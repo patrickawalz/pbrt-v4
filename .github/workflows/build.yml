@@ -1,0 +1,28 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Memory available
+        run: free -g
+      - name: Build pbrt_lib
+        run: /usr/bin/time -v dotnet build src/pbrt/pbrt_lib.csproj -c Release -nologo -v minimal 2>&1 | tee build.log
+      - name: Peak memory of build
+        run: grep -E "Maximum resident|Elapsed" build.log || true
+      - name: Build pbrt and pbrt_test
+        run: |
+          dotnet build src/pbrt/cmd/pbrt_exe.csproj -c Release -nologo -v minimal
+          dotnet build src/pbrt/cmd/pbrt_test.csproj -c Release -nologo -v minimal
+      - name: Run tests
+        working-directory: ${{ runner.temp }}
+        run: dotnet ${{ github.workspace }}/src/pbrt/cmd/bin/Release/net10.0/pbrt_test.dll

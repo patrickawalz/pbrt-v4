@@ -1,0 +1,35 @@
+// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// The pbrt source code is licensed under the Apache License, Version 2.0.
+// SPDX: Apache-2.0
+// base/texture.h
+
+using System;
+
+namespace pbrt
+{
+
+    // FloatTexture Definition
+    // (TaggedPointer over FloatImageTexture, GPUFloatImageTexture, FloatMixTexture,
+    // FloatDirectionMixTexture, FloatScaledTexture, FloatConstantTexture, FloatBilerpTexture,
+    // FloatCheckerboardTexture, FloatDotsTexture, FBmTexture, FloatPtexTexture, GPUFloatPtexTexture,
+    // WindyTexture, WrinkledTexture)
+    public abstract unsafe partial class FloatTexture
+    {
+        // FloatTexture Interface
+        public abstract override string ToString();
+        public abstract Float Evaluate(TextureEvalContext ctx);
+    }
+
+    // SpectrumTexture Definition
+    // (TaggedPointer over SpectrumImageTexture, GPUSpectrumImageTexture, SpectrumMixTexture,
+    // SpectrumDirectionMixTexture, SpectrumScaledTexture, SpectrumConstantTexture,
+    // SpectrumBilerpTexture, SpectrumCheckerboardTexture, MarbleTexture, SpectrumDotsTexture,
+    // SpectrumPtexTexture, GPUSpectrumPtexTexture)
+    public abstract unsafe partial class SpectrumTexture
+    {
+        // SpectrumTexture Interface
+        public abstract override string ToString();
+        public abstract SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda);
+    }
+
+}  // namespace pbrt

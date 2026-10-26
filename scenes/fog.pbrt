@@ -1,0 +1,26 @@
+LookAt 0 2 -6  0 0.5 0  0 1 0
+Camera "perspective" "float fov" 40
+Sampler "zsobol" "integer pixelsamples" 16
+Integrator "volpath" "integer maxdepth" 20
+Film "rgb" "integer xresolution" 160 "integer yresolution" 120 "string filename" "fog.png"
+MakeNamedMedium "fog" "string type" "homogeneous" "rgb sigma_a" [0.2 0.2 0.2] "rgb sigma_s" [1 1 1] "float scale" 0.6
+MediumInterface "" "fog"
+Camera "perspective" "float fov" 40
+WorldBegin
+LightSource "point" "rgb I" [30 30 30] "point3 from" [0 3 -1]
+LightSource "infinite" "rgb L" [0.2 0.3 0.5]
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [0.6 0.4 0.3]
+  Translate 0 0.5 0
+  Shape "sphere" "float radius" 1
+AttributeEnd
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [0.5 0.5 0.5]
+  Shape "trianglemesh" "integer indices" [0 1 2 0 2 3] "point3 P" [-5 -0.5 -5  5 -0.5 -5  5 -0.5 5  -5 -0.5 5]
+AttributeEnd
+AttributeBegin
+  MediumInterface "fog" ""
+  Material "interface"
+  Translate 0 0.5 0
+  Shape "sphere" "float radius" 2.5
+AttributeEnd

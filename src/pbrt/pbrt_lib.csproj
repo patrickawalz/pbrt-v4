@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>pbrt_lib</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <TieredPGO>true</TieredPGO>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <RunAnalyzers>false</RunAnalyzers>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
+    <RootNamespace>pbrt</RootNamespace>
+    <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ext/**/*.cs" Exclude="../ext/gtest/**;../ext/ptex/src/utils/**;../ext/ptex/src/tests/**;../ext/**/*_test.cs" />
+    <Compile Remove="cmd/**;**/*_test.cs;bin/**;obj/**" />
+  </ItemGroup>
+</Project>
