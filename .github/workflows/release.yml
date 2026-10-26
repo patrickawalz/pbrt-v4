@@ -1,0 +1,79 @@
+name: release
+
+# Every push builds Linux and Windows packages and uploads them as workflow artifacts (kept 90 days).
+# Pushing a tag such as v0.1.0 also publishes them as a GitHub Release.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Self-contained: no .NET install needed to run. The tools share one output directory
+      # (identical runtime files are simply overwritten).
+      - name: Publish tools
+        shell: bash
+        run: |
+          for p in pbrt_exe imgtool plytool cyhair2pbrt nanovdb2pbrt pspec rgb2spec_opt; do
+            dotnet publish src/pbrt/cmd/$p.csproj -c Release -r ${{ matrix.rid }} --self-contained true \
+              -p:UseAppHost=true -nologo -v minimal -o package/pbrt-v4-${{ matrix.rid }}
+          done
+          mkdir -p package/pbrt-v4-${{ matrix.rid }}/scenes
+          cp -r scenes/. package/pbrt-v4-${{ matrix.rid }}/scenes/
+          cp LICENSE.txt THIRD_PARTY.md README.md package/pbrt-v4-${{ matrix.rid }}/
+
+      - name: Zip (Linux)
+        if: runner.os == 'Linux'
+        working-directory: package
+        run: zip -qr ../pbrt-v4-${{ matrix.rid }}.zip pbrt-v4-${{ matrix.rid }}
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        working-directory: package
+        shell: pwsh
+        run: Compress-Archive -Path pbrt-v4-${{ matrix.rid }} -DestinationPath ../pbrt-v4-${{ matrix.rid }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pbrt-v4-${{ matrix.rid }}
+          path: pbrt-v4-${{ matrix.rid }}.zip
+          retention-days: 90
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" artifacts/*.zip \
+            --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
