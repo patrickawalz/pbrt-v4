@@ -232,6 +232,15 @@ public static class Rgb2SpecOpt
                                        {0.22900413, 0.69172573, 0.079269454},
                                        {0.0, 0.04511256, 1.0437145}};
 
+    // The C++ arrays are declared double[CIE_SAMPLES] with fewer initializers than elements (cie_d50 and cie_d60),
+    // so the remaining elements are zero. C# array initializers are not zero-padded, so do it here.
+    static double[] PadCie(double[] a)
+    {
+        double[] r = new double[CIE_SAMPLES];
+        Array.Copy(a, r, a.Length);
+        return r;
+    }
+
     static double cie_interp(double[] data, double x)
     {
         x -= CIE_LAMBDA_MIN;
@@ -422,7 +431,7 @@ public static class Rgb2SpecOpt
         switch (gamut)
         {
         case Gamut.SRGB:
-            illuminant = cie_d65;
+            illuminant = PadCie(cie_d65);
             copy33(xyz_to_rgb, xyz_to_srgb);
             copy33(rgb_to_xyz, srgb_to_xyz);
             break;
@@ -440,25 +449,25 @@ public static class Rgb2SpecOpt
             break;
 
         case Gamut.ProPhotoRGB:
-            illuminant = cie_d50;
+            illuminant = PadCie(cie_d50);
             copy33(xyz_to_rgb, xyz_to_prophoto_rgb);
             copy33(rgb_to_xyz, prophoto_rgb_to_xyz);
             break;
 
         case Gamut.ACES2065_1:
-            illuminant = cie_d60;
+            illuminant = PadCie(cie_d60);
             copy33(xyz_to_rgb, xyz_to_aces2065_1);
             copy33(rgb_to_xyz, aces2065_1_to_xyz);
             break;
 
         case Gamut.REC2020:
-            illuminant = cie_d65;
+            illuminant = PadCie(cie_d65);
             copy33(xyz_to_rgb, xyz_to_rec2020);
             copy33(rgb_to_xyz, rec2020_to_xyz);
             break;
 
         case Gamut.DCI_P3:
-            illuminant = cie_d65;
+            illuminant = PadCie(cie_d65);
             copy33(xyz_to_rgb, xyz_to_dcip3);
             copy33(rgb_to_xyz, dcip3_to_xyz);
             break;

@@ -21,4 +21,33 @@
     <Compile Include="../ext/**/*.cs" Exclude="../ext/gtest/**;../ext/ptex/src/utils/**;../ext/ptex/src/tests/**;../ext/**/*_test.cs" />
     <Compile Remove="cmd/**;**/*_test.cs;bin/**;obj/**" />
   </ItemGroup>
+  <!-- The RGB-to-spectrum tables (rgbspectrum_*.cs) are generated at build time by rgb2spec_opt, as the pbrt-v4
+       CMake build does, instead of being checked in. The tool does not depend on this library; the generated
+       sources go to obj/rgbspec and are regenerated only when the tool's source changes. -->
+  <ItemGroup>
+    <ProjectReference Include="cmd/rgb2spec_opt.csproj" ReferenceOutputAssembly="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;UseAppHost" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <RgbSpecDir>$(MSBuildThisFileDirectory)obj/rgbspec/</RgbSpecDir>
+    <RgbSpecTool>$(MSBuildThisFileDirectory)cmd/bin/$(Configuration)/net10.0/rgb2spec_opt.dll</RgbSpecTool>
+  </PropertyGroup>
+
+  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile"
+          Inputs="$(MSBuildThisFileDirectory)cmd/rgb2spec_opt.cs;$(RgbSpecTool)"
+          Outputs="$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
+    <MakeDir Directories="$(RgbSpecDir)" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_srgb.cs&quot; sRGB" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_dci_p3.cs&quot; DCI_P3" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_rec2020.cs&quot; REC2020" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_aces.cs&quot; ACES2065_1" />
+  </Target>
+
+  <!-- Always add the generated files to the compilation (also when the generation step was skipped as up to date). -->
+  <Target Name="AddRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="GenerateRgbSpectrumTables">
+    <ItemGroup>
+      <Compile Include="$(RgbSpecDir)rgbspectrum_*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>
