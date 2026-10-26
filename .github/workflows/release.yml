@@ -30,18 +30,28 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Self-contained: no .NET install needed to run. The tools share one output directory
-      # (identical runtime files are simply overwritten).
+      # Self-contained: no .NET install needed to run. Each tool is published to its own directory and the
+      # results are merged (identical runtime files are not overwritten), because publishing several tools
+      # into one directory loses the earlier tools' files.
       - name: Publish tools
         shell: bash
         run: |
+          PKG=package/pbrt-v4-${{ matrix.rid }}
+          mkdir -p "$PKG"
           for p in pbrt_exe imgtool plytool cyhair2pbrt nanovdb2pbrt pspec rgb2spec_opt; do
             dotnet publish src/pbrt/cmd/$p.csproj -c Release -r ${{ matrix.rid }} --self-contained true \
-              -p:UseAppHost=true -nologo -v minimal -o package/pbrt-v4-${{ matrix.rid }}
+              -p:UseAppHost=true -nologo -v minimal -o package/tmp/$p
+            cp -rn package/tmp/$p/. "$PKG/"
           done
-          mkdir -p package/pbrt-v4-${{ matrix.rid }}/scenes
-          cp -r scenes/. package/pbrt-v4-${{ matrix.rid }}/scenes/
-          cp LICENSE.txt THIRD_PARTY.md README.md package/pbrt-v4-${{ matrix.rid }}/
+          mkdir -p "$PKG/scenes"
+          cp -r scenes/. "$PKG/scenes/"
+          cp LICENSE.txt THIRD_PARTY.md README.md "$PKG/"
+          ls "$PKG" | grep -E "^(pbrt|imgtool|plytool|cyhair2pbrt|nanovdb2pbrt|pspec|rgb2spec_opt)(\.exe)?$|^pbrt_lib\.dll$"
+          for f in pbrt imgtool plytool cyhair2pbrt nanovdb2pbrt pspec rgb2spec_opt; do
+            if [ "${{ runner.os }}" = "Windows" ]; then f="$f.exe"; fi
+            test -f "$PKG/$f" || { echo "missing $f in package"; exit 1; }
+          done
+          test -f "$PKG/pbrt_lib.dll" || { echo "missing pbrt_lib.dll"; exit 1; }
 
       - name: Zip (Linux)
         if: runner.os == 'Linux'
