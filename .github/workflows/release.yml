@@ -1,7 +1,7 @@
 name: release
 
 # Every push builds Linux and Windows packages and uploads them as workflow artifacts (kept 90 days).
-# Pushing a tag such as v0.1.0 also publishes them as a GitHub Release.
+# Pushing a tag such as v0.1.0, or bumping the VERSION file on main, also publishes them as a GitHub Release.
 
 on:
   push:
@@ -61,19 +61,30 @@ jobs:
           retention-days: 90
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Runs for tags (v*) and for pushes to main. On main, the release tag is taken from the VERSION file and
+    # the release is created only if "v<VERSION>" does not exist yet, so bumping VERSION makes a new release.
     needs: package
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-      - name: Create GitHub Release
+      - name: Create GitHub Release if new
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" artifacts/*.zip \
-            --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v$(tr -d '[:space:]' < VERSION)"
+          fi
+          if gh release view "$TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+          else
+            gh release create "$TAG" artifacts/*.zip --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" --title "$TAG" --generate-notes
+          fi
