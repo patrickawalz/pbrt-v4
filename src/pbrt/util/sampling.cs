@@ -1643,143 +1643,275 @@ namespace pbrt
         private Array2D<Float> func;
     }
 
-    // Index-generating iterator helpers (detail::IndexingGenerator and friends are
-    // expressed as IEnumerable<T> since C# has no begin()/end() range-for protocol).
-    public unsafe class Uniform1D : IEnumerable<Float>
+    // detail::IndexingIterator and friends (sampling.h). C++'s begin()/end() range-for protocol is kept
+    // (begin(), end(), Increment() for operator++, Deref() for operator*, ==/!=), and the generators also
+    // implement IEnumerable<T> so that C# "foreach" works on them.
+    // (C++ friend access to the generators' members is internal/public here; IndexingIterator's
+    // templated generator pointer parameter is dropped since it is unused, and RNGIterator takes the
+    // generator's sequenceIndex directly.)
+    namespace detail
+    {
+        public abstract unsafe class IndexingIterator<Iterator> where Iterator : IndexingIterator<Iterator>
+        {
+            public IndexingIterator(int i, int n)
+            {
+                this.i = i;
+                this.n = n;
+            }
+
+            public static bool operator ==(IndexingIterator<Iterator> a, IndexingIterator<Iterator> it)
+            {
+                return a.i == it.i;
+            }
+            public static bool operator !=(IndexingIterator<Iterator> a, IndexingIterator<Iterator> it)
+            {
+                return !(a == it);
+            }
+            // operator++()
+            public Iterator Increment()
+            {
+                ++i;
+                return (Iterator)this;
+            }
+            // operator++(int)
+            public Iterator PostIncrement()
+            {
+                Iterator it = (Iterator)MemberwiseClone();
+                return it.Increment();
+            }
+
+            protected int i, n;
+        }
+
+        // (The C++ Iterator(i, n, generator) construction is MakeIterator() here, since C# cannot call a
+        // constructor with arguments on a type parameter.)
+        public abstract unsafe class IndexingGenerator<Generator, Iterator> where Iterator : IndexingIterator<Iterator>
+        {
+            public IndexingGenerator(int n)
+            {
+                this.n = n;
+            }
+            public Iterator begin() { return MakeIterator(0); }
+            public Iterator end() { return MakeIterator(n); }
+
+            protected abstract Iterator MakeIterator(int i);
+
+            protected int n;
+        }
+
+        public abstract unsafe class RNGGenerator<Generator, Iterator> : IndexingGenerator<Generator, Iterator>
+            where Iterator : IndexingIterator<Iterator>
+        {
+            public RNGGenerator(int n, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
+                : base(n)
+            {
+                this.sequenceIndex = sequenceIndex;
+                this.seed = seed;
+            }
+
+            // (protected with friend RNGIterator<Iterator> in C++)
+            public uint64_t sequenceIndex, seed;
+        }
+
+        public abstract unsafe class RNGIterator<Iterator> : IndexingIterator<Iterator> where Iterator : IndexingIterator<Iterator>
+        {
+            public RNGIterator(int i, int n, uint64_t sequenceIndex)
+                : base(i, n)
+            {
+                rng = new RNG(sequenceIndex);
+            }
+
+            protected RNG rng;
+        }
+    }
+
+    public unsafe class Uniform1D : detail.RNGGenerator<Uniform1D, detail.Uniform1DIter>, IEnumerable<Float>
     {
         public Uniform1D(int n, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
-        {
-            this.n = n; this.sequenceIndex = sequenceIndex; this.seed = seed;
-        }
+            : base(n, sequenceIndex, seed) { }
+        protected override detail.Uniform1DIter MakeIterator(int i) { return new detail.Uniform1DIter(i, n, this); }
         public IEnumerator<Float> GetEnumerator()
         {
-            RNG rng = new RNG(sequenceIndex);
-            for (int i = 0; i < n; ++i)
-                yield return rng.Uniform<Float>();
+            for (detail.Uniform1DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
-        private uint64_t sequenceIndex, seed;
     }
 
-    public unsafe class Uniform2D : IEnumerable<Point2f>
+    public unsafe class Uniform2D : detail.RNGGenerator<Uniform2D, detail.Uniform2DIter>, IEnumerable<Point2f>
     {
         public Uniform2D(int n, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
-        {
-            this.n = n; this.sequenceIndex = sequenceIndex; this.seed = seed;
-        }
+            : base(n, sequenceIndex, seed) { }
+        protected override detail.Uniform2DIter MakeIterator(int i) { return new detail.Uniform2DIter(i, n, this); }
         public IEnumerator<Point2f> GetEnumerator()
         {
-            RNG rng = new RNG(sequenceIndex);
-            for (int i = 0; i < n; ++i)
-            {
-                Float a = rng.Uniform<Float>();
-                Float b = rng.Uniform<Float>();
-                yield return new Point2f(a, b);
-            }
+            for (detail.Uniform2DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
-        private uint64_t sequenceIndex, seed;
     }
 
-    public unsafe class Uniform3D : IEnumerable<Point3f>
+    public unsafe class Uniform3D : detail.RNGGenerator<Uniform3D, detail.Uniform3DIter>, IEnumerable<Point3f>
     {
         public Uniform3D(int n, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
-        {
-            this.n = n; this.sequenceIndex = sequenceIndex; this.seed = seed;
-        }
+            : base(n, sequenceIndex, seed) { }
+        protected override detail.Uniform3DIter MakeIterator(int i) { return new detail.Uniform3DIter(i, n, this); }
         public IEnumerator<Point3f> GetEnumerator()
         {
-            RNG rng = new RNG(sequenceIndex);
-            for (int i = 0; i < n; ++i)
-            {
-                Float a = rng.Uniform<Float>();
-                Float b = rng.Uniform<Float>();
-                Float c = rng.Uniform<Float>();
-                yield return new Point3f(a, b, c);
-            }
+            for (detail.Uniform3DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
-        private uint64_t sequenceIndex, seed;
     }
 
-    public unsafe class Hammersley2D : IEnumerable<Point2f>
+    public unsafe class Hammersley2D : detail.IndexingGenerator<Hammersley2D, detail.Hammersley2DIter>, IEnumerable<Point2f>
     {
-        public Hammersley2D(int n) { this.n = n; }
+        public Hammersley2D(int n) : base(n) { }
+        protected override detail.Hammersley2DIter MakeIterator(int i) { return new detail.Hammersley2DIter(i, n, this); }
         public IEnumerator<Point2f> GetEnumerator()
         {
-            for (int i = 0; i < n; ++i)
-                yield return new Point2f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i));
+            for (detail.Hammersley2DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
     }
 
-    public unsafe class Hammersley3D : IEnumerable<Point3f>
+    public unsafe class Hammersley3D : detail.IndexingGenerator<Hammersley3D, detail.Hammersley3DIter>, IEnumerable<Point3f>
     {
-        public Hammersley3D(int n) { this.n = n; }
+        public Hammersley3D(int n) : base(n) { }
+        protected override detail.Hammersley3DIter MakeIterator(int i) { return new detail.Hammersley3DIter(i, n, this); }
         public IEnumerator<Point3f> GetEnumerator()
         {
-            for (int i = 0; i < n; ++i)
-                yield return new Point3f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i), pbrt.RadicalInverse(1, (uint64_t)i));
+            for (detail.Hammersley3DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
     }
 
-    public unsafe class Stratified1D : IEnumerable<Float>
+    public unsafe class Stratified1D : detail.RNGGenerator<Stratified1D, detail.Stratified1DIter>, IEnumerable<Float>
     {
         public Stratified1D(int n, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
-        {
-            this.n = n; this.sequenceIndex = sequenceIndex; this.seed = seed;
-        }
+            : base(n, sequenceIndex, seed) { }
+        protected override detail.Stratified1DIter MakeIterator(int i) { return new detail.Stratified1DIter(i, n, this); }
         public IEnumerator<Float> GetEnumerator()
         {
-            RNG rng = new RNG(sequenceIndex);
-            for (int i = 0; i < n; ++i)
-                yield return (i + rng.Uniform<Float>()) / n;
+            for (detail.Stratified1DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int n;
-        private uint64_t sequenceIndex, seed;
     }
 
-    public unsafe class Stratified2D : IEnumerable<Point2f>
+    public unsafe class Stratified2D : detail.RNGGenerator<Stratified2D, detail.Stratified2DIter>, IEnumerable<Point2f>
     {
         public Stratified2D(int nx, int ny, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
+            : base(nx * ny, sequenceIndex, seed)
         {
-            this.nx = nx; this.ny = ny; this.sequenceIndex = sequenceIndex; this.seed = seed;
+            this.nx = nx;
+            this.ny = ny;
         }
+        protected override detail.Stratified2DIter MakeIterator(int i) { return new detail.Stratified2DIter(i, n, this); }
         public IEnumerator<Point2f> GetEnumerator()
         {
-            RNG rng = new RNG(sequenceIndex);
-            int n = nx * ny;
-            for (int i = 0; i < n; ++i)
+            for (detail.Stratified2DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
+        }
+        IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
+
+        // (private with friend detail::Stratified2DIter in C++)
+        internal int nx, ny;
+    }
+
+    public unsafe class Stratified3D : detail.RNGGenerator<Stratified3D, detail.Stratified3DIter>, IEnumerable<Point3f>
+    {
+        public Stratified3D(int nx, int ny, int nz, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
+            : base(nx * ny * nz, sequenceIndex, seed)
+        {
+            this.nx = nx;
+            this.ny = ny;
+            this.nz = nz;
+        }
+        protected override detail.Stratified3DIter MakeIterator(int i) { return new detail.Stratified3DIter(i, n, this); }
+        public IEnumerator<Point3f> GetEnumerator()
+        {
+            for (detail.Stratified3DIter it = begin(), e = end(); it != e; it.Increment())
+                yield return it.Deref();
+        }
+        IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
+
+        // (private with friend detail::Stratified3DIter in C++)
+        internal int nx, ny, nz;
+    }
+
+    namespace detail
+    {
+        public unsafe class Uniform1DIter : RNGIterator<Uniform1DIter>
+        {
+            public Uniform1DIter(int i, int n, Uniform1D generator) : base(i, n, generator.sequenceIndex) { }
+            // operator*()
+            public Float Deref() { return rng.Uniform<Float>(); }
+        }
+
+        public unsafe class Uniform2DIter : RNGIterator<Uniform2DIter>
+        {
+            public Uniform2DIter(int i, int n, Uniform2D generator) : base(i, n, generator.sequenceIndex) { }
+            public Point2f Deref()
+            {
+                // braced-init-list: evaluated left to right
+                Float x = rng.Uniform<Float>();
+                Float y = rng.Uniform<Float>();
+                return new Point2f(x, y);
+            }
+        }
+
+        public unsafe class Uniform3DIter : RNGIterator<Uniform3DIter>
+        {
+            public Uniform3DIter(int i, int n, Uniform3D generator) : base(i, n, generator.sequenceIndex) { }
+            public Point3f Deref()
+            {
+                Float x = rng.Uniform<Float>();
+                Float y = rng.Uniform<Float>();
+                Float z = rng.Uniform<Float>();
+                return new Point3f(x, y, z);
+            }
+        }
+
+        public unsafe class Stratified1DIter : RNGIterator<Stratified1DIter>
+        {
+            public Stratified1DIter(int i, int n, Stratified1D generator) : base(i, n, generator.sequenceIndex) { }
+            public Float Deref() { return (i + rng.Uniform<Float>()) / n; }
+        }
+
+        public unsafe class Stratified2DIter : RNGIterator<Stratified2DIter>
+        {
+            public Stratified2DIter(int i, int n, Stratified2D generator)
+                : base(i, n, generator.sequenceIndex)
+            {
+                nx = generator.nx;
+                ny = generator.ny;
+            }
+
+            public Point2f Deref()
             {
                 int ix = i % nx, iy = i / nx;
                 Float a = rng.Uniform<Float>();
                 Float b = rng.Uniform<Float>();
-                yield return new Point2f((ix + a) / nx, (iy + b) / ny);
+                return new Point2f((ix + a) / nx, (iy + b) / ny);
             }
-        }
-        IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int nx, ny;
-        private uint64_t sequenceIndex, seed;
-    }
 
-    public unsafe class Stratified3D : IEnumerable<Point3f>
-    {
-        public Stratified3D(int nx, int ny, int nz, uint64_t sequenceIndex = 0, uint64_t seed = PCG32_DEFAULT_STATE)
-        {
-            this.nx = nx; this.ny = ny; this.nz = nz; this.sequenceIndex = sequenceIndex; this.seed = seed;
+            private int nx, ny;
         }
-        public IEnumerator<Point3f> GetEnumerator()
+
+        public unsafe class Stratified3DIter : RNGIterator<Stratified3DIter>
         {
-            RNG rng = new RNG(sequenceIndex);
-            int n = nx * ny * nz;
-            for (int i = 0; i < n; ++i)
+            public Stratified3DIter(int i, int n, Stratified3D generator)
+                : base(i, n, generator.sequenceIndex)
+            {
+                nx = generator.nx;
+                ny = generator.ny;
+                nz = generator.nz;
+            }
+
+            public Point3f Deref()
             {
                 int ix = i % nx;
                 int iy = (i / nx) % ny;
@@ -1787,12 +1919,27 @@ namespace pbrt
                 Float a = rng.Uniform<Float>();
                 Float b = rng.Uniform<Float>();
                 Float c = rng.Uniform<Float>();
-                yield return new Point3f((ix + a) / nx, (iy + b) / ny, (iz + c) / nz);
+                return new Point3f((ix + a) / nx, (iy + b) / ny, (iz + c) / nz);
+            }
+
+            private int nx, ny, nz;
+        }
+
+        public unsafe class Hammersley2DIter : IndexingIterator<Hammersley2DIter>
+        {
+            public Hammersley2DIter(int i, int n, Hammersley2D generator) : base(i, n) { }
+            public Point2f Deref() { return new Point2f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i)); }
+        }
+
+        public unsafe class Hammersley3DIter : IndexingIterator<Hammersley3DIter>
+        {
+            public Hammersley3DIter(int i, int n, Hammersley3D generator) : base(i, n) { }
+            public Point3f Deref()
+            {
+                return new Point3f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i),
+                                   pbrt.RadicalInverse(1, (uint64_t)i));
             }
         }
-        IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
-        private int nx, ny, nz;
-        private uint64_t sequenceIndex, seed;
     }
 
     // PiecewiseLinear2D Implementation

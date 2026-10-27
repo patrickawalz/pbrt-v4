@@ -1248,6 +1248,328 @@ namespace pbrt
             return 1;
         }
 
+        // (C's printf/fprintf(stderr, ...) for the debugging output below)
+        static void printf(string fmt, params object[] args)
+        {
+            Console.Out.Write(pbrt.StringPrintf(fmt, args));
+        }
+
+        public void DrawLensSystem()
+        {
+            Float sumz = -LensFrontZ();
+            Float z = sumz;
+            for (int i = 0; i < (int)elementInterfaces.size(); ++i)
+            {
+                LensElementInterface element = elementInterfaces[(ulong)i];
+                Float r = element.curvatureRadius;
+                if (r == 0)
+                {
+                    // stop
+                    printf("{Thick, Line[{{%f, %f}, {%f, %f}}], ", z, element.apertureRadius, z,
+                           2 * element.apertureRadius);
+                    printf("Line[{{%f, %f}, {%f, %f}}]}, ", z, -element.apertureRadius, z,
+                           -2 * element.apertureRadius);
+                }
+                else
+                {
+                    Float theta = std.abs(pbrt.SafeASin(element.apertureRadius / r));
+                    if (r > 0)
+                    {
+                        // convex as seen from front of lens
+                        Float t0 = pbrt.Pi - theta;
+                        Float t1 = pbrt.Pi + theta;
+                        printf("Circle[{%f, 0}, %f, {%f, %f}], ", z + r, r, t0, t1);
+                    }
+                    else
+                    {
+                        // concave as seen from front of lens
+                        Float t0 = -theta;
+                        Float t1 = theta;
+                        printf("Circle[{%f, 0}, %f, {%f, %f}], ", z + r, -r, t0, t1);
+                    }
+                    if (element.eta != 0 && element.eta != 1)
+                    {
+                        // connect top/bottom to next element
+                        pbrt.CHECK_LT((ulong)(i + 1), elementInterfaces.size());
+                        Float nextApertureRadius = elementInterfaces[(ulong)(i + 1)].apertureRadius;
+                        Float h = std.max(element.apertureRadius, nextApertureRadius);
+                        Float hlow = std.min(element.apertureRadius, nextApertureRadius);
+
+                        Float zp0, zp1;
+                        if (r > 0)
+                        {
+                            zp0 = z + element.curvatureRadius -
+                                  element.apertureRadius / std.tan(theta);
+                        }
+                        else
+                        {
+                            zp0 = z + element.curvatureRadius +
+                                  element.apertureRadius / std.tan(theta);
+                        }
+
+                        Float nextCurvatureRadius = elementInterfaces[(ulong)(i + 1)].curvatureRadius;
+                        Float nextTheta =
+                            std.abs(pbrt.SafeASin(nextApertureRadius / nextCurvatureRadius));
+                        if (nextCurvatureRadius > 0)
+                        {
+                            zp1 = z + element.thickness + nextCurvatureRadius -
+                                  nextApertureRadius / std.tan(nextTheta);
+                        }
+                        else
+                        {
+                            zp1 = z + element.thickness + nextCurvatureRadius +
+                                  nextApertureRadius / std.tan(nextTheta);
+                        }
+
+                        // Connect tops
+                        printf("Line[{{%f, %f}, {%f, %f}}], ", zp0, h, zp1, h);
+                        printf("Line[{{%f, %f}, {%f, %f}}], ", zp0, -h, zp1, -h);
+
+                        // vertical lines when needed to close up the element profile
+                        if (element.apertureRadius < nextApertureRadius)
+                        {
+                            printf("Line[{{%f, %f}, {%f, %f}}], ", zp0, h, zp0, hlow);
+                            printf("Line[{{%f, %f}, {%f, %f}}], ", zp0, -h, zp0, -hlow);
+                        }
+                        else if (element.apertureRadius > nextApertureRadius)
+                        {
+                            printf("Line[{{%f, %f}, {%f, %f}}], ", zp1, h, zp1, hlow);
+                            printf("Line[{{%f, %f}, {%f, %f}}], ", zp1, -h, zp1, -hlow);
+                        }
+                    }
+                }
+                z += element.thickness;
+            }
+
+            // 24mm height for 35mm film
+            printf("Line[{{0, -.012}, {0, .012}}], ");
+            // optical axis
+            printf("Line[{{0, 0}, {%f, 0}}] ", 1.2f * sumz);
+        }
+
+        public void DrawRayPathFromFilm(Ray r, bool arrow, bool toOpticalIntercept)
+        {
+            Float elementZ = 0;
+            // Transform _ray_ from camera to lens system space
+            Transform LensFromCamera = pbrt.Scale(1, 1, -1);
+            Ray ray = LensFromCamera.Apply(r);
+            printf("{ ");
+            if (TraceLensesFromFilm(r, null) == 0)
+            {
+                printf("Dashed, RGBColor[.8, .5, .5]");
+            }
+            else
+                printf("RGBColor[.5, .5, .8]");
+
+            for (int i = (int)elementInterfaces.size() - 1; i >= 0; --i)
+            {
+                LensElementInterface element = elementInterfaces[(ulong)i];
+                elementZ -= element.thickness;
+                bool isStop = (element.curvatureRadius == 0);
+                // Compute intersection of ray with lens element
+                Float t;
+                Normal3f n = default;
+                if (isStop)
+                    t = -(ray.o.z - elementZ) / ray.d.z;
+                else
+                {
+                    Float radius = element.curvatureRadius;
+                    Float zCenter = elementZ + element.curvatureRadius;
+                    if (!IntersectSphericalElement(radius, zCenter, ray, &t, &n))
+                        goto done;
+                }
+                pbrt.CHECK_GE(t, 0);
+
+                printf(", Line[{{%f, %f}, {%f, %f}}]", ray.o.z, ray.o.x, ray.Apply(t).z, ray.Apply(t).x);
+
+                // Test intersection point against element aperture
+                Point3f pHit = ray.Apply(t);
+                Float r2 = pHit.x * pHit.x + pHit.y * pHit.y;
+                Float apertureRadius2 = element.apertureRadius * element.apertureRadius;
+                if (r2 > apertureRadius2)
+                    goto done;
+                ray.o = pHit;
+
+                // Update ray path for element interface interaction
+                if (!isStop)
+                {
+                    Vector3f wt;
+                    Float eta_i = element.eta;
+                    Float eta_t = (i > 0 && elementInterfaces[(ulong)(i - 1)].eta != 0)
+                                      ? elementInterfaces[(ulong)(i - 1)].eta
+                                      : 1;
+                    if (!pbrt.Refract(pbrt.Normalize(-ray.d), n, eta_t / eta_i, null, &wt))
+                        goto done;
+                    ray.d = wt;
+                }
+            }
+
+            ray.d = pbrt.Normalize(ray.d);
+            {
+                Float ta = std.abs(elementZ / 4);
+                if (toOpticalIntercept)
+                {
+                    ta = -ray.o.x / ray.d.x;
+                    printf(", Point[{%f, %f}]", ray.Apply(ta).z, ray.Apply(ta).x);
+                }
+                printf(", %s[{{%f, %f}, {%f, %f}}]", arrow ? "Arrow" : "Line", ray.o.z, ray.o.x,
+                       ray.Apply(ta).z, ray.Apply(ta).x);
+
+                // overdraw the optical axis if needed...
+                if (toOpticalIntercept)
+                    printf(", Line[{{%f, 0}, {%f, 0}}]", ray.o.z, ray.Apply(ta).z * 1.05f);
+            }
+
+        done:
+            printf("}");
+        }
+
+        public void DrawRayPathFromScene(Ray r, bool arrow, bool toOpticalIntercept)
+        {
+            Float elementZ = LensFrontZ() * -1;
+
+            // Transform _ray_ from camera to lens system space
+            Transform LensFromCamera = pbrt.Scale(1, 1, -1);
+            Ray ray = LensFromCamera.Apply(r);
+            for (int i = 0; i < (int)elementInterfaces.size(); ++i)
+            {
+                LensElementInterface element = elementInterfaces[(ulong)i];
+                bool isStop = (element.curvatureRadius == 0);
+                // Compute intersection of ray with lens element
+                Float t;
+                Normal3f n = default;
+                if (isStop)
+                    t = -(ray.o.z - elementZ) / ray.d.z;
+                else
+                {
+                    Float radius = element.curvatureRadius;
+                    Float zCenter = elementZ + element.curvatureRadius;
+                    if (!IntersectSphericalElement(radius, zCenter, ray, &t, &n))
+                        return;
+                }
+                pbrt.CHECK_GE(t, 0.0f);
+
+                printf("Line[{{%f, %f}, {%f, %f}}],", ray.o.z, ray.o.x, ray.Apply(t).z, ray.Apply(t).x);
+
+                // Test intersection point against element aperture
+                Point3f pHit = ray.Apply(t);
+                Float r2 = pHit.x * pHit.x + pHit.y * pHit.y;
+                Float apertureRadius2 = element.apertureRadius * element.apertureRadius;
+                if (r2 > apertureRadius2)
+                    return;
+                ray.o = pHit;
+
+                // Update ray path for from-scene element interface interaction
+                if (!isStop)
+                {
+                    Vector3f wt;
+                    Float eta_i = (i == 0 || elementInterfaces[(ulong)(i - 1)].eta == 0.0f)
+                                      ? 1.0f
+                                      : elementInterfaces[(ulong)(i - 1)].eta;
+                    Float eta_t =
+                        (elementInterfaces[(ulong)i].eta != 0.0f) ? elementInterfaces[(ulong)i].eta : 1.0f;
+                    if (!pbrt.Refract(pbrt.Normalize(-ray.d), n, eta_t / eta_i, null, &wt))
+                        return;
+                    ray.d = wt;
+                }
+                elementZ += element.thickness;
+            }
+
+            // go to the film plane by default
+            {
+                Float ta = -ray.o.z / ray.d.z;
+                if (toOpticalIntercept)
+                {
+                    ta = -ray.o.x / ray.d.x;
+                    printf("Point[{%f, %f}], ", ray.Apply(ta).z, ray.Apply(ta).x);
+                }
+                printf("%s[{{%f, %f}, {%f, %f}}]", arrow ? "Arrow" : "Line", ray.o.z, ray.o.x,
+                       ray.Apply(ta).z, ray.Apply(ta).x);
+            }
+        }
+
+        public void RenderExitPupil(Float sx, Float sy, string filename)
+        {
+            Point3f pFilm = new Point3f(sx, sy, 0);
+
+            const int nSamples = 2048;
+            Image image = new Image(PixelFormat.Float, new Point2i(nSamples, nSamples), new string[] { "Y" });
+
+            for (int y = 0; y < nSamples; ++y)
+            {
+                Float fy = (Float)y / (Float)(nSamples - 1);
+                Float ly = pbrt.Lerp(fy, -RearElementRadius(), RearElementRadius());
+                for (int x = 0; x < nSamples; ++x)
+                {
+                    Float fx = (Float)x / (Float)(nSamples - 1);
+                    Float lx = pbrt.Lerp(fx, -RearElementRadius(), RearElementRadius());
+
+                    Point3f pRear = new Point3f(lx, ly, LensRearZ());
+
+                    if (lx * lx + ly * ly > RearElementRadius() * RearElementRadius())
+                        image.SetChannel(new Point2i(x, y), 0, 1.0f);
+                    else if (TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null) != 0)
+                        image.SetChannel(new Point2i(x, y), 0, 0.5f);
+                    else
+                        image.SetChannel(new Point2i(x, y), 0, 0.0f);
+                }
+            }
+
+            image.Write(filename);
+        }
+
+        public void TestExitPupilBounds()
+        {
+            Float filmDiagonal = film.Diagonal();
+
+            Float u = testExitPupilBoundsRng.Uniform<Float>();
+            Point3f pFilm = new Point3f(u * filmDiagonal / 2, 0, 0);
+
+            Float r = pFilm.x / (filmDiagonal / 2);
+            int pupilIndex = std.min((int)exitPupilBounds.size() - 1,
+                                     (int)std.floor(r * (exitPupilBounds.size() - 1)));
+            Bounds2f pupilBounds = exitPupilBounds[(ulong)pupilIndex];
+            if (pupilIndex + 1 < (int)exitPupilBounds.size())
+                pupilBounds = pbrt.Union(pupilBounds, exitPupilBounds[(ulong)(pupilIndex + 1)]);
+
+            // Now, randomly pick points on the aperture and see if any are outside
+            // of pupil bounds...
+            for (int i = 0; i < 1000; ++i)
+            {
+                // Braced-init-list: left-to-right.
+                Float ux = testExitPupilBoundsRng.Uniform<Float>();
+                Float uy = testExitPupilBoundsRng.Uniform<Float>();
+                Point2f u2 = new Point2f(ux, uy);
+                Point2f pd = pbrt.SampleUniformDiskConcentric(u2);
+                pd *= RearElementRadius();
+
+                Ray testRay = new Ray(pFilm, new Point3f(pd.x, pd.y, 0.0f) - pFilm);
+                Ray testOut;
+                if (TraceLensesFromFilm(testRay, &testOut) == 0)
+                    continue;
+
+                if (!pbrt.Inside(pd, pupilBounds))
+                {
+                    Console.Error.Write(pbrt.StringPrintf("Aha! (%f,%f) went through, but outside bounds (%f,%f) - " +
+                                                          "(%f,%f)\n",
+                                                          pd.x, pd.y, pupilBounds.pMin[0], pupilBounds.pMin[1],
+                                                          pupilBounds.pMax[0], pupilBounds.pMax[1]));
+                    RenderExitPupil(
+                        (Float)pupilIndex / exitPupilBounds.size() * filmDiagonal / 2.0f, 0.0f,
+                        "low.exr");
+                    RenderExitPupil(
+                        (Float)(pupilIndex + 1) / exitPupilBounds.size() * filmDiagonal / 2.0f,
+                        0.0f, "high.exr");
+                    RenderExitPupil(pFilm.x, 0.0f, "mid.exr");
+                    Environment.Exit(0);
+                }
+            }
+            Console.Error.Write(".");
+        }
+
+        // (function-local "static RNG rng" in TestExitPupilBounds)
+        static RNG testExitPupilBoundsRng = new RNG();
+
         static void ComputeCardinalPoints(Ray rIn, Ray rOut, Float* pz, Float* fz)
         {
             Float tf = -rOut.o.x / rOut.d.x;
