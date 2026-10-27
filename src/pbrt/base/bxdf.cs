@@ -11,6 +11,17 @@ using System;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // BxDFFlags Inline Functions
+        public static bool IsReflective(BxDFFlags f) { return (f & BxDFFlags.Reflection) != 0; }
+        public static bool IsTransmissive(BxDFFlags f) { return (f & BxDFFlags.Transmission) != 0; }
+        public static bool IsDiffuse(BxDFFlags f) { return (f & BxDFFlags.Diffuse) != 0; }
+        public static bool IsGlossy(BxDFFlags f) { return (f & BxDFFlags.Glossy) != 0; }
+        public static bool IsSpecular(BxDFFlags f) { return (f & BxDFFlags.Specular) != 0; }
+        public static bool IsNonSpecular(BxDFFlags f) { return (f & (BxDFFlags.Diffuse | BxDFFlags.Glossy)) != 0; }
+    }
+
 
     // BxDFReflTransFlags Definition
     public readonly struct BxDFReflTransFlags : IEquatable<BxDFReflTransFlags>
@@ -119,17 +130,6 @@ namespace pbrt
         {
             return this == Radiance ? "Radiance" : "Importance";
         }
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // BxDFFlags Inline Functions
-        public static bool IsReflective(BxDFFlags f) { return (f & BxDFFlags.Reflection) != 0; }
-        public static bool IsTransmissive(BxDFFlags f) { return (f & BxDFFlags.Transmission) != 0; }
-        public static bool IsDiffuse(BxDFFlags f) { return (f & BxDFFlags.Diffuse) != 0; }
-        public static bool IsGlossy(BxDFFlags f) { return (f & BxDFFlags.Glossy) != 0; }
-        public static bool IsSpecular(BxDFFlags f) { return (f & BxDFFlags.Specular) != 0; }
-        public static bool IsNonSpecular(BxDFFlags f) { return (f & (BxDFFlags.Diffuse | BxDFFlags.Glossy)) != 0; }
     }
 
     // BSDFSample Definition

@@ -12,144 +12,6 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
-
-    // LoopSubdiv Local Structures
-    internal unsafe class SDVertex
-    {
-        private static long nextId = 0;
-
-        // SDVertex Constructor
-        public SDVertex() { p = new Point3f(0, 0, 0); id = nextId++; }
-        public SDVertex(Point3f p) { this.p = p; id = nextId++; }
-
-        // SDVertex Methods
-        public int valence()
-        {
-            SDFace f = startFace;
-            if (!boundary)
-            {
-                // Compute valence of interior vertex
-                int nf = 1;
-                while ((f = f.nextFace(this)) != startFace)
-                    ++nf;
-                return nf;
-            }
-            else
-            {
-                // Compute valence of boundary vertex
-                int nf = 1;
-                while ((f = f.nextFace(this)) != null)
-                    ++nf;
-                f = startFace;
-                while ((f = f.prevFace(this)) != null)
-                    ++nf;
-                return nf + 1;
-            }
-        }
-
-        public void oneRing(Point3f[] p)
-        {
-            int pi = 0;
-            if (!boundary)
-            {
-                // Get one-ring vertices for interior vertex
-                SDFace face = startFace;
-                do
-                {
-                    p[pi++] = face.nextVert(this).p;
-                    face = face.nextFace(this);
-                } while (face != startFace);
-            }
-            else
-            {
-                // Get one-ring vertices for boundary vertex
-                SDFace face = startFace, f2;
-                while ((f2 = face.nextFace(this)) != null)
-                    face = f2;
-                p[pi++] = face.nextVert(this).p;
-                do
-                {
-                    p[pi++] = face.prevVert(this).p;
-                    face = face.prevFace(this);
-                } while (face != null);
-            }
-        }
-
-        public Point3f p;
-        public SDFace startFace = null;
-        public SDVertex child = null;
-        public bool regular = false, boundary = false;
-        public readonly long id;
-    }
-
-    internal unsafe class SDFace
-    {
-        // LoopSubdiv Macros
-        public static int NEXT(int i) { return (i + 1) % 3; }
-        public static int PREV(int i) { return (i + 2) % 3; }
-
-        // SDFace Constructor
-        public SDFace()
-        {
-            for (int i = 0; i < 3; ++i)
-            {
-                v[i] = null;
-                f[i] = null;
-            }
-            for (int i = 0; i < 4; ++i)
-                children[i] = null;
-        }
-
-        // SDFace Methods
-        public int vnum(SDVertex vert)
-        {
-            for (int i = 0; i < 3; ++i)
-                if (v[i] == vert)
-                    return i;
-            pbrt.LOG_FATAL("Basic logic error in SDFace::vnum()");
-            return -1;
-        }
-        public SDFace nextFace(SDVertex vert) { return f[vnum(vert)]; }
-        public SDFace prevFace(SDVertex vert) { return f[PREV(vnum(vert))]; }
-        public SDVertex nextVert(SDVertex vert) { return v[NEXT(vnum(vert))]; }
-        public SDVertex prevVert(SDVertex vert) { return v[PREV(vnum(vert))]; }
-        public SDVertex otherVert(SDVertex v0, SDVertex v1)
-        {
-            for (int i = 0; i < 3; ++i)
-                if (v[i] != v0 && v[i] != v1)
-                    return v[i];
-            pbrt.LOG_FATAL("Basic logic error in SDFace::otherVert()");
-            return null;
-        }
-        public SDVertex[] v = new SDVertex[3];
-        public SDFace[] f = new SDFace[3];
-        public SDFace[] children = new SDFace[4];
-    }
-
-    internal unsafe class SDEdge
-    {
-        // SDEdge Constructor
-        public SDEdge(SDVertex v0 = null, SDVertex v1 = null)
-        {
-            // std::min / std::max of the two pointers
-            long i0 = v0 == null ? -1 : v0.id, i1 = v1 == null ? -1 : v1.id;
-            v[0] = i0 <= i1 ? v0 : v1;
-            v[1] = i0 <= i1 ? v1 : v0;
-            f[0] = f[1] = null;
-            f0edgeNum = -1;
-        }
-
-        // SDEdge key (replaces operator< of std::set / std::map)
-        public (long, long) Key()
-        {
-            return (v[0] == null ? -1 : v[0].id, v[1] == null ? -1 : v[1].id);
-        }
-
-        public SDVertex[] v = new SDVertex[2];
-        public SDFace[] f = new SDFace[2];
-        public int f0edgeNum;
-    }
-
     public static unsafe partial class pbrt
     {
         // LoopSubdiv Inline Functions
@@ -484,6 +346,144 @@ namespace pbrt
             p += beta * pRing[valence - 1];
             return p;
         }
+    }
+
+
+    // LoopSubdiv Local Structures
+    internal unsafe class SDVertex
+    {
+        private static long nextId = 0;
+
+        // SDVertex Constructor
+        public SDVertex() { p = new Point3f(0, 0, 0); id = nextId++; }
+        public SDVertex(Point3f p) { this.p = p; id = nextId++; }
+
+        // SDVertex Methods
+        public int valence()
+        {
+            SDFace f = startFace;
+            if (!boundary)
+            {
+                // Compute valence of interior vertex
+                int nf = 1;
+                while ((f = f.nextFace(this)) != startFace)
+                    ++nf;
+                return nf;
+            }
+            else
+            {
+                // Compute valence of boundary vertex
+                int nf = 1;
+                while ((f = f.nextFace(this)) != null)
+                    ++nf;
+                f = startFace;
+                while ((f = f.prevFace(this)) != null)
+                    ++nf;
+                return nf + 1;
+            }
+        }
+
+        public void oneRing(Point3f[] p)
+        {
+            int pi = 0;
+            if (!boundary)
+            {
+                // Get one-ring vertices for interior vertex
+                SDFace face = startFace;
+                do
+                {
+                    p[pi++] = face.nextVert(this).p;
+                    face = face.nextFace(this);
+                } while (face != startFace);
+            }
+            else
+            {
+                // Get one-ring vertices for boundary vertex
+                SDFace face = startFace, f2;
+                while ((f2 = face.nextFace(this)) != null)
+                    face = f2;
+                p[pi++] = face.nextVert(this).p;
+                do
+                {
+                    p[pi++] = face.prevVert(this).p;
+                    face = face.prevFace(this);
+                } while (face != null);
+            }
+        }
+
+        public Point3f p;
+        public SDFace startFace = null;
+        public SDVertex child = null;
+        public bool regular = false, boundary = false;
+        public readonly long id;
+    }
+
+    internal unsafe class SDFace
+    {
+        // LoopSubdiv Macros
+        public static int NEXT(int i) { return (i + 1) % 3; }
+        public static int PREV(int i) { return (i + 2) % 3; }
+
+        // SDFace Constructor
+        public SDFace()
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                v[i] = null;
+                f[i] = null;
+            }
+            for (int i = 0; i < 4; ++i)
+                children[i] = null;
+        }
+
+        // SDFace Methods
+        public int vnum(SDVertex vert)
+        {
+            for (int i = 0; i < 3; ++i)
+                if (v[i] == vert)
+                    return i;
+            pbrt.LOG_FATAL("Basic logic error in SDFace::vnum()");
+            return -1;
+        }
+        public SDFace nextFace(SDVertex vert) { return f[vnum(vert)]; }
+        public SDFace prevFace(SDVertex vert) { return f[PREV(vnum(vert))]; }
+        public SDVertex nextVert(SDVertex vert) { return v[NEXT(vnum(vert))]; }
+        public SDVertex prevVert(SDVertex vert) { return v[PREV(vnum(vert))]; }
+        public SDVertex otherVert(SDVertex v0, SDVertex v1)
+        {
+            for (int i = 0; i < 3; ++i)
+                if (v[i] != v0 && v[i] != v1)
+                    return v[i];
+            pbrt.LOG_FATAL("Basic logic error in SDFace::otherVert()");
+            return null;
+        }
+        public SDVertex[] v = new SDVertex[3];
+        public SDFace[] f = new SDFace[3];
+        public SDFace[] children = new SDFace[4];
+    }
+
+    internal unsafe class SDEdge
+    {
+        // SDEdge Constructor
+        public SDEdge(SDVertex v0 = null, SDVertex v1 = null)
+        {
+            // std::min / std::max of the two pointers
+            long i0 = v0 == null ? -1 : v0.id, i1 = v1 == null ? -1 : v1.id;
+            v[0] = i0 <= i1 ? v0 : v1;
+            v[1] = i0 <= i1 ? v1 : v0;
+            f[0] = f[1] = null;
+            f0edgeNum = -1;
+        }
+
+        // SDEdge key (replaces operator< of std::set / std::map)
+        public (long, long) Key()
+        {
+            return (v[0] == null ? -1 : v[0].id, v[1] == null ? -1 : v[1].id);
+        }
+
+        public SDVertex[] v = new SDVertex[2];
+        public SDFace[] f = new SDFace[2];
+        public int f0edgeNum;
     }
 
 }  // namespace pbrt

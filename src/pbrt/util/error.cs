@@ -8,16 +8,6 @@ using System;
 
 namespace pbrt
 {
-    public unsafe class FileLoc
-    {
-        public FileLoc() { }
-        public FileLoc(string filename) { this.filename = filename; }
-        public override string ToString() { return $"{filename}:{line}:{column}"; }
-
-        public string filename;
-        public int line = 1, column = 0;
-    }
-
     public static unsafe partial class pbrt
     {
         private static bool hasErrored = false;
@@ -58,4 +48,15 @@ namespace pbrt
 
         public static void ErrorExit(string message) { ErrorExit((FileLoc)null, message); }
     }
+
+    public unsafe class FileLoc
+    {
+        public FileLoc() { }
+        public FileLoc(string filename) { this.filename = filename; }
+        public override string ToString() { return $"{filename}:{line}:{column}"; }
+
+        public string filename;
+        public int line = 1, column = 0;
+    }
+
 }

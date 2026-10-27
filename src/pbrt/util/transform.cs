@@ -10,6 +10,188 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        public static Transform Inverse(Transform t)
+        {
+            return new Transform(t.GetInverseMatrix(), t.GetMatrix());
+        }
+
+        public static Transform Transpose(Transform t)
+        {
+            return new Transform(Transpose(t.GetMatrix()), Transpose(t.GetInverseMatrix()));
+        }
+
+        public static Transform Rotate(Float sinTheta, Float cosTheta, Vector3f axis)
+        {
+            Vector3f a = Normalize(axis);
+            SquareMatrix4 m = new SquareMatrix4();
+            // Compute rotation of first basis vector
+            m[0][0] = a.x * a.x + (1 - a.x * a.x) * cosTheta;
+            m[0][1] = a.x * a.y * (1 - cosTheta) - a.z * sinTheta;
+            m[0][2] = a.x * a.z * (1 - cosTheta) + a.y * sinTheta;
+            m[0][3] = 0;
+
+            // Compute rotations of second and third basis vectors
+            m[1][0] = a.x * a.y * (1 - cosTheta) + a.z * sinTheta;
+            m[1][1] = a.y * a.y + (1 - a.y * a.y) * cosTheta;
+            m[1][2] = a.y * a.z * (1 - cosTheta) - a.x * sinTheta;
+            m[1][3] = 0;
+
+            m[2][0] = a.x * a.z * (1 - cosTheta) - a.y * sinTheta;
+            m[2][1] = a.y * a.z * (1 - cosTheta) + a.x * sinTheta;
+            m[2][2] = a.z * a.z + (1 - a.z * a.z) * cosTheta;
+            m[2][3] = 0;
+
+            return new Transform(m, Transpose(m));
+        }
+
+        public static Transform Rotate(Float theta, Vector3f axis)
+        {
+            Float sinTheta = std.sin(Radians(theta));
+            Float cosTheta = std.cos(Radians(theta));
+            return Rotate(sinTheta, cosTheta, axis);
+        }
+
+        public static Transform RotateFromTo(Vector3f from, Vector3f to)
+        {
+            // Compute intermediate vector for vector reflection
+            Vector3f refl;
+            if (std.abs(from.x) < 0.72f && std.abs(to.x) < 0.72f)
+                refl = new Vector3f(1, 0, 0);
+            else if (std.abs(from.y) < 0.72f && std.abs(to.y) < 0.72f)
+                refl = new Vector3f(0, 1, 0);
+            else
+                refl = new Vector3f(0, 0, 1);
+
+            // Initialize matrix _r_ for rotation
+            Vector3f u = refl - from, v = refl - to;
+            SquareMatrix4 r = new SquareMatrix4();
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    // Initialize matrix element _r[i][j]_
+                    r[i][j] = ((i == j) ? 1 : 0) - 2 / Dot(u, u) * u[i] * u[j] -
+                              2 / Dot(v, v) * v[i] * v[j] +
+                              4 * Dot(u, v) / (Dot(u, u) * Dot(v, v)) * v[i] * u[j];
+
+            return new Transform(r, Transpose(r));
+        }
+
+        // Transform Function Definitions
+        public static Transform Translate(Vector3f delta)
+        {
+            SquareMatrix4 m = new SquareMatrix4(1, 0, 0, delta.x,
+                                                0, 1, 0, delta.y,
+                                                0, 0, 1, delta.z,
+                                                0, 0, 0, 1);
+            SquareMatrix4 minv = new SquareMatrix4(1, 0, 0, -delta.x,
+                                                   0, 1, 0, -delta.y,
+                                                   0, 0, 1, -delta.z,
+                                                   0, 0, 0, 1);
+            return new Transform(m, minv);
+        }
+
+        public static Transform Scale(Float x, Float y, Float z)
+        {
+            SquareMatrix4 m = new SquareMatrix4(x, 0, 0, 0,
+                                                0, y, 0, 0,
+                                                0, 0, z, 0,
+                                                0, 0, 0, 1);
+            SquareMatrix4 minv = new SquareMatrix4(1 / x, 0, 0, 0,
+                                                   0, 1 / y, 0, 0,
+                                                   0, 0, 1 / z, 0,
+                                                   0, 0, 0, 1);
+            return new Transform(m, minv);
+        }
+
+        public static Transform RotateX(Float theta)
+        {
+            Float sinTheta = std.sin(Radians(theta));
+            Float cosTheta = std.cos(Radians(theta));
+            SquareMatrix4 m = new SquareMatrix4(1, 0, 0, 0,
+                                                0, cosTheta, -sinTheta, 0,
+                                                0, sinTheta, cosTheta, 0,
+                                                0, 0, 0, 1);
+            return new Transform(m, Transpose(m));
+        }
+
+        public static Transform RotateY(Float theta)
+        {
+            Float sinTheta = std.sin(Radians(theta));
+            Float cosTheta = std.cos(Radians(theta));
+            SquareMatrix4 m = new SquareMatrix4(cosTheta, 0, sinTheta, 0,
+                                                0, 1, 0, 0,
+                                                -sinTheta, 0, cosTheta, 0,
+                                                0, 0, 0, 1);
+            return new Transform(m, Transpose(m));
+        }
+
+        public static Transform RotateZ(Float theta)
+        {
+            Float sinTheta = std.sin(Radians(theta));
+            Float cosTheta = std.cos(Radians(theta));
+            SquareMatrix4 m = new SquareMatrix4(cosTheta, -sinTheta, 0, 0,
+                                                sinTheta, cosTheta, 0, 0,
+                                                0, 0, 1, 0,
+                                                0, 0, 0, 1);
+            return new Transform(m, Transpose(m));
+        }
+
+        public static Transform LookAt(Point3f pos, Point3f look, Vector3f up)
+        {
+            SquareMatrix4 worldFromCamera = new SquareMatrix4();
+            // Initialize fourth column of viewing matrix
+            worldFromCamera[0][3] = pos.x;
+            worldFromCamera[1][3] = pos.y;
+            worldFromCamera[2][3] = pos.z;
+            worldFromCamera[3][3] = 1;
+
+            // Initialize first three columns of viewing matrix
+            Vector3f dir = Normalize(look - pos);
+            if (Length(Cross(Normalize(up), dir)) == 0)
+                LOG_FATAL(string.Format("LookAt: \"up\" vector ({0}, {1}, {2}) and viewing direction " +
+                          "({3}, {4}, {5}) " +
+                          "passed to LookAt are pointing in the same direction.",
+                          up.x, up.y, up.z, dir.x, dir.y, dir.z));
+
+            Vector3f right = Normalize(Cross(Normalize(up), dir));
+            Vector3f newUp = Cross(dir, right);
+            worldFromCamera[0][0] = right.x;
+            worldFromCamera[1][0] = right.y;
+            worldFromCamera[2][0] = right.z;
+            worldFromCamera[3][0] = 0;
+            worldFromCamera[0][1] = newUp.x;
+            worldFromCamera[1][1] = newUp.y;
+            worldFromCamera[2][1] = newUp.z;
+            worldFromCamera[3][1] = 0;
+            worldFromCamera[0][2] = dir.x;
+            worldFromCamera[1][2] = dir.y;
+            worldFromCamera[2][2] = dir.z;
+            worldFromCamera[3][2] = 0;
+
+            SquareMatrix4 cameraFromWorld = InvertOrExit(worldFromCamera);
+            return new Transform(cameraFromWorld, worldFromCamera);
+        }
+
+        public static Transform Orthographic(Float zNear, Float zFar)
+        {
+            return Scale(1, 1, 1 / (zFar - zNear)) * Translate(new Vector3f(0, 0, -zNear));
+        }
+
+        public static Transform Perspective(Float fov, Float n, Float f)
+        {
+            // Perform projective divide for perspective projection
+            SquareMatrix4 persp = new SquareMatrix4(1, 0, 0, 0,
+                                                    0, 1, 0, 0,
+                                                    0, 0, f / (f - n), -f * n / (f - n),
+                                                    0, 0, 1, 0);
+
+            // Scale canonical perspective view to specified field of view
+            Float invTanAng = 1 / std.tan(Radians(fov) / 2);
+            return Scale(invTanAng, invTanAng, 1) * new Transform(persp);
+        }
+    }
+
 
     // Transform Definition
     public unsafe struct Transform
@@ -576,187 +758,6 @@ namespace pbrt
     }
 
     // Transform Function Declarations
-    public static unsafe partial class pbrt
-    {
-        public static Transform Inverse(Transform t)
-        {
-            return new Transform(t.GetInverseMatrix(), t.GetMatrix());
-        }
-
-        public static Transform Transpose(Transform t)
-        {
-            return new Transform(Transpose(t.GetMatrix()), Transpose(t.GetInverseMatrix()));
-        }
-
-        public static Transform Rotate(Float sinTheta, Float cosTheta, Vector3f axis)
-        {
-            Vector3f a = Normalize(axis);
-            SquareMatrix4 m = new SquareMatrix4();
-            // Compute rotation of first basis vector
-            m[0][0] = a.x * a.x + (1 - a.x * a.x) * cosTheta;
-            m[0][1] = a.x * a.y * (1 - cosTheta) - a.z * sinTheta;
-            m[0][2] = a.x * a.z * (1 - cosTheta) + a.y * sinTheta;
-            m[0][3] = 0;
-
-            // Compute rotations of second and third basis vectors
-            m[1][0] = a.x * a.y * (1 - cosTheta) + a.z * sinTheta;
-            m[1][1] = a.y * a.y + (1 - a.y * a.y) * cosTheta;
-            m[1][2] = a.y * a.z * (1 - cosTheta) - a.x * sinTheta;
-            m[1][3] = 0;
-
-            m[2][0] = a.x * a.z * (1 - cosTheta) - a.y * sinTheta;
-            m[2][1] = a.y * a.z * (1 - cosTheta) + a.x * sinTheta;
-            m[2][2] = a.z * a.z + (1 - a.z * a.z) * cosTheta;
-            m[2][3] = 0;
-
-            return new Transform(m, Transpose(m));
-        }
-
-        public static Transform Rotate(Float theta, Vector3f axis)
-        {
-            Float sinTheta = std.sin(Radians(theta));
-            Float cosTheta = std.cos(Radians(theta));
-            return Rotate(sinTheta, cosTheta, axis);
-        }
-
-        public static Transform RotateFromTo(Vector3f from, Vector3f to)
-        {
-            // Compute intermediate vector for vector reflection
-            Vector3f refl;
-            if (std.abs(from.x) < 0.72f && std.abs(to.x) < 0.72f)
-                refl = new Vector3f(1, 0, 0);
-            else if (std.abs(from.y) < 0.72f && std.abs(to.y) < 0.72f)
-                refl = new Vector3f(0, 1, 0);
-            else
-                refl = new Vector3f(0, 0, 1);
-
-            // Initialize matrix _r_ for rotation
-            Vector3f u = refl - from, v = refl - to;
-            SquareMatrix4 r = new SquareMatrix4();
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    // Initialize matrix element _r[i][j]_
-                    r[i][j] = ((i == j) ? 1 : 0) - 2 / Dot(u, u) * u[i] * u[j] -
-                              2 / Dot(v, v) * v[i] * v[j] +
-                              4 * Dot(u, v) / (Dot(u, u) * Dot(v, v)) * v[i] * u[j];
-
-            return new Transform(r, Transpose(r));
-        }
-
-        // Transform Function Definitions
-        public static Transform Translate(Vector3f delta)
-        {
-            SquareMatrix4 m = new SquareMatrix4(1, 0, 0, delta.x,
-                                                0, 1, 0, delta.y,
-                                                0, 0, 1, delta.z,
-                                                0, 0, 0, 1);
-            SquareMatrix4 minv = new SquareMatrix4(1, 0, 0, -delta.x,
-                                                   0, 1, 0, -delta.y,
-                                                   0, 0, 1, -delta.z,
-                                                   0, 0, 0, 1);
-            return new Transform(m, minv);
-        }
-
-        public static Transform Scale(Float x, Float y, Float z)
-        {
-            SquareMatrix4 m = new SquareMatrix4(x, 0, 0, 0,
-                                                0, y, 0, 0,
-                                                0, 0, z, 0,
-                                                0, 0, 0, 1);
-            SquareMatrix4 minv = new SquareMatrix4(1 / x, 0, 0, 0,
-                                                   0, 1 / y, 0, 0,
-                                                   0, 0, 1 / z, 0,
-                                                   0, 0, 0, 1);
-            return new Transform(m, minv);
-        }
-
-        public static Transform RotateX(Float theta)
-        {
-            Float sinTheta = std.sin(Radians(theta));
-            Float cosTheta = std.cos(Radians(theta));
-            SquareMatrix4 m = new SquareMatrix4(1, 0, 0, 0,
-                                                0, cosTheta, -sinTheta, 0,
-                                                0, sinTheta, cosTheta, 0,
-                                                0, 0, 0, 1);
-            return new Transform(m, Transpose(m));
-        }
-
-        public static Transform RotateY(Float theta)
-        {
-            Float sinTheta = std.sin(Radians(theta));
-            Float cosTheta = std.cos(Radians(theta));
-            SquareMatrix4 m = new SquareMatrix4(cosTheta, 0, sinTheta, 0,
-                                                0, 1, 0, 0,
-                                                -sinTheta, 0, cosTheta, 0,
-                                                0, 0, 0, 1);
-            return new Transform(m, Transpose(m));
-        }
-
-        public static Transform RotateZ(Float theta)
-        {
-            Float sinTheta = std.sin(Radians(theta));
-            Float cosTheta = std.cos(Radians(theta));
-            SquareMatrix4 m = new SquareMatrix4(cosTheta, -sinTheta, 0, 0,
-                                                sinTheta, cosTheta, 0, 0,
-                                                0, 0, 1, 0,
-                                                0, 0, 0, 1);
-            return new Transform(m, Transpose(m));
-        }
-
-        public static Transform LookAt(Point3f pos, Point3f look, Vector3f up)
-        {
-            SquareMatrix4 worldFromCamera = new SquareMatrix4();
-            // Initialize fourth column of viewing matrix
-            worldFromCamera[0][3] = pos.x;
-            worldFromCamera[1][3] = pos.y;
-            worldFromCamera[2][3] = pos.z;
-            worldFromCamera[3][3] = 1;
-
-            // Initialize first three columns of viewing matrix
-            Vector3f dir = Normalize(look - pos);
-            if (Length(Cross(Normalize(up), dir)) == 0)
-                LOG_FATAL(string.Format("LookAt: \"up\" vector ({0}, {1}, {2}) and viewing direction " +
-                          "({3}, {4}, {5}) " +
-                          "passed to LookAt are pointing in the same direction.",
-                          up.x, up.y, up.z, dir.x, dir.y, dir.z));
-
-            Vector3f right = Normalize(Cross(Normalize(up), dir));
-            Vector3f newUp = Cross(dir, right);
-            worldFromCamera[0][0] = right.x;
-            worldFromCamera[1][0] = right.y;
-            worldFromCamera[2][0] = right.z;
-            worldFromCamera[3][0] = 0;
-            worldFromCamera[0][1] = newUp.x;
-            worldFromCamera[1][1] = newUp.y;
-            worldFromCamera[2][1] = newUp.z;
-            worldFromCamera[3][1] = 0;
-            worldFromCamera[0][2] = dir.x;
-            worldFromCamera[1][2] = dir.y;
-            worldFromCamera[2][2] = dir.z;
-            worldFromCamera[3][2] = 0;
-
-            SquareMatrix4 cameraFromWorld = InvertOrExit(worldFromCamera);
-            return new Transform(cameraFromWorld, worldFromCamera);
-        }
-
-        public static Transform Orthographic(Float zNear, Float zFar)
-        {
-            return Scale(1, 1, 1 / (zFar - zNear)) * Translate(new Vector3f(0, 0, -zNear));
-        }
-
-        public static Transform Perspective(Float fov, Float n, Float f)
-        {
-            // Perform projective divide for perspective projection
-            SquareMatrix4 persp = new SquareMatrix4(1, 0, 0, 0,
-                                                    0, 1, 0, 0,
-                                                    0, 0, f / (f - n), -f * n / (f - n),
-                                                    0, 0, 1, 0);
-
-            // Scale canonical perspective view to specified field of view
-            Float invTanAng = 1 / std.tan(Radians(fov) / 2);
-            return Scale(invTanAng, invTanAng, 1) * new Transform(persp);
-        }
-    }
 
     // AnimatedTransform Definition
     public unsafe class AnimatedTransform

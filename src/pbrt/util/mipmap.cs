@@ -10,6 +10,37 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        public static pstd.optional<FilterFunction> ParseFilter(string f)
+        {
+            if (f == "ewa" || f == "EWA")
+                return FilterFunction.EWA;
+            else if (f == "trilinear")
+                return FilterFunction.Trilinear;
+            else if (f == "bilinear")
+                return FilterFunction.Bilinear;
+            else if (f == "point")
+                return FilterFunction.Point;
+            else
+                return new pstd.optional<FilterFunction>();
+        }
+
+        public static string ToString(FilterFunction f)
+        {
+            switch (f)
+            {
+                case FilterFunction.Point: return "Point";
+                case FilterFunction.Bilinear: return "Bilinear";
+                case FilterFunction.Trilinear: return "Trilinear";
+                case FilterFunction.EWA: return "EWA";
+                default:
+                    LOG_FATAL("Unhandled case");
+                    return "";
+            }
+        }
+    }
+
     // FilterFunction Definition
     public enum FilterFunction { Point, Bilinear, Trilinear, EWA }
 
@@ -48,37 +79,6 @@ namespace pbrt
         public override string ToString()
         {
             return StringPrintf("[ MIPMapFilterOptions filter: %s maxAnisotropy: %f ]", pbrt.ToString(filter), maxAnisotropy);
-        }
-    }
-
-    public static unsafe partial class pbrt
-    {
-        public static pstd.optional<FilterFunction> ParseFilter(string f)
-        {
-            if (f == "ewa" || f == "EWA")
-                return FilterFunction.EWA;
-            else if (f == "trilinear")
-                return FilterFunction.Trilinear;
-            else if (f == "bilinear")
-                return FilterFunction.Bilinear;
-            else if (f == "point")
-                return FilterFunction.Point;
-            else
-                return new pstd.optional<FilterFunction>();
-        }
-
-        public static string ToString(FilterFunction f)
-        {
-            switch (f)
-            {
-                case FilterFunction.Point: return "Point";
-                case FilterFunction.Bilinear: return "Bilinear";
-                case FilterFunction.Trilinear: return "Trilinear";
-                case FilterFunction.EWA: return "EWA";
-                default:
-                    LOG_FATAL("Unhandled case");
-                    return "";
-            }
         }
     }
 

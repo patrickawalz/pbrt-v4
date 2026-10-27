@@ -9,6 +9,25 @@ using System.Text;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        public static string ToString(SpectrumType t)
+        {
+            switch (t)
+            {
+            case SpectrumType.Albedo:
+                return "Albedo";
+            case SpectrumType.Unbounded:
+                return "Unbounded";
+            case SpectrumType.Illuminant:
+                return "Illuminant";
+            default:
+                LOG_FATAL("Unhandled SpectrumType");
+                return "";
+            }
+        }
+    }
+
 
     // ParsedParameter Definition
     // (ParsedParameter::AddFloat/AddInt/AddString/AddBool/ToString are defined in parser.cpp -> parser.cs)
@@ -47,25 +66,6 @@ namespace pbrt
 
     // SpectrumType Definition
     public enum SpectrumType { Illuminant, Albedo, Unbounded }
-
-    public static unsafe partial class pbrt
-    {
-        public static string ToString(SpectrumType t)
-        {
-            switch (t)
-            {
-            case SpectrumType.Albedo:
-                return "Albedo";
-            case SpectrumType.Unbounded:
-                return "Unbounded";
-            case SpectrumType.Illuminant:
-                return "Illuminant";
-            default:
-                LOG_FATAL("Unhandled SpectrumType");
-                return "";
-            }
-        }
-    }
 
     // NamedTextures Definition
     public sealed class NamedTextures

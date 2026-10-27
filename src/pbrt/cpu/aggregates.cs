@@ -9,6 +9,27 @@ using System.Threading;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        public static Primitive CreateAccelerator(string name, List<Primitive> prims,
+                                                  ParameterDictionary parameters)
+        {
+            Primitive accel = null;
+            if (name == "bvh")
+                accel = BVHAggregate.Create(prims, parameters);
+            else if (name == "kdtree")
+                accel = KdTreeAggregate.Create(prims, parameters);
+            else
+                ErrorExit(StringPrintf("%s: accelerator type unknown.", name));
+
+            if (accel == null)
+                ErrorExit(StringPrintf("%s: unable to create accelerator.", name));
+
+            parameters.ReportUnused();
+            return accel;
+        }
+    }
+
 
     // BVHAggregate Definition
     public sealed unsafe class BVHAggregate : Primitive
@@ -1472,27 +1493,6 @@ namespace pbrt
         KdTreeNode[] nodes;
         int nAllocedNodes, nextFreeNode;
         Bounds3f bounds;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        public static Primitive CreateAccelerator(string name, List<Primitive> prims,
-                                                  ParameterDictionary parameters)
-        {
-            Primitive accel = null;
-            if (name == "bvh")
-                accel = BVHAggregate.Create(prims, parameters);
-            else if (name == "kdtree")
-                accel = KdTreeAggregate.Create(prims, parameters);
-            else
-                ErrorExit(StringPrintf("%s: accelerator type unknown.", name));
-
-            if (accel == null)
-                ErrorExit(StringPrintf("%s: unable to create accelerator.", name));
-
-            parameters.ReportUnused();
-            return accel;
-        }
     }
 
 }  // namespace pbrt

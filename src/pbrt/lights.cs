@@ -8,6 +8,52 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // LightBounds Inline Functions
+        public static LightBounds Union(LightBounds a, LightBounds b)
+        {
+            // If one _LightBounds_ has zero power, return the other
+            if (a.phi == 0)
+                return b;
+            if (b.phi == 0)
+                return a;
+
+            // Find average direction and updated angles for _LightBounds_
+            DirectionCone cone = Union(new DirectionCone(a.w, a.cosTheta_o), new DirectionCone(b.w, b.cosTheta_o));
+            Float cosTheta_o = cone.cosTheta;
+            Float cosTheta_e = std.min(a.cosTheta_e, b.cosTheta_e);
+
+            // Return final _LightBounds_ union
+            return new LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, cosTheta_o, cosTheta_e,
+                                   a.twoSided | b.twoSided);
+        }
+
+        public static string ToString(LightType lf)
+        {
+            switch (lf)
+            {
+                case LightType.DeltaPosition:
+                    return "DeltaPosition";
+                case LightType.DeltaDirection:
+                    return "DeltaDirection,";
+                case LightType.Area:
+                    return "Area";
+                case LightType.Infinite:
+                    return "Infinite";
+                default:
+                    LOG_FATAL("Unhandled type");
+                    return "";
+            }
+        }
+
+        // LightType Inline Functions
+        public static bool IsDeltaLight(LightType type)
+        {
+            return (type == LightType.DeltaPosition || type == LightType.DeltaDirection);
+        }
+    }
+
 
     // LightLiSample Definition
     public unsafe struct LightLiSample
@@ -171,52 +217,6 @@ namespace pbrt
         public Vector3f w;
         public Float cosTheta_o, cosTheta_e;
         public bool twoSided;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // LightBounds Inline Functions
-        public static LightBounds Union(LightBounds a, LightBounds b)
-        {
-            // If one _LightBounds_ has zero power, return the other
-            if (a.phi == 0)
-                return b;
-            if (b.phi == 0)
-                return a;
-
-            // Find average direction and updated angles for _LightBounds_
-            DirectionCone cone = Union(new DirectionCone(a.w, a.cosTheta_o), new DirectionCone(b.w, b.cosTheta_o));
-            Float cosTheta_o = cone.cosTheta;
-            Float cosTheta_e = std.min(a.cosTheta_e, b.cosTheta_e);
-
-            // Return final _LightBounds_ union
-            return new LightBounds(Union(a.bounds, b.bounds), cone.w, a.phi + b.phi, cosTheta_o, cosTheta_e,
-                                   a.twoSided | b.twoSided);
-        }
-
-        public static string ToString(LightType lf)
-        {
-            switch (lf)
-            {
-                case LightType.DeltaPosition:
-                    return "DeltaPosition";
-                case LightType.DeltaDirection:
-                    return "DeltaDirection,";
-                case LightType.Area:
-                    return "Area";
-                case LightType.Infinite:
-                    return "Infinite";
-                default:
-                    LOG_FATAL("Unhandled type");
-                    return "";
-            }
-        }
-
-        // LightType Inline Functions
-        public static bool IsDeltaLight(LightType type)
-        {
-            return (type == LightType.DeltaPosition || type == LightType.DeltaDirection);
-        }
     }
 
     // LightBase Definition

@@ -8,6 +8,191 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // Triangle Function Declarations
+        public static pstd.optional<TriangleIntersection> IntersectTriangle(Ray ray, Float tMax, Point3f p0, Point3f p1,
+                                                                             Point3f p2)
+        {
+            // Return no intersection if triangle is degenerate
+            if (LengthSquared(Cross(p2 - p0, p1 - p0)) == 0)
+                return default;
+
+            // Transform triangle vertices to ray coordinate space
+            // Translate vertices based on ray origin
+            Point3f p0t = p0 - (Vector3f)ray.o;
+            Point3f p1t = p1 - (Vector3f)ray.o;
+            Point3f p2t = p2 - (Vector3f)ray.o;
+
+            // Permute components of triangle vertices and ray direction
+            int kz = MaxComponentIndex(Abs(ray.d));
+            int kx = kz + 1;
+            if (kx == 3)
+                kx = 0;
+            int ky = kx + 1;
+            if (ky == 3)
+                ky = 0;
+            Vector3f d = Permute(ray.d, kx, ky, kz);
+            p0t = Permute(p0t, kx, ky, kz);
+            p1t = Permute(p1t, kx, ky, kz);
+            p2t = Permute(p2t, kx, ky, kz);
+
+            // Apply shear transformation to translated vertex positions
+            Float Sx = -d.x / d.z;
+            Float Sy = -d.y / d.z;
+            Float Sz = 1 / d.z;
+            p0t.x += Sx * p0t.z;
+            p0t.y += Sy * p0t.z;
+            p1t.x += Sx * p1t.z;
+            p1t.y += Sy * p1t.z;
+            p2t.x += Sx * p2t.z;
+            p2t.y += Sy * p2t.z;
+
+            // Compute edge function coefficients _e0_, _e1_, and _e2_
+            Float e0 = DifferenceOfProducts(p1t.x, p2t.y, p1t.y, p2t.x);
+            Float e1 = DifferenceOfProducts(p2t.x, p0t.y, p2t.y, p0t.x);
+            Float e2 = DifferenceOfProducts(p0t.x, p1t.y, p0t.y, p1t.x);
+
+            // Fall back to double-precision test at triangle edges
+            if (sizeof(Float) == sizeof(float) && (e0 == 0.0f || e1 == 0.0f || e2 == 0.0f))
+            {
+                double p2txp1ty = (double)p2t.x * (double)p1t.y;
+                double p2typ1tx = (double)p2t.y * (double)p1t.x;
+                e0 = (float)(p2typ1tx - p2txp1ty);
+                double p0txp2ty = (double)p0t.x * (double)p2t.y;
+                double p0typ2tx = (double)p0t.y * (double)p2t.x;
+                e1 = (float)(p0typ2tx - p0txp2ty);
+                double p1txp0ty = (double)p1t.x * (double)p0t.y;
+                double p1typ0tx = (double)p1t.y * (double)p0t.x;
+                e2 = (float)(p1typ0tx - p1txp0ty);
+            }
+
+            // Perform triangle edge and determinant tests
+            if ((e0 < 0 || e1 < 0 || e2 < 0) && (e0 > 0 || e1 > 0 || e2 > 0))
+                return default;
+            Float det = e0 + e1 + e2;
+            if (det == 0)
+                return default;
+
+            // Compute scaled hit distance to triangle and test against ray $t$ range
+            p0t.z *= Sz;
+            p1t.z *= Sz;
+            p2t.z *= Sz;
+            Float tScaled = e0 * p0t.z + e1 * p1t.z + e2 * p2t.z;
+            if (det < 0 && (tScaled >= 0 || tScaled < tMax * det))
+                return default;
+            else if (det > 0 && (tScaled <= 0 || tScaled > tMax * det))
+                return default;
+
+            // Compute barycentric coordinates and $t$ value for triangle intersection
+            Float invDet = 1 / det;
+            Float b0 = e0 * invDet, b1 = e1 * invDet, b2 = e2 * invDet;
+            Float t = tScaled * invDet;
+            DCHECK(!IsNaN(t));
+
+            // Ensure that computed triangle $t$ is conservatively greater than zero
+            // Compute $\delta_z$ term for triangle $t$ error bounds
+            Float maxZt = MaxComponentValue(Abs(new Vector3f(p0t.z, p1t.z, p2t.z)));
+            Float deltaZ = gamma(3) * maxZt;
+
+            // Compute $\delta_x$ and $\delta_y$ terms for triangle $t$ error bounds
+            Float maxXt = MaxComponentValue(Abs(new Vector3f(p0t.x, p1t.x, p2t.x)));
+            Float maxYt = MaxComponentValue(Abs(new Vector3f(p0t.y, p1t.y, p2t.y)));
+            Float deltaX = gamma(5) * (maxXt + maxZt);
+            Float deltaY = gamma(5) * (maxYt + maxZt);
+
+            // Compute $\delta_e$ term for triangle $t$ error bounds
+            Float deltaE = 2 * (gamma(2) * maxXt * maxYt + deltaY * maxXt + deltaX * maxYt);
+
+            // Compute $\delta_t$ term for triangle $t$ error bounds and check _t_
+            Float maxE = MaxComponentValue(Abs(new Vector3f(e0, e1, e2)));
+            Float deltaT = 3 * (gamma(3) * maxE * maxZt + deltaE * maxZt + deltaZ * maxE) * std.abs(invDet);
+            if (t <= deltaT)
+                return default;
+
+            return new TriangleIntersection(b0, b1, b2, t);
+        }
+
+        // Bilinear Patch Inline Functions
+        public static pstd.optional<BilinearIntersection> IntersectBilinearPatch(Ray ray, Float tMax, Point3f p00,
+                                                                                 Point3f p10, Point3f p01, Point3f p11)
+        {
+            // Find quadratic coefficients for distance from ray to $u$ iso-lines
+            Float a = Dot(Cross(p10 - p00, p01 - p11), ray.d);
+            Float c = Dot(Cross(p00 - ray.o, ray.d), p01 - p00);
+            Float b = Dot(Cross(p10 - ray.o, ray.d), p11 - p10) - (a + c);
+
+            // Solve quadratic for bilinear patch $u$ intersection
+            Float u1, u2;
+            if (!Quadratic(a, b, c, &u1, &u2))
+                return default;
+
+            // Find epsilon _eps_ to ensure that candidate $t$ is greater than zero
+            Float eps = gamma(30) * (MaxComponentValue(Abs(ray.o)) + MaxComponentValue(Abs(ray.d)) +
+                                     MaxComponentValue(Abs(p00)) + MaxComponentValue(Abs(p10)) +
+                                     MaxComponentValue(Abs(p01)) + MaxComponentValue(Abs(p11)));
+
+            // Compute $v$ and $t$ for the first $u$ intersection
+            Float t = tMax, u = 0, v = 0;
+            if (0 <= u1 && u1 <= 1)
+            {
+                // Precompute common terms for $v$ and $t$ computation
+                Point3f uo = Lerp(u1, p00, p10);
+                Vector3f ud = Lerp(u1, p01, p11) - uo;
+                Vector3f deltao = uo - ray.o;
+                Vector3f perp = Cross(ray.d, ud);
+                Float p2 = LengthSquared(perp);
+
+                // Compute matrix determinants for $v$ and $t$ numerators
+                Float v1 = Determinant(new SquareMatrix3(deltao.x, ray.d.x, perp.x, deltao.y, ray.d.y, perp.y,
+                                                         deltao.z, ray.d.z, perp.z));
+                Float t1 = Determinant(new SquareMatrix3(deltao.x, ud.x, perp.x, deltao.y, ud.y, perp.y, deltao.z,
+                                                         ud.z, perp.z));
+
+                // Set _u_, _v_, and _t_ if intersection is valid
+                if (t1 > p2 * eps && 0 <= v1 && v1 <= p2)
+                {
+                    u = u1;
+                    v = v1 / p2;
+                    t = t1 / p2;
+                }
+            }
+
+            // Compute $v$ and $t$ for the second $u$ intersection
+            if (0 <= u2 && u2 <= 1 && u2 != u1)
+            {
+                // Precompute common terms for $v$ and $t$ computation
+                Point3f uo = Lerp(u2, p00, p10);
+                Vector3f ud = Lerp(u2, p01, p11) - uo;
+                Vector3f deltao = uo - ray.o;
+                Vector3f perp = Cross(ray.d, ud);
+                Float p2 = LengthSquared(perp);
+
+                // Compute matrix determinants for $v$ and $t$ numerators
+                Float v2 = Determinant(new SquareMatrix3(deltao.x, ray.d.x, perp.x, deltao.y, ray.d.y, perp.y,
+                                                         deltao.z, ray.d.z, perp.z));
+                Float t2 = Determinant(new SquareMatrix3(deltao.x, ud.x, perp.x, deltao.y, ud.y, perp.y, deltao.z,
+                                                         ud.z, perp.z));
+                t2 /= p2;
+
+                // Set _u_, _v_, and _t_ if intersection is valid
+                if (0 <= v2 && v2 <= p2 && t > t2 && t2 > eps)
+                {
+                    t = t2;
+                    u = u2;
+                    v = v2 / p2;
+                }
+            }
+
+            // TODO: reject hits with sufficiently small t that we're not sure.
+            // Check intersection $t$ against _tMax_ and possibly return intersection
+            if (t >= tMax)
+                return default;
+
+            return new BilinearIntersection(new Point2f(u, v), t);
+        }
+    }
+
 
     // ShapeSample Definition
     public unsafe struct ShapeSample
@@ -2507,191 +2692,6 @@ namespace pbrt
         // BilinearPatch Private Members
         int meshIndex, blpIndex;
         Float area;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // Triangle Function Declarations
-        public static pstd.optional<TriangleIntersection> IntersectTriangle(Ray ray, Float tMax, Point3f p0, Point3f p1,
-                                                                             Point3f p2)
-        {
-            // Return no intersection if triangle is degenerate
-            if (LengthSquared(Cross(p2 - p0, p1 - p0)) == 0)
-                return default;
-
-            // Transform triangle vertices to ray coordinate space
-            // Translate vertices based on ray origin
-            Point3f p0t = p0 - (Vector3f)ray.o;
-            Point3f p1t = p1 - (Vector3f)ray.o;
-            Point3f p2t = p2 - (Vector3f)ray.o;
-
-            // Permute components of triangle vertices and ray direction
-            int kz = MaxComponentIndex(Abs(ray.d));
-            int kx = kz + 1;
-            if (kx == 3)
-                kx = 0;
-            int ky = kx + 1;
-            if (ky == 3)
-                ky = 0;
-            Vector3f d = Permute(ray.d, kx, ky, kz);
-            p0t = Permute(p0t, kx, ky, kz);
-            p1t = Permute(p1t, kx, ky, kz);
-            p2t = Permute(p2t, kx, ky, kz);
-
-            // Apply shear transformation to translated vertex positions
-            Float Sx = -d.x / d.z;
-            Float Sy = -d.y / d.z;
-            Float Sz = 1 / d.z;
-            p0t.x += Sx * p0t.z;
-            p0t.y += Sy * p0t.z;
-            p1t.x += Sx * p1t.z;
-            p1t.y += Sy * p1t.z;
-            p2t.x += Sx * p2t.z;
-            p2t.y += Sy * p2t.z;
-
-            // Compute edge function coefficients _e0_, _e1_, and _e2_
-            Float e0 = DifferenceOfProducts(p1t.x, p2t.y, p1t.y, p2t.x);
-            Float e1 = DifferenceOfProducts(p2t.x, p0t.y, p2t.y, p0t.x);
-            Float e2 = DifferenceOfProducts(p0t.x, p1t.y, p0t.y, p1t.x);
-
-            // Fall back to double-precision test at triangle edges
-            if (sizeof(Float) == sizeof(float) && (e0 == 0.0f || e1 == 0.0f || e2 == 0.0f))
-            {
-                double p2txp1ty = (double)p2t.x * (double)p1t.y;
-                double p2typ1tx = (double)p2t.y * (double)p1t.x;
-                e0 = (float)(p2typ1tx - p2txp1ty);
-                double p0txp2ty = (double)p0t.x * (double)p2t.y;
-                double p0typ2tx = (double)p0t.y * (double)p2t.x;
-                e1 = (float)(p0typ2tx - p0txp2ty);
-                double p1txp0ty = (double)p1t.x * (double)p0t.y;
-                double p1typ0tx = (double)p1t.y * (double)p0t.x;
-                e2 = (float)(p1typ0tx - p1txp0ty);
-            }
-
-            // Perform triangle edge and determinant tests
-            if ((e0 < 0 || e1 < 0 || e2 < 0) && (e0 > 0 || e1 > 0 || e2 > 0))
-                return default;
-            Float det = e0 + e1 + e2;
-            if (det == 0)
-                return default;
-
-            // Compute scaled hit distance to triangle and test against ray $t$ range
-            p0t.z *= Sz;
-            p1t.z *= Sz;
-            p2t.z *= Sz;
-            Float tScaled = e0 * p0t.z + e1 * p1t.z + e2 * p2t.z;
-            if (det < 0 && (tScaled >= 0 || tScaled < tMax * det))
-                return default;
-            else if (det > 0 && (tScaled <= 0 || tScaled > tMax * det))
-                return default;
-
-            // Compute barycentric coordinates and $t$ value for triangle intersection
-            Float invDet = 1 / det;
-            Float b0 = e0 * invDet, b1 = e1 * invDet, b2 = e2 * invDet;
-            Float t = tScaled * invDet;
-            DCHECK(!IsNaN(t));
-
-            // Ensure that computed triangle $t$ is conservatively greater than zero
-            // Compute $\delta_z$ term for triangle $t$ error bounds
-            Float maxZt = MaxComponentValue(Abs(new Vector3f(p0t.z, p1t.z, p2t.z)));
-            Float deltaZ = gamma(3) * maxZt;
-
-            // Compute $\delta_x$ and $\delta_y$ terms for triangle $t$ error bounds
-            Float maxXt = MaxComponentValue(Abs(new Vector3f(p0t.x, p1t.x, p2t.x)));
-            Float maxYt = MaxComponentValue(Abs(new Vector3f(p0t.y, p1t.y, p2t.y)));
-            Float deltaX = gamma(5) * (maxXt + maxZt);
-            Float deltaY = gamma(5) * (maxYt + maxZt);
-
-            // Compute $\delta_e$ term for triangle $t$ error bounds
-            Float deltaE = 2 * (gamma(2) * maxXt * maxYt + deltaY * maxXt + deltaX * maxYt);
-
-            // Compute $\delta_t$ term for triangle $t$ error bounds and check _t_
-            Float maxE = MaxComponentValue(Abs(new Vector3f(e0, e1, e2)));
-            Float deltaT = 3 * (gamma(3) * maxE * maxZt + deltaE * maxZt + deltaZ * maxE) * std.abs(invDet);
-            if (t <= deltaT)
-                return default;
-
-            return new TriangleIntersection(b0, b1, b2, t);
-        }
-
-        // Bilinear Patch Inline Functions
-        public static pstd.optional<BilinearIntersection> IntersectBilinearPatch(Ray ray, Float tMax, Point3f p00,
-                                                                                 Point3f p10, Point3f p01, Point3f p11)
-        {
-            // Find quadratic coefficients for distance from ray to $u$ iso-lines
-            Float a = Dot(Cross(p10 - p00, p01 - p11), ray.d);
-            Float c = Dot(Cross(p00 - ray.o, ray.d), p01 - p00);
-            Float b = Dot(Cross(p10 - ray.o, ray.d), p11 - p10) - (a + c);
-
-            // Solve quadratic for bilinear patch $u$ intersection
-            Float u1, u2;
-            if (!Quadratic(a, b, c, &u1, &u2))
-                return default;
-
-            // Find epsilon _eps_ to ensure that candidate $t$ is greater than zero
-            Float eps = gamma(30) * (MaxComponentValue(Abs(ray.o)) + MaxComponentValue(Abs(ray.d)) +
-                                     MaxComponentValue(Abs(p00)) + MaxComponentValue(Abs(p10)) +
-                                     MaxComponentValue(Abs(p01)) + MaxComponentValue(Abs(p11)));
-
-            // Compute $v$ and $t$ for the first $u$ intersection
-            Float t = tMax, u = 0, v = 0;
-            if (0 <= u1 && u1 <= 1)
-            {
-                // Precompute common terms for $v$ and $t$ computation
-                Point3f uo = Lerp(u1, p00, p10);
-                Vector3f ud = Lerp(u1, p01, p11) - uo;
-                Vector3f deltao = uo - ray.o;
-                Vector3f perp = Cross(ray.d, ud);
-                Float p2 = LengthSquared(perp);
-
-                // Compute matrix determinants for $v$ and $t$ numerators
-                Float v1 = Determinant(new SquareMatrix3(deltao.x, ray.d.x, perp.x, deltao.y, ray.d.y, perp.y,
-                                                         deltao.z, ray.d.z, perp.z));
-                Float t1 = Determinant(new SquareMatrix3(deltao.x, ud.x, perp.x, deltao.y, ud.y, perp.y, deltao.z,
-                                                         ud.z, perp.z));
-
-                // Set _u_, _v_, and _t_ if intersection is valid
-                if (t1 > p2 * eps && 0 <= v1 && v1 <= p2)
-                {
-                    u = u1;
-                    v = v1 / p2;
-                    t = t1 / p2;
-                }
-            }
-
-            // Compute $v$ and $t$ for the second $u$ intersection
-            if (0 <= u2 && u2 <= 1 && u2 != u1)
-            {
-                // Precompute common terms for $v$ and $t$ computation
-                Point3f uo = Lerp(u2, p00, p10);
-                Vector3f ud = Lerp(u2, p01, p11) - uo;
-                Vector3f deltao = uo - ray.o;
-                Vector3f perp = Cross(ray.d, ud);
-                Float p2 = LengthSquared(perp);
-
-                // Compute matrix determinants for $v$ and $t$ numerators
-                Float v2 = Determinant(new SquareMatrix3(deltao.x, ray.d.x, perp.x, deltao.y, ray.d.y, perp.y,
-                                                         deltao.z, ray.d.z, perp.z));
-                Float t2 = Determinant(new SquareMatrix3(deltao.x, ud.x, perp.x, deltao.y, ud.y, perp.y, deltao.z,
-                                                         ud.z, perp.z));
-                t2 /= p2;
-
-                // Set _u_, _v_, and _t_ if intersection is valid
-                if (0 <= v2 && v2 <= p2 && t > t2 && t2 > eps)
-                {
-                    t = t2;
-                    u = u2;
-                    v = v2 / p2;
-                }
-            }
-
-            // TODO: reject hits with sufficiently small t that we're not sure.
-            // Check intersection $t$ against _tMax_ and possibly return intersection
-            if (t >= tMax)
-                return default;
-
-            return new BilinearIntersection(new Point2f(u, v), t);
-        }
     }
 
     // Shape factory (Shape::Create from shapes.cpp)

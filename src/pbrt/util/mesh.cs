@@ -12,6 +12,89 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        private static void PlyErrorCallback(p_ply ply, string message)
+        {
+            Error($"PLY writing error: {message}");
+        }
+
+        public static bool WritePLY(string filename, pstd.span<int> triIndices, pstd.span<int> quadIndices,
+                                    pstd.span<Point3f> p, pstd.span<Normal3f> n, pstd.span<Point2f> uv,
+                                    pstd.span<int> faceIndices)
+        {
+            p_ply plyFile = rply.ply_create(filename, rply.PLY_DEFAULT, PlyErrorCallback, 0, null);
+            if (plyFile == null)
+                return false;
+
+            int nVertices = (int)p.size();
+            rply.ply_add_element(plyFile, "vertex", nVertices);
+            rply.ply_add_scalar_property(plyFile, "x", e_ply_type.PLY_FLOAT);
+            rply.ply_add_scalar_property(plyFile, "y", e_ply_type.PLY_FLOAT);
+            rply.ply_add_scalar_property(plyFile, "z", e_ply_type.PLY_FLOAT);
+            if (n.size() != 0)
+            {
+                rply.ply_add_scalar_property(plyFile, "nx", e_ply_type.PLY_FLOAT);
+                rply.ply_add_scalar_property(plyFile, "ny", e_ply_type.PLY_FLOAT);
+                rply.ply_add_scalar_property(plyFile, "nz", e_ply_type.PLY_FLOAT);
+            }
+            if (uv.size() != 0)
+            {
+                rply.ply_add_scalar_property(plyFile, "u", e_ply_type.PLY_FLOAT);
+                rply.ply_add_scalar_property(plyFile, "v", e_ply_type.PLY_FLOAT);
+            }
+
+            int nTriangles = (int)(triIndices.size() / 3), nQuads = (int)(quadIndices.size() / 4);
+            rply.ply_add_element(plyFile, "face", nTriangles + nQuads);
+            rply.ply_add_list_property(plyFile, "vertex_indices", e_ply_type.PLY_UINT8, e_ply_type.PLY_INT);
+            if (faceIndices.size() != 0)
+                rply.ply_add_scalar_property(plyFile, "face_indices", e_ply_type.PLY_INT);
+
+            rply.ply_write_header(plyFile);
+
+            for (int i = 0; i < nVertices; ++i)
+            {
+                rply.ply_write(plyFile, p[i].x);
+                rply.ply_write(plyFile, p[i].y);
+                rply.ply_write(plyFile, p[i].z);
+                if (n.size() != 0)
+                {
+                    rply.ply_write(plyFile, n[i].x);
+                    rply.ply_write(plyFile, n[i].y);
+                    rply.ply_write(plyFile, n[i].z);
+                }
+                if (uv.size() != 0)
+                {
+                    rply.ply_write(plyFile, uv[i].x);
+                    rply.ply_write(plyFile, uv[i].y);
+                }
+            }
+
+            for (int i = 0; i < nTriangles; ++i)
+            {
+                rply.ply_write(plyFile, 3);
+                rply.ply_write(plyFile, triIndices[3 * i]);
+                rply.ply_write(plyFile, triIndices[3 * i + 1]);
+                rply.ply_write(plyFile, triIndices[3 * i + 2]);
+                if (faceIndices.size() != 0)
+                    rply.ply_write(plyFile, faceIndices[i]);
+            }
+            for (int i = 0; i < nQuads; ++i)
+            {
+                rply.ply_write(plyFile, 4);
+                rply.ply_write(plyFile, quadIndices[4 * i]);
+                rply.ply_write(plyFile, quadIndices[4 * i + 1]);
+                rply.ply_write(plyFile, quadIndices[4 * i + 2]);
+                rply.ply_write(plyFile, quadIndices[4 * i + 3]);
+                if (faceIndices.size() != 0)
+                    rply.ply_write(plyFile, faceIndices[i]);
+            }
+
+            rply.ply_close(plyFile);
+            return true;
+        }
+    }
+
     // TriangleMesh Definition
     public unsafe class TriangleMesh
     {
@@ -622,86 +705,4 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class pbrt
-    {
-        private static void PlyErrorCallback(p_ply ply, string message)
-        {
-            Error($"PLY writing error: {message}");
-        }
-
-        public static bool WritePLY(string filename, pstd.span<int> triIndices, pstd.span<int> quadIndices,
-                                    pstd.span<Point3f> p, pstd.span<Normal3f> n, pstd.span<Point2f> uv,
-                                    pstd.span<int> faceIndices)
-        {
-            p_ply plyFile = rply.ply_create(filename, rply.PLY_DEFAULT, PlyErrorCallback, 0, null);
-            if (plyFile == null)
-                return false;
-
-            int nVertices = (int)p.size();
-            rply.ply_add_element(plyFile, "vertex", nVertices);
-            rply.ply_add_scalar_property(plyFile, "x", e_ply_type.PLY_FLOAT);
-            rply.ply_add_scalar_property(plyFile, "y", e_ply_type.PLY_FLOAT);
-            rply.ply_add_scalar_property(plyFile, "z", e_ply_type.PLY_FLOAT);
-            if (n.size() != 0)
-            {
-                rply.ply_add_scalar_property(plyFile, "nx", e_ply_type.PLY_FLOAT);
-                rply.ply_add_scalar_property(plyFile, "ny", e_ply_type.PLY_FLOAT);
-                rply.ply_add_scalar_property(plyFile, "nz", e_ply_type.PLY_FLOAT);
-            }
-            if (uv.size() != 0)
-            {
-                rply.ply_add_scalar_property(plyFile, "u", e_ply_type.PLY_FLOAT);
-                rply.ply_add_scalar_property(plyFile, "v", e_ply_type.PLY_FLOAT);
-            }
-
-            int nTriangles = (int)(triIndices.size() / 3), nQuads = (int)(quadIndices.size() / 4);
-            rply.ply_add_element(plyFile, "face", nTriangles + nQuads);
-            rply.ply_add_list_property(plyFile, "vertex_indices", e_ply_type.PLY_UINT8, e_ply_type.PLY_INT);
-            if (faceIndices.size() != 0)
-                rply.ply_add_scalar_property(plyFile, "face_indices", e_ply_type.PLY_INT);
-
-            rply.ply_write_header(plyFile);
-
-            for (int i = 0; i < nVertices; ++i)
-            {
-                rply.ply_write(plyFile, p[i].x);
-                rply.ply_write(plyFile, p[i].y);
-                rply.ply_write(plyFile, p[i].z);
-                if (n.size() != 0)
-                {
-                    rply.ply_write(plyFile, n[i].x);
-                    rply.ply_write(plyFile, n[i].y);
-                    rply.ply_write(plyFile, n[i].z);
-                }
-                if (uv.size() != 0)
-                {
-                    rply.ply_write(plyFile, uv[i].x);
-                    rply.ply_write(plyFile, uv[i].y);
-                }
-            }
-
-            for (int i = 0; i < nTriangles; ++i)
-            {
-                rply.ply_write(plyFile, 3);
-                rply.ply_write(plyFile, triIndices[3 * i]);
-                rply.ply_write(plyFile, triIndices[3 * i + 1]);
-                rply.ply_write(plyFile, triIndices[3 * i + 2]);
-                if (faceIndices.size() != 0)
-                    rply.ply_write(plyFile, faceIndices[i]);
-            }
-            for (int i = 0; i < nQuads; ++i)
-            {
-                rply.ply_write(plyFile, 4);
-                rply.ply_write(plyFile, quadIndices[4 * i]);
-                rply.ply_write(plyFile, quadIndices[4 * i + 1]);
-                rply.ply_write(plyFile, quadIndices[4 * i + 2]);
-                rply.ply_write(plyFile, quadIndices[4 * i + 3]);
-                if (faceIndices.size() != 0)
-                    rply.ply_write(plyFile, faceIndices[i]);
-            }
-
-            rply.ply_close(plyFile);
-            return true;
-        }
-    }
 }

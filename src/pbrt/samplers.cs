@@ -8,6 +8,30 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // Sampler Inline Functions
+        public static CameraSample GetCameraSample(Sampler sampler, Point2i pPixel, Filter filter)
+        {
+            FilterSample fs = filter.Sample(sampler.GetPixel2D());
+            CameraSample cs = new CameraSample();
+            // Initialize _CameraSample_ member variables
+            cs.pFilm = new Point2f(pPixel.x, pPixel.y) + fs.p + new Vector2f(0.5f, 0.5f);
+            cs.time = sampler.Get1D();
+            cs.pLens = sampler.Get2D();
+            cs.filterWeight = fs.weight;
+
+            if (Options.disablePixelJitter)
+            {
+                cs.pFilm = new Point2f(pPixel.x, pPixel.y) + new Vector2f(0.5f, 0.5f);
+                cs.time = 0.5f;
+                cs.pLens = new Point2f(0.5f, 0.5f);
+                cs.filterWeight = 1;
+            }
+            return cs;
+        }
+    }
+
 
     // HaltonSampler Definition
     public sealed unsafe class HaltonSampler : Sampler
@@ -1091,30 +1115,6 @@ namespace pbrt
             parameters.ReportUnused();
 
             return sampler;
-        }
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // Sampler Inline Functions
-        public static CameraSample GetCameraSample(Sampler sampler, Point2i pPixel, Filter filter)
-        {
-            FilterSample fs = filter.Sample(sampler.GetPixel2D());
-            CameraSample cs = new CameraSample();
-            // Initialize _CameraSample_ member variables
-            cs.pFilm = new Point2f(pPixel.x, pPixel.y) + fs.p + new Vector2f(0.5f, 0.5f);
-            cs.time = sampler.Get1D();
-            cs.pLens = sampler.Get2D();
-            cs.filterWeight = fs.weight;
-
-            if (Options.disablePixelJitter)
-            {
-                cs.pFilm = new Point2f(pPixel.x, pPixel.y) + new Vector2f(0.5f, 0.5f);
-                cs.time = 0.5f;
-                cs.pLens = new Point2f(0.5f, 0.5f);
-                cs.filterWeight = 1;
-            }
-            return cs;
         }
     }
 

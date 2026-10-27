@@ -7,131 +7,6 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    // DigitPermutation Definition
-    public unsafe class DigitPermutation
-    {
-        // DigitPermutation Public Methods
-        public DigitPermutation() { }
-        public DigitPermutation(int base_, uint32_t seed, Allocator alloc)
-        {
-            this.base_ = base_;
-            CHECK_LT(base_, 65536);  // uint16_t
-            // Compute number of digits needed for _base_
-            nDigits = 0;
-            Float invBase = (Float)1 / (Float)base_, invBaseM = 1;
-            while (1 - (base_ - 1) * invBaseM < 1)
-            {
-                ++nDigits;
-                invBaseM *= invBase;
-            }
-
-            permutations = new uint16_t[nDigits * base_];
-            // Compute random permutations for all digits
-            for (int digitIndex = 0; digitIndex < nDigits; ++digitIndex)
-            {
-                uint64_t dseed = pbrt.Hash(base_, digitIndex, seed);
-                for (int digitValue = 0; digitValue < base_; ++digitValue)
-                {
-                    int index = digitIndex * base_ + digitValue;
-                    permutations[index] = (uint16_t)pbrt.PermutationElement((uint32_t)digitValue, (uint32_t)base_, (uint32_t)dseed);
-                }
-            }
-        }
-
-        public int Permute(int digitIndex, int digitValue)
-        {
-            pbrt.DCHECK_LT(digitIndex, nDigits);
-            pbrt.DCHECK_LT(digitValue, base_);
-            return permutations[digitIndex * base_ + digitValue];
-        }
-
-        public override string ToString()
-        {
-            string s = $"[ DigitPermitation base: {base_} nDigits: {nDigits} permutations: ";
-            for (int digitIndex = 0; digitIndex < nDigits; ++digitIndex)
-            {
-                s += $"[{digitIndex}] ( ";
-                for (int digitValue = 0; digitValue < base_; ++digitValue)
-                {
-                    s += $"{permutations[digitIndex * base_ + digitValue]}";
-                    if (digitValue != base_ - 1)
-                        s += ", ";
-                }
-                s += ") ";
-            }
-
-            return s + " ]";
-        }
-
-        // DigitPermutation Private Members
-        private int base_, nDigits;
-        private uint16_t[] permutations;
-    }
-
-    // Randomizer interface for the C++ template parameter R of SobolSample().
-    public interface IRandomizer
-    {
-        uint32_t Apply(uint32_t v);
-    }
-
-    // NoRandomizer Definition
-    public struct NoRandomizer : IRandomizer
-    {
-        public uint32_t Apply(uint32_t v) { return v; }
-    }
-
-    // BinaryPermuteScrambler Definition
-    public struct BinaryPermuteScrambler : IRandomizer
-    {
-        public BinaryPermuteScrambler(uint32_t perm) { permutation = perm; }
-        public uint32_t Apply(uint32_t v) { return permutation ^ v; }
-        public uint32_t permutation;
-    }
-
-    // FastOwenScrambler Definition
-    public struct FastOwenScrambler : IRandomizer
-    {
-        public FastOwenScrambler(uint32_t seed) { this.seed = seed; }
-        // FastOwenScrambler Public Methods
-        public uint32_t Apply(uint32_t v)
-        {
-            v = pbrt.ReverseBits32(v);
-            v ^= v * 0x3d20adea;
-            v += seed;
-            v *= (seed >> 16) | 1;
-            v ^= v * 0x05526c56;
-            v ^= v * 0x53a22864;
-            return pbrt.ReverseBits32(v);
-        }
-
-        public uint32_t seed;
-    }
-
-    // OwenScrambler Definition
-    public struct OwenScrambler : IRandomizer
-    {
-        public OwenScrambler(uint32_t seed) { this.seed = seed; }
-        // OwenScrambler Public Methods
-        public uint32_t Apply(uint32_t v)
-        {
-            if ((seed & 1) != 0)
-                v ^= 1u << 31;
-            for (int b = 1; b < 32; ++b)
-            {
-                // Apply Owen scrambling to binary digit _b_ in _v_
-                uint32_t mask = (~0u) << (32 - b);
-                if (((uint32_t)pbrt.MixBits((v & mask) ^ seed) & (1u << b)) != 0)
-                    v ^= 1u << (31 - b);
-            }
-            return v;
-        }
-
-        public uint32_t seed;
-    }
-
-    // RandomizeStrategy Definition
-    public enum RandomizeStrategy { None, PermuteDigits, FastOwen, Owen }
-
     public static unsafe partial class pbrt
     {
         public static string ToString(RandomizeStrategy r)
@@ -320,4 +195,130 @@ namespace pbrt
             return index;
         }
     }
+
+    // DigitPermutation Definition
+    public unsafe class DigitPermutation
+    {
+        // DigitPermutation Public Methods
+        public DigitPermutation() { }
+        public DigitPermutation(int base_, uint32_t seed, Allocator alloc)
+        {
+            this.base_ = base_;
+            CHECK_LT(base_, 65536);  // uint16_t
+            // Compute number of digits needed for _base_
+            nDigits = 0;
+            Float invBase = (Float)1 / (Float)base_, invBaseM = 1;
+            while (1 - (base_ - 1) * invBaseM < 1)
+            {
+                ++nDigits;
+                invBaseM *= invBase;
+            }
+
+            permutations = new uint16_t[nDigits * base_];
+            // Compute random permutations for all digits
+            for (int digitIndex = 0; digitIndex < nDigits; ++digitIndex)
+            {
+                uint64_t dseed = pbrt.Hash(base_, digitIndex, seed);
+                for (int digitValue = 0; digitValue < base_; ++digitValue)
+                {
+                    int index = digitIndex * base_ + digitValue;
+                    permutations[index] = (uint16_t)pbrt.PermutationElement((uint32_t)digitValue, (uint32_t)base_, (uint32_t)dseed);
+                }
+            }
+        }
+
+        public int Permute(int digitIndex, int digitValue)
+        {
+            pbrt.DCHECK_LT(digitIndex, nDigits);
+            pbrt.DCHECK_LT(digitValue, base_);
+            return permutations[digitIndex * base_ + digitValue];
+        }
+
+        public override string ToString()
+        {
+            string s = $"[ DigitPermitation base: {base_} nDigits: {nDigits} permutations: ";
+            for (int digitIndex = 0; digitIndex < nDigits; ++digitIndex)
+            {
+                s += $"[{digitIndex}] ( ";
+                for (int digitValue = 0; digitValue < base_; ++digitValue)
+                {
+                    s += $"{permutations[digitIndex * base_ + digitValue]}";
+                    if (digitValue != base_ - 1)
+                        s += ", ";
+                }
+                s += ") ";
+            }
+
+            return s + " ]";
+        }
+
+        // DigitPermutation Private Members
+        private int base_, nDigits;
+        private uint16_t[] permutations;
+    }
+
+    // Randomizer interface for the C++ template parameter R of SobolSample().
+    public interface IRandomizer
+    {
+        uint32_t Apply(uint32_t v);
+    }
+
+    // NoRandomizer Definition
+    public struct NoRandomizer : IRandomizer
+    {
+        public uint32_t Apply(uint32_t v) { return v; }
+    }
+
+    // BinaryPermuteScrambler Definition
+    public struct BinaryPermuteScrambler : IRandomizer
+    {
+        public BinaryPermuteScrambler(uint32_t perm) { permutation = perm; }
+        public uint32_t Apply(uint32_t v) { return permutation ^ v; }
+        public uint32_t permutation;
+    }
+
+    // FastOwenScrambler Definition
+    public struct FastOwenScrambler : IRandomizer
+    {
+        public FastOwenScrambler(uint32_t seed) { this.seed = seed; }
+        // FastOwenScrambler Public Methods
+        public uint32_t Apply(uint32_t v)
+        {
+            v = pbrt.ReverseBits32(v);
+            v ^= v * 0x3d20adea;
+            v += seed;
+            v *= (seed >> 16) | 1;
+            v ^= v * 0x05526c56;
+            v ^= v * 0x53a22864;
+            return pbrt.ReverseBits32(v);
+        }
+
+        public uint32_t seed;
+    }
+
+    // OwenScrambler Definition
+    public struct OwenScrambler : IRandomizer
+    {
+        public OwenScrambler(uint32_t seed) { this.seed = seed; }
+        // OwenScrambler Public Methods
+        public uint32_t Apply(uint32_t v)
+        {
+            if ((seed & 1) != 0)
+                v ^= 1u << 31;
+            for (int b = 1; b < 32; ++b)
+            {
+                // Apply Owen scrambling to binary digit _b_ in _v_
+                uint32_t mask = (~0u) << (32 - b);
+                if (((uint32_t)pbrt.MixBits((v & mask) ^ seed) & (1u << b)) != 0)
+                    v ^= 1u << (31 - b);
+            }
+            return v;
+        }
+
+        public uint32_t seed;
+    }
+
+    // RandomizeStrategy Definition
+    public enum RandomizeStrategy { None, PermuteDigits, FastOwen, Owen }
+
 }

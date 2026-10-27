@@ -15,377 +15,6 @@ using System.Text;
 
 namespace pbrt
 {
-
-    ///////////////////////////////////////////////////////////////////////////
-    // ParsedParameter
-
-    public sealed unsafe partial class ParsedParameter
-    {
-        public void AddFloat(Float v)
-        {
-            CHECK(ints.empty() && strings.empty() && bools.empty());
-            floats.push_back(v);
-        }
-
-        public void AddInt(int i)
-        {
-            CHECK(floats.empty() && strings.empty() && bools.empty());
-            ints.push_back(i);
-        }
-
-        public void AddString(string str)
-        {
-            CHECK(floats.empty() && ints.empty() && bools.empty());
-            strings.push_back(str);
-        }
-
-        public void AddBool(bool v)
-        {
-            CHECK(floats.empty() && ints.empty() && strings.empty());
-            bools.push_back((byte)(v ? 1 : 0));
-        }
-
-        public override string ToString()
-        {
-            string str = "";
-            str += "\"" + type + " " + name + "\" [ ";
-            if (!floats.empty())
-                for (ulong i = 0; i < floats.size(); ++i)
-                    str += StringPrintf("%f ", floats[i]);
-            else if (!ints.empty())
-                for (ulong i = 0; i < ints.size(); ++i)
-                    str += StringPrintf("%d ", ints[i]);
-            else if (!strings.empty())
-                for (ulong i = 0; i < strings.size(); ++i)
-                    str += '\"' + strings[i] + "\" ";
-            else if (!bools.empty())
-                for (ulong i = 0; i < bools.size(); ++i)
-                    str += bools[i] != 0 ? "true " : "false ";
-            str += "] ";
-
-            return str;
-        }
-    }
-
-    // ParserTarget Definition
-    public abstract unsafe class ParserTarget
-    {
-        // ParserTarget Interface
-        public abstract void Scale(Float sx, Float sy, Float sz, FileLoc loc);
-
-        public abstract void Shape(string name, List<ParsedParameter> parameters, FileLoc loc);
-
-        public abstract void Option(string name, string value, FileLoc loc);
-
-        public abstract void Identity(FileLoc loc);
-        public abstract void Translate(Float dx, Float dy, Float dz, FileLoc loc);
-        public abstract void Rotate(Float angle, Float ax, Float ay, Float az, FileLoc loc);
-        public abstract void LookAt(Float ex, Float ey, Float ez, Float lx, Float ly, Float lz,
-                                    Float ux, Float uy, Float uz, FileLoc loc);
-        public abstract void ConcatTransform(Float[] transform, FileLoc loc);
-        public abstract void Transform(Float[] transform, FileLoc loc);
-        public abstract void CoordinateSystem(string name, FileLoc loc);
-        public abstract void CoordSysTransform(string name, FileLoc loc);
-        public abstract void ActiveTransformAll(FileLoc loc);
-        public abstract void ActiveTransformEndTime(FileLoc loc);
-        public abstract void ActiveTransformStartTime(FileLoc loc);
-        public abstract void TransformTimes(Float start, Float end, FileLoc loc);
-
-        public abstract void ColorSpace(string n, FileLoc loc);
-        public abstract void PixelFilter(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void Film(string type, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void Accelerator(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void Integrator(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void Camera(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void MakeNamedMedium(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void MediumInterface(string insideName, string outsideName, FileLoc loc);
-        public abstract void Sampler(string name, List<ParsedParameter> parameters, FileLoc loc);
-
-        public abstract void WorldBegin(FileLoc loc);
-        public abstract void AttributeBegin(FileLoc loc);
-        public abstract void AttributeEnd(FileLoc loc);
-        public abstract void Attribute(string target, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void Texture(string name, string type, string texname, List<ParsedParameter> parameters,
-                                     FileLoc loc);
-        public abstract void Material(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void MakeNamedMaterial(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void NamedMaterial(string name, FileLoc loc);
-        public abstract void LightSource(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void AreaLightSource(string name, List<ParsedParameter> parameters, FileLoc loc);
-        public abstract void ReverseOrientation(FileLoc loc);
-        public abstract void ObjectBegin(string name, FileLoc loc);
-        public abstract void ObjectEnd(FileLoc loc);
-        public abstract void ObjectInstance(string name, FileLoc loc);
-
-        public abstract void EndOfFiles();
-
-        // ParserTarget Protected Methods
-        protected void ErrorExitDeferred(string message)
-        {
-            errorExit = true;
-            pbrt.Error(message);
-        }
-        protected void ErrorExitDeferred(FileLoc loc, string message)
-        {
-            errorExit = true;
-            pbrt.Error(loc, message);
-        }
-
-        protected bool errorExit = false;
-    }
-
-    // Token Definition
-    public sealed unsafe class Token
-    {
-        public Token() { }
-        public Token(string token, FileLoc loc) { this.token = token; this.loc = loc; }
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ Token token: %s loc: %s ]", token, loc);
-        }
-        public string token;
-        public FileLoc loc;
-    }
-
-    // Tokenizer Definition
-    public sealed unsafe class Tokenizer
-    {
-        // STAT_MEMORY_COUNTER("Memory/Tokenizer buffers", tokenizerMemory);
-        [ThreadStatic] static long tokenizerMemory;
-        static StatRegisterer STATS_REG = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportMemoryCounter("Memory/Tokenizer buffers", tokenizerMemory);
-            tokenizerMemory = 0;
-        });
-
-        const int EOF = -1;
-
-        // Tokenizer Implementation
-        static char decodeEscaped(int ch, FileLoc loc)
-        {
-            switch (ch)
-            {
-                case EOF:
-                    pbrt.ErrorExit(loc, "premature EOF after character escape '\\'");
-                    break;
-                case 'b':
-                    return '\b';
-                case 'f':
-                    return '\f';
-                case 'n':
-                    return '\n';
-                case 'r':
-                    return '\r';
-                case 't':
-                    return '\t';
-                case '\\':
-                    return '\\';
-                case '\'':
-                    return '\'';
-                case '\"':
-                    return '\"';
-                default:
-                    pbrt.ErrorExit(loc, "unexpected escaped character \"" + (char)ch + "\"");
-                    break;
-            }
-            return (char)0;  // NOTREACHED
-        }
-
-        public static Tokenizer CreateFromFile(string filename, Action<string, FileLoc> errorCallback)
-        {
-            if (filename == "-")
-            {
-                // Handle stdin by slurping everything into a string.
-                string str = Console.In.ReadToEnd();
-                return new Tokenizer(str, "<stdin>", errorCallback);
-            }
-
-            if (pbrt.HasExtension(filename, ".gz"))
-            {
-                string str = pbrt.ReadDecompressedFileContents(filename);
-                return new Tokenizer(str, filename, errorCallback);
-            }
-
-            if (!File.Exists(filename))
-            {
-                errorCallback(pbrt.StringPrintf("%s: %s", filename, "No such file or directory"), null);
-                return null;
-            }
-            byte[] bytes = pbrt.ReadFileBytes(filename);
-            Tokenizer t = new Tokenizer(Encoding.UTF8.GetString(bytes), filename, errorCallback);
-            t.CheckUTF(bytes);
-            return t;
-        }
-
-        public static Tokenizer CreateFromString(string str, Action<string, FileLoc> errorCallback)
-        {
-            return new Tokenizer(str, "<stdin>", errorCallback);
-        }
-
-        public Tokenizer(string str, string filename, Action<string, FileLoc> errorCallback)
-        {
-            this.errorCallback = errorCallback;
-            this.contents = str;
-            loc = new FileLoc(filename);
-            pos = 0;
-            end = contents.Length;
-            tokenizerMemory += contents.Length;
-            if (contents.Length >= 1 && (contents[0] == '﻿' || contents[0] == '￾'))
-                CheckUTF(new byte[] { (byte)(contents[0] == '﻿' ? 0xfe : 0xff), (byte)(contents[0] == '﻿' ? 0xff : 0xfe) });
-        }
-
-        void CheckUTF(byte[] c)
-        {
-            int len = c.Length;
-            // https://en.wikipedia.org/wiki/Byte_order_mark
-            if (len >= 2 && ((c[0] == 0xfe && c[1] == 0xff) || (c[0] == 0xff && c[1] == 0xfe)))
-                errorCallback("File is encoded with UTF-16, which is not currently " +
-                              "supported by pbrt (https://github.com/mmp/pbrt-v4/issues/136).",
-                              loc);
-        }
-
-        static FileLoc Copy(FileLoc l)
-        {
-            FileLoc c = new FileLoc(l.filename);
-            c.line = l.line;
-            c.column = l.column;
-            return c;
-        }
-
-        public Token Next()
-        {
-            while (true)
-            {
-                int tokenStart = pos;
-                FileLoc startLoc = Copy(loc);
-
-                int ch = getChar();
-                if (ch == EOF)
-                    return null;
-                else if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r')
-                {
-                    // nothing
-                }
-                else if (ch == '"')
-                {
-                    // scan to closing quote
-                    bool haveEscaped = false;
-                    while ((ch = getChar()) != '"')
-                    {
-                        if (ch == EOF)
-                        {
-                            errorCallback("premature EOF", startLoc);
-                            return null;
-                        }
-                        else if (ch == '\n')
-                        {
-                            errorCallback("unterminated string", startLoc);
-                            return null;
-                        }
-                        else if (ch == '\\')
-                        {
-                            haveEscaped = true;
-                            // Grab the next character
-                            if ((ch = getChar()) == EOF)
-                            {
-                                errorCallback("premature EOF", startLoc);
-                                return null;
-                            }
-                        }
-                    }
-
-                    if (!haveEscaped)
-                        return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
-                    else
-                    {
-                        StringBuilder sEscaped = new StringBuilder();
-                        for (int p = tokenStart; p < pos; ++p)
-                        {
-                            if (contents[p] != '\\')
-                                sEscaped.Append(contents[p]);
-                            else
-                            {
-                                ++p;
-                                CHECK_LT(p, pos);
-                                sEscaped.Append(decodeEscaped(contents[p], startLoc));
-                            }
-                        }
-                        return new Token(sEscaped.ToString(), startLoc);
-                    }
-                }
-                else if (ch == '[' || ch == ']')
-                {
-                    return new Token(contents.Substring(tokenStart, 1), startLoc);
-                }
-                else if (ch == '#')
-                {
-                    // comment: scan to EOL (or EOF)
-                    while ((ch = getChar()) != EOF)
-                    {
-                        if (ch == '\n' || ch == '\r')
-                        {
-                            ungetChar();
-                            break;
-                        }
-                    }
-
-                    return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
-                }
-                else
-                {
-                    // Regular statement or numeric token; scan until we hit a
-                    // space, opening quote, or bracket.
-                    while ((ch = getChar()) != EOF)
-                    {
-                        if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' || ch == '"' ||
-                            ch == '[' || ch == ']')
-                        {
-                            ungetChar();
-                            break;
-                        }
-                    }
-                    return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
-                }
-            }
-        }
-
-        int getChar()
-        {
-            if (pos == end)
-                return EOF;
-            int ch = contents[pos++];
-            if (ch == '\n')
-            {
-                ++loc.line;
-                loc.column = 0;
-            }
-            else
-                ++loc.column;
-            return ch;
-        }
-
-        void ungetChar()
-        {
-            --pos;
-            if (contents[pos] == '\n')
-                // Don't worry about the column; we'll be going to the start of
-                // the next line again shortly...
-                --loc.line;
-        }
-
-        // Just for parse().
-        public FileLoc loc;
-
-        // Tokenizer Private Members
-        // This function is called if there is an error during lexing.
-        Action<string, FileLoc> errorCallback;
-
-        string contents;
-
-        // Current position in the file and one past the end of the file.
-        int pos, end;
-    }
-
     public static unsafe partial class pbrt
     {
         static string toString(string s) { return s; }
@@ -1212,6 +841,377 @@ namespace pbrt
 
             target.EndOfFiles();
         }
+    }
+
+
+    ///////////////////////////////////////////////////////////////////////////
+    // ParsedParameter
+
+    public sealed unsafe partial class ParsedParameter
+    {
+        public void AddFloat(Float v)
+        {
+            CHECK(ints.empty() && strings.empty() && bools.empty());
+            floats.push_back(v);
+        }
+
+        public void AddInt(int i)
+        {
+            CHECK(floats.empty() && strings.empty() && bools.empty());
+            ints.push_back(i);
+        }
+
+        public void AddString(string str)
+        {
+            CHECK(floats.empty() && ints.empty() && bools.empty());
+            strings.push_back(str);
+        }
+
+        public void AddBool(bool v)
+        {
+            CHECK(floats.empty() && ints.empty() && strings.empty());
+            bools.push_back((byte)(v ? 1 : 0));
+        }
+
+        public override string ToString()
+        {
+            string str = "";
+            str += "\"" + type + " " + name + "\" [ ";
+            if (!floats.empty())
+                for (ulong i = 0; i < floats.size(); ++i)
+                    str += StringPrintf("%f ", floats[i]);
+            else if (!ints.empty())
+                for (ulong i = 0; i < ints.size(); ++i)
+                    str += StringPrintf("%d ", ints[i]);
+            else if (!strings.empty())
+                for (ulong i = 0; i < strings.size(); ++i)
+                    str += '\"' + strings[i] + "\" ";
+            else if (!bools.empty())
+                for (ulong i = 0; i < bools.size(); ++i)
+                    str += bools[i] != 0 ? "true " : "false ";
+            str += "] ";
+
+            return str;
+        }
+    }
+
+    // ParserTarget Definition
+    public abstract unsafe class ParserTarget
+    {
+        // ParserTarget Interface
+        public abstract void Scale(Float sx, Float sy, Float sz, FileLoc loc);
+
+        public abstract void Shape(string name, List<ParsedParameter> parameters, FileLoc loc);
+
+        public abstract void Option(string name, string value, FileLoc loc);
+
+        public abstract void Identity(FileLoc loc);
+        public abstract void Translate(Float dx, Float dy, Float dz, FileLoc loc);
+        public abstract void Rotate(Float angle, Float ax, Float ay, Float az, FileLoc loc);
+        public abstract void LookAt(Float ex, Float ey, Float ez, Float lx, Float ly, Float lz,
+                                    Float ux, Float uy, Float uz, FileLoc loc);
+        public abstract void ConcatTransform(Float[] transform, FileLoc loc);
+        public abstract void Transform(Float[] transform, FileLoc loc);
+        public abstract void CoordinateSystem(string name, FileLoc loc);
+        public abstract void CoordSysTransform(string name, FileLoc loc);
+        public abstract void ActiveTransformAll(FileLoc loc);
+        public abstract void ActiveTransformEndTime(FileLoc loc);
+        public abstract void ActiveTransformStartTime(FileLoc loc);
+        public abstract void TransformTimes(Float start, Float end, FileLoc loc);
+
+        public abstract void ColorSpace(string n, FileLoc loc);
+        public abstract void PixelFilter(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void Film(string type, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void Accelerator(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void Integrator(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void Camera(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void MakeNamedMedium(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void MediumInterface(string insideName, string outsideName, FileLoc loc);
+        public abstract void Sampler(string name, List<ParsedParameter> parameters, FileLoc loc);
+
+        public abstract void WorldBegin(FileLoc loc);
+        public abstract void AttributeBegin(FileLoc loc);
+        public abstract void AttributeEnd(FileLoc loc);
+        public abstract void Attribute(string target, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void Texture(string name, string type, string texname, List<ParsedParameter> parameters,
+                                     FileLoc loc);
+        public abstract void Material(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void MakeNamedMaterial(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void NamedMaterial(string name, FileLoc loc);
+        public abstract void LightSource(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void AreaLightSource(string name, List<ParsedParameter> parameters, FileLoc loc);
+        public abstract void ReverseOrientation(FileLoc loc);
+        public abstract void ObjectBegin(string name, FileLoc loc);
+        public abstract void ObjectEnd(FileLoc loc);
+        public abstract void ObjectInstance(string name, FileLoc loc);
+
+        public abstract void EndOfFiles();
+
+        // ParserTarget Protected Methods
+        protected void ErrorExitDeferred(string message)
+        {
+            errorExit = true;
+            pbrt.Error(message);
+        }
+        protected void ErrorExitDeferred(FileLoc loc, string message)
+        {
+            errorExit = true;
+            pbrt.Error(loc, message);
+        }
+
+        protected bool errorExit = false;
+    }
+
+    // Token Definition
+    public sealed unsafe class Token
+    {
+        public Token() { }
+        public Token(string token, FileLoc loc) { this.token = token; this.loc = loc; }
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ Token token: %s loc: %s ]", token, loc);
+        }
+        public string token;
+        public FileLoc loc;
+    }
+
+    // Tokenizer Definition
+    public sealed unsafe class Tokenizer
+    {
+        // STAT_MEMORY_COUNTER("Memory/Tokenizer buffers", tokenizerMemory);
+        [ThreadStatic] static long tokenizerMemory;
+        static StatRegisterer STATS_REG = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportMemoryCounter("Memory/Tokenizer buffers", tokenizerMemory);
+            tokenizerMemory = 0;
+        });
+
+        const int EOF = -1;
+
+        // Tokenizer Implementation
+        static char decodeEscaped(int ch, FileLoc loc)
+        {
+            switch (ch)
+            {
+                case EOF:
+                    pbrt.ErrorExit(loc, "premature EOF after character escape '\\'");
+                    break;
+                case 'b':
+                    return '\b';
+                case 'f':
+                    return '\f';
+                case 'n':
+                    return '\n';
+                case 'r':
+                    return '\r';
+                case 't':
+                    return '\t';
+                case '\\':
+                    return '\\';
+                case '\'':
+                    return '\'';
+                case '\"':
+                    return '\"';
+                default:
+                    pbrt.ErrorExit(loc, "unexpected escaped character \"" + (char)ch + "\"");
+                    break;
+            }
+            return (char)0;  // NOTREACHED
+        }
+
+        public static Tokenizer CreateFromFile(string filename, Action<string, FileLoc> errorCallback)
+        {
+            if (filename == "-")
+            {
+                // Handle stdin by slurping everything into a string.
+                string str = Console.In.ReadToEnd();
+                return new Tokenizer(str, "<stdin>", errorCallback);
+            }
+
+            if (pbrt.HasExtension(filename, ".gz"))
+            {
+                string str = pbrt.ReadDecompressedFileContents(filename);
+                return new Tokenizer(str, filename, errorCallback);
+            }
+
+            if (!File.Exists(filename))
+            {
+                errorCallback(pbrt.StringPrintf("%s: %s", filename, "No such file or directory"), null);
+                return null;
+            }
+            byte[] bytes = pbrt.ReadFileBytes(filename);
+            Tokenizer t = new Tokenizer(Encoding.UTF8.GetString(bytes), filename, errorCallback);
+            t.CheckUTF(bytes);
+            return t;
+        }
+
+        public static Tokenizer CreateFromString(string str, Action<string, FileLoc> errorCallback)
+        {
+            return new Tokenizer(str, "<stdin>", errorCallback);
+        }
+
+        public Tokenizer(string str, string filename, Action<string, FileLoc> errorCallback)
+        {
+            this.errorCallback = errorCallback;
+            this.contents = str;
+            loc = new FileLoc(filename);
+            pos = 0;
+            end = contents.Length;
+            tokenizerMemory += contents.Length;
+            if (contents.Length >= 1 && (contents[0] == '﻿' || contents[0] == '￾'))
+                CheckUTF(new byte[] { (byte)(contents[0] == '﻿' ? 0xfe : 0xff), (byte)(contents[0] == '﻿' ? 0xff : 0xfe) });
+        }
+
+        void CheckUTF(byte[] c)
+        {
+            int len = c.Length;
+            // https://en.wikipedia.org/wiki/Byte_order_mark
+            if (len >= 2 && ((c[0] == 0xfe && c[1] == 0xff) || (c[0] == 0xff && c[1] == 0xfe)))
+                errorCallback("File is encoded with UTF-16, which is not currently " +
+                              "supported by pbrt (https://github.com/mmp/pbrt-v4/issues/136).",
+                              loc);
+        }
+
+        static FileLoc Copy(FileLoc l)
+        {
+            FileLoc c = new FileLoc(l.filename);
+            c.line = l.line;
+            c.column = l.column;
+            return c;
+        }
+
+        public Token Next()
+        {
+            while (true)
+            {
+                int tokenStart = pos;
+                FileLoc startLoc = Copy(loc);
+
+                int ch = getChar();
+                if (ch == EOF)
+                    return null;
+                else if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r')
+                {
+                    // nothing
+                }
+                else if (ch == '"')
+                {
+                    // scan to closing quote
+                    bool haveEscaped = false;
+                    while ((ch = getChar()) != '"')
+                    {
+                        if (ch == EOF)
+                        {
+                            errorCallback("premature EOF", startLoc);
+                            return null;
+                        }
+                        else if (ch == '\n')
+                        {
+                            errorCallback("unterminated string", startLoc);
+                            return null;
+                        }
+                        else if (ch == '\\')
+                        {
+                            haveEscaped = true;
+                            // Grab the next character
+                            if ((ch = getChar()) == EOF)
+                            {
+                                errorCallback("premature EOF", startLoc);
+                                return null;
+                            }
+                        }
+                    }
+
+                    if (!haveEscaped)
+                        return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
+                    else
+                    {
+                        StringBuilder sEscaped = new StringBuilder();
+                        for (int p = tokenStart; p < pos; ++p)
+                        {
+                            if (contents[p] != '\\')
+                                sEscaped.Append(contents[p]);
+                            else
+                            {
+                                ++p;
+                                CHECK_LT(p, pos);
+                                sEscaped.Append(decodeEscaped(contents[p], startLoc));
+                            }
+                        }
+                        return new Token(sEscaped.ToString(), startLoc);
+                    }
+                }
+                else if (ch == '[' || ch == ']')
+                {
+                    return new Token(contents.Substring(tokenStart, 1), startLoc);
+                }
+                else if (ch == '#')
+                {
+                    // comment: scan to EOL (or EOF)
+                    while ((ch = getChar()) != EOF)
+                    {
+                        if (ch == '\n' || ch == '\r')
+                        {
+                            ungetChar();
+                            break;
+                        }
+                    }
+
+                    return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
+                }
+                else
+                {
+                    // Regular statement or numeric token; scan until we hit a
+                    // space, opening quote, or bracket.
+                    while ((ch = getChar()) != EOF)
+                    {
+                        if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' || ch == '"' ||
+                            ch == '[' || ch == ']')
+                        {
+                            ungetChar();
+                            break;
+                        }
+                    }
+                    return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
+                }
+            }
+        }
+
+        int getChar()
+        {
+            if (pos == end)
+                return EOF;
+            int ch = contents[pos++];
+            if (ch == '\n')
+            {
+                ++loc.line;
+                loc.column = 0;
+            }
+            else
+                ++loc.column;
+            return ch;
+        }
+
+        void ungetChar()
+        {
+            --pos;
+            if (contents[pos] == '\n')
+                // Don't worry about the column; we'll be going to the start of
+                // the next line again shortly...
+                --loc.line;
+        }
+
+        // Just for parse().
+        public FileLoc loc;
+
+        // Tokenizer Private Members
+        // This function is called if there is an error during lexing.
+        Action<string, FileLoc> errorCallback;
+
+        string contents;
+
+        // Current position in the file and one past the end of the file.
+        int pos, end;
     }
 
     // FormattingParserTarget Definition

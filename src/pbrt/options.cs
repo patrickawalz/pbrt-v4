@@ -6,6 +6,28 @@
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        public static string ToString(RenderingCoordinateSystem r)
+        {
+            if (r == RenderingCoordinateSystem.Camera)
+                return "RenderingCoordinateSystem::Camera";
+            else if (r == RenderingCoordinateSystem.CameraWorld)
+                return "RenderingCoordinateSystem::CameraWorld";
+            else
+            {
+                CHECK(r == RenderingCoordinateSystem.World);
+                return "RenderingCoordinateSystem::World";
+            }
+        }
+
+        // Options Global Variable Declaration
+        public static PBRTOptions Options;
+
+        // Options Inline Functions
+        public static BasicPBRTOptions GetOptions() { return Options; }
+    }
+
     // RenderingCoordinateSystem Definition
     public enum RenderingCoordinateSystem { Camera, CameraWorld, World }
 
@@ -69,25 +91,4 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class pbrt
-    {
-        public static string ToString(RenderingCoordinateSystem r)
-        {
-            if (r == RenderingCoordinateSystem.Camera)
-                return "RenderingCoordinateSystem::Camera";
-            else if (r == RenderingCoordinateSystem.CameraWorld)
-                return "RenderingCoordinateSystem::CameraWorld";
-            else
-            {
-                CHECK(r == RenderingCoordinateSystem.World);
-                return "RenderingCoordinateSystem::World";
-            }
-        }
-
-        // Options Global Variable Declaration
-        public static PBRTOptions Options;
-
-        // Options Inline Functions
-        public static BasicPBRTOptions GetOptions() { return Options; }
-    }
 }

@@ -9,13 +9,6 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public enum LogLevel { Verbose, Error, Fatal, Invalid }
-
-    public unsafe class FatalException : Exception
-    {
-        public FatalException(string s) : base(s) { }
-    }
-
     public static unsafe partial class pbrt
     {
         public static string ToString(LogLevel level)
@@ -100,6 +93,13 @@ namespace pbrt
         {
             LogFatal(LogLevel.Fatal, file, line, s);
         }
+    }
+
+    public enum LogLevel { Verbose, Error, Fatal, Invalid }
+
+    public unsafe class FatalException : Exception
+    {
+        public FatalException(string s) : base(s) { }
     }
 
     public static unsafe class logging

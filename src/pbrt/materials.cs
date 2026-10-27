@@ -14,6 +14,87 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // Normal Mapping Function Definitions
+        public static void NormalMap(Image normalMap, NormalBumpEvalContext ctx, Vector3f* dpdu, Vector3f* dpdv)
+        {
+            // Get normalized normal vector from normal map
+            WrapMode2D wrap = new WrapMode2D(WrapMode.Repeat);
+            Point2f uv = new Point2f(ctx.uv[0], 1 - ctx.uv[1]);
+            Vector3f ns = new Vector3f(2 * normalMap.BilerpChannel(uv, 0, wrap) - 1,
+                                       2 * normalMap.BilerpChannel(uv, 1, wrap) - 1,
+                                       2 * normalMap.BilerpChannel(uv, 2, wrap) - 1);
+            ns = Normalize(ns);
+
+            // Transform tangent-space normal to rendering space
+            Frame frame = Frame.FromXZ(Normalize(ctx.shading.dpdu), (Vector3f)ctx.shading.n);
+            ns = frame.FromLocal(ns);
+
+            // Find $\dpdu$ and $\dpdv$ that give shading normal
+            Float ulen = Length(ctx.shading.dpdu), vlen = Length(ctx.shading.dpdv);
+            *dpdu = Normalize(GramSchmidt(ctx.shading.dpdu, ns)) * ulen;
+            *dpdv = Normalize(Cross(ns, *dpdu)) * vlen;
+        }
+
+        // Bump Mapping Function Definitions
+        public static void BumpMap<TextureEvaluator>(TextureEvaluator texEval, FloatTexture displacement,
+                                                     NormalBumpEvalContext ctx, Vector3f* dpdu, Vector3f* dpdv)
+            where TextureEvaluator : ITextureEvaluator
+        {
+            DCHECK(texEval.CanEvaluate(new FloatTexture[] { displacement }, new SpectrumTexture[0]));
+            // Compute offset positions and evaluate displacement texture
+            TextureEvalContext shiftedCtx = ctx;
+
+            // Shift _shiftedCtx_ _du_ in the $u$ direction
+            Float du = .5f * (std.abs(ctx.dudx) + std.abs(ctx.dudy));
+            if (du == 0)
+                du = .0005f;
+            shiftedCtx.p = ctx.p + du * ctx.shading.dpdu;
+            shiftedCtx.uv = ctx.uv + new Vector2f(du, 0f);
+
+            Float uDisplace = texEval.Apply(displacement, shiftedCtx);
+
+            // Shift _shiftedCtx_ _dv_ in the $v$ direction
+            Float dv = .5f * (std.abs(ctx.dvdx) + std.abs(ctx.dvdy));
+            if (dv == 0)
+                dv = .0005f;
+            shiftedCtx.p = ctx.p + dv * ctx.shading.dpdv;
+            shiftedCtx.uv = ctx.uv + new Vector2f(0f, dv);
+
+            Float vDisplace = texEval.Apply(displacement, shiftedCtx);
+            Float displace = texEval.Apply(displacement, ctx);
+
+            // Compute bump-mapped differential geometry
+            *dpdu = ctx.shading.dpdu + (uDisplace - displace) / du * (Vector3f)ctx.shading.n +
+                    displace * (Vector3f)ctx.shading.dndu;
+            *dpdv = ctx.shading.dpdv + (vDisplace - displace) / dv * (Vector3f)ctx.shading.n +
+                    displace * (Vector3f)ctx.shading.dndv;
+        }
+
+        // STAT_COUNTER("Scene/Materials", nMaterialsCreated);
+        [ThreadStatic] internal static long nMaterialsCreated;
+        private static StatRegisterer STATS_REGnMaterialsCreated = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportCounter("Scene/Materials", nMaterialsCreated);
+            nMaterialsCreated = 0;
+        });
+
+        internal static string NormalMapString(Image normalMap) { return normalMap != null ? normalMap.ToString() : "(nullptr)"; }
+
+        internal static Spectrum GetEtaSpectrum(TextureParameterDictionary parameters, string name, Allocator alloc)
+        {
+            Spectrum eta;
+            if (parameters.GetFloatArray(name).Count != 0)
+                eta = new ConstantSpectrum(parameters.GetFloatArray(name)[0]);
+            else
+                eta = parameters.GetOneSpectrum(name, null, SpectrumType.Unbounded, alloc);
+            if (eta == null)
+                eta = new ConstantSpectrum(1.5f);
+            return eta;
+        }
+    }
+
 
     // MaterialEvalContext Definition
     // (C++: struct MaterialEvalContext : public TextureEvalContext. C# structs cannot inherit,
@@ -109,87 +190,6 @@ namespace pbrt
         public Float dudx, dudy, dvdx, dvdy;
         public Vector3f dpdx, dpdy;
         public int faceIndex;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // Normal Mapping Function Definitions
-        public static void NormalMap(Image normalMap, NormalBumpEvalContext ctx, Vector3f* dpdu, Vector3f* dpdv)
-        {
-            // Get normalized normal vector from normal map
-            WrapMode2D wrap = new WrapMode2D(WrapMode.Repeat);
-            Point2f uv = new Point2f(ctx.uv[0], 1 - ctx.uv[1]);
-            Vector3f ns = new Vector3f(2 * normalMap.BilerpChannel(uv, 0, wrap) - 1,
-                                       2 * normalMap.BilerpChannel(uv, 1, wrap) - 1,
-                                       2 * normalMap.BilerpChannel(uv, 2, wrap) - 1);
-            ns = Normalize(ns);
-
-            // Transform tangent-space normal to rendering space
-            Frame frame = Frame.FromXZ(Normalize(ctx.shading.dpdu), (Vector3f)ctx.shading.n);
-            ns = frame.FromLocal(ns);
-
-            // Find $\dpdu$ and $\dpdv$ that give shading normal
-            Float ulen = Length(ctx.shading.dpdu), vlen = Length(ctx.shading.dpdv);
-            *dpdu = Normalize(GramSchmidt(ctx.shading.dpdu, ns)) * ulen;
-            *dpdv = Normalize(Cross(ns, *dpdu)) * vlen;
-        }
-
-        // Bump Mapping Function Definitions
-        public static void BumpMap<TextureEvaluator>(TextureEvaluator texEval, FloatTexture displacement,
-                                                     NormalBumpEvalContext ctx, Vector3f* dpdu, Vector3f* dpdv)
-            where TextureEvaluator : ITextureEvaluator
-        {
-            DCHECK(texEval.CanEvaluate(new FloatTexture[] { displacement }, new SpectrumTexture[0]));
-            // Compute offset positions and evaluate displacement texture
-            TextureEvalContext shiftedCtx = ctx;
-
-            // Shift _shiftedCtx_ _du_ in the $u$ direction
-            Float du = .5f * (std.abs(ctx.dudx) + std.abs(ctx.dudy));
-            if (du == 0)
-                du = .0005f;
-            shiftedCtx.p = ctx.p + du * ctx.shading.dpdu;
-            shiftedCtx.uv = ctx.uv + new Vector2f(du, 0f);
-
-            Float uDisplace = texEval.Apply(displacement, shiftedCtx);
-
-            // Shift _shiftedCtx_ _dv_ in the $v$ direction
-            Float dv = .5f * (std.abs(ctx.dvdx) + std.abs(ctx.dvdy));
-            if (dv == 0)
-                dv = .0005f;
-            shiftedCtx.p = ctx.p + dv * ctx.shading.dpdv;
-            shiftedCtx.uv = ctx.uv + new Vector2f(0f, dv);
-
-            Float vDisplace = texEval.Apply(displacement, shiftedCtx);
-            Float displace = texEval.Apply(displacement, ctx);
-
-            // Compute bump-mapped differential geometry
-            *dpdu = ctx.shading.dpdu + (uDisplace - displace) / du * (Vector3f)ctx.shading.n +
-                    displace * (Vector3f)ctx.shading.dndu;
-            *dpdv = ctx.shading.dpdv + (vDisplace - displace) / dv * (Vector3f)ctx.shading.n +
-                    displace * (Vector3f)ctx.shading.dndv;
-        }
-
-        // STAT_COUNTER("Scene/Materials", nMaterialsCreated);
-        [ThreadStatic] internal static long nMaterialsCreated;
-        private static StatRegisterer STATS_REGnMaterialsCreated = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportCounter("Scene/Materials", nMaterialsCreated);
-            nMaterialsCreated = 0;
-        });
-
-        internal static string NormalMapString(Image normalMap) { return normalMap != null ? normalMap.ToString() : "(nullptr)"; }
-
-        internal static Spectrum GetEtaSpectrum(TextureParameterDictionary parameters, string name, Allocator alloc)
-        {
-            Spectrum eta;
-            if (parameters.GetFloatArray(name).Count != 0)
-                eta = new ConstantSpectrum(parameters.GetFloatArray(name)[0]);
-            else
-                eta = parameters.GetOneSpectrum(name, null, SpectrumType.Unbounded, alloc);
-            if (eta == null)
-                eta = new ConstantSpectrum(1.5f);
-            return eta;
-        }
     }
 
     // DielectricMaterial Definition

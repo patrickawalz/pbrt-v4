@@ -12,6 +12,139 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // static std::mutex ptexMutex; static Ptex::PtexCache *cache;
+        internal static readonly object ptexMutex = new object();
+        internal static Ptex.PtexCache ptexCache;
+
+        // STAT_COUNTER("Texture/Ptex lookups", nLookups);
+        [ThreadStatic] internal static long nLookups;
+        private static StatRegisterer STATS_REGnLookups = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportCounter("Texture/Ptex lookups", nLookups);
+            nLookups = 0;
+        });
+        // STAT_COUNTER("Texture/Ptex files accessed", nFilesAccessed);
+        [ThreadStatic] internal static long nFilesAccessed;
+        private static StatRegisterer STATS_REGnFilesAccessed = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportCounter("Texture/Ptex files accessed", nFilesAccessed);
+            nFilesAccessed = 0;
+        });
+        // STAT_COUNTER("Texture/Ptex block reads", nBlockReads);
+        [ThreadStatic] internal static long nBlockReads;
+        private static StatRegisterer STATS_REGnBlockReads = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportCounter("Texture/Ptex block reads", nBlockReads);
+            nBlockReads = 0;
+        });
+        // STAT_MEMORY_COUNTER("Memory/Ptex peak memory used", peakMemoryUsed);
+        [ThreadStatic] internal static long peakMemoryUsed;
+        private static StatRegisterer STATS_REGpeakMemoryUsed = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportMemoryCounter("Memory/Ptex peak memory used", peakMemoryUsed);
+            peakMemoryUsed = 0;
+        });
+        // STAT_MEMORY_COUNTER("Memory/GPU Ptex memory used", gpuPtexMemoryUsed);
+        // (GPU only; nothing in this port adds to it)
+        [ThreadStatic] internal static long gpuPtexMemoryUsed;
+        private static StatRegisterer STATS_REGgpuPtexMemoryUsed = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportMemoryCounter("Memory/GPU Ptex memory used", gpuPtexMemoryUsed);
+            gpuPtexMemoryUsed = 0;
+        });
+        // STAT_RATIO("Texture/Ptex file cache hits", ptexCacheHits, ptexCacheLookups);
+        [ThreadStatic] internal static long ptexCacheHits, ptexCacheLookups;
+        private static StatRegisterer STATS_REGptexCacheHits = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportRatio("Texture/Ptex file cache hits", ptexCacheHits, ptexCacheLookups);
+            ptexCacheHits = 0;
+            ptexCacheLookups = 0;
+        });
+
+        // struct : public PtexErrorHandler { void reportError(const char *error) override { Error("%s", error); } } errorHandler;
+        private sealed class PtexErrorHandlerImpl : Ptex.PtexErrorHandler
+        {
+            public override void reportError(string error) { pbrt.Error(error); }
+        }
+        internal static readonly Ptex.PtexErrorHandler ptexErrorHandler = new PtexErrorHandlerImpl();
+
+        // STAT_COUNTER("Scene/Textures", nTextures);
+        [ThreadStatic] internal static long nTextures;
+        private static StatRegisterer STATS_REGnTextures = new StatRegisterer((StatsAccumulator accum) =>
+        {
+            accum.ReportCounter("Scene/Textures", nTextures);
+            nTextures = 0;
+        });
+
+        internal static MIPMap GetImageTextureMIPMap(ImageTextureBase b)
+        {
+            return b.GetMIPMap();
+        }
+
+        // CheckerboardTexture Function Definitions
+        public static Float Checkerboard(TextureEvalContext ctx, TextureMapping2D map2D, TextureMapping3D map3D)
+        {
+            // Define 1D checkerboard filtered integral functions
+            Float d(Float x)
+            {
+                Float y = x / 2 - std.floor(x / 2) - 0.5f;
+                return x / 2 + y * (1 - 2 * std.abs(y));
+            }
+
+            Float bf(Float x, Float r)
+            {
+                if (std.floor(x - r) == std.floor(x + r))
+                    return 1 - 2 * ((int)std.floor(x) & 1);
+                return (d(x + r) - 2 * d(x) + d(x - r)) / Sqr(r);
+            }
+
+            if (map2D != null)
+            {
+                // Return weights for 2D checkerboard texture
+                CHECK(map3D == null);
+                TexCoord2D c = map2D.Map(ctx);
+                Float ds = std.max(std.abs(c.dsdx), std.abs(c.dsdy));
+                Float dt = std.max(std.abs(c.dtdx), std.abs(c.dtdy));
+                // Integrate product of 2D checkerboard function and triangle filter
+                ds *= 1.5f;
+                dt *= 1.5f;
+                return 0.5f - bf(c.st[0], ds) * bf(c.st[1], dt) / 2;
+            }
+            else
+            {
+                // Return weights for 3D checkerboard texture
+                CHECK(map3D != null);
+                TexCoord3D c = map3D.Map(ctx);
+                Float dx = 1.5f * std.max(std.abs(c.dpdx.x), std.abs(c.dpdy.x));
+                Float dy = 1.5f * std.max(std.abs(c.dpdx.y), std.abs(c.dpdy.y));
+                Float dz = 1.5f * std.max(std.abs(c.dpdx.z), std.abs(c.dpdy.z));
+                return 0.5f - 0.5f * bf(c.p.x, dx) * bf(c.p.y, dy) * bf(c.p.z, dz);
+            }
+        }
+
+        // InsidePolkaDot Function Definition
+        public static bool InsidePolkaDot(Point2f st)
+        {
+            // Compute cell indices (_sCell_,_tCell_ for dots
+            int sCell = (int)std.floor(st[0] + .5f), tCell = (int)std.floor(st[1] + .5f);
+
+            if (Noise(sCell + .5f, tCell + .5f) > 0)
+            {
+                // Determine dot position and test if _st_ is inside it
+                Float radius = .35f;
+                Float maxShift = 0.5f - radius;
+                Float sCenter = sCell + maxShift * Noise(sCell + 1.5f, tCell + 2.8f);
+                Float tCenter = tCell + maxShift * Noise(sCell + 4.5f, tCell + 9.8f);
+                Vector2f dst = st - new Point2f(sCenter, tCenter);
+                if (LengthSquared(dst) < Sqr(radius))
+                    return true;
+            }
+            return false;
+        }
+    }
+
 
     // TextureEvalContext Definition
     public struct TextureEvalContext
@@ -1600,139 +1733,6 @@ namespace pbrt
                     pbrt.LOG_FATAL("BasicTextureEvaluator::operator() called with " + tex.ToString());
                 return new SampledSpectrum(0f);
             }
-        }
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // static std::mutex ptexMutex; static Ptex::PtexCache *cache;
-        internal static readonly object ptexMutex = new object();
-        internal static Ptex.PtexCache ptexCache;
-
-        // STAT_COUNTER("Texture/Ptex lookups", nLookups);
-        [ThreadStatic] internal static long nLookups;
-        private static StatRegisterer STATS_REGnLookups = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportCounter("Texture/Ptex lookups", nLookups);
-            nLookups = 0;
-        });
-        // STAT_COUNTER("Texture/Ptex files accessed", nFilesAccessed);
-        [ThreadStatic] internal static long nFilesAccessed;
-        private static StatRegisterer STATS_REGnFilesAccessed = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportCounter("Texture/Ptex files accessed", nFilesAccessed);
-            nFilesAccessed = 0;
-        });
-        // STAT_COUNTER("Texture/Ptex block reads", nBlockReads);
-        [ThreadStatic] internal static long nBlockReads;
-        private static StatRegisterer STATS_REGnBlockReads = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportCounter("Texture/Ptex block reads", nBlockReads);
-            nBlockReads = 0;
-        });
-        // STAT_MEMORY_COUNTER("Memory/Ptex peak memory used", peakMemoryUsed);
-        [ThreadStatic] internal static long peakMemoryUsed;
-        private static StatRegisterer STATS_REGpeakMemoryUsed = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportMemoryCounter("Memory/Ptex peak memory used", peakMemoryUsed);
-            peakMemoryUsed = 0;
-        });
-        // STAT_MEMORY_COUNTER("Memory/GPU Ptex memory used", gpuPtexMemoryUsed);
-        // (GPU only; nothing in this port adds to it)
-        [ThreadStatic] internal static long gpuPtexMemoryUsed;
-        private static StatRegisterer STATS_REGgpuPtexMemoryUsed = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportMemoryCounter("Memory/GPU Ptex memory used", gpuPtexMemoryUsed);
-            gpuPtexMemoryUsed = 0;
-        });
-        // STAT_RATIO("Texture/Ptex file cache hits", ptexCacheHits, ptexCacheLookups);
-        [ThreadStatic] internal static long ptexCacheHits, ptexCacheLookups;
-        private static StatRegisterer STATS_REGptexCacheHits = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportRatio("Texture/Ptex file cache hits", ptexCacheHits, ptexCacheLookups);
-            ptexCacheHits = 0;
-            ptexCacheLookups = 0;
-        });
-
-        // struct : public PtexErrorHandler { void reportError(const char *error) override { Error("%s", error); } } errorHandler;
-        private sealed class PtexErrorHandlerImpl : Ptex.PtexErrorHandler
-        {
-            public override void reportError(string error) { pbrt.Error(error); }
-        }
-        internal static readonly Ptex.PtexErrorHandler ptexErrorHandler = new PtexErrorHandlerImpl();
-
-        // STAT_COUNTER("Scene/Textures", nTextures);
-        [ThreadStatic] internal static long nTextures;
-        private static StatRegisterer STATS_REGnTextures = new StatRegisterer((StatsAccumulator accum) =>
-        {
-            accum.ReportCounter("Scene/Textures", nTextures);
-            nTextures = 0;
-        });
-
-        internal static MIPMap GetImageTextureMIPMap(ImageTextureBase b)
-        {
-            return b.GetMIPMap();
-        }
-
-        // CheckerboardTexture Function Definitions
-        public static Float Checkerboard(TextureEvalContext ctx, TextureMapping2D map2D, TextureMapping3D map3D)
-        {
-            // Define 1D checkerboard filtered integral functions
-            Float d(Float x)
-            {
-                Float y = x / 2 - std.floor(x / 2) - 0.5f;
-                return x / 2 + y * (1 - 2 * std.abs(y));
-            }
-
-            Float bf(Float x, Float r)
-            {
-                if (std.floor(x - r) == std.floor(x + r))
-                    return 1 - 2 * ((int)std.floor(x) & 1);
-                return (d(x + r) - 2 * d(x) + d(x - r)) / Sqr(r);
-            }
-
-            if (map2D != null)
-            {
-                // Return weights for 2D checkerboard texture
-                CHECK(map3D == null);
-                TexCoord2D c = map2D.Map(ctx);
-                Float ds = std.max(std.abs(c.dsdx), std.abs(c.dsdy));
-                Float dt = std.max(std.abs(c.dtdx), std.abs(c.dtdy));
-                // Integrate product of 2D checkerboard function and triangle filter
-                ds *= 1.5f;
-                dt *= 1.5f;
-                return 0.5f - bf(c.st[0], ds) * bf(c.st[1], dt) / 2;
-            }
-            else
-            {
-                // Return weights for 3D checkerboard texture
-                CHECK(map3D != null);
-                TexCoord3D c = map3D.Map(ctx);
-                Float dx = 1.5f * std.max(std.abs(c.dpdx.x), std.abs(c.dpdy.x));
-                Float dy = 1.5f * std.max(std.abs(c.dpdx.y), std.abs(c.dpdy.y));
-                Float dz = 1.5f * std.max(std.abs(c.dpdx.z), std.abs(c.dpdy.z));
-                return 0.5f - 0.5f * bf(c.p.x, dx) * bf(c.p.y, dy) * bf(c.p.z, dz);
-            }
-        }
-
-        // InsidePolkaDot Function Definition
-        public static bool InsidePolkaDot(Point2f st)
-        {
-            // Compute cell indices (_sCell_,_tCell_ for dots
-            int sCell = (int)std.floor(st[0] + .5f), tCell = (int)std.floor(st[1] + .5f);
-
-            if (Noise(sCell + .5f, tCell + .5f) > 0)
-            {
-                // Determine dot position and test if _st_ is inside it
-                Float radius = .35f;
-                Float maxShift = 0.5f - radius;
-                Float sCenter = sCell + maxShift * Noise(sCell + 1.5f, tCell + 2.8f);
-                Float tCenter = tCell + maxShift * Noise(sCell + 4.5f, tCell + 9.8f);
-                Vector2f dst = st - new Point2f(sCenter, tCenter);
-                if (LengthSquared(dst) < Sqr(radius))
-                    return true;
-            }
-            return false;
         }
     }
 

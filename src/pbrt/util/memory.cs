@@ -13,6 +13,14 @@ using System.Threading;
 
 namespace pbrt
 {
+    public static partial class pbrt
+    {
+        public static size_t GetCurrentRSS()
+        {
+            return (size_t)Process.GetCurrentProcess().WorkingSet64;
+        }
+    }
+
 
     // pstd::pmr::polymorphic_allocator<> / pbrt::Allocator placeholder
     public sealed class Allocator
@@ -21,14 +29,6 @@ namespace pbrt
         public static readonly Allocator Default = new Allocator();
         public T[] allocate_object<T>(size_t n) { return new T[n]; }
         public T new_object<T>() where T : new() { return new T(); }
-    }
-
-    public static partial class pbrt
-    {
-        public static size_t GetCurrentRSS()
-        {
-            return (size_t)Process.GetCurrentProcess().WorkingSet64;
-        }
     }
 
     // TrackedMemoryResource: tracks allocation totals reported by callers.

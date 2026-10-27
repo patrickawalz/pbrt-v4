@@ -7,6 +7,129 @@ using System;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        internal static pstd.span<Float> pstdspan(pstd.vector<Float> v) { return new pstd.span<Float>(v.data(), 0, (int)v.size()); }
+
+        // BSSRDF Inline Functions
+        public static void SubsurfaceFromDiffuse(BSSRDFTable t, SampledSpectrum rhoEff, SampledSpectrum mfp,
+                                                 SampledSpectrum* sigma_a, SampledSpectrum* sigma_s)
+        {
+            for (int c = 0; c < NSpectrumSamples; ++c)
+            {
+                Float rho = InvertCatmullRom(pstdspan(t.rhoSamples), pstdspan(t.rhoEff), rhoEff[c]);
+                (*sigma_s)[c] = rho / mfp[c];
+                (*sigma_a)[c] = (1 - rho) / mfp[c];
+            }
+        }
+
+        // BSSRDF Function Definitions
+        public static Float BeamDiffusionMS(Float sigma_s, Float sigma_a, Float g, Float eta, Float r)
+        {
+            const int nSamples = 100;
+            Float Ed = 0;
+            // Precompute information for dipole integrand
+            // Compute reduced scattering coefficients $\sigmaps, \sigmapt$ and albedo $\rhop$
+            Float sigmap_s = sigma_s * (1 - g);
+            Float sigmap_t = sigma_a + sigmap_s;
+            Float rhop = sigmap_s / sigmap_t;
+
+            // Compute non-classical diffusion coefficient $D_\roman{G}$ using Equation
+            // $(\ref{eq:diffusion-coefficient-grosjean})$
+            Float D_g = (2 * sigma_a + sigmap_s) / (3 * sigmap_t * sigmap_t);
+
+            // Compute effective transport coefficient $\sigmatr$ based on $D_\roman{G}$
+            Float sigma_tr = SafeSqrt(sigma_a / D_g);
+
+            // Determine linear extrapolation distance $\depthextrapolation$ using Equation
+            // $(\ref{eq:dipole-boundary-condition})$
+            Float fm1 = FresnelMoment1(eta), fm2 = FresnelMoment2(eta);
+            Float ze = -2 * D_g * (1 + 3 * fm2) / (1 - 2 * fm1);
+
+            // Determine exitance scale factors using Equations $(\ref{eq:kp-exitance-phi})$ and
+            // $(\ref{eq:kp-exitance-e})$
+            Float cPhi = 0.25f * (1 - 2 * fm1), cE = 0.5f * (1 - 3 * fm2);
+
+            for (int i = 0; i < nSamples; ++i)
+            {
+                // Sample real point source depth $\depthreal$
+                Float zr = SampleExponential((i + 0.5f) / nSamples, sigmap_t);
+
+                // Evaluate dipole integrand $E_{\roman{d}}$ at $\depthreal$ and add to _Ed_
+                Float zv = -zr + 2 * ze;
+                Float dr = std.sqrt(Sqr(r) + Sqr(zr)), dv = std.sqrt(Sqr(r) + Sqr(zv));
+                // Compute dipole fluence rate $\dipole(r)$ using Equation
+                // $(\ref{eq:diffusion-dipole})$
+                Float phiD = Inv4Pi / D_g * (FastExp(-sigma_tr * dr) / dr - FastExp(-sigma_tr * dv) / dv);
+
+                // Compute dipole vector irradiance $-\N{}\cdot\dipoleE(r)$ using Equation
+                // $(\ref{eq:diffusion-dipole-vector-irradiance-normal})$
+                Float EDn = Inv4Pi * (zr * (1 + sigma_tr * dr) * FastExp(-sigma_tr * dr) / (Pow(3, dr)) -
+                                      zv * (1 + sigma_tr * dv) * FastExp(-sigma_tr * dv) / (Pow(3, dv)));
+
+                // Add contribution from dipole for depth $\depthreal$ to _Ed_
+                Float E = phiD * cPhi + EDn * cE;
+                Float kappa = 1 - FastExp(-2 * sigmap_t * (dr + zr));
+                Ed += kappa * rhop * rhop * E;
+            }
+            return Ed / nSamples;
+        }
+
+        public static Float BeamDiffusionSS(Float sigma_s, Float sigma_a, Float g, Float eta, Float r)
+        {
+            // Compute material parameters and minimum $t$ below the critical angle
+            Float sigma_t = sigma_a + sigma_s, rho = sigma_s / sigma_t;
+            Float tCrit = r * SafeSqrt(Sqr(eta) - 1);
+
+            Float Ess = 0;
+            const int nSamples = 100;
+            for (int i = 0; i < nSamples; ++i)
+            {
+                // Evaluate single-scattering integrand and add to _Ess_
+                Float ti = tCrit + SampleExponential((i + 0.5f) / nSamples, sigma_t);
+                // Determine length $d$ of connecting segment and $\cos\theta_\roman{o}$
+                Float d = std.sqrt(Sqr(r) + Sqr(ti));
+                Float cosTheta_o = ti / d;
+
+                // Add contribution of single scattering at depth $t$
+                Ess += rho * FastExp(-sigma_t * (d + tCrit)) / Sqr(d) * HenyeyGreenstein(cosTheta_o, g) *
+                       (1 - FrDielectric(-cosTheta_o, eta)) * std.abs(cosTheta_o);
+            }
+            return Ess / nSamples;
+        }
+
+        public static void ComputeBeamDiffusionBSSRDF(Float g, Float eta, BSSRDFTable t)
+        {
+            // Choose radius values of the diffusion profile discretization
+            t.radiusSamples[0] = 0;
+            t.radiusSamples[1] = 2.5e-3f;
+            for (int i = 2; i < (int)t.radiusSamples.size(); ++i)
+                t.radiusSamples[i] = t.radiusSamples[i - 1] * 1.2f;
+
+            // Choose albedo values of the diffusion profile discretization
+            for (int i = 0; i < (int)t.rhoSamples.size(); ++i)
+                t.rhoSamples[i] = (1 - FastExp(-8 * i / (Float)(t.rhoSamples.size() - 1))) / (1 - FastExp(-8f));
+
+            ParallelFor(0, (long)t.rhoSamples.size(), (int i) =>
+            {
+                // Compute the diffusion profile for the _i_th albedo sample
+                // Compute scattering profile for chosen albedo $\rho$
+                int nSamples = (int)t.radiusSamples.size();
+                for (int j = 0; j < nSamples; ++j)
+                {
+                    Float rho = t.rhoSamples[i], r = t.radiusSamples[j];
+                    t.profile[i * nSamples + j] = 2 * Pi * r * (BeamDiffusionSS(rho, 1 - rho, g, eta, r) +
+                                                                BeamDiffusionMS(rho, 1 - rho, g, eta, r));
+                }
+
+                // Compute effective albedo $\rho_{\roman{eff}}$ and CDF for importance sampling
+                t.rhoEff[i] = IntegrateCatmullRom(pstdspan(t.radiusSamples),
+                                                  new pstd.span<Float>(t.profile.data(), i * nSamples, nSamples),
+                                                  new pstd.span<Float>(t.profileCDF.data(), i * nSamples, nSamples));
+            });
+        }
+    }
+
 
     // BSSRDFSample Definition
     public struct BSSRDFSample
@@ -273,129 +396,6 @@ namespace pbrt
         private Float eta;
         private SampledSpectrum sigma_t, rho;
         private BSSRDFTable table;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        internal static pstd.span<Float> pstdspan(pstd.vector<Float> v) { return new pstd.span<Float>(v.data(), 0, (int)v.size()); }
-
-        // BSSRDF Inline Functions
-        public static void SubsurfaceFromDiffuse(BSSRDFTable t, SampledSpectrum rhoEff, SampledSpectrum mfp,
-                                                 SampledSpectrum* sigma_a, SampledSpectrum* sigma_s)
-        {
-            for (int c = 0; c < NSpectrumSamples; ++c)
-            {
-                Float rho = InvertCatmullRom(pstdspan(t.rhoSamples), pstdspan(t.rhoEff), rhoEff[c]);
-                (*sigma_s)[c] = rho / mfp[c];
-                (*sigma_a)[c] = (1 - rho) / mfp[c];
-            }
-        }
-
-        // BSSRDF Function Definitions
-        public static Float BeamDiffusionMS(Float sigma_s, Float sigma_a, Float g, Float eta, Float r)
-        {
-            const int nSamples = 100;
-            Float Ed = 0;
-            // Precompute information for dipole integrand
-            // Compute reduced scattering coefficients $\sigmaps, \sigmapt$ and albedo $\rhop$
-            Float sigmap_s = sigma_s * (1 - g);
-            Float sigmap_t = sigma_a + sigmap_s;
-            Float rhop = sigmap_s / sigmap_t;
-
-            // Compute non-classical diffusion coefficient $D_\roman{G}$ using Equation
-            // $(\ref{eq:diffusion-coefficient-grosjean})$
-            Float D_g = (2 * sigma_a + sigmap_s) / (3 * sigmap_t * sigmap_t);
-
-            // Compute effective transport coefficient $\sigmatr$ based on $D_\roman{G}$
-            Float sigma_tr = SafeSqrt(sigma_a / D_g);
-
-            // Determine linear extrapolation distance $\depthextrapolation$ using Equation
-            // $(\ref{eq:dipole-boundary-condition})$
-            Float fm1 = FresnelMoment1(eta), fm2 = FresnelMoment2(eta);
-            Float ze = -2 * D_g * (1 + 3 * fm2) / (1 - 2 * fm1);
-
-            // Determine exitance scale factors using Equations $(\ref{eq:kp-exitance-phi})$ and
-            // $(\ref{eq:kp-exitance-e})$
-            Float cPhi = 0.25f * (1 - 2 * fm1), cE = 0.5f * (1 - 3 * fm2);
-
-            for (int i = 0; i < nSamples; ++i)
-            {
-                // Sample real point source depth $\depthreal$
-                Float zr = SampleExponential((i + 0.5f) / nSamples, sigmap_t);
-
-                // Evaluate dipole integrand $E_{\roman{d}}$ at $\depthreal$ and add to _Ed_
-                Float zv = -zr + 2 * ze;
-                Float dr = std.sqrt(Sqr(r) + Sqr(zr)), dv = std.sqrt(Sqr(r) + Sqr(zv));
-                // Compute dipole fluence rate $\dipole(r)$ using Equation
-                // $(\ref{eq:diffusion-dipole})$
-                Float phiD = Inv4Pi / D_g * (FastExp(-sigma_tr * dr) / dr - FastExp(-sigma_tr * dv) / dv);
-
-                // Compute dipole vector irradiance $-\N{}\cdot\dipoleE(r)$ using Equation
-                // $(\ref{eq:diffusion-dipole-vector-irradiance-normal})$
-                Float EDn = Inv4Pi * (zr * (1 + sigma_tr * dr) * FastExp(-sigma_tr * dr) / (Pow(3, dr)) -
-                                      zv * (1 + sigma_tr * dv) * FastExp(-sigma_tr * dv) / (Pow(3, dv)));
-
-                // Add contribution from dipole for depth $\depthreal$ to _Ed_
-                Float E = phiD * cPhi + EDn * cE;
-                Float kappa = 1 - FastExp(-2 * sigmap_t * (dr + zr));
-                Ed += kappa * rhop * rhop * E;
-            }
-            return Ed / nSamples;
-        }
-
-        public static Float BeamDiffusionSS(Float sigma_s, Float sigma_a, Float g, Float eta, Float r)
-        {
-            // Compute material parameters and minimum $t$ below the critical angle
-            Float sigma_t = sigma_a + sigma_s, rho = sigma_s / sigma_t;
-            Float tCrit = r * SafeSqrt(Sqr(eta) - 1);
-
-            Float Ess = 0;
-            const int nSamples = 100;
-            for (int i = 0; i < nSamples; ++i)
-            {
-                // Evaluate single-scattering integrand and add to _Ess_
-                Float ti = tCrit + SampleExponential((i + 0.5f) / nSamples, sigma_t);
-                // Determine length $d$ of connecting segment and $\cos\theta_\roman{o}$
-                Float d = std.sqrt(Sqr(r) + Sqr(ti));
-                Float cosTheta_o = ti / d;
-
-                // Add contribution of single scattering at depth $t$
-                Ess += rho * FastExp(-sigma_t * (d + tCrit)) / Sqr(d) * HenyeyGreenstein(cosTheta_o, g) *
-                       (1 - FrDielectric(-cosTheta_o, eta)) * std.abs(cosTheta_o);
-            }
-            return Ess / nSamples;
-        }
-
-        public static void ComputeBeamDiffusionBSSRDF(Float g, Float eta, BSSRDFTable t)
-        {
-            // Choose radius values of the diffusion profile discretization
-            t.radiusSamples[0] = 0;
-            t.radiusSamples[1] = 2.5e-3f;
-            for (int i = 2; i < (int)t.radiusSamples.size(); ++i)
-                t.radiusSamples[i] = t.radiusSamples[i - 1] * 1.2f;
-
-            // Choose albedo values of the diffusion profile discretization
-            for (int i = 0; i < (int)t.rhoSamples.size(); ++i)
-                t.rhoSamples[i] = (1 - FastExp(-8 * i / (Float)(t.rhoSamples.size() - 1))) / (1 - FastExp(-8f));
-
-            ParallelFor(0, (long)t.rhoSamples.size(), (int i) =>
-            {
-                // Compute the diffusion profile for the _i_th albedo sample
-                // Compute scattering profile for chosen albedo $\rho$
-                int nSamples = (int)t.radiusSamples.size();
-                for (int j = 0; j < nSamples; ++j)
-                {
-                    Float rho = t.rhoSamples[i], r = t.radiusSamples[j];
-                    t.profile[i * nSamples + j] = 2 * Pi * r * (BeamDiffusionSS(rho, 1 - rho, g, eta, r) +
-                                                                BeamDiffusionMS(rho, 1 - rho, g, eta, r));
-                }
-
-                // Compute effective albedo $\rho_{\roman{eff}}$ and CDF for importance sampling
-                t.rhoEff[i] = IntegrateCatmullRom(pstdspan(t.radiusSamples),
-                                                  new pstd.span<Float>(t.profile.data(), i * nSamples, nSamples),
-                                                  new pstd.span<Float>(t.profileCDF.data(), i * nSamples, nSamples));
-            });
-        }
     }
 
 }  // namespace pbrt

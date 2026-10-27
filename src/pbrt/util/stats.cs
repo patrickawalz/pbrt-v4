@@ -19,72 +19,6 @@ using System.IO;
 
 namespace pbrt
 {
-    // (kept out of pbrt so registration from pbrt' own static initializers works)
-    internal static class StatRegistry
-    {
-        internal static readonly object statsLock = new object();
-        internal static List<Action<StatsAccumulator>> statFuncs = new List<Action<StatsAccumulator>>();
-        internal static List<Action<Point2i, int, PixelStatsAccumulator>> pixelStatFuncs =
-            new List<Action<Point2i, int, PixelStatsAccumulator>>();
-    }
-
-    // StatRegisterer Definition
-    public unsafe class StatRegisterer
-    {
-        // StatRegisterer Public Methods
-        public StatRegisterer(Action<StatsAccumulator> func, Action<Point2i, int, PixelStatsAccumulator> pfunc = null)
-        {
-            lock (StatRegistry.statsLock)
-            {
-                if (func != null)
-                    StatRegistry.statFuncs.Add(func);
-                if (pfunc != null)
-                    StatRegistry.pixelStatFuncs.Add(pfunc);
-            }
-        }
-
-        public static void CallCallbacks(StatsAccumulator accum)
-        {
-            Action<StatsAccumulator>[] funcs;
-            lock (StatRegistry.statsLock)
-                funcs = StatRegistry.statFuncs.ToArray();
-            foreach (Action<StatsAccumulator> func in funcs)
-                func(accum);
-        }
-
-        public static void CallPixelCallbacks(Point2i p, PixelStatsAccumulator accum)
-        {
-            Action<Point2i, int, PixelStatsAccumulator>[] funcs;
-            lock (StatRegistry.statsLock)
-                funcs = StatRegistry.pixelStatFuncs.ToArray();
-            for (int i = 0; i < funcs.Length; ++i)
-                funcs[i](p, i, accum);
-        }
-    }
-
-    public unsafe class StatIntDistribution
-    {
-        public int64_t sum = 0, count = 0;
-        public int64_t min = long.MaxValue;
-        public int64_t max = long.MinValue;
-        public void Add(int64_t value)  // operator<<
-        {
-            sum += value;
-            count += 1;
-            min = (value < min) ? value : min;
-            max = (value > max) ? value : max;
-        }
-    }
-
-    // ThreadStatsState Definition
-    public unsafe class ThreadStatsState
-    {
-        public Point2i p;
-        public bool active;
-        public System.Diagnostics.Stopwatch start;
-        public PixelStatsAccumulator accum = new PixelStatsAccumulator();
-    }
-
     public static unsafe partial class pbrt
     {
         // Statistics Local Variables
@@ -190,6 +124,72 @@ namespace pbrt
                 title = comps[1];
             }
         }
+    }
+
+    // (kept out of pbrt so registration from pbrt' own static initializers works)
+    internal static class StatRegistry
+    {
+        internal static readonly object statsLock = new object();
+        internal static List<Action<StatsAccumulator>> statFuncs = new List<Action<StatsAccumulator>>();
+        internal static List<Action<Point2i, int, PixelStatsAccumulator>> pixelStatFuncs =
+            new List<Action<Point2i, int, PixelStatsAccumulator>>();
+    }
+
+    // StatRegisterer Definition
+    public unsafe class StatRegisterer
+    {
+        // StatRegisterer Public Methods
+        public StatRegisterer(Action<StatsAccumulator> func, Action<Point2i, int, PixelStatsAccumulator> pfunc = null)
+        {
+            lock (StatRegistry.statsLock)
+            {
+                if (func != null)
+                    StatRegistry.statFuncs.Add(func);
+                if (pfunc != null)
+                    StatRegistry.pixelStatFuncs.Add(pfunc);
+            }
+        }
+
+        public static void CallCallbacks(StatsAccumulator accum)
+        {
+            Action<StatsAccumulator>[] funcs;
+            lock (StatRegistry.statsLock)
+                funcs = StatRegistry.statFuncs.ToArray();
+            foreach (Action<StatsAccumulator> func in funcs)
+                func(accum);
+        }
+
+        public static void CallPixelCallbacks(Point2i p, PixelStatsAccumulator accum)
+        {
+            Action<Point2i, int, PixelStatsAccumulator>[] funcs;
+            lock (StatRegistry.statsLock)
+                funcs = StatRegistry.pixelStatFuncs.ToArray();
+            for (int i = 0; i < funcs.Length; ++i)
+                funcs[i](p, i, accum);
+        }
+    }
+
+    public unsafe class StatIntDistribution
+    {
+        public int64_t sum = 0, count = 0;
+        public int64_t min = long.MaxValue;
+        public int64_t max = long.MinValue;
+        public void Add(int64_t value)  // operator<<
+        {
+            sum += value;
+            count += 1;
+            min = (value < min) ? value : min;
+            max = (value > max) ? value : max;
+        }
+    }
+
+    // ThreadStatsState Definition
+    public unsafe class ThreadStatsState
+    {
+        public Point2i p;
+        public bool active;
+        public System.Diagnostics.Stopwatch start;
+        public PixelStatsAccumulator accum = new PixelStatsAccumulator();
     }
 
     // PixelStatsAccumulator Definition

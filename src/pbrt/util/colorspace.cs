@@ -7,6 +7,16 @@ using System;
 
 namespace pbrt
 {
+    public static partial class pbrt
+    {
+        public static SquareMatrix3 ConvertRGBColorSpace(RGBColorSpace from, RGBColorSpace to)
+        {
+            if (from == to)
+                return new SquareMatrix3();
+            return to.RGBFromXYZ * from.XYZFromRGB;
+        }
+    }
+
 
     // RGBColorSpace Definition
     public sealed class RGBColorSpace
@@ -139,16 +149,6 @@ namespace pbrt
 
         // RGBColorSpace Private Members
         private RGBToSpectrumTable rgbToSpectrumTable;
-    }
-
-    public static partial class pbrt
-    {
-        public static SquareMatrix3 ConvertRGBColorSpace(RGBColorSpace from, RGBColorSpace to)
-        {
-            if (from == to)
-                return new SquareMatrix3();
-            return to.RGBFromXYZ * from.XYZFromRGB;
-        }
     }
 
 }  // namespace pbrt

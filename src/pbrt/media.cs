@@ -15,6 +15,188 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // Media Function Definitions
+        private struct MeasuredSS
+        {
+            public string name;
+            public RGB sigma_prime_s, sigma_a;  // mm^-1
+            public MeasuredSS(string name, RGB sigma_prime_s, RGB sigma_a)
+            {
+                this.name = name;
+                this.sigma_prime_s = sigma_prime_s;
+                this.sigma_a = sigma_a;
+            }
+        }
+
+        private static readonly MeasuredSS[] SubsurfaceParameterTable = {
+            // From "A Practical Model for Subsurface Light Transport"
+            // Jensen, Marschner, Levoy, Hanrahan
+            // Proc SIGGRAPH 2001
+            new MeasuredSS("Apple", new RGB(2.29f, 2.39f, 1.97f), new RGB(0.0030f, 0.0034f, 0.046f)),
+            new MeasuredSS("Chicken1", new RGB(0.15f, 0.21f, 0.38f), new RGB(0.015f, 0.077f, 0.19f)),
+            new MeasuredSS("Chicken2", new RGB(0.19f, 0.25f, 0.32f), new RGB(0.018f, 0.088f, 0.20f)),
+            new MeasuredSS("Cream", new RGB(7.38f, 5.47f, 3.15f), new RGB(0.0002f, 0.0028f, 0.0163f)),
+            new MeasuredSS("Ketchup", new RGB(0.18f, 0.07f, 0.03f), new RGB(0.061f, 0.97f, 1.45f)),
+            new MeasuredSS("Marble", new RGB(2.19f, 2.62f, 3.00f), new RGB(0.0021f, 0.0041f, 0.0071f)),
+            new MeasuredSS("Potato", new RGB(0.68f, 0.70f, 0.55f), new RGB(0.0024f, 0.0090f, 0.12f)),
+            new MeasuredSS("Skimmilk", new RGB(0.70f, 1.22f, 1.90f), new RGB(0.0014f, 0.0025f, 0.0142f)),
+            new MeasuredSS("Skin1", new RGB(0.74f, 0.88f, 1.01f), new RGB(0.032f, 0.17f, 0.48f)),
+            new MeasuredSS("Skin2", new RGB(1.09f, 1.59f, 1.79f), new RGB(0.013f, 0.070f, 0.145f)),
+            new MeasuredSS("Spectralon", new RGB(11.6f, 20.4f, 14.9f), new RGB(0.00f, 0.00f, 0.00f)),
+            new MeasuredSS("Wholemilk", new RGB(2.55f, 3.21f, 3.77f), new RGB(0.0011f, 0.0024f, 0.014f)),
+
+            // From "Acquiring Scattering Properties of Participating Media by
+            // Dilution",
+            // Narasimhan, Gupta, Donner, Ramamoorthi, Nayar, Jensen
+            // Proc SIGGRAPH 2006
+            new MeasuredSS("Lowfat Milk", new RGB(0.89187f, 1.5136f, 2.532f), new RGB(0.002875f, 0.00575f, 0.0115f)),
+            new MeasuredSS("Reduced Milk", new RGB(2.4858f, 3.1669f, 4.5214f), new RGB(0.0025556f, 0.0051111f, 0.012778f)),
+            new MeasuredSS("Regular Milk", new RGB(4.5513f, 5.8294f, 7.136f), new RGB(0.0015333f, 0.0046f, 0.019933f)),
+            new MeasuredSS("Espresso", new RGB(0.72378f, 0.84557f, 1.0247f), new RGB(4.7984f, 6.5751f, 8.8493f)),
+            new MeasuredSS("Mint Mocha Coffee", new RGB(0.31602f, 0.38538f, 0.48131f), new RGB(3.772f, 5.8228f, 7.82f)),
+            new MeasuredSS("Lowfat Soy Milk", new RGB(0.30576f, 0.34233f, 0.61664f), new RGB(0.0014375f, 0.0071875f, 0.035937f)),
+            new MeasuredSS("Regular Soy Milk", new RGB(0.59223f, 0.73866f, 1.4693f), new RGB(0.0019167f, 0.0095833f, 0.065167f)),
+            new MeasuredSS("Lowfat Chocolate Milk", new RGB(0.64925f, 0.83916f, 1.1057f), new RGB(0.0115f, 0.0368f, 0.1564f)),
+            new MeasuredSS("Regular Chocolate Milk", new RGB(1.4585f, 2.1289f, 2.9527f), new RGB(0.010063f, 0.043125f, 0.14375f)),
+            new MeasuredSS("Coke", new RGB(8.9053e-05f, 8.372e-05f, 0f), new RGB(0.10014f, 0.16503f, 0.2468f)),
+            new MeasuredSS("Pepsi", new RGB(6.1697e-05f, 4.2564e-05f, 0f), new RGB(0.091641f, 0.14158f, 0.20729f)),
+            new MeasuredSS("Sprite", new RGB(6.0306e-06f, 6.4139e-06f, 6.5504e-06f), new RGB(0.001886f, 0.0018308f, 0.0020025f)),
+            new MeasuredSS("Gatorade", new RGB(0.0024574f, 0.003007f, 0.0037325f), new RGB(0.024794f, 0.019289f, 0.008878f)),
+            new MeasuredSS("Chardonnay", new RGB(1.7982e-05f, 1.3758e-05f, 1.2023e-05f), new RGB(0.010782f, 0.011855f, 0.023997f)),
+            new MeasuredSS("White Zinfandel", new RGB(1.7501e-05f, 1.9069e-05f, 1.288e-05f), new RGB(0.012072f, 0.016184f, 0.019843f)),
+            new MeasuredSS("Merlot", new RGB(2.1129e-05f, 0f, 0f), new RGB(0.11632f, 0.25191f, 0.29434f)),
+            new MeasuredSS("Budweiser Beer", new RGB(2.4356e-05f, 2.4079e-05f, 1.0564e-05f), new RGB(0.011492f, 0.024911f, 0.057786f)),
+            new MeasuredSS("Coors Light Beer", new RGB(5.0922e-05f, 4.301e-05f, 0f), new RGB(0.006164f, 0.013984f, 0.034983f)),
+            new MeasuredSS("Clorox", new RGB(0.0024035f, 0.0031373f, 0.003991f), new RGB(0.0033542f, 0.014892f, 0.026297f)),
+            new MeasuredSS("Apple Juice", new RGB(0.00013612f, 0.00015836f, 0.000227f), new RGB(0.012957f, 0.023741f, 0.052184f)),
+            new MeasuredSS("Cranberry Juice", new RGB(0.00010402f, 0.00011646f, 7.8139e-05f), new RGB(0.039437f, 0.094223f, 0.12426f)),
+            new MeasuredSS("Grape Juice", new RGB(5.382e-05f, 0f, 0f), new RGB(0.10404f, 0.23958f, 0.29325f)),
+            new MeasuredSS("Ruby Grapefruit Juice", new RGB(0.011002f, 0.010927f, 0.011036f), new RGB(0.085867f, 0.18314f, 0.25262f)),
+            new MeasuredSS("White Grapefruit Juice", new RGB(0.22826f, 0.23998f, 0.32748f), new RGB(0.0138f, 0.018831f, 0.056781f)),
+            new MeasuredSS("Shampoo", new RGB(0.0007176f, 0.0008303f, 0.0009016f), new RGB(0.014107f, 0.045693f, 0.061717f)),
+            new MeasuredSS("Strawberry Shampoo", new RGB(0.00015671f, 0.00015947f, 1.518e-05f), new RGB(0.01449f, 0.05796f, 0.075823f)),
+            new MeasuredSS("Head & Shoulders Shampoo", new RGB(0.023805f, 0.028804f, 0.034306f), new RGB(0.084621f, 0.15688f, 0.20365f)),
+            new MeasuredSS("Lemon Tea Powder", new RGB(0.040224f, 0.045264f, 0.051081f), new RGB(2.4288f, 4.5757f, 7.2127f)),
+            new MeasuredSS("Orange Powder", new RGB(0.00015617f, 0.00017482f, 0.0001762f), new RGB(0.001449f, 0.003441f, 0.007863f)),
+            new MeasuredSS("Pink Lemonade Powder", new RGB(0.00012103f, 0.00013073f, 0.00012528f), new RGB(0.001165f, 0.002366f, 0.003195f)),
+            new MeasuredSS("Cappuccino Powder", new RGB(1.8436f, 2.5851f, 2.1662f), new RGB(35.844f, 49.547f, 61.084f)),
+            new MeasuredSS("Salt Powder", new RGB(0.027333f, 0.032451f, 0.031979f), new RGB(0.28415f, 0.3257f, 0.34148f)),
+            new MeasuredSS("Sugar Powder", new RGB(0.00022272f, 0.00025513f, 0.000271f), new RGB(0.012638f, 0.031051f, 0.050124f)),
+            new MeasuredSS("Suisse Mocha Powder", new RGB(2.7979f, 3.5452f, 4.3365f), new RGB(17.502f, 27.004f, 35.433f)),
+            new MeasuredSS("Pacific Ocean Surface Water", new RGB(0.0001764f, 0.00032095f, 0.00019617f), new RGB(0.031845f, 0.031324f, 0.030147f))
+        };
+
+        public static bool GetMediumScatteringProperties(string name, ref Spectrum sigma_a, ref Spectrum sigma_s, Allocator alloc)
+        {
+            foreach (MeasuredSS mss in SubsurfaceParameterTable)
+            {
+                if (name == mss.name)
+                {
+                    sigma_a = new RGBUnboundedSpectrum(RGBColorSpace.sRGB, mss.sigma_a);
+                    sigma_s = new RGBUnboundedSpectrum(RGBColorSpace.sRGB, mss.sigma_prime_s);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // SampleT_maj<ConcreteMedium>
+        public static SampledSpectrum SampleT_maj<ConcreteMedium, MajorantIterator>(
+            Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+            Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
+            where ConcreteMedium : Medium, IMajorantMedium<MajorantIterator>
+            where MajorantIterator : RayMajorantIterator
+        {
+            // Normalize ray direction and update _tMax_ accordingly
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+
+            // Initialize _MajorantIterator_ for ray majorant sampling
+            ConcreteMedium medium = (ConcreteMedium)ray.medium;
+            MajorantIterator iter = medium.SampleRay(ray, tMax, lambda);
+
+            // Generate ray majorant samples until termination
+            SampledSpectrum T_maj = new SampledSpectrum(1f);
+            bool done = false;
+            while (!done)
+            {
+                // Get next majorant segment from iterator and sample it
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                    return T_maj;
+                RayMajorantSegment sg = seg.value();
+                // Handle zero-valued majorant for current segment
+                if (sg.sigma_maj[0] == 0)
+                {
+                    Float dt = sg.tMax - sg.tMin;
+                    // Handle infinite _dt_ for ray majorant segment
+                    if (IsInf(dt))
+                        dt = Float.MaxValue;
+
+                    T_maj *= FastExp(-dt * sg.sigma_maj);
+                    continue;
+                }
+
+                // Generate samples along current majorant segment
+                Float tMin = sg.tMin;
+                while (true)
+                {
+                    // Try to generate sample along current majorant segment
+                    Float t = tMin + SampleExponential(u, sg.sigma_maj[0]);
+                    u = rng.Uniform<Float>();
+                    if (t < sg.tMax)
+                    {
+                        // Call callback function for sample within segment
+                        T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                        if (!callback(ray.Apply(t), mp, sg.sigma_maj, T_maj))
+                        {
+                            // Returning out of doubly-nested while loop is not as good perf. wise
+                            // on the GPU vs using "done" here.
+                            done = true;
+                            break;
+                        }
+                        T_maj = new SampledSpectrum(1f);
+                        tMin = t;
+                    }
+                    else
+                    {
+                        // Handle sample past end of majorant segment
+                        Float dt = sg.tMax - tMin;
+                        // Handle infinite _dt_ for ray majorant segment
+                        if (IsInf(dt))
+                            dt = Float.MaxValue;
+
+                        T_maj *= FastExp(-dt * sg.sigma_maj);
+                        break;
+                    }
+                }
+            }
+            return new SampledSpectrum(1f);
+        }
+
+        // SampleT_maj(): dispatch on the ray's medium type (ray.medium.Dispatch)
+        public static SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+                                                  Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
+        {
+            Medium m = ray.medium;
+            if (m is HomogeneousMedium)
+                return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            else if (m is GridMedium)
+                return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            else if (m is RGBGridMedium)
+                return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            else if (m is CloudMedium)
+                return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            else if (m is NanoVDBMedium)
+                return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            LOG_FATAL("SampleT_maj(): ray has no medium");
+            return default;
+        }
+    }
+
 
     // HGPhaseFunction Definition
     public sealed unsafe class HGPhaseFunction : PhaseFunction
@@ -887,188 +1069,6 @@ namespace pbrt
         private nanovdb.NanoGrid<float> densityFloatGrid;
         private nanovdb.NanoGrid<float> temperatureFloatGrid;
         private Float LeScale, temperatureOffset, temperatureScale;
-    }
-
-    public static unsafe partial class pbrt
-    {
-        // Media Function Definitions
-        private struct MeasuredSS
-        {
-            public string name;
-            public RGB sigma_prime_s, sigma_a;  // mm^-1
-            public MeasuredSS(string name, RGB sigma_prime_s, RGB sigma_a)
-            {
-                this.name = name;
-                this.sigma_prime_s = sigma_prime_s;
-                this.sigma_a = sigma_a;
-            }
-        }
-
-        private static readonly MeasuredSS[] SubsurfaceParameterTable = {
-            // From "A Practical Model for Subsurface Light Transport"
-            // Jensen, Marschner, Levoy, Hanrahan
-            // Proc SIGGRAPH 2001
-            new MeasuredSS("Apple", new RGB(2.29f, 2.39f, 1.97f), new RGB(0.0030f, 0.0034f, 0.046f)),
-            new MeasuredSS("Chicken1", new RGB(0.15f, 0.21f, 0.38f), new RGB(0.015f, 0.077f, 0.19f)),
-            new MeasuredSS("Chicken2", new RGB(0.19f, 0.25f, 0.32f), new RGB(0.018f, 0.088f, 0.20f)),
-            new MeasuredSS("Cream", new RGB(7.38f, 5.47f, 3.15f), new RGB(0.0002f, 0.0028f, 0.0163f)),
-            new MeasuredSS("Ketchup", new RGB(0.18f, 0.07f, 0.03f), new RGB(0.061f, 0.97f, 1.45f)),
-            new MeasuredSS("Marble", new RGB(2.19f, 2.62f, 3.00f), new RGB(0.0021f, 0.0041f, 0.0071f)),
-            new MeasuredSS("Potato", new RGB(0.68f, 0.70f, 0.55f), new RGB(0.0024f, 0.0090f, 0.12f)),
-            new MeasuredSS("Skimmilk", new RGB(0.70f, 1.22f, 1.90f), new RGB(0.0014f, 0.0025f, 0.0142f)),
-            new MeasuredSS("Skin1", new RGB(0.74f, 0.88f, 1.01f), new RGB(0.032f, 0.17f, 0.48f)),
-            new MeasuredSS("Skin2", new RGB(1.09f, 1.59f, 1.79f), new RGB(0.013f, 0.070f, 0.145f)),
-            new MeasuredSS("Spectralon", new RGB(11.6f, 20.4f, 14.9f), new RGB(0.00f, 0.00f, 0.00f)),
-            new MeasuredSS("Wholemilk", new RGB(2.55f, 3.21f, 3.77f), new RGB(0.0011f, 0.0024f, 0.014f)),
-
-            // From "Acquiring Scattering Properties of Participating Media by
-            // Dilution",
-            // Narasimhan, Gupta, Donner, Ramamoorthi, Nayar, Jensen
-            // Proc SIGGRAPH 2006
-            new MeasuredSS("Lowfat Milk", new RGB(0.89187f, 1.5136f, 2.532f), new RGB(0.002875f, 0.00575f, 0.0115f)),
-            new MeasuredSS("Reduced Milk", new RGB(2.4858f, 3.1669f, 4.5214f), new RGB(0.0025556f, 0.0051111f, 0.012778f)),
-            new MeasuredSS("Regular Milk", new RGB(4.5513f, 5.8294f, 7.136f), new RGB(0.0015333f, 0.0046f, 0.019933f)),
-            new MeasuredSS("Espresso", new RGB(0.72378f, 0.84557f, 1.0247f), new RGB(4.7984f, 6.5751f, 8.8493f)),
-            new MeasuredSS("Mint Mocha Coffee", new RGB(0.31602f, 0.38538f, 0.48131f), new RGB(3.772f, 5.8228f, 7.82f)),
-            new MeasuredSS("Lowfat Soy Milk", new RGB(0.30576f, 0.34233f, 0.61664f), new RGB(0.0014375f, 0.0071875f, 0.035937f)),
-            new MeasuredSS("Regular Soy Milk", new RGB(0.59223f, 0.73866f, 1.4693f), new RGB(0.0019167f, 0.0095833f, 0.065167f)),
-            new MeasuredSS("Lowfat Chocolate Milk", new RGB(0.64925f, 0.83916f, 1.1057f), new RGB(0.0115f, 0.0368f, 0.1564f)),
-            new MeasuredSS("Regular Chocolate Milk", new RGB(1.4585f, 2.1289f, 2.9527f), new RGB(0.010063f, 0.043125f, 0.14375f)),
-            new MeasuredSS("Coke", new RGB(8.9053e-05f, 8.372e-05f, 0f), new RGB(0.10014f, 0.16503f, 0.2468f)),
-            new MeasuredSS("Pepsi", new RGB(6.1697e-05f, 4.2564e-05f, 0f), new RGB(0.091641f, 0.14158f, 0.20729f)),
-            new MeasuredSS("Sprite", new RGB(6.0306e-06f, 6.4139e-06f, 6.5504e-06f), new RGB(0.001886f, 0.0018308f, 0.0020025f)),
-            new MeasuredSS("Gatorade", new RGB(0.0024574f, 0.003007f, 0.0037325f), new RGB(0.024794f, 0.019289f, 0.008878f)),
-            new MeasuredSS("Chardonnay", new RGB(1.7982e-05f, 1.3758e-05f, 1.2023e-05f), new RGB(0.010782f, 0.011855f, 0.023997f)),
-            new MeasuredSS("White Zinfandel", new RGB(1.7501e-05f, 1.9069e-05f, 1.288e-05f), new RGB(0.012072f, 0.016184f, 0.019843f)),
-            new MeasuredSS("Merlot", new RGB(2.1129e-05f, 0f, 0f), new RGB(0.11632f, 0.25191f, 0.29434f)),
-            new MeasuredSS("Budweiser Beer", new RGB(2.4356e-05f, 2.4079e-05f, 1.0564e-05f), new RGB(0.011492f, 0.024911f, 0.057786f)),
-            new MeasuredSS("Coors Light Beer", new RGB(5.0922e-05f, 4.301e-05f, 0f), new RGB(0.006164f, 0.013984f, 0.034983f)),
-            new MeasuredSS("Clorox", new RGB(0.0024035f, 0.0031373f, 0.003991f), new RGB(0.0033542f, 0.014892f, 0.026297f)),
-            new MeasuredSS("Apple Juice", new RGB(0.00013612f, 0.00015836f, 0.000227f), new RGB(0.012957f, 0.023741f, 0.052184f)),
-            new MeasuredSS("Cranberry Juice", new RGB(0.00010402f, 0.00011646f, 7.8139e-05f), new RGB(0.039437f, 0.094223f, 0.12426f)),
-            new MeasuredSS("Grape Juice", new RGB(5.382e-05f, 0f, 0f), new RGB(0.10404f, 0.23958f, 0.29325f)),
-            new MeasuredSS("Ruby Grapefruit Juice", new RGB(0.011002f, 0.010927f, 0.011036f), new RGB(0.085867f, 0.18314f, 0.25262f)),
-            new MeasuredSS("White Grapefruit Juice", new RGB(0.22826f, 0.23998f, 0.32748f), new RGB(0.0138f, 0.018831f, 0.056781f)),
-            new MeasuredSS("Shampoo", new RGB(0.0007176f, 0.0008303f, 0.0009016f), new RGB(0.014107f, 0.045693f, 0.061717f)),
-            new MeasuredSS("Strawberry Shampoo", new RGB(0.00015671f, 0.00015947f, 1.518e-05f), new RGB(0.01449f, 0.05796f, 0.075823f)),
-            new MeasuredSS("Head & Shoulders Shampoo", new RGB(0.023805f, 0.028804f, 0.034306f), new RGB(0.084621f, 0.15688f, 0.20365f)),
-            new MeasuredSS("Lemon Tea Powder", new RGB(0.040224f, 0.045264f, 0.051081f), new RGB(2.4288f, 4.5757f, 7.2127f)),
-            new MeasuredSS("Orange Powder", new RGB(0.00015617f, 0.00017482f, 0.0001762f), new RGB(0.001449f, 0.003441f, 0.007863f)),
-            new MeasuredSS("Pink Lemonade Powder", new RGB(0.00012103f, 0.00013073f, 0.00012528f), new RGB(0.001165f, 0.002366f, 0.003195f)),
-            new MeasuredSS("Cappuccino Powder", new RGB(1.8436f, 2.5851f, 2.1662f), new RGB(35.844f, 49.547f, 61.084f)),
-            new MeasuredSS("Salt Powder", new RGB(0.027333f, 0.032451f, 0.031979f), new RGB(0.28415f, 0.3257f, 0.34148f)),
-            new MeasuredSS("Sugar Powder", new RGB(0.00022272f, 0.00025513f, 0.000271f), new RGB(0.012638f, 0.031051f, 0.050124f)),
-            new MeasuredSS("Suisse Mocha Powder", new RGB(2.7979f, 3.5452f, 4.3365f), new RGB(17.502f, 27.004f, 35.433f)),
-            new MeasuredSS("Pacific Ocean Surface Water", new RGB(0.0001764f, 0.00032095f, 0.00019617f), new RGB(0.031845f, 0.031324f, 0.030147f))
-        };
-
-        public static bool GetMediumScatteringProperties(string name, ref Spectrum sigma_a, ref Spectrum sigma_s, Allocator alloc)
-        {
-            foreach (MeasuredSS mss in SubsurfaceParameterTable)
-            {
-                if (name == mss.name)
-                {
-                    sigma_a = new RGBUnboundedSpectrum(RGBColorSpace.sRGB, mss.sigma_a);
-                    sigma_s = new RGBUnboundedSpectrum(RGBColorSpace.sRGB, mss.sigma_prime_s);
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // SampleT_maj<ConcreteMedium>
-        public static SampledSpectrum SampleT_maj<ConcreteMedium, MajorantIterator>(
-            Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
-            Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
-            where ConcreteMedium : Medium, IMajorantMedium<MajorantIterator>
-            where MajorantIterator : RayMajorantIterator
-        {
-            // Normalize ray direction and update _tMax_ accordingly
-            tMax *= Length(ray.d);
-            ray.d = Normalize(ray.d);
-
-            // Initialize _MajorantIterator_ for ray majorant sampling
-            ConcreteMedium medium = (ConcreteMedium)ray.medium;
-            MajorantIterator iter = medium.SampleRay(ray, tMax, lambda);
-
-            // Generate ray majorant samples until termination
-            SampledSpectrum T_maj = new SampledSpectrum(1f);
-            bool done = false;
-            while (!done)
-            {
-                // Get next majorant segment from iterator and sample it
-                pstd.optional<RayMajorantSegment> seg = iter.Next();
-                if (!seg)
-                    return T_maj;
-                RayMajorantSegment sg = seg.value();
-                // Handle zero-valued majorant for current segment
-                if (sg.sigma_maj[0] == 0)
-                {
-                    Float dt = sg.tMax - sg.tMin;
-                    // Handle infinite _dt_ for ray majorant segment
-                    if (IsInf(dt))
-                        dt = Float.MaxValue;
-
-                    T_maj *= FastExp(-dt * sg.sigma_maj);
-                    continue;
-                }
-
-                // Generate samples along current majorant segment
-                Float tMin = sg.tMin;
-                while (true)
-                {
-                    // Try to generate sample along current majorant segment
-                    Float t = tMin + SampleExponential(u, sg.sigma_maj[0]);
-                    u = rng.Uniform<Float>();
-                    if (t < sg.tMax)
-                    {
-                        // Call callback function for sample within segment
-                        T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
-                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
-                        if (!callback(ray.Apply(t), mp, sg.sigma_maj, T_maj))
-                        {
-                            // Returning out of doubly-nested while loop is not as good perf. wise
-                            // on the GPU vs using "done" here.
-                            done = true;
-                            break;
-                        }
-                        T_maj = new SampledSpectrum(1f);
-                        tMin = t;
-                    }
-                    else
-                    {
-                        // Handle sample past end of majorant segment
-                        Float dt = sg.tMax - tMin;
-                        // Handle infinite _dt_ for ray majorant segment
-                        if (IsInf(dt))
-                            dt = Float.MaxValue;
-
-                        T_maj *= FastExp(-dt * sg.sigma_maj);
-                        break;
-                    }
-                }
-            }
-            return new SampledSpectrum(1f);
-        }
-
-        // SampleT_maj(): dispatch on the ray's medium type (ray.medium.Dispatch)
-        public static SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
-                                                  Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
-        {
-            Medium m = ray.medium;
-            if (m is HomogeneousMedium)
-                return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
-            else if (m is GridMedium)
-                return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
-            else if (m is RGBGridMedium)
-                return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
-            else if (m is CloudMedium)
-                return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
-            else if (m is NanoVDBMedium)
-                return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
-            LOG_FATAL("SampleT_maj(): ray has no medium");
-            return default;
-        }
     }
 
     // Medium Method Definitions

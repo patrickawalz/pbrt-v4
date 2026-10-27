@@ -11,35 +11,6 @@ using System.Runtime.InteropServices;
 
 namespace pbrt
 {
-    // PixelFormat Definition
-    public enum PixelFormat { U256, Half, Float }
-
-    // WrapMode Definitions
-    // (Magi: Clamp is listed first so that default(WrapMode2D) is Clamp/Clamp, which is what C++'s
-    // default argument "= WrapMode::Clamp" needs; the numeric values are never used.)
-    public enum WrapMode { Clamp, Black, Repeat, OctahedralSphere }
-
-    // ResampleWeight Definition
-    public unsafe struct ResampleWeight
-    {
-        public int firstPixel;
-        public Float weight0, weight1, weight2, weight3;
-        public Float this[int i]
-        {
-            get { return i == 0 ? weight0 : (i == 1 ? weight1 : (i == 2 ? weight2 : weight3)); }
-            set { if (i == 0) weight0 = value; else if (i == 1) weight1 = value; else if (i == 2) weight2 = value; else weight3 = value; }
-        }
-    }
-
-    public unsafe struct WrapMode2D
-    {
-        public WrapMode2D(WrapMode w) { wrap = new pstd.array2<WrapMode>(w, w); }
-        public WrapMode2D(WrapMode x, WrapMode y) { wrap = new pstd.array2<WrapMode>(x, y); }
-        public static implicit operator WrapMode2D(WrapMode w) { return new WrapMode2D(w); }
-
-        public pstd.array2<WrapMode> wrap;
-    }
-
     public static unsafe partial class pbrt
     {
         // PixelFormat Inline Functions
@@ -169,6 +140,35 @@ namespace pbrt
             }
             return true;
         }
+    }
+
+    // PixelFormat Definition
+    public enum PixelFormat { U256, Half, Float }
+
+    // WrapMode Definitions
+    // (Magi: Clamp is listed first so that default(WrapMode2D) is Clamp/Clamp, which is what C++'s
+    // default argument "= WrapMode::Clamp" needs; the numeric values are never used.)
+    public enum WrapMode { Clamp, Black, Repeat, OctahedralSphere }
+
+    // ResampleWeight Definition
+    public unsafe struct ResampleWeight
+    {
+        public int firstPixel;
+        public Float weight0, weight1, weight2, weight3;
+        public Float this[int i]
+        {
+            get { return i == 0 ? weight0 : (i == 1 ? weight1 : (i == 2 ? weight2 : weight3)); }
+            set { if (i == 0) weight0 = value; else if (i == 1) weight1 = value; else if (i == 2) weight2 = value; else weight3 = value; }
+        }
+    }
+
+    public unsafe struct WrapMode2D
+    {
+        public WrapMode2D(WrapMode w) { wrap = new pstd.array2<WrapMode>(w, w); }
+        public WrapMode2D(WrapMode x, WrapMode y) { wrap = new pstd.array2<WrapMode>(x, y); }
+        public static implicit operator WrapMode2D(WrapMode w) { return new WrapMode2D(w); }
+
+        public pstd.array2<WrapMode> wrap;
     }
 
     // ImageMetadata Definition

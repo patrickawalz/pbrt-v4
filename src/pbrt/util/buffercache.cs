@@ -13,6 +13,26 @@ using System.Threading;
 
 namespace pbrt
 {
+    public static unsafe partial class pbrt
+    {
+        // BufferCache Global Definitions
+        public static BufferCache<int> intBufferCache;
+        public static BufferCache<Point2f> point2BufferCache;
+        public static BufferCache<Point3f> point3BufferCache;
+        public static BufferCache<Vector3f> vector3BufferCache;
+        public static BufferCache<Normal3f> normal3BufferCache;
+
+        public static void InitBufferCaches()
+        {
+            CHECK(intBufferCache == null);
+            intBufferCache = new BufferCache<int>();
+            point2BufferCache = new BufferCache<Point2f>();
+            point3BufferCache = new BufferCache<Point3f>();
+            vector3BufferCache = new BufferCache<Vector3f>();
+            normal3BufferCache = new BufferCache<Normal3f>();
+        }
+    }
+
     // BufferCache Definition
     public unsafe class BufferCache<T> where T : unmanaged
     {
@@ -116,23 +136,4 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class pbrt
-    {
-        // BufferCache Global Definitions
-        public static BufferCache<int> intBufferCache;
-        public static BufferCache<Point2f> point2BufferCache;
-        public static BufferCache<Point3f> point3BufferCache;
-        public static BufferCache<Vector3f> vector3BufferCache;
-        public static BufferCache<Normal3f> normal3BufferCache;
-
-        public static void InitBufferCaches()
-        {
-            CHECK(intBufferCache == null);
-            intBufferCache = new BufferCache<int>();
-            point2BufferCache = new BufferCache<Point2f>();
-            point3BufferCache = new BufferCache<Point3f>();
-            vector3BufferCache = new BufferCache<Vector3f>();
-            normal3BufferCache = new BufferCache<Normal3f>();
-        }
-    }
 }
