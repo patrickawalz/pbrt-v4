@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Scattering Inline Functions
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

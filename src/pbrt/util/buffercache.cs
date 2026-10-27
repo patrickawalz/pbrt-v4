@@ -116,7 +116,7 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // BufferCache Global Definitions
         public static BufferCache<int> intBufferCache;

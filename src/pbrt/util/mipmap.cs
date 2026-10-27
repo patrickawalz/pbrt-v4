@@ -47,11 +47,11 @@ namespace pbrt
 
         public override string ToString()
         {
-            return StringPrintf("[ MIPMapFilterOptions filter: %s maxAnisotropy: %f ]", Globals.ToString(filter), maxAnisotropy);
+            return StringPrintf("[ MIPMapFilterOptions filter: %s maxAnisotropy: %f ]", pbrt.ToString(filter), maxAnisotropy);
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static pstd.optional<FilterFunction> ParseFilter(string f)
         {
@@ -226,7 +226,7 @@ namespace pbrt
             for (int i = 0; i < (int)pyramid.size(); ++i)
                 levels += (i > 0 ? ", " : "") + pyramid[i].ToString();
             return StringPrintf("[ MIPMap pyramid: [ %s ] colorSpace: %s wrapMode: %s options: %s ]",
-                                levels, colorSpace.ToString(), Globals.ToString(wrapMode), options.ToString());
+                                levels, colorSpace.ToString(), pbrt.ToString(wrapMode), options.ToString());
         }
 
         // MIPMap Private Methods

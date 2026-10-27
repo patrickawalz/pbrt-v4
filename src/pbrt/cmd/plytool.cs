@@ -12,7 +12,7 @@ global using Float = System.Single;
 using System;
 using System.Collections.Generic;
 using pbrt;
-using static pbrt.Globals;
+using static global::pbrt.pbrt;
 
 public static unsafe class PlyToolMain
 {

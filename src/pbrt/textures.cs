@@ -55,7 +55,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TextureEvalContext p: %s dpdx: %s dpdy: %s n: %s uv: %s dudx: %f dudy: %f " +
+            return pbrt.StringPrintf("[ TextureEvalContext p: %s dpdx: %s dpdy: %s n: %s uv: %s dudx: %f dudy: %f " +
                                         "dvdx: %f dvdy: %f faceIndex: %d ]", p, dpdx, dpdy, n, uv, dudx, dudy, dvdx, dvdy, faceIndex);
         }
 
@@ -74,7 +74,7 @@ namespace pbrt
         public Float dsdx, dsdy, dtdx, dtdy;
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TexCoord2D st: %s dsdx: %f dsdy: %f dtdx: %f dtdy: %f ]", st, dsdx, dsdy, dtdx, dtdy);
+            return pbrt.StringPrintf("[ TexCoord2D st: %s dsdx: %f dsdy: %f dtdx: %f dtdy: %f ]", st, dsdx, dsdy, dtdx, dtdy);
         }
     }
 
@@ -85,7 +85,7 @@ namespace pbrt
         public Vector3f dpdx, dpdy;
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TexCoord3D p: %s dpdx: %s dpdy: %s ]", p, dpdx, dpdy);
+            return pbrt.StringPrintf("[ TexCoord3D p: %s dpdx: %s dpdy: %s ]", p, dpdx, dpdy);
         }
     }
 
@@ -110,17 +110,17 @@ namespace pbrt
                 return new UVMapping(su, sv, du, dv);
             }
             else if (type == "spherical")
-                return new SphericalMapping(Globals.Inverse(renderFromTexture));
+                return new SphericalMapping(pbrt.Inverse(renderFromTexture));
             else if (type == "cylindrical")
-                return new CylindricalMapping(Globals.Inverse(renderFromTexture));
+                return new CylindricalMapping(pbrt.Inverse(renderFromTexture));
             else if (type == "planar")
-                return new PlanarMapping(Globals.Inverse(renderFromTexture),
+                return new PlanarMapping(pbrt.Inverse(renderFromTexture),
                                          parameters.GetOneVector3f("v1", new Vector3f(1, 0, 0)),
                                          parameters.GetOneVector3f("v2", new Vector3f(0, 1, 0)),
                                          parameters.GetOneFloat("udelta", 0f), parameters.GetOneFloat("vdelta", 0f));
             else
             {
-                Globals.Error(loc, Globals.StringPrintf("2D texture mapping \"%s\" unknown", type));
+                pbrt.Error(loc, pbrt.StringPrintf("2D texture mapping \"%s\" unknown", type));
                 return new UVMapping();
             }
         }
@@ -137,7 +137,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ UVMapping su: %f sv: %f du: %f dv: %f ]", su, sv, du, dv);
+            return pbrt.StringPrintf("[ UVMapping su: %f sv: %f du: %f dv: %f ]", su, sv, du, dv);
         }
 
         public override TexCoord2D Map(TextureEvalContext ctx)
@@ -161,7 +161,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SphericalMapping textureFromRender: %s ]", textureFromRender);
+            return pbrt.StringPrintf("[ SphericalMapping textureFromRender: %s ]", textureFromRender);
         }
 
         public override TexCoord2D Map(TextureEvalContext ctx)
@@ -169,21 +169,21 @@ namespace pbrt
             Point3f pt = textureFromRender.Apply(ctx.p);
             // Compute $\partial\,s/\partial\,\pt{}$ and $\partial\,t/\partial\,\pt{}$ for
             // spherical mapping
-            Float x2y2 = Globals.Sqr(pt.x) + Globals.Sqr(pt.y);
+            Float x2y2 = pbrt.Sqr(pt.x) + pbrt.Sqr(pt.y);
             Float sqrtx2y2 = std.sqrt(x2y2);
-            Vector3f dsdp = new Vector3f(-pt.y, pt.x, 0) / (2 * Globals.Pi * x2y2);
-            Vector3f dtdp = 1 / (Globals.Pi * (x2y2 + Globals.Sqr(pt.z))) *
+            Vector3f dsdp = new Vector3f(-pt.y, pt.x, 0) / (2 * pbrt.Pi * x2y2);
+            Vector3f dtdp = 1 / (pbrt.Pi * (x2y2 + pbrt.Sqr(pt.z))) *
                             new Vector3f(pt.x * pt.z / sqrtx2y2, pt.y * pt.z / sqrtx2y2, -sqrtx2y2);
 
             // Compute texture coordinate differentials for spherical mapping
             Vector3f dpdx = textureFromRender.Apply(ctx.dpdx);
             Vector3f dpdy = textureFromRender.Apply(ctx.dpdy);
-            Float dsdx = Globals.Dot(dsdp, dpdx), dsdy = Globals.Dot(dsdp, dpdy);
-            Float dtdx = Globals.Dot(dtdp, dpdx), dtdy = Globals.Dot(dtdp, dpdy);
+            Float dsdx = pbrt.Dot(dsdp, dpdx), dsdy = pbrt.Dot(dsdp, dpdy);
+            Float dtdx = pbrt.Dot(dtdp, dpdx), dtdy = pbrt.Dot(dtdp, dpdy);
 
             // Return $(s,t)$ texture coordinates and differentials based on spherical mapping
-            Vector3f vec = Globals.Normalize(pt - new Point3f(0, 0, 0));
-            Point2f st = new Point2f(Globals.SphericalTheta(vec) * Globals.InvPi, Globals.SphericalPhi(vec) * Globals.Inv2Pi);
+            Vector3f vec = pbrt.Normalize(pt - new Point3f(0, 0, 0));
+            Point2f st = new Point2f(pbrt.SphericalTheta(vec) * pbrt.InvPi, pbrt.SphericalPhi(vec) * pbrt.Inv2Pi);
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
         }
 
@@ -199,21 +199,21 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ CylindricalMapping textureFromRender: %s ]", textureFromRender);
+            return pbrt.StringPrintf("[ CylindricalMapping textureFromRender: %s ]", textureFromRender);
         }
 
         public override TexCoord2D Map(TextureEvalContext ctx)
         {
             Point3f pt = textureFromRender.Apply(ctx.p);
             // Compute texture coordinate differentials for cylinder $(u,v)$ mapping
-            Float x2y2 = Globals.Sqr(pt.x) + Globals.Sqr(pt.y);
-            Vector3f dsdp = new Vector3f(-pt.y, pt.x, 0) / (2 * Globals.Pi * x2y2),
+            Float x2y2 = pbrt.Sqr(pt.x) + pbrt.Sqr(pt.y);
+            Vector3f dsdp = new Vector3f(-pt.y, pt.x, 0) / (2 * pbrt.Pi * x2y2),
                      dtdp = new Vector3f(0, 0, 1);
             Vector3f dpdx = textureFromRender.Apply(ctx.dpdx), dpdy = textureFromRender.Apply(ctx.dpdy);
-            Float dsdx = Globals.Dot(dsdp, dpdx), dsdy = Globals.Dot(dsdp, dpdy);
-            Float dtdx = Globals.Dot(dtdp, dpdx), dtdy = Globals.Dot(dtdp, dpdy);
+            Float dsdx = pbrt.Dot(dsdp, dpdx), dsdy = pbrt.Dot(dsdp, dpdy);
+            Float dtdx = pbrt.Dot(dtdp, dpdx), dtdy = pbrt.Dot(dtdp, dpdy);
 
-            Point2f st = new Point2f((Globals.Pi + std.atan2(pt.y, pt.x)) * Globals.Inv2Pi, pt.z);
+            Point2f st = new Point2f((pbrt.Pi + std.atan2(pt.y, pt.x)) * pbrt.Inv2Pi, pt.z);
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
         }
 
@@ -237,16 +237,16 @@ namespace pbrt
             // Initialize partial derivatives of planar mapping $(s,t)$ coordinates
             Vector3f dpdx = textureFromRender.Apply(ctx.dpdx);
             Vector3f dpdy = textureFromRender.Apply(ctx.dpdy);
-            Float dsdx = Globals.Dot(vs, dpdx), dsdy = Globals.Dot(vs, dpdy);
-            Float dtdx = Globals.Dot(vt, dpdx), dtdy = Globals.Dot(vt, dpdy);
+            Float dsdx = pbrt.Dot(vs, dpdx), dsdy = pbrt.Dot(vs, dpdy);
+            Float dtdx = pbrt.Dot(vt, dpdx), dtdy = pbrt.Dot(vt, dpdy);
 
-            Point2f st = new Point2f(ds + Globals.Dot(vec, vs), dt + Globals.Dot(vec, vt));
+            Point2f st = new Point2f(ds + pbrt.Dot(vec, vs), dt + pbrt.Dot(vec, vt));
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ PlanarMapping vs: %s vt: %s ds: %f dt: %f]", vs, vt, ds, dt);
+            return pbrt.StringPrintf("[ PlanarMapping vs: %s vt: %s ds: %f dt: %f]", vs, vt, ds, dt);
         }
 
         // PlanarMapping Private Members
@@ -266,7 +266,7 @@ namespace pbrt
         public static TextureMapping3D Create(ParameterDictionary parameters, Transform renderFromTexture, FileLoc loc,
                                               Allocator alloc)
         {
-            return new PointTransformMapping(Globals.Inverse(renderFromTexture));
+            return new PointTransformMapping(pbrt.Inverse(renderFromTexture));
         }
     }
 
@@ -278,7 +278,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ PointTransformMapping textureFromRender: %s ]", textureFromRender);
+            return pbrt.StringPrintf("[ PointTransformMapping textureFromRender: %s ]", textureFromRender);
         }
 
         public override TexCoord3D Map(TextureEvalContext ctx)
@@ -302,7 +302,7 @@ namespace pbrt
             return new FloatConstantTexture(parameters.GetOneFloat("value", 1f));
         }
 
-        public override string ToString() { return Globals.StringPrintf("[ FloatConstantTexture value: %f ]", value); }
+        public override string ToString() { return pbrt.StringPrintf("[ FloatConstantTexture value: %f ]", value); }
 
         private Float value;
     }
@@ -325,7 +325,7 @@ namespace pbrt
             Spectrum c = parameters.GetOneSpectrum("value", one, spectrumType, alloc);
             return new SpectrumConstantTexture(c);
         }
-        public override string ToString() { return Globals.StringPrintf("[ SpectrumConstantTexture value: %s ]", value); }
+        public override string ToString() { return pbrt.StringPrintf("[ SpectrumConstantTexture value: %s ]", value); }
 
         private Spectrum value;
     }
@@ -357,7 +357,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatBilerpTexture mapping: %s v00: %f v01: %f v10: %f v11: %f ]", mapping,
+            return pbrt.StringPrintf("[ FloatBilerpTexture mapping: %s v00: %f v01: %f v10: %f v11: %f ]", mapping,
                                         v00, v01, v10, v11);
         }
 
@@ -377,7 +377,7 @@ namespace pbrt
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             TexCoord2D c = mapping.Map(ctx);
-            return Globals.Bilerp(new Float[] { c.st[0], c.st[1] },
+            return pbrt.Bilerp(new Float[] { c.st[0], c.st[1] },
                                   new SampledSpectrum[] { v00.Sample(lambda), v10.Sample(lambda), v01.Sample(lambda),
                                                           v11.Sample(lambda) });
         }
@@ -399,7 +399,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumBilerpTexture mapping: %s v00: %s v01: %s v10: %s v11: %s ]", mapping,
+            return pbrt.StringPrintf("[ SpectrumBilerpTexture mapping: %s v00: %s v01: %s v10: %s v11: %s ]", mapping,
                                         v00, v01, v10, v11);
         }
 
@@ -417,7 +417,7 @@ namespace pbrt
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
-            Float w = Globals.Checkerboard(ctx, map2D, map3D);
+            Float w = pbrt.Checkerboard(ctx, map2D, map3D);
             Float t0 = 0, t1 = 0;
             if (w != 1)
                 t0 = tex[0].Evaluate(ctx);
@@ -432,7 +432,7 @@ namespace pbrt
             int dim = parameters.GetOneInt("dimension", 2);
             if (dim != 2 && dim != 3)
             {
-                Globals.Error(loc, Globals.StringPrintf("%d dimensional checkerboard texture not supported", dim));
+                pbrt.Error(loc, pbrt.StringPrintf("%d dimensional checkerboard texture not supported", dim));
                 return null;
             }
             FloatTexture tex1 = parameters.GetFloatTexture("tex1", 1f, alloc);
@@ -454,7 +454,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatCheckerboardTexture map2D: %s map3D: %s tex[0]: %s tex[1]: %s ",
+            return pbrt.StringPrintf("[ FloatCheckerboardTexture map2D: %s map3D: %s tex[0]: %s tex[1]: %s ",
                                         map2D != null ? map2D.ToString() : "(nullptr)",
                                         map3D != null ? map3D.ToString() : "(nullptr)", tex[0], tex[1]);
         }
@@ -480,7 +480,7 @@ namespace pbrt
             int dim = parameters.GetOneInt("dimension", 2);
             if (dim != 2 && dim != 3)
             {
-                Globals.Error(loc, Globals.StringPrintf("%d dimensional checkerboard texture not supported", dim));
+                pbrt.Error(loc, pbrt.StringPrintf("%d dimensional checkerboard texture not supported", dim));
                 return null;
             }
 
@@ -506,14 +506,14 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumCheckerboardTexture map2D: %s map3D: %s tex[0]: %s tex[1]: %s ",
+            return pbrt.StringPrintf("[ SpectrumCheckerboardTexture map2D: %s map3D: %s tex[0]: %s tex[1]: %s ",
                                         map2D != null ? map2D.ToString() : "(nullptr)",
                                         map3D != null ? map3D.ToString() : "(nullptr)", tex[0], tex[1]);
         }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
-            Float w = Globals.Checkerboard(ctx, map2D, map3D);
+            Float w = pbrt.Checkerboard(ctx, map2D, map3D);
             SampledSpectrum t0 = new SampledSpectrum(), t1 = new SampledSpectrum();
             if (w != 1)
                 t0 = tex[0].Evaluate(ctx, lambda);
@@ -538,7 +538,7 @@ namespace pbrt
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord2D c = mapping.Map(ctx);
-            return Globals.InsidePolkaDot(c.st) ? insideDot.Evaluate(ctx) : outsideDot.Evaluate(ctx);
+            return pbrt.InsidePolkaDot(c.st) ? insideDot.Evaluate(ctx) : outsideDot.Evaluate(ctx);
         }
 
         public static FloatDotsTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
@@ -553,7 +553,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatDotsTexture mapping: %s insideDot: %s outsideDot: %s ]", mapping, insideDot,
+            return pbrt.StringPrintf("[ FloatDotsTexture mapping: %s insideDot: %s outsideDot: %s ]", mapping, insideDot,
                                         outsideDot);
         }
 
@@ -574,7 +574,7 @@ namespace pbrt
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             TexCoord2D c = mapping.Map(ctx);
-            return Globals.InsidePolkaDot(c.st) ? insideDot.Evaluate(ctx, lambda) : outsideDot.Evaluate(ctx, lambda);
+            return pbrt.InsidePolkaDot(c.st) ? insideDot.Evaluate(ctx, lambda) : outsideDot.Evaluate(ctx, lambda);
         }
 
         public static SpectrumDotsTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
@@ -591,7 +591,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumDotsTexture mapping: %s insideDot: %s outsideDot: %s ]", mapping,
+            return pbrt.StringPrintf("[ SpectrumDotsTexture mapping: %s insideDot: %s outsideDot: %s ]", mapping,
                                         insideDot, outsideDot);
         }
 
@@ -612,7 +612,7 @@ namespace pbrt
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);
-            return Globals.FBm(c.p, c.dpdx, c.dpdy, omega, octaves);
+            return pbrt.FBm(c.p, c.dpdx, c.dpdy, omega, octaves);
         }
 
         public static FBmTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc,
@@ -625,7 +625,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FBmTexture mapping: %s omega: %f octaves: %d ]", mapping, omega, octaves);
+            return pbrt.StringPrintf("[ FBmTexture mapping: %s omega: %f octaves: %d ]", mapping, omega, octaves);
         }
 
         private TextureMapping3D mapping;
@@ -657,7 +657,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TexInfo filename: %s filterOptions: %s wrapMode: %s encoding: %s ]", filename,
+            return pbrt.StringPrintf("[ TexInfo filename: %s filterOptions: %s wrapMode: %s encoding: %s ]", filename,
                                         filterOptions, wrapMode, encoding);
         }
 
@@ -693,7 +693,7 @@ namespace pbrt
                 // This is actually ok, but if it hits, it means we've wastefully
                 // loaded this texture. (Note that in that case, should just return
                 // the one that's already in there and not replace it.)
-                Globals.CHECK(!textureCache.ContainsKey(texInfo));
+                pbrt.CHECK(!textureCache.ContainsKey(texInfo));
                 textureCache[texInfo] = mipmap;
             }
         }
@@ -737,7 +737,7 @@ namespace pbrt
         {
             b = new ImageTextureBase(m, filename, filterOptions, wm, scale, invert, encoding, alloc);
             b_mapping = m; this.filename = filename; this.scale = scale; this.invert = invert;
-            mipmap = Globals.GetImageTextureMIPMap(b);
+            mipmap = pbrt.GetImageTextureMIPMap(b);
         }
 
         public void MultiplyScale(Float s) { scale *= s; }
@@ -764,21 +764,21 @@ namespace pbrt
             string filter = parameters.GetOneString("filter", "bilinear");
             MIPMapFilterOptions filterOptions = new MIPMapFilterOptions();
             filterOptions.maxAnisotropy = maxAniso;
-            pstd.optional<FilterFunction> ff = Globals.ParseFilter(filter);
+            pstd.optional<FilterFunction> ff = pbrt.ParseFilter(filter);
             if (ff)
                 filterOptions.filter = ff.value();
             else
-                Globals.Error(loc, Globals.StringPrintf("%s: filter function unknown", filter));
+                pbrt.Error(loc, pbrt.StringPrintf("%s: filter function unknown", filter));
 
             string wrapString = parameters.GetOneString("wrap", "repeat");
-            pstd.optional<WrapMode> wrapMode = Globals.ParseWrapMode(wrapString);
+            pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrapString);
             if (!wrapMode)
-                Globals.ErrorExit(Globals.StringPrintf("%s: wrap mode unknown", wrapString));
+                pbrt.ErrorExit(pbrt.StringPrintf("%s: wrap mode unknown", wrapString));
             Float scale = parameters.GetOneFloat("scale", 1f);
             bool invert = parameters.GetOneBool("invert", false);
-            string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
 
-            string defaultEncoding = Globals.HasExtension(filename, "png") ? "sRGB" : "linear";
+            string defaultEncoding = pbrt.HasExtension(filename, "png") ? "sRGB" : "linear";
             string encodingString = parameters.GetOneString("encoding", defaultEncoding);
             ColorEncoding encoding = ColorEncoding.Get(encodingString, alloc);
 
@@ -787,7 +787,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatImageTexture filename: %s mapping: %s scale: %f invert: %s mipmap: %s ]",
+            return pbrt.StringPrintf("[ FloatImageTexture filename: %s mapping: %s scale: %f invert: %s mipmap: %s ]",
                                         filename, mapping, scale, invert, mipmap);
         }
     }
@@ -810,7 +810,7 @@ namespace pbrt
         {
             b = new ImageTextureBase(mapping, filename, filterOptions, wrapMode, scale, invert, encoding, alloc);
             this.mapping = mapping; this.filename = filename; this.scale = scale; this.invert = invert;
-            mipmap = Globals.GetImageTextureMIPMap(b);
+            mipmap = pbrt.GetImageTextureMIPMap(b);
             this.spectrumType = spectrumType;
         }
 
@@ -825,7 +825,7 @@ namespace pbrt
 
             // Lookup filtered RGB value in _MIPMap_
             RGB rgb = scale * mipmap.Filter<RGB>(c.st, new Vector2f(c.dsdx, c.dtdx), new Vector2f(c.dsdy, c.dtdy));
-            rgb = Globals.ClampZero(invert ? (new RGB(1, 1, 1) - rgb) : rgb);
+            rgb = pbrt.ClampZero(invert ? (new RGB(1, 1, 1) - rgb) : rgb);
 
             // Return _SampledSpectrum_ for RGB image texture value
             RGBColorSpace cs = mipmap.GetRGBColorSpace();
@@ -834,12 +834,12 @@ namespace pbrt
                 if (spectrumType == SpectrumType.Unbounded)
                     return new RGBUnboundedSpectrum(cs, rgb).Sample(lambda);
                 else if (spectrumType == SpectrumType.Albedo)
-                    return new RGBAlbedoSpectrum(cs, Globals.Clamp(rgb, 0, 1)).Sample(lambda);
+                    return new RGBAlbedoSpectrum(cs, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
                 else
                     return new RGBIlluminantSpectrum(cs, rgb).Sample(lambda);
             }
             // otherwise it better be a one-channel texture
-            Globals.DCHECK(rgb[0] == rgb[1] && rgb[1] == rgb[2]);
+            pbrt.DCHECK(rgb[0] == rgb[1] && rgb[1] == rgb[2]);
             return new SampledSpectrum(rgb[0]);
         }
 
@@ -854,21 +854,21 @@ namespace pbrt
             string filter = parameters.GetOneString("filter", "bilinear");
             MIPMapFilterOptions filterOptions = new MIPMapFilterOptions();
             filterOptions.maxAnisotropy = maxAniso;
-            pstd.optional<FilterFunction> ff = Globals.ParseFilter(filter);
+            pstd.optional<FilterFunction> ff = pbrt.ParseFilter(filter);
             if (ff)
                 filterOptions.filter = ff.value();
             else
-                Globals.Error(loc, Globals.StringPrintf("%s: filter function unknown", filter));
+                pbrt.Error(loc, pbrt.StringPrintf("%s: filter function unknown", filter));
 
             string wrapString = parameters.GetOneString("wrap", "repeat");
-            pstd.optional<WrapMode> wrapMode = Globals.ParseWrapMode(wrapString);
+            pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrapString);
             if (!wrapMode)
-                Globals.ErrorExit(Globals.StringPrintf("%s: wrap mode unknown", wrapString));
+                pbrt.ErrorExit(pbrt.StringPrintf("%s: wrap mode unknown", wrapString));
             Float scale = parameters.GetOneFloat("scale", 1f);
             bool invert = parameters.GetOneBool("invert", false);
-            string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
 
-            string defaultEncoding = Globals.HasExtension(filename, "png") ? "sRGB" : "linear";
+            string defaultEncoding = pbrt.HasExtension(filename, "png") ? "sRGB" : "linear";
             string encodingString = parameters.GetOneString("encoding", defaultEncoding);
             ColorEncoding encoding = ColorEncoding.Get(encodingString, alloc);
 
@@ -878,7 +878,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumImageTexture filename: %s mapping: %s scale: %f invert: %s mipmap: %s ]",
+            return pbrt.StringPrintf("[ SpectrumImageTexture filename: %s mapping: %s scale: %f invert: %s mipmap: %s ]",
                                         filename, mapping, scale, invert, mipmap);
         }
     }
@@ -902,7 +902,7 @@ namespace pbrt
         {
             TexCoord3D c = mapping.Map(ctx);
             c.p *= scale;
-            Float marble = c.p.y + variation * Globals.FBm(c.p, scale * c.dpdx, scale * c.dpdy, omega, octaves);
+            Float marble = c.p.y + variation * pbrt.FBm(c.p, scale * c.dpdx, scale * c.dpdy, omega, octaves);
             Float t = .5f + .5f * std.sin(marble);
             // Evaluate marble spline at $t$ to compute color _rgb_
             int nSeg = colors.Length - 3;
@@ -915,7 +915,7 @@ namespace pbrt
             {
                 for (int i = 0; i < 4; ++i)
                     ch[i] = colors[first + i][k];
-                rgb[k] = 1.5f * Globals.EvaluateCubicBezier(new pstd.span<Float>(ch), t);
+                rgb[k] = 1.5f * pbrt.EvaluateCubicBezier(new pstd.span<Float>(ch), t);
             }
 
             return new RGBAlbedoSpectrum(RGBColorSpace.sRGB, rgb).Sample(lambda);
@@ -923,7 +923,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MarbleTexture mapping: %s octaves: %d omega: %f scale: %f variation: %f ]",
+            return pbrt.StringPrintf("[ MarbleTexture mapping: %s octaves: %d omega: %f scale: %f variation: %f ]",
                                         mapping, octaves, omega, scale, variation);
         }
 
@@ -971,7 +971,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatMixTexture tex1: %s tex2: %s amount: %s ]", tex1, tex2, amount);
+            return pbrt.StringPrintf("[ FloatMixTexture tex1: %s tex2: %s amount: %s ]", tex1, tex2, amount);
         }
 
         private FloatTexture tex1, tex2;
@@ -989,7 +989,7 @@ namespace pbrt
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
-            Float amt = Globals.AbsDot(ctx.n, dir);
+            Float amt = pbrt.AbsDot(ctx.n, dir);
             Float t1 = 0, t2 = 0;
             if (amt != 0)
                 t1 = tex1.Evaluate(ctx);
@@ -1002,14 +1002,14 @@ namespace pbrt
                                                       FileLoc loc, Allocator alloc)
         {
             Vector3f dir = parameters.GetOneVector3f("dir", new Vector3f(0, 1, 0));
-            dir = Globals.Normalize(renderFromTexture.Apply(dir));
+            dir = pbrt.Normalize(renderFromTexture.Apply(dir));
             return new FloatDirectionMixTexture(parameters.GetFloatTexture("tex1", 0f, alloc),
                                                 parameters.GetFloatTexture("tex2", 1f, alloc), dir);
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatDirectionMixTexture tex1: %s tex2: %s dir: %s ]", tex1, tex2, dir);
+            return pbrt.StringPrintf("[ FloatDirectionMixTexture tex1: %s tex2: %s dir: %s ]", tex1, tex2, dir);
         }
 
         // FloatDirectionMixTexture Private Members
@@ -1048,7 +1048,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumMixTexture tex1: %s tex2: %s amount: %s ]", tex1, tex2, amount);
+            return pbrt.StringPrintf("[ SpectrumMixTexture tex1: %s tex2: %s amount: %s ]", tex1, tex2, amount);
         }
 
         private SpectrumTexture tex1, tex2;
@@ -1066,7 +1066,7 @@ namespace pbrt
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
-            Float amt = Globals.AbsDot(ctx.n, dir);
+            Float amt = pbrt.AbsDot(ctx.n, dir);
             SampledSpectrum t1 = new SampledSpectrum(), t2 = new SampledSpectrum();
             if (amt != 0)
                 t1 = tex1.Evaluate(ctx, lambda);
@@ -1081,14 +1081,14 @@ namespace pbrt
             Spectrum zero = new ConstantSpectrum(0f);
             Spectrum one = new ConstantSpectrum(1f);
             Vector3f dir = parameters.GetOneVector3f("dir", new Vector3f(0, 1, 0));
-            dir = Globals.Normalize(renderFromTexture.Apply(dir));
+            dir = pbrt.Normalize(renderFromTexture.Apply(dir));
             return new SpectrumDirectionMixTexture(parameters.GetSpectrumTexture("tex1", zero, spectrumType, alloc),
                                                    parameters.GetSpectrumTexture("tex2", one, spectrumType, alloc), dir);
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumDirectionMixTexture tex1: %s tex2: %s dir: %s ]", tex1, tex2, dir);
+            return pbrt.StringPrintf("[ SpectrumDirectionMixTexture tex1: %s tex2: %s dir: %s ]", tex1, tex2, dir);
         }
 
         // SpectrumDirectionMixTexture Private Members
@@ -1102,16 +1102,16 @@ namespace pbrt
         public PtexTextureBase(string filename, ColorEncoding encoding, Float scale)
         {
             this.filename = filename; this.encoding = encoding; this.scale = scale;
-            lock (Globals.ptexMutex)
+            lock (pbrt.ptexMutex)
             {
-                if (Globals.ptexCache == null)
+                if (pbrt.ptexCache == null)
                 {
                     int maxFiles = 100;
                     ulong maxMem = 1ul << 32;  // 4GB
                     bool premultiply = true;
 
-                    Globals.ptexCache = Ptex.PtexCache.create(maxFiles, maxMem, premultiply, null,
-                                                              Globals.ptexErrorHandler);
+                    pbrt.ptexCache = Ptex.PtexCache.create(maxFiles, maxMem, premultiply, null,
+                                                              pbrt.ptexErrorHandler);
                     // TODO? cache->setSearchPath(...);
                 }
             }
@@ -1120,13 +1120,13 @@ namespace pbrt
             // number of channels.
             valid = false;
             string error = "";
-            Ptex.PtexTexture texture = Globals.ptexCache.get(filename, ref error);
+            Ptex.PtexTexture texture = pbrt.ptexCache.get(filename, ref error);
             if (texture == null)
-                Globals.Error(error);
+                pbrt.Error(error);
             else
             {
                 if (texture.numChannels() != 1 && texture.numChannels() != 3)
-                    Globals.Error(Globals.StringPrintf("%s: only one and three channel ptex textures are supported", filename));
+                    pbrt.Error(pbrt.StringPrintf("%s: only one and three channel ptex textures are supported", filename));
                 else
                     valid = true;
                 texture.release();
@@ -1135,15 +1135,15 @@ namespace pbrt
 
         public static void ReportStats()
         {
-            if (Globals.ptexCache == null)
+            if (pbrt.ptexCache == null)
                 return;
 
             Ptex.PtexCache.Stats stats;
-            Globals.ptexCache.getStats(out stats);
+            pbrt.ptexCache.getStats(out stats);
 
-            Globals.nFilesAccessed += (long)stats.filesAccessed;
-            Globals.nBlockReads += (long)stats.blockReads;
-            Globals.peakMemoryUsed = std.max(Globals.peakMemoryUsed, (long)stats.peakMemUsed);
+            pbrt.nFilesAccessed += (long)stats.filesAccessed;
+            pbrt.nBlockReads += (long)stats.blockReads;
+            pbrt.peakMemoryUsed = std.max(pbrt.peakMemoryUsed, (long)stats.peakMemUsed);
         }
 
         public int SampleTexture(TextureEvalContext ctx, float* result)
@@ -1154,10 +1154,10 @@ namespace pbrt
                 return 1;
             }
 
-            ++Globals.nLookups;
+            ++pbrt.nLookups;
             string error = "";
-            Ptex.PtexTexture texture = Globals.ptexCache.get(filename, ref error);
-            Globals.CHECK(texture != null);
+            Ptex.PtexTexture texture = pbrt.ptexCache.get(filename, ref error);
+            pbrt.CHECK(texture != null);
             // TODO: make the filter an option?
             Ptex.PtexFilter.Options opts = new Ptex.PtexFilter.Options(Ptex.PtexFilter.FilterType.f_bspline);
             Ptex.PtexFilter filter = Ptex.PtexFilter.getFilter(texture, opts);
@@ -1175,7 +1175,7 @@ namespace pbrt
                 // encoding, but it's probably fine.
                 byte[] result8 = new byte[3];
                 for (int i = 0; i < nc; ++i)
-                    result8[i] = (byte)Globals.Clamp(result[i] * 255f + 0.5f, 0, 255);
+                    result8[i] = (byte)pbrt.Clamp(result[i] * 255f + 0.5f, 0, 255);
 
                 // Handle Float == double.
                 Float[] fResult = new Float[3];
@@ -1192,7 +1192,7 @@ namespace pbrt
 
         protected string BaseToString()
         {
-            return Globals.StringPrintf("valid: %s filename: %s encoding: %s scale: %f", valid, filename, encoding, scale);
+            return pbrt.StringPrintf("valid: %s filename: %s encoding: %s scale: %f", valid, filename, encoding, scale);
         }
         internal string BaseToStringInternal() { return BaseToString(); }
 
@@ -1215,19 +1215,19 @@ namespace pbrt
             int nc = b.SampleTexture(ctx, result);
             if (nc == 1)
                 return result[0];
-            Globals.DCHECK_EQ(3, nc);
+            pbrt.DCHECK_EQ(3, nc);
             return (result[0] + result[1] + result[2]) / 3;
         }
         public static FloatPtexTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc,
                                               Allocator alloc)
         {
-            string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
             string encodingString = parameters.GetOneString("encoding", "gamma 2.2");
             ColorEncoding encoding = ColorEncoding.Get(encodingString, alloc);
             Float scale = parameters.GetOneFloat("scale", 1f);
             return new FloatPtexTexture(filename, encoding, scale);
         }
-        public override string ToString() { return Globals.StringPrintf("[ FloatPtexTexture %s ]", BaseToStringPublic()); }
+        public override string ToString() { return pbrt.StringPrintf("[ FloatPtexTexture %s ]", BaseToStringPublic()); }
         private string BaseToStringPublic() { return b.BaseToStringInternal(); }
     }
 
@@ -1246,25 +1246,25 @@ namespace pbrt
             int nc = b.SampleTexture(ctx, result);
             if (nc == 1)
                 return new SampledSpectrum(result[0]);
-            Globals.DCHECK_EQ(3, nc);
+            pbrt.DCHECK_EQ(3, nc);
             RGB rgb = new RGB(result[0], result[1], result[2]);
             if (spectrumType == SpectrumType.Unbounded)
                 return new RGBUnboundedSpectrum(RGBColorSpace.sRGB, rgb).Sample(lambda);
             else if (spectrumType == SpectrumType.Albedo)
-                return new RGBAlbedoSpectrum(RGBColorSpace.sRGB, Globals.Clamp(rgb, 0, 1)).Sample(lambda);
+                return new RGBAlbedoSpectrum(RGBColorSpace.sRGB, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
             else
                 return new RGBIlluminantSpectrum(RGBColorSpace.sRGB, rgb).Sample(lambda);
         }
         public static SpectrumPtexTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
                                                  SpectrumType spectrumType, FileLoc loc, Allocator alloc)
         {
-            string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
             string encodingString = parameters.GetOneString("encoding", "gamma 2.2");
             ColorEncoding encoding = ColorEncoding.Get(encodingString, alloc);
             Float scale = parameters.GetOneFloat("scale", 1f);
             return new SpectrumPtexTexture(filename, encoding, scale, spectrumType);
         }
-        public override string ToString() { return Globals.StringPrintf("[ SpectrumPtexTexture %s ]", b.BaseToStringInternal()); }
+        public override string ToString() { return pbrt.StringPrintf("[ SpectrumPtexTexture %s ]", b.BaseToStringInternal()); }
     }
 
     // FloatScaledTexture Definition
@@ -1315,7 +1315,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FloatScaledTexture tex: %s scale: %s ]", tex, scale);
+            return pbrt.StringPrintf("[ FloatScaledTexture tex: %s scale: %s ]", tex, scale);
         }
 
         private FloatTexture tex, scale;
@@ -1362,7 +1362,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectrumScaledTexture tex: %s scale: %s ]", tex, scale);
+            return pbrt.StringPrintf("[ SpectrumScaledTexture tex: %s scale: %s ]", tex, scale);
         }
 
         private SpectrumTexture tex;
@@ -1378,8 +1378,8 @@ namespace pbrt
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);
-            Float windStrength = Globals.FBm(.1f * c.p, .1f * c.dpdx, .1f * c.dpdy, .5f, 3);
-            Float waveHeight = Globals.FBm(c.p, c.dpdx, c.dpdy, .5f, 6);
+            Float windStrength = pbrt.FBm(.1f * c.p, .1f * c.dpdx, .1f * c.dpdy, .5f, 3);
+            Float waveHeight = pbrt.FBm(c.p, c.dpdx, c.dpdy, .5f, 6);
             return std.abs(windStrength) * waveHeight;
         }
 
@@ -1391,7 +1391,7 @@ namespace pbrt
             return new WindyTexture(map);
         }
 
-        public override string ToString() { return Globals.StringPrintf("[ WindyTexture mapping: %s ]", mapping); }
+        public override string ToString() { return pbrt.StringPrintf("[ WindyTexture mapping: %s ]", mapping); }
 
         private TextureMapping3D mapping;
     }
@@ -1408,7 +1408,7 @@ namespace pbrt
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);
-            return Globals.Turbulence(c.p, c.dpdx, c.dpdy, omega, octaves);
+            return pbrt.Turbulence(c.p, c.dpdx, c.dpdy, omega, octaves);
         }
 
         public static WrinkledTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc,
@@ -1421,7 +1421,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ WrinkledTexture mapping: %s octaves: %d omega: %f ]", mapping, octaves, omega);
+            return pbrt.StringPrintf("[ WrinkledTexture mapping: %s octaves: %d omega: %f ]", mapping, octaves, omega);
         }
 
         // WrinkledTexture Private Data
@@ -1450,7 +1450,7 @@ namespace pbrt
             else if (name == "imagemap")
             {
                 if (gpu)
-                    Globals.ErrorExit(loc, "GPU image textures are not supported by this port.");
+                    pbrt.ErrorExit(loc, "GPU image textures are not supported by this port.");
                 else
                     tex = FloatImageTexture.Create(renderFromTexture, parameters, loc, alloc);
             }
@@ -1467,17 +1467,17 @@ namespace pbrt
             else if (name == "ptex")
             {
                 if (gpu)
-                    Globals.ErrorExit(loc, "GPU ptex textures are not supported by this port.");
+                    pbrt.ErrorExit(loc, "GPU ptex textures are not supported by this port.");
                 else
                     tex = FloatPtexTexture.Create(renderFromTexture, parameters, loc, alloc);
             }
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: float texture type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture type unknown.", name));
 
             if (tex == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create texture.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create texture.", name));
 
-            ++Globals.nTextures;
+            ++pbrt.nTextures;
 
             parameters.ReportUnused();
             return tex;
@@ -1503,7 +1503,7 @@ namespace pbrt
             else if (name == "imagemap")
             {
                 if (gpu)
-                    Globals.ErrorExit(loc, "GPU image textures are not supported by this port.");
+                    pbrt.ErrorExit(loc, "GPU image textures are not supported by this port.");
                 else
                     tex = SpectrumImageTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             }
@@ -1516,17 +1516,17 @@ namespace pbrt
             else if (name == "ptex")
             {
                 if (gpu)
-                    Globals.ErrorExit(loc, "GPU ptex textures are not supported by this port.");
+                    pbrt.ErrorExit(loc, "GPU ptex textures are not supported by this port.");
                 else
                     tex = SpectrumPtexTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             }
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: spectrum texture type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: spectrum texture type unknown.", name));
 
             if (tex == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create texture.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create texture.", name));
 
-            ++Globals.nTextures;
+            ++pbrt.nTextures;
 
             parameters.ReportUnused();
 
@@ -1583,7 +1583,7 @@ namespace pbrt
             else
             {
                 if (tex != null)
-                    Globals.LOG_FATAL("BasicTextureEvaluator::operator() called with " + tex.ToString());
+                    pbrt.LOG_FATAL("BasicTextureEvaluator::operator() called with " + tex.ToString());
                 return 0f;
             }
         }
@@ -1597,13 +1597,13 @@ namespace pbrt
             else
             {
                 if (tex != null)
-                    Globals.LOG_FATAL("BasicTextureEvaluator::operator() called with " + tex.ToString());
+                    pbrt.LOG_FATAL("BasicTextureEvaluator::operator() called with " + tex.ToString());
                 return new SampledSpectrum(0f);
             }
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // static std::mutex ptexMutex; static Ptex::PtexCache *cache;
         internal static readonly object ptexMutex = new object();
@@ -1657,7 +1657,7 @@ namespace pbrt
         // struct : public PtexErrorHandler { void reportError(const char *error) override { Error("%s", error); } } errorHandler;
         private sealed class PtexErrorHandlerImpl : Ptex.PtexErrorHandler
         {
-            public override void reportError(string error) { Globals.Error(error); }
+            public override void reportError(string error) { pbrt.Error(error); }
         }
         internal static readonly Ptex.PtexErrorHandler ptexErrorHandler = new PtexErrorHandlerImpl();
 

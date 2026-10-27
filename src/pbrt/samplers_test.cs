@@ -142,7 +142,7 @@ namespace pbrt
             foreach (int seed in new int[] { 0, 1, 5, 6, 10, 15 })
                 foreach (RandomizeStrategy rand in new RandomizeStrategy[] { RandomizeStrategy.None, RandomizeStrategy.PermuteDigits })
                     for (int logSamples = 2; logSamples <= 8; ++logSamples)
-                        checkElementarySampler(StringPrintf("ZSobolSampler - %s - %d", Globals.ToString(rand), seed),
+                        checkElementarySampler(StringPrintf("ZSobolSampler - %s - %d", pbrt.ToString(rand), seed),
                                                new ZSobolSampler(1 << logSamples, new Point2i(10, 10), rand, seed),
                                                logSamples, 10);
         }

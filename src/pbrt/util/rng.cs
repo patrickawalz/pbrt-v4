@@ -12,7 +12,7 @@ using System.Runtime.CompilerServices;
 namespace pbrt
 {
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         // Random Number Declarations
         public const ulong PCG32_DEFAULT_STATE = 0x853c49e6748fea9bUL;

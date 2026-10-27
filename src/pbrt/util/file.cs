@@ -10,7 +10,7 @@ using System.Text;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         private static string searchDirectory = "";
 

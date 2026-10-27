@@ -171,7 +171,7 @@ namespace testing
         public static void EXPECT_DEATH(Action statement, string regex, [CallerFilePath] string f = "", [CallerLineNumber] int l = 0)
         {
             try { statement(); }
-            catch (pbrt.FatalException ex)
+            catch (global::pbrt.FatalException ex)
             {
                 if (!Regex.IsMatch(ex.Message, regex, RegexOptions.Singleline))
                     Fail(false, f, l, "Death test: message did not match \"" + regex + "\"\n  Actual msg: " + ex.Message);

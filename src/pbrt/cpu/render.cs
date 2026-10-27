@@ -9,7 +9,7 @@ using System.Collections.Generic;
 namespace pbrt
 {
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static void RenderCPU(BasicScene parsedScene)
         {

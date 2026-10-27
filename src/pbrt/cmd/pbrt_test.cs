@@ -16,7 +16,7 @@ global using uint64_t = System.UInt64;
 global using size_t = System.UInt64;
 global using ptrdiff_t = System.Int64;
 global using uintptr_t = System.UInt64;
-global using static pbrt.Globals;
+global using static global::pbrt.pbrt;
 global using static testing.Gtest;
 
 // pbrt_test.cpp

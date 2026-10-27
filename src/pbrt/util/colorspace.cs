@@ -141,7 +141,7 @@ namespace pbrt
         private RGBToSpectrumTable rgbToSpectrumTable;
     }
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         public static SquareMatrix3 ConvertRGBColorSpace(RGBColorSpace from, RGBColorSpace to)
         {

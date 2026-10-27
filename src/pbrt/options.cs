@@ -69,7 +69,7 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static string ToString(RenderingCoordinateSystem r)
         {

@@ -15,7 +15,7 @@ namespace pbrt
         public ShapeSample(Interaction intr, Float pdf) { this.intr = intr; this.pdf = pdf; }
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ShapeSample intr: %s pdf: %f ]", intr, pdf);
+            return pbrt.StringPrintf("[ ShapeSample intr: %s pdf: %f ]", intr, pdf);
         }
 
         public Interaction intr;
@@ -45,9 +45,9 @@ namespace pbrt
         public Point3f OffsetRayOrigin(Vector3f w)
         {
             // Find vector _offset_ to corner of error bounds and compute initial _po_
-            Float d = Globals.Dot(Globals.Abs(n), pi.Error());
+            Float d = pbrt.Dot(pbrt.Abs(n), pi.Error());
             Vector3f offset = d * (Vector3f)n;
-            if (Globals.Dot(w, n) < 0)
+            if (pbrt.Dot(w, n) < 0)
                 offset = -offset;
             Point3f po = (Point3f)pi + offset;
 
@@ -55,9 +55,9 @@ namespace pbrt
             for (int i = 0; i < 3; ++i)
             {
                 if (offset[i] > 0)
-                    po[i] = Globals.NextFloatUp(po[i]);
+                    po[i] = pbrt.NextFloatUp(po[i]);
                 else if (offset[i] < 0)
-                    po[i] = Globals.NextFloatDown(po[i]);
+                    po[i] = pbrt.NextFloatDown(po[i]);
             }
 
             return po;
@@ -83,7 +83,7 @@ namespace pbrt
         public ShapeIntersection(SurfaceInteraction intr, Float tHit) { this.intr = intr; this.tHit = tHit; }
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ShapeIntersection intr: %s tHit: %f ]", intr, tHit);
+            return pbrt.StringPrintf("[ ShapeIntersection intr: %s tHit: %f ]", intr, tHit);
         }
 
         public SurfaceInteraction intr;
@@ -108,15 +108,15 @@ namespace pbrt
         // DifferenceOfProducts for vector/normal types, componentwise as in pbrt's templates
         public static Vector3f DifferenceOfProducts(Float a, Vector3f b, Float c, Vector3f d)
         {
-            return new Vector3f(Globals.DifferenceOfProducts(a, b.x, c, d.x),
-                                Globals.DifferenceOfProducts(a, b.y, c, d.y),
-                                Globals.DifferenceOfProducts(a, b.z, c, d.z));
+            return new Vector3f(pbrt.DifferenceOfProducts(a, b.x, c, d.x),
+                                pbrt.DifferenceOfProducts(a, b.y, c, d.y),
+                                pbrt.DifferenceOfProducts(a, b.z, c, d.z));
         }
         public static Normal3f DifferenceOfProducts(Float a, Normal3f b, Float c, Normal3f d)
         {
-            return new Normal3f(Globals.DifferenceOfProducts(a, b.x, c, d.x),
-                                Globals.DifferenceOfProducts(a, b.y, c, d.y),
-                                Globals.DifferenceOfProducts(a, b.z, c, d.z));
+            return new Normal3f(pbrt.DifferenceOfProducts(a, b.x, c, d.x),
+                                pbrt.DifferenceOfProducts(a, b.y, c, d.y),
+                                pbrt.DifferenceOfProducts(a, b.z, c, d.z));
         }
 
         // Common area-sampling to solid-angle conversion used by several shapes
@@ -124,17 +124,17 @@ namespace pbrt
         {
             // Sample shape by area and compute incident direction _wi_
             pstd.optional<ShapeSample> ss = shape.Sample(u);
-            Globals.DCHECK(ss);
+            pbrt.DCHECK(ss);
             ss.Ref().intr.time = ctx.time;
             Vector3f wi = ss.value().intr.p() - ctx.p();
-            if (Globals.LengthSquared(wi) == 0)
+            if (pbrt.LengthSquared(wi) == 0)
                 return default;
-            wi = Globals.Normalize(wi);
+            wi = pbrt.Normalize(wi);
 
             // Convert area sampling PDF in _ss_ to solid angle measure
-            ss.Ref().pdf /= Globals.AbsDot(ss.value().intr.n, -wi) /
-                            Globals.DistanceSquared(ctx.p(), ss.value().intr.p());
-            if (Globals.IsInf(ss.value().pdf))
+            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) /
+                            pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+            if (pbrt.IsInf(ss.value().pdf))
                 return default;
             return ss;
         }
@@ -148,9 +148,9 @@ namespace pbrt
                 return 0;
 
             // Compute PDF in solid angle measure from shape intersection point
-            Float pdf = (1 / shape.Area()) / (Globals.AbsDot(isect.value().intr.n, -wi) /
-                                              Globals.DistanceSquared(ctx.p(), isect.value().intr.p()));
-            if (Globals.IsInf(pdf))
+            Float pdf = (1 / shape.Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+                                              pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
+            if (pbrt.IsInf(pdf))
                 pdf = 0;
             return pdf;
         }
@@ -168,11 +168,11 @@ namespace pbrt
             this.reverseOrientation = reverseOrientation;
             this.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             this.radius = radius;
-            this.zMin = Globals.Clamp(std.min(zMin, zMax), -radius, radius);
-            this.zMax = Globals.Clamp(std.max(zMin, zMax), -radius, radius);
-            this.thetaZMin = std.acos(Globals.Clamp(std.min(zMin, zMax) / radius, -1, 1));
-            this.thetaZMax = std.acos(Globals.Clamp(std.max(zMin, zMax) / radius, -1, 1));
-            this.phiMax = Globals.Radians(Globals.Clamp(phiMax, 0, 360));
+            this.zMin = pbrt.Clamp(std.min(zMin, zMax), -radius, radius);
+            this.zMax = pbrt.Clamp(std.max(zMin, zMax), -radius, radius);
+            this.thetaZMin = std.acos(pbrt.Clamp(std.min(zMin, zMax) / radius, -1, 1));
+            this.thetaZMax = std.acos(pbrt.Clamp(std.max(zMin, zMax) / radius, -1, 1));
+            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
         }
 
         public static Sphere Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
@@ -187,7 +187,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ Sphere renderFromObject: %s " +
+            return pbrt.StringPrintf("[ Sphere renderFromObject: %s " +
                                         "objectFromRender: %s reverseOrientation: %s " +
                                         "transformSwapsHandedness: %s radius: %f zMin: %f " +
                                         "zMax: %f thetaMin: %f " +
@@ -225,20 +225,20 @@ namespace pbrt
             // Solve quadratic equation to compute sphere _t0_ and _t1_
             Interval t0, t1;
             // Compute sphere quadratic coefficients
-            Interval a = Globals.Sqr(di.x) + Globals.Sqr(di.y) + Globals.Sqr(di.z);
+            Interval a = pbrt.Sqr(di.x) + pbrt.Sqr(di.y) + pbrt.Sqr(di.z);
             Interval b = 2 * (di.x * oi.x + di.y * oi.y + di.z * oi.z);
-            Interval c = Globals.Sqr(oi.x) + Globals.Sqr(oi.y) + Globals.Sqr(oi.z) - Globals.Sqr(new Interval(radius));
+            Interval c = pbrt.Sqr(oi.x) + pbrt.Sqr(oi.y) + pbrt.Sqr(oi.z) - pbrt.Sqr(new Interval(radius));
 
             // Compute sphere quadratic discriminant _discrim_
             Interval f = b / (2 * a);
             Vector3fi v = new Vector3fi(oi.x - f * di.x, oi.y - f * di.y, oi.z - f * di.z);
-            Interval length = Globals.Length(v);
+            Interval length = pbrt.Length(v);
             Interval discrim = 4 * a * (new Interval(radius) + length) * (new Interval(radius) - length);
             if (discrim.LowerBound() < 0)
                 return default;
 
             // Compute quadratic $t$ values
-            Interval rootDiscrim = Globals.Sqrt(discrim);
+            Interval rootDiscrim = pbrt.Sqrt(discrim);
             Interval q;
             if ((Float)b < 0)
                 q = -.5f * (b - rootDiscrim);
@@ -266,7 +266,7 @@ namespace pbrt
             // Compute sphere hit position and $\phi$
             pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
             // Refine sphere intersection point
-            pHit *= radius / Globals.Distance(pHit, new Point3f(0, 0, 0));
+            pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
 
             if (pHit.x == 0 && pHit.y == 0)
                 pHit.x = 1e-5f * radius;
@@ -285,7 +285,7 @@ namespace pbrt
                 // Compute sphere hit position and $\phi$
                 pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
                 // Refine sphere intersection point
-                pHit *= radius / Globals.Distance(pHit, new Point3f(0, 0, 0));
+                pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
 
                 if (pHit.x == 0 && pHit.y == 0)
                     pHit.x = 1e-5f * radius;
@@ -310,33 +310,33 @@ namespace pbrt
             // Find parametric representation of sphere hit
             Float u = phi / phiMax;
             Float cosTheta = pHit.z / radius;
-            Float theta = Globals.SafeACos(cosTheta);
+            Float theta = pbrt.SafeACos(cosTheta);
             Float v = (theta - thetaZMin) / (thetaZMax - thetaZMin);
             // Compute sphere $\dpdu$ and $\dpdv$
-            Float zRadius = std.sqrt(Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y));
+            Float zRadius = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
             Float cosPhi = pHit.x / zRadius, sinPhi = pHit.y / zRadius;
             Vector3f dpdu = new Vector3f(-phiMax * pHit.y, phiMax * pHit.x, 0);
-            Float sinTheta = Globals.SafeSqrt(1 - Globals.Sqr(cosTheta));
+            Float sinTheta = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta));
             Vector3f dpdv = (thetaZMax - thetaZMin) *
                             new Vector3f(pHit.z * cosPhi, pHit.z * sinPhi, -radius * sinTheta);
 
             // Compute sphere $\dndu$ and $\dndv$
             Vector3f d2Pduu = -phiMax * phiMax * new Vector3f(pHit.x, pHit.y, 0);
             Vector3f d2Pduv = (thetaZMax - thetaZMin) * pHit.z * phiMax * new Vector3f(-sinPhi, cosPhi, 0.0f);
-            Vector3f d2Pdvv = -Globals.Sqr(thetaZMax - thetaZMin) * new Vector3f(pHit.x, pHit.y, pHit.z);
+            Vector3f d2Pdvv = -pbrt.Sqr(thetaZMax - thetaZMin) * new Vector3f(pHit.x, pHit.y, pHit.z);
             // Compute coefficients for fundamental forms
-            Float E = Globals.Dot(dpdu, dpdu), F = Globals.Dot(dpdu, dpdv), G = Globals.Dot(dpdv, dpdv);
-            Vector3f n = Globals.Normalize(Globals.Cross(dpdu, dpdv));
-            Float e = Globals.Dot(n, d2Pduu), f = Globals.Dot(n, d2Pduv), g = Globals.Dot(n, d2Pdvv);
+            Float E = pbrt.Dot(dpdu, dpdu), F = pbrt.Dot(dpdu, dpdv), G = pbrt.Dot(dpdv, dpdv);
+            Vector3f n = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
+            Float e = pbrt.Dot(n, d2Pduu), f = pbrt.Dot(n, d2Pduv), g = pbrt.Dot(n, d2Pdvv);
 
             // Compute $\dndu$ and $\dndv$ from fundamental form coefficients
-            Float EGF2 = Globals.DifferenceOfProducts(E, G, F, F);
+            Float EGF2 = pbrt.DifferenceOfProducts(E, G, F, F);
             Float invEGF2 = (EGF2 == 0) ? (Float)0 : 1 / EGF2;
             Normal3f dndu = (Normal3f)((f * F - e * G) * invEGF2 * dpdu + (e * F - f * E) * invEGF2 * dpdv);
             Normal3f dndv = (Normal3f)((g * F - f * G) * invEGF2 * dpdu + (f * F - g * E) * invEGF2 * dpdv);
 
             // Compute error bounds for sphere intersection
-            Vector3f pError = Globals.gamma(5) * Globals.Abs((Vector3f)pHit);
+            Vector3f pError = pbrt.gamma(5) * pbrt.Abs((Vector3f)pHit);
 
             // Return _SurfaceInteraction_ for quadric intersection
             bool flipNormal = reverseOrientation ^ transformSwapsHandedness;
@@ -349,18 +349,18 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            Point3f pObj = new Point3f(0, 0, 0) + radius * Globals.SampleUniformSphere(u);
+            Point3f pObj = new Point3f(0, 0, 0) + radius * pbrt.SampleUniformSphere(u);
             // Reproject _pObj_ to sphere surface and compute _pObjError_
-            pObj *= radius / Globals.Distance(pObj, new Point3f(0, 0, 0));
-            Vector3f pObjError = Globals.gamma(5) * Globals.Abs((Vector3f)pObj);
+            pObj *= radius / pbrt.Distance(pObj, new Point3f(0, 0, 0));
+            Vector3f pObjError = pbrt.gamma(5) * pbrt.Abs((Vector3f)pObj);
             // Compute surface normal for sphere sample and return _ShapeSample_
             Normal3f nObj = new Normal3f(pObj.x, pObj.y, pObj.z);
-            Normal3f n = Globals.Normalize(renderFromObject.Apply(nObj));
+            Normal3f n = pbrt.Normalize(renderFromObject.Apply(nObj));
             if (reverseOrientation)
                 n *= -1;
 
             // Compute $(u,v)$ coordinates for sphere sample
-            Float theta = Globals.SafeACos(pObj.z / radius);
+            Float theta = pbrt.SafeACos(pObj.z / radius);
             Float phi = std.atan2(pObj.y, pObj.x);
             if (phi < 0)
                 phi += 2 * Pi;
@@ -377,19 +377,19 @@ namespace pbrt
             // Sample uniformly on sphere if $\pt{}$ is inside it
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
-            if (Globals.DistanceSquared(pOrigin, pCenter) <= Globals.Sqr(radius))
+            if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
                 return ShapeUtil.SampleByArea(this, ctx, u);
 
             // Sample sphere uniformly inside subtended cone
             // Compute quantities related to the $\theta_\roman{max}$ for cone
-            Float sinThetaMax = radius / Globals.Distance(ctx.p(), pCenter);
-            Float sin2ThetaMax = Globals.Sqr(sinThetaMax);
-            Float cosThetaMax = Globals.SafeSqrt(1 - sin2ThetaMax);
+            Float sinThetaMax = radius / pbrt.Distance(ctx.p(), pCenter);
+            Float sin2ThetaMax = pbrt.Sqr(sinThetaMax);
+            Float cosThetaMax = pbrt.SafeSqrt(1 - sin2ThetaMax);
             Float oneMinusCosThetaMax = 1 - cosThetaMax;
 
             // Compute $\theta$ and $\phi$ values for sample in cone
             Float cosTheta = (cosThetaMax - 1) * u[0] + 1;
-            Float sin2Theta = 1 - Globals.Sqr(cosTheta);
+            Float sin2Theta = 1 - pbrt.Sqr(cosTheta);
             if (sin2ThetaMax < 0.00068523f /* sin^2(1.5 deg) */)
             {
                 // Compute cone sample via Taylor series expansion for small angles
@@ -400,13 +400,13 @@ namespace pbrt
 
             // Compute angle $\alpha$ from center of sphere to sampled point on surface
             Float cosAlpha = sin2Theta / sinThetaMax +
-                             cosTheta * Globals.SafeSqrt(1 - sin2Theta / Globals.Sqr(sinThetaMax));
-            Float sinAlpha = Globals.SafeSqrt(1 - Globals.Sqr(cosAlpha));
+                             cosTheta * pbrt.SafeSqrt(1 - sin2Theta / pbrt.Sqr(sinThetaMax));
+            Float sinAlpha = pbrt.SafeSqrt(1 - pbrt.Sqr(cosAlpha));
 
             // Compute surface normal and sampled point on sphere
             Float phi = u[1] * 2 * Pi;
-            Vector3f w = Globals.SphericalDirection(sinAlpha, cosAlpha, phi);
-            Frame samplingFrame = Frame.FromZ(Globals.Normalize(pCenter - ctx.p()));
+            Vector3f w = pbrt.SphericalDirection(sinAlpha, cosAlpha, phi);
+            Frame samplingFrame = Frame.FromZ(pbrt.Normalize(pCenter - ctx.p()));
             Normal3f n = (Normal3f)samplingFrame.FromLocal(-w);
             Point3f p = pCenter + radius * new Point3f(n.x, n.y, n.z);
             if (reverseOrientation)
@@ -414,17 +414,17 @@ namespace pbrt
 
             // Return _ShapeSample_ for sampled point on sphere
             // Compute _pError_ for sampled point on sphere
-            Vector3f pError = Globals.gamma(5) * Globals.Abs((Vector3f)p);
+            Vector3f pError = pbrt.gamma(5) * pbrt.Abs((Vector3f)p);
 
             // Compute $(u,v)$ coordinates for sampled point on sphere
             Point3f pObj = objectFromRender.Apply(p);
-            Float theta = Globals.SafeACos(pObj.z / radius);
+            Float theta = pbrt.SafeACos(pObj.z / radius);
             Float spherePhi = std.atan2(pObj.y, pObj.x);
             if (spherePhi < 0)
                 spherePhi += 2 * Pi;
             Point2f uv = new Point2f(spherePhi / phiMax, (theta - thetaZMin) / (thetaZMax - thetaZMin));
 
-            Globals.DCHECK_NE(oneMinusCosThetaMax, 0);  // very small far away sphere
+            pbrt.DCHECK_NE(oneMinusCosThetaMax, 0);  // very small far away sphere
             return new ShapeSample(new Interaction(new Point3fi(p, pError), n, ctx.time, uv),
                                    1 / (2 * Pi * oneMinusCosThetaMax));
         }
@@ -433,12 +433,12 @@ namespace pbrt
         {
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
-            if (Globals.DistanceSquared(pOrigin, pCenter) <= Globals.Sqr(radius))
+            if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
                 return ShapeUtil.PDFByArea(this, ctx, wi);  // Return solid angle PDF for point inside sphere
 
             // Compute general solid angle sphere PDF
-            Float sin2ThetaMax = radius * radius / Globals.DistanceSquared(ctx.p(), pCenter);
-            Float cosThetaMax = Globals.SafeSqrt(1 - sin2ThetaMax);
+            Float sin2ThetaMax = radius * radius / pbrt.DistanceSquared(ctx.p(), pCenter);
+            Float cosThetaMax = pbrt.SafeSqrt(1 - sin2ThetaMax);
             Float oneMinusCosThetaMax = 1 - cosThetaMax;
             // Compute more accurate _oneMinusCosThetaMax_ for small solid angle
             if (sin2ThetaMax < 0.00068523f /* sin^2(1.5 deg) */)
@@ -469,7 +469,7 @@ namespace pbrt
             this.height = height;
             this.radius = radius;
             this.innerRadius = innerRadius;
-            this.phiMax = Globals.Radians(Globals.Clamp(phiMax, 0, 360));
+            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
         }
 
         public static Disk Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
@@ -484,7 +484,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ Disk renderFromObject: %s objectFromRender: %s " +
                 "reverseOrientation: %s " +
                 "transformSwapsHandedness: %s height: %f radius: %f innerRadius: %f " +
@@ -493,7 +493,7 @@ namespace pbrt
                 transformSwapsHandedness, height, radius, innerRadius, phiMax);
         }
 
-        public override Float Area() { return phiMax * 0.5f * (Globals.Sqr(radius) - Globals.Sqr(innerRadius)); }
+        public override Float Area() { return phiMax * 0.5f * (pbrt.Sqr(radius) - pbrt.Sqr(innerRadius)); }
 
         public override Bounds3f Bounds()
         {
@@ -535,8 +535,8 @@ namespace pbrt
 
             // See if hit point is inside disk radii and $\phimax$
             Point3f pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
-            Float dist2 = Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y);
-            if (dist2 > Globals.Sqr(radius) || dist2 < Globals.Sqr(innerRadius))
+            Float dist2 = pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y);
+            if (dist2 > pbrt.Sqr(radius) || dist2 < pbrt.Sqr(innerRadius))
                 return default;
             // Test disk $\phi$ value against $\phimax$
             Float phi = std.atan2(pHit.y, pHit.x);
@@ -555,7 +555,7 @@ namespace pbrt
             Float phi = isect.phi;
             // Find parametric representation of disk hit
             Float u = phi / phiMax;
-            Float rHit = std.sqrt(Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y));
+            Float rHit = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
             Float v = (radius - rHit) / (radius - innerRadius);
             Vector3f dpdu = new Vector3f(-phiMax * pHit.y, phiMax * pHit.x, 0);
             Vector3f dpdv = new Vector3f(pHit.x, pHit.y, 0) * (innerRadius - radius) / rHit;
@@ -578,17 +578,17 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            Point2f pd = Globals.SampleUniformDiskConcentric(u);
+            Point2f pd = pbrt.SampleUniformDiskConcentric(u);
             Point3f pObj = new Point3f(pd.x * radius, pd.y * radius, height);
             Point3fi pi = renderFromObject.Apply(new Point3fi(pObj));
-            Normal3f n = Globals.Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
+            Normal3f n = pbrt.Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
             if (reverseOrientation)
                 n *= -1;
             // Compute $(u,v)$ for sampled point on disk
             Float phi = std.atan2(pd.y, pd.x);
             if (phi < 0)
                 phi += 2 * Pi;
-            Float radiusSample = std.sqrt(Globals.Sqr(pObj.x) + Globals.Sqr(pObj.y));
+            Float radiusSample = std.sqrt(pbrt.Sqr(pObj.x) + pbrt.Sqr(pObj.y));
             Point2f uv = new Point2f(phi / phiMax, (radius - radiusSample) / (radius - innerRadius));
             return new ShapeSample(new Interaction(pi, n, uv), 1 / Area());
         }
@@ -622,7 +622,7 @@ namespace pbrt
             this.radius = radius;
             this.zMin = std.min(zMin, zMax);
             this.zMax = std.max(zMin, zMax);
-            this.phiMax = Globals.Radians(Globals.Clamp(phiMax, 0, 360));
+            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
         }
 
         public static Cylinder Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
@@ -643,7 +643,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ Cylinder renderFromObject: %s objectFromRender: %s " +
+            return pbrt.StringPrintf("[ Cylinder renderFromObject: %s objectFromRender: %s " +
                                         "reverseOrientation: %s " +
                                         "transformSwapsHandedness: %s radius: %f zMin: %f zMax: %f " +
                                         "phiMax: %f ]",
@@ -675,20 +675,20 @@ namespace pbrt
             // Solve quadratic equation to find cylinder _t0_ and _t1_ values
             Interval t0, t1;
             // Compute cylinder quadratic coefficients
-            Interval a = Globals.Sqr(di.x) + Globals.Sqr(di.y);
+            Interval a = pbrt.Sqr(di.x) + pbrt.Sqr(di.y);
             Interval b = 2 * (di.x * oi.x + di.y * oi.y);
-            Interval c = Globals.Sqr(oi.x) + Globals.Sqr(oi.y) - Globals.Sqr(new Interval(radius));
+            Interval c = pbrt.Sqr(oi.x) + pbrt.Sqr(oi.y) - pbrt.Sqr(new Interval(radius));
 
             // Compute cylinder quadratic discriminant _discrim_
             Interval f = b / (2 * a);
             Interval vx = oi.x - f * di.x, vy = oi.y - f * di.y;
-            Interval length = Globals.Sqrt(Globals.Sqr(vx) + Globals.Sqr(vy));
+            Interval length = pbrt.Sqrt(pbrt.Sqr(vx) + pbrt.Sqr(vy));
             Interval discrim = 4 * a * (new Interval(radius) + length) * (new Interval(radius) - length);
             if (discrim.LowerBound() < 0)
                 return default;
 
             // Compute quadratic $t$ values
-            Interval rootDiscrim = Globals.Sqrt(discrim);
+            Interval rootDiscrim = pbrt.Sqrt(discrim);
             Interval q;
             if ((Float)b < 0)
                 q = -.5f * (b - rootDiscrim);
@@ -716,7 +716,7 @@ namespace pbrt
             // Compute cylinder hit point and $\phi$
             pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
             // Refine cylinder intersection point
-            Float hitRad = std.sqrt(Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y));
+            Float hitRad = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
             pHit.x *= radius / hitRad;
             pHit.y *= radius / hitRad;
 
@@ -735,7 +735,7 @@ namespace pbrt
                 // Compute cylinder hit point and $\phi$
                 pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
                 // Refine cylinder intersection point
-                Float hitRad2 = std.sqrt(Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y));
+                Float hitRad2 = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
                 pHit.x *= radius / hitRad2;
                 pHit.y *= radius / hitRad2;
 
@@ -768,18 +768,18 @@ namespace pbrt
             Vector3f d2Pduu = -phiMax * phiMax * new Vector3f(pHit.x, pHit.y, 0);
             Vector3f d2Pduv = new Vector3f(0, 0, 0), d2Pdvv = new Vector3f(0, 0, 0);
             // Compute coefficients for fundamental forms
-            Float E = Globals.Dot(dpdu, dpdu), F = Globals.Dot(dpdu, dpdv), G = Globals.Dot(dpdv, dpdv);
-            Vector3f n = Globals.Normalize(Globals.Cross(dpdu, dpdv));
-            Float e = Globals.Dot(n, d2Pduu), f = Globals.Dot(n, d2Pduv), g = Globals.Dot(n, d2Pdvv);
+            Float E = pbrt.Dot(dpdu, dpdu), F = pbrt.Dot(dpdu, dpdv), G = pbrt.Dot(dpdv, dpdv);
+            Vector3f n = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
+            Float e = pbrt.Dot(n, d2Pduu), f = pbrt.Dot(n, d2Pduv), g = pbrt.Dot(n, d2Pdvv);
 
             // Compute $\dndu$ and $\dndv$ from fundamental form coefficients
-            Float EGF2 = Globals.DifferenceOfProducts(E, G, F, F);
+            Float EGF2 = pbrt.DifferenceOfProducts(E, G, F, F);
             Float invEGF2 = (EGF2 == 0) ? (Float)0 : 1 / EGF2;
             Normal3f dndu = (Normal3f)((f * F - e * G) * invEGF2 * dpdu + (e * F - f * E) * invEGF2 * dpdv);
             Normal3f dndv = (Normal3f)((g * F - f * G) * invEGF2 * dpdu + (f * F - g * E) * invEGF2 * dpdv);
 
             // Compute error bounds for cylinder intersection
-            Vector3f pError = Globals.gamma(3) * Globals.Abs(new Vector3f(pHit.x, pHit.y, 0));
+            Vector3f pError = pbrt.gamma(3) * pbrt.Abs(new Vector3f(pHit.x, pHit.y, 0));
 
             // Return _SurfaceInteraction_ for quadric intersection
             bool flipNormal = reverseOrientation ^ transformSwapsHandedness;
@@ -790,18 +790,18 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            Float z = Globals.Lerp(u[0], zMin, zMax);
+            Float z = pbrt.Lerp(u[0], zMin, zMax);
             Float phi = u[1] * phiMax;
             // Compute cylinder sample position _pi_ and normal _n_ from $z$ and $\phi$
             Point3f pObj = new Point3f(radius * std.cos(phi), radius * std.sin(phi), z);
             // Reproject _pObj_ to cylinder surface and compute _pObjError_
-            Float hitRad = std.sqrt(Globals.Sqr(pObj.x) + Globals.Sqr(pObj.y));
+            Float hitRad = std.sqrt(pbrt.Sqr(pObj.x) + pbrt.Sqr(pObj.y));
             pObj.x *= radius / hitRad;
             pObj.y *= radius / hitRad;
-            Vector3f pObjError = Globals.gamma(3) * Globals.Abs(new Vector3f(pObj.x, pObj.y, 0));
+            Vector3f pObjError = pbrt.gamma(3) * pbrt.Abs(new Vector3f(pObj.x, pObj.y, 0));
 
             Point3fi pi = renderFromObject.Apply(new Point3fi(pObj, pObjError));
-            Normal3f n = Globals.Normalize(renderFromObject.Apply(new Normal3f(pObj.x, pObj.y, 0)));
+            Normal3f n = pbrt.Normalize(renderFromObject.Apply(new Normal3f(pObj.x, pObj.y, 0)));
             if (reverseOrientation)
                 n *= -1;
             // Compute $(u,v)$ for cylinder sample
@@ -830,7 +830,7 @@ namespace pbrt
         public TriangleIntersection(Float b0, Float b1, Float b2, Float t) { this.b0 = b0; this.b1 = b1; this.b2 = b2; this.t = t; }
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TriangleIntersection b0: %f b1: %f b2: %f t: %f ]", b0, b1, b2, t);
+            return pbrt.StringPrintf("[ TriangleIntersection b0: %f b1: %f b2: %f t: %f ]", b0, b1, b2, t);
         }
 
         public Float b0, b1, b2;
@@ -870,7 +870,7 @@ namespace pbrt
             int meshIndex;
             lock (allMeshesLock)
             {
-                Globals.CHECK_LT(allMeshes.Count, 1 << 30);
+                pbrt.CHECK_LT(allMeshes.Count, 1 << 30);
                 meshIndex = allMeshes.Count;
                 allMeshes.Add(mesh);
             }
@@ -891,7 +891,7 @@ namespace pbrt
             int v0 = mesh.vertexIndices[3 * triIndex], v1 = mesh.vertexIndices[3 * triIndex + 1],
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
-            return Globals.Union(new Bounds3f(p0, p1), p2);
+            return pbrt.Union(new Bounds3f(p0, p1), p2);
         }
 
         public override Float Area()
@@ -901,7 +901,7 @@ namespace pbrt
             int v0 = mesh.vertexIndices[3 * triIndex], v1 = mesh.vertexIndices[3 * triIndex + 1],
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
-            return 0.5f * Globals.Length(Globals.Cross(p1 - p0, p2 - p0));
+            return 0.5f * pbrt.Length(pbrt.Cross(p1 - p0, p2 - p0));
         }
 
         public override DirectionCone NormalBounds()
@@ -912,12 +912,12 @@ namespace pbrt
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
 
-            Normal3f n = Globals.Normalize((Normal3f)Globals.Cross(p1 - p0, p2 - p0));
+            Normal3f n = pbrt.Normalize((Normal3f)pbrt.Cross(p1 - p0, p2 - p0));
             // Ensure correct orientation of geometric normal for normal bounds
             if (mesh.n != null)
             {
                 Normal3f ns = mesh.n[v0] + mesh.n[v1] + mesh.n[v2];
-                n = Globals.FaceForward(n, ns);
+                n = pbrt.FaceForward(n, ns);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n *= -1;
@@ -934,7 +934,7 @@ namespace pbrt
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
 
-            pstd.optional<TriangleIntersection> triIsect = Globals.IntersectTriangle(ray, tMax, p0, p1, p2);
+            pstd.optional<TriangleIntersection> triIsect = pbrt.IntersectTriangle(ray, tMax, p0, p1, p2);
             if (!triIsect)
                 return default;
             SurfaceInteraction intr = InteractionFromIntersection(mesh, triIndex, triIsect.value(), ray.time, -ray.d);
@@ -951,7 +951,7 @@ namespace pbrt
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
 
-            pstd.optional<TriangleIntersection> isect = Globals.IntersectTriangle(ray, tMax, p0, p1, p2);
+            pstd.optional<TriangleIntersection> isect = pbrt.IntersectTriangle(ray, tMax, p0, p1, p2);
             if (isect)
             {
                 ++nTriHits;
@@ -968,8 +968,8 @@ namespace pbrt
             int v0 = mesh.vertexIndices[3 * triIndex], v1 = mesh.vertexIndices[3 * triIndex + 1],
                 v2 = mesh.vertexIndices[3 * triIndex + 2];
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
-            return Globals.SphericalTriangleArea(Globals.Normalize(p0 - p), Globals.Normalize(p1 - p),
-                                                 Globals.Normalize(p2 - p));
+            return pbrt.SphericalTriangleArea(pbrt.Normalize(p0 - p), pbrt.Normalize(p1 - p),
+                                                 pbrt.Normalize(p2 - p));
         }
 
         public override string ToString()
@@ -980,7 +980,7 @@ namespace pbrt
             Point3f p0 = mesh.p[v0];
             Point3f p1 = mesh.p[v1];
             Point3f p2 = mesh.p[v2];
-            return Globals.StringPrintf("[ Triangle meshIndex: %d triIndex: %d -> p [ %s %s %s ] ]", meshIndex,
+            return pbrt.StringPrintf("[ Triangle meshIndex: %d triIndex: %d -> p [ %s %s %s ] ]", meshIndex,
                                         triIndex, p0, p1, p2);
         }
 
@@ -997,14 +997,14 @@ namespace pbrt
                     vi = new List<int> { 0, 1, 2 };
                 else
                 {
-                    Globals.Error(loc, "Vertex indices \"indices\" must be provided with " +
+                    pbrt.Error(loc, "Vertex indices \"indices\" must be provided with " +
                                        "triangle mesh.");
                     return null;
                 }
             }
             else if ((vi.Count % 3) != 0)
             {
-                Globals.Error(loc, Globals.StringPrintf("Number of vertex indices %d not a multiple of 3. Discarding %d " +
+                pbrt.Error(loc, pbrt.StringPrintf("Number of vertex indices %d not a multiple of 3. Discarding %d " +
                                                         "excess.", vi.Count, vi.Count % 3));
                 while ((vi.Count % 3) != 0)
                     vi.RemoveAt(vi.Count - 1);
@@ -1012,13 +1012,13 @@ namespace pbrt
 
             if (P.Count == 0)
             {
-                Globals.Error(loc, "Vertex positions \"P\" must be provided with triangle mesh.");
+                pbrt.Error(loc, "Vertex positions \"P\" must be provided with triangle mesh.");
                 return null;
             }
 
             if (uvs.Count != 0 && uvs.Count != P.Count)
             {
-                Globals.Error(loc, "Number of \"uv\"s for triangle mesh must match \"P\"s. " +
+                pbrt.Error(loc, "Number of \"uv\"s for triangle mesh must match \"P\"s. " +
                                    "Discarding uvs.");
                 uvs = new List<Point2f>();
             }
@@ -1026,14 +1026,14 @@ namespace pbrt
             List<Vector3f> S = parameters.GetVector3fArray("S");
             if (S.Count != 0 && S.Count != P.Count)
             {
-                Globals.Error(loc, "Number of \"S\"s for triangle mesh must match \"P\"s. " +
+                pbrt.Error(loc, "Number of \"S\"s for triangle mesh must match \"P\"s. " +
                                    "Discarding \"S\"s.");
                 S = new List<Vector3f>();
             }
             List<Normal3f> N = parameters.GetNormal3fArray("N");
             if (N.Count != 0 && N.Count != P.Count)
             {
-                Globals.Error(loc, "Number of \"N\"s for triangle mesh must match \"P\"s. " +
+                pbrt.Error(loc, "Number of \"N\"s for triangle mesh must match \"P\"s. " +
                                    "Discarding \"N\"s.");
                 N = new List<Normal3f>();
             }
@@ -1041,7 +1041,7 @@ namespace pbrt
             for (int i = 0; i < vi.Count; ++i)
                 if (vi[i] >= P.Count)
                 {
-                    Globals.Error(loc, Globals.StringPrintf("trianglemesh has out of-bounds vertex index %d (%d \"P\" " +
+                    pbrt.Error(loc, pbrt.StringPrintf("trianglemesh has out of-bounds vertex index %d (%d \"P\" " +
                                                             "values were given. Discarding this mesh.",
                                                             vi[i], P.Count));
                     return null;
@@ -1050,7 +1050,7 @@ namespace pbrt
             List<int> faceIndices = parameters.GetIntArray("faceIndices");
             if (faceIndices.Count != 0 && faceIndices.Count != vi.Count / 3)
             {
-                Globals.Error(loc, Globals.StringPrintf("Number of face indices %d does not match number of triangles %d. " +
+                pbrt.Error(loc, pbrt.StringPrintf("Number of face indices %d does not match number of triangles %d. " +
                                                         "Discarding face indices.", faceIndices.Count, vi.Count / 3));
                 faceIndices = new List<int>();
             }
@@ -1075,7 +1075,7 @@ namespace pbrt
                                           : new pstd.array3<Point2f>(new Point2f(0, 0), new Point2f(1, 0), new Point2f(1, 1));
             Vector2f duv02 = uv[0] - uv[2], duv12 = uv[1] - uv[2];
             Vector3f dp02 = p0 - p2, dp12 = p1 - p2;
-            Float determinant = Globals.DifferenceOfProducts(duv02[0], duv12[1], duv02[1], duv12[0]);
+            Float determinant = pbrt.DifferenceOfProducts(duv02[0], duv12[1], duv02[1], duv12[0]);
 
             Vector3f dpdu = default, dpdv = default;
             bool degenerateUV = std.abs(determinant) < 1e-9f;
@@ -1087,19 +1087,19 @@ namespace pbrt
                 dpdv = ShapeUtil.DifferenceOfProducts(duv02[0], dp12, duv12[0], dp02) * invdet;
             }
             // Handle degenerate triangle $(u,v)$ parameterization or partial derivatives
-            if (degenerateUV || Globals.LengthSquared(Globals.Cross(dpdu, dpdv)) == 0)
+            if (degenerateUV || pbrt.LengthSquared(pbrt.Cross(dpdu, dpdv)) == 0)
             {
-                Vector3f ng = Globals.Cross(p2 - p0, p1 - p0);
-                if (Globals.LengthSquared(ng) == 0)
+                Vector3f ng = pbrt.Cross(p2 - p0, p1 - p0);
+                if (pbrt.LengthSquared(ng) == 0)
                 {
                     // Vector3<double> fallback
                     double ax = (double)(p2.x - p0.x), ay = (double)(p2.y - p0.y), az = (double)(p2.z - p0.z);
                     double bx = (double)(p1.x - p0.x), by = (double)(p1.y - p0.y), bz = (double)(p1.z - p0.z);
                     ng = new Vector3f((Float)(ay * bz - az * by), (Float)(az * bx - ax * bz), (Float)(ax * by - ay * bx));
-                    Globals.CHECK_NE(Globals.LengthSquared(ng), 0);
+                    pbrt.CHECK_NE(pbrt.LengthSquared(ng), 0);
                 }
                 Vector3f a, b;
-                Globals.CoordinateSystem(Globals.Normalize(ng), &a, &b);
+                pbrt.CoordinateSystem(pbrt.Normalize(ng), &a, &b);
                 dpdu = a;
                 dpdv = b;
             }
@@ -1111,8 +1111,8 @@ namespace pbrt
             // Return _SurfaceInteraction_ for triangle hit
             bool flipNormal = mesh.reverseOrientation ^ mesh.transformSwapsHandedness;
             // Compute error bounds _pError_ for triangle intersection
-            Point3f pAbsSum = Globals.Abs(ti.b0 * p0) + Globals.Abs(ti.b1 * p1) + Globals.Abs(ti.b2 * p2);
-            Vector3f pError = Globals.gamma(7) * (Vector3f)pAbsSum;
+            Point3f pAbsSum = pbrt.Abs(ti.b0 * p0) + pbrt.Abs(ti.b1 * p1) + pbrt.Abs(ti.b2 * p2);
+            Vector3f pError = pbrt.gamma(7) * (Vector3f)pAbsSum;
             SurfaceInteraction isect = new SurfaceInteraction(new Point3fi(pHit, pError), uvHit, wo, dpdu, dpdv,
                                                               new Normal3f(), new Normal3f(), time, flipNormal);
             // Compute norm of triangle...
@@ -1120,7 +1120,7 @@ namespace pbrt
 
             // Set final surface normal and shading geometry for triangle
             // Override surface normal in _isect_ for triangle
-            isect.n = isect.shading.n = (Normal3f)Globals.Normalize(Globals.Cross(dp02, dp12));
+            isect.n = isect.shading.n = (Normal3f)pbrt.Normalize(pbrt.Cross(dp02, dp12));
             if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 isect.n = isect.shading.n = -isect.n;
 
@@ -1132,7 +1132,7 @@ namespace pbrt
                 if (mesh.n != null)
                 {
                     ns = ti.b0 * mesh.n[v0] + ti.b1 * mesh.n[v1] + ti.b2 * mesh.n[v2];
-                    ns = Globals.LengthSquared(ns) > 0 ? Globals.Normalize(ns) : isect.n;
+                    ns = pbrt.LengthSquared(ns) > 0 ? pbrt.Normalize(ns) : isect.n;
                 }
                 else
                     ns = isect.n;
@@ -1142,20 +1142,20 @@ namespace pbrt
                 if (mesh.s != null)
                 {
                     ss = ti.b0 * mesh.s[v0] + ti.b1 * mesh.s[v1] + ti.b2 * mesh.s[v2];
-                    if (Globals.LengthSquared(ss) == 0)
+                    if (pbrt.LengthSquared(ss) == 0)
                         ss = isect.dpdu;
                 }
                 else
                     ss = isect.dpdu;
 
                 // Compute shading bitangent _ts_ for triangle and adjust _ss_
-                Vector3f ts = Globals.Cross(ns, ss);
-                if (Globals.LengthSquared(ts) > 0)
-                    ss = Globals.Cross(ts, ns);
+                Vector3f ts = pbrt.Cross(ns, ss);
+                if (pbrt.LengthSquared(ts) > 0)
+                    ss = pbrt.Cross(ts, ns);
                 else
                 {
                     Vector3f a, b;
-                    Globals.CoordinateSystem(ns, &a, &b);
+                    pbrt.CoordinateSystem(ns, &a, &b);
                     ss = a;
                     ts = b;
                 }
@@ -1170,7 +1170,7 @@ namespace pbrt
                     Normal3f dn1 = mesh.n[v0] - mesh.n[v2];
                     Normal3f dn2 = mesh.n[v1] - mesh.n[v2];
 
-                    Float determinantb = Globals.DifferenceOfProducts(duv02b[0], duv12b[1], duv02b[1], duv12b[0]);
+                    Float determinantb = pbrt.DifferenceOfProducts(duv02b[0], duv12b[1], duv02b[1], duv12b[0]);
                     bool degenerateUVb = std.abs(determinantb) < 1e-9;
                     if (degenerateUVb)
                     {
@@ -1180,15 +1180,15 @@ namespace pbrt
                         // (rather than giving up) so that ray differentials for
                         // rays reflected from triangles with degenerate
                         // parameterizations are still reasonable.
-                        Vector3f dn = Globals.Cross((Vector3f)(mesh.n[v2] - mesh.n[v0]),
+                        Vector3f dn = pbrt.Cross((Vector3f)(mesh.n[v2] - mesh.n[v0]),
                                                     (Vector3f)(mesh.n[v1] - mesh.n[v0]));
 
-                        if (Globals.LengthSquared(dn) == 0)
+                        if (pbrt.LengthSquared(dn) == 0)
                             dndu = dndv = new Normal3f(0, 0, 0);
                         else
                         {
                             Vector3f dnu, dnv;
-                            Globals.CoordinateSystem(dn, &dnu, &dnv);
+                            pbrt.CoordinateSystem(dn, &dnu, &dnv);
                             dndu = (Normal3f)dnu;
                             dndv = (Normal3f)dnv;
                         }
@@ -1218,15 +1218,15 @@ namespace pbrt
             Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
 
             // Sample point on triangle uniformly by area
-            pstd.array3<Float> b = Globals.SampleUniformTriangle(u);
+            pstd.array3<Float> b = pbrt.SampleUniformTriangle(u);
             Point3f p = b[0] * p0 + b[1] * p1 + b[2] * p2;
 
             // Compute surface normal for sampled point on triangle
-            Normal3f n = Globals.Normalize((Normal3f)Globals.Cross(p1 - p0, p2 - p0));
+            Normal3f n = pbrt.Normalize((Normal3f)pbrt.Cross(p1 - p0, p2 - p0));
             if (mesh.n != null)
             {
                 Normal3f ns = b[0] * mesh.n[v0] + b[1] * mesh.n[v1] + (1 - b[0] - b[1]) * mesh.n[v2];
-                n = Globals.FaceForward(n, ns);
+                n = pbrt.FaceForward(n, ns);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n *= -1;
@@ -1239,8 +1239,8 @@ namespace pbrt
             Point2f uvSample = b[0] * uv[0] + b[1] * uv[1] + b[2] * uv[2];
 
             // Compute error bounds _pError_ for sampled point on triangle
-            Point3f pAbsSum = Globals.Abs(b[0] * p0) + Globals.Abs(b[1] * p1) + Globals.Abs((1 - b[0] - b[1]) * p2);
-            Vector3f pError = (Vector3f)(Globals.gamma(6) * pAbsSum);
+            Point3f pAbsSum = pbrt.Abs(b[0] * p0) + pbrt.Abs(b[1] * p1) + pbrt.Abs((1 - b[0] - b[1]) * p2);
+            Vector3f pError = (Vector3f)(pbrt.gamma(6) * pAbsSum);
 
             return new ShapeSample(new Interaction(new Point3fi(p, pError), n, uvSample), 1 / Area());
         }
@@ -1272,36 +1272,36 @@ namespace pbrt
             {
                 // Compute $\cos\theta$-based weights _w_ at sample domain corners
                 Point3f rp = ctx.p();
-                Vector3f wi0 = Globals.Normalize(p0 - rp), wi1 = Globals.Normalize(p1 - rp),
-                         wi2 = Globals.Normalize(p2 - rp);
-                pstd.span<Float> w = W4(std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi1)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi1)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi0)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi2)));
-                u = Globals.SampleBilinear(u, w);
-                Globals.DCHECK(u[0] >= 0 && u[0] < 1 && u[1] >= 0 && u[1] < 1);
-                pdf = Globals.BilinearPDF(u, w);
+                Vector3f wi0 = pbrt.Normalize(p0 - rp), wi1 = pbrt.Normalize(p1 - rp),
+                         wi2 = pbrt.Normalize(p2 - rp);
+                pstd.span<Float> w = W4(std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi1)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi1)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi0)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi2)));
+                u = pbrt.SampleBilinear(u, w);
+                pbrt.DCHECK(u[0] >= 0 && u[0] < 1 && u[1] >= 0 && u[1] < 1);
+                pdf = pbrt.BilinearPDF(u, w);
             }
 
             Float triPDF;
-            pstd.array3<Float> b = Globals.SampleSphericalTriangle(new pstd.array3<Point3f>(p0, p1, p2), ctx.p(), u,
+            pstd.array3<Float> b = pbrt.SampleSphericalTriangle(new pstd.array3<Point3f>(p0, p1, p2), ctx.p(), u,
                                                                    &triPDF);
             if (triPDF == 0)
                 return default;
             pdf *= triPDF;
 
             // Compute error bounds _pError_ for sampled point on triangle
-            Point3f pAbsSum = Globals.Abs(b[0] * p0) + Globals.Abs(b[1] * p1) + Globals.Abs((1 - b[0] - b[1]) * p2);
-            Vector3f pError = (Vector3f)(Globals.gamma(6) * pAbsSum);
+            Point3f pAbsSum = pbrt.Abs(b[0] * p0) + pbrt.Abs(b[1] * p1) + pbrt.Abs((1 - b[0] - b[1]) * p2);
+            Vector3f pError = (Vector3f)(pbrt.gamma(6) * pAbsSum);
 
             // Return _ShapeSample_ for solid angle sampled point on triangle
             Point3f p = b[0] * p0 + b[1] * p1 + b[2] * p2;
             // Compute surface normal for sampled point on triangle
-            Normal3f n = Globals.Normalize((Normal3f)Globals.Cross(p1 - p0, p2 - p0));
+            Normal3f n = pbrt.Normalize((Normal3f)pbrt.Cross(p1 - p0, p2 - p0));
             if (mesh.n != null)
             {
                 Normal3f ns = b[0] * mesh.n[v0] + b[1] * mesh.n[v1] + (1 - b[0] - b[1]) * mesh.n[v2];
-                n = Globals.FaceForward(n, ns);
+                n = pbrt.FaceForward(n, ns);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n *= -1;
@@ -1333,16 +1333,16 @@ namespace pbrt
                     v2 = mesh.vertexIndices[3 * triIndex + 2];
                 Point3f p0 = mesh.p[v0], p1 = mesh.p[v1], p2 = mesh.p[v2];
 
-                Point2f u = Globals.InvertSphericalTriangleSample(new pstd.array3<Point3f>(p0, p1, p2), ctx.p(), wi);
+                Point2f u = pbrt.InvertSphericalTriangleSample(new pstd.array3<Point3f>(p0, p1, p2), ctx.p(), wi);
                 // Compute $\cos\theta$-based weights _w_ at sample domain corners
                 Point3f rp = ctx.p();
-                Vector3f wi0 = Globals.Normalize(p0 - rp), wi1 = Globals.Normalize(p1 - rp),
-                         wi2 = Globals.Normalize(p2 - rp);
-                pstd.span<Float> w = W4(std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi1)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi1)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi0)),
-                                        std.max<Float>(0.01f, Globals.AbsDot(ctx.ns, wi2)));
-                pdf *= Globals.BilinearPDF(u, w);
+                Vector3f wi0 = pbrt.Normalize(p0 - rp), wi1 = pbrt.Normalize(p1 - rp),
+                         wi2 = pbrt.Normalize(p2 - rp);
+                pstd.span<Float> w = W4(std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi1)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi1)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi0)),
+                                        std.max<Float>(0.01f, pbrt.AbsDot(ctx.ns, wi2)));
+                pdf *= pbrt.BilinearPDF(u, w);
             }
 
             return pdf;
@@ -1372,15 +1372,15 @@ namespace pbrt
             this.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             width[0] = width0;
             width[1] = width1;
-            Globals.CHECK_EQ((int)c.size(), 4);
+            pbrt.CHECK_EQ((int)c.size(), 4);
             for (int i = 0; i < 4; ++i)
                 cpObj[i] = c[i];
 
             if (norm.size() == 2)
             {
-                n[0] = Globals.Normalize(norm[0]);
-                n[1] = Globals.Normalize(norm[1]);
-                normalAngle = Globals.AngleBetween(n[0], n[1]);
+                n[0] = pbrt.Normalize(norm[0]);
+                n[1] = pbrt.Normalize(norm[1]);
+                normalAngle = pbrt.AngleBetween(n[0], n[1]);
                 invSinNormalAngle = 1 / std.sin(normalAngle);
             }
             ++Curve.nCurves;
@@ -1388,7 +1388,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ CurveCommon type: %s cpObj: [ %s %s %s %s ] width: [ %f %f ] n: [ %s %s ] normalAngle: %f " +
                 "invSinNormalAngle: %f renderFromObject: %s " +
                 "objectFromRender: %s " +
@@ -1470,7 +1470,7 @@ namespace pbrt
             int degree = parameters.GetOneInt("degree", 3);
             if (degree != 2 && degree != 3)
             {
-                Globals.Error(loc, Globals.StringPrintf("Invalid degree %d: only degree 2 and 3 curves are supported.",
+                pbrt.Error(loc, pbrt.StringPrintf("Invalid degree %d: only degree 2 and 3 curves are supported.",
                                                         degree));
                 return new pstd.vector<Shape>();
             }
@@ -1478,7 +1478,7 @@ namespace pbrt
             string basis = parameters.GetOneString("basis", "bezier");
             if (basis != "bezier" && basis != "bspline")
             {
-                Globals.Error(loc, Globals.StringPrintf("Invalid basis \"%s\": only \"bezier\" and \"bspline\" are " +
+                pbrt.Error(loc, pbrt.StringPrintf("Invalid basis \"%s\": only \"bezier\" and \"bspline\" are " +
                                                         "supported.", basis));
                 return new pstd.vector<Shape>();
             }
@@ -1492,7 +1492,7 @@ namespace pbrt
                 // one and then use degree more control points.
                 if (((cp.Count - 1 - degree) % degree) != 0)
                 {
-                    Globals.Error(loc, Globals.StringPrintf("Invalid number of control points %d: for the degree %d " +
+                    pbrt.Error(loc, pbrt.StringPrintf("Invalid number of control points %d: for the degree %d " +
                                                             "Bezier basis %d + n * %d are required, for n >= 0.",
                                                             cp.Count, degree, degree + 1, degree));
                     return new pstd.vector<Shape>();
@@ -1503,7 +1503,7 @@ namespace pbrt
             {
                 if (cp.Count < degree + 1)
                 {
-                    Globals.Error(loc, Globals.StringPrintf("Invalid number of control points %d: for the degree %d " +
+                    pbrt.Error(loc, pbrt.StringPrintf("Invalid number of control points %d: for the degree %d " +
                                                             "b-spline basis, must have >= %d.",
                                                             cp.Count, degree, degree + 1));
                     return new pstd.vector<Shape>();
@@ -1521,7 +1521,7 @@ namespace pbrt
                 type = CurveType.Cylinder;
             else
             {
-                Globals.Error(loc, Globals.StringPrintf("Unknown curve type \"%s\".  Using \"cylinder\".", curveType));
+                pbrt.Error(loc, pbrt.StringPrintf("Unknown curve type \"%s\".  Using \"cylinder\".", curveType));
                 type = CurveType.Cylinder;
             }
 
@@ -1530,12 +1530,12 @@ namespace pbrt
             {
                 if (type != CurveType.Ribbon)
                 {
-                    Globals.Warning("Curve normals are only used with \"ribbon\" type curves.");
+                    pbrt.Warning("Curve normals are only used with \"ribbon\" type curves.");
                     n = new List<Normal3f>();
                 }
                 else if (n.Count != nSegments + 1)
                 {
-                    Globals.Error(loc, Globals.StringPrintf("Invalid number of normals %d: must provide %d normals for " +
+                    pbrt.Error(loc, pbrt.StringPrintf("Invalid number of normals %d: must provide %d normals for " +
                                                             "ribbon curves with %d segments.",
                                                             n.Count, nSegments + 1, nSegments));
                     return new pstd.vector<Shape>();
@@ -1543,16 +1543,16 @@ namespace pbrt
             }
             else if (type == CurveType.Ribbon)
             {
-                Globals.Error(loc, "Must provide normals \"N\" at curve endpoints with ribbon " +
+                pbrt.Error(loc, "Must provide normals \"N\" at curve endpoints with ribbon " +
                                    "curves.");
                 return new pstd.vector<Shape>();
             }
 
-            int sd = Globals.Options.useGPU ? 0 : parameters.GetOneInt("splitdepth", 3);
+            int sd = pbrt.Options.useGPU ? 0 : parameters.GetOneInt("splitdepth", 3);
 
             if (type == CurveType.Ribbon && n.Count == 0)
             {
-                Globals.Error(loc, "Must provide normals \"N\" at curve endpoints with ribbon " +
+                pbrt.Error(loc, "Must provide normals \"N\" at curve endpoints with ribbon " +
                                    "curves.");
                 return new pstd.vector<Shape>();
             }
@@ -1571,7 +1571,7 @@ namespace pbrt
                     // Create elevated degree 3 Bezier from degree 2 control points
                     if (degree == 2)
                     {
-                        segCpBezier = Globals.ElevateQuadraticBezierToCubic(new pstd.span<Point3f>(cpArr, cpOffset, 3));
+                        segCpBezier = pbrt.ElevateQuadraticBezierToCubic(new pstd.span<Point3f>(cpArr, cpOffset, 3));
                     }
                     else
                     {
@@ -1587,13 +1587,13 @@ namespace pbrt
                     if (degree == 2)
                     {
                         pstd.array3<Point3f> bezCp =
-                            Globals.QuadraticBSplineToBezier(new pstd.span<Point3f>(cpArr, cpOffset, 3));
-                        segCpBezier = Globals.ElevateQuadraticBezierToCubic(
+                            pbrt.QuadraticBSplineToBezier(new pstd.span<Point3f>(cpArr, cpOffset, 3));
+                        segCpBezier = pbrt.ElevateQuadraticBezierToCubic(
                             new pstd.span<Point3f>(new Point3f[] { bezCp[0], bezCp[1], bezCp[2] }));
                     }
                     else
                     {
-                        segCpBezier = Globals.CubicBSplineToBezier(new pstd.span<Point3f>(cpArr, cpOffset, 4));
+                        segCpBezier = pbrt.CubicBSplineToBezier(new pstd.span<Point3f>(cpArr, cpOffset, 4));
                     }
                     ++cpOffset;
                 }
@@ -1604,8 +1604,8 @@ namespace pbrt
                 pstd.vector<Shape> c = CreateCurve(
                     renderFromObject, objectFromRender, reverseOrientation,
                     new pstd.span<Point3f>(new Point3f[] { segCpBezier[0], segCpBezier[1], segCpBezier[2], segCpBezier[3] }),
-                    Globals.Lerp((Float)seg / (Float)nSegments, width0, width1),
-                    Globals.Lerp((Float)(seg + 1) / (Float)nSegments, width0, width1), type, nspan, sd, alloc);
+                    pbrt.Lerp((Float)seg / (Float)nSegments, width0, width1),
+                    pbrt.Lerp((Float)(seg + 1) / (Float)nSegments, width0, width1), type, nspan, sd, alloc);
                 for (int i = 0; i < (int)c.size(); ++i)
                     curves.push_back(c[i]);
             }
@@ -1615,11 +1615,11 @@ namespace pbrt
         public override Bounds3f Bounds()
         {
             pstd.span<Point3f> cpSpan = new pstd.span<Point3f>(common.cpObj);
-            Bounds3f objBounds = Globals.BoundCubicBezier(cpSpan, uMin, uMax);
+            Bounds3f objBounds = pbrt.BoundCubicBezier(cpSpan, uMin, uMax);
             // Expand _objBounds_ by maximum curve width over $u$ range
-            Float w0 = Globals.Lerp(uMin, common.width[0], common.width[1]);
-            Float w1 = Globals.Lerp(uMax, common.width[0], common.width[1]);
-            objBounds = Globals.Expand(objBounds, std.max(w0, w1) * 0.5f);
+            Float w0 = pbrt.Lerp(uMin, common.width[0], common.width[1]);
+            Float w1 = pbrt.Lerp(uMax, common.width[0], common.width[1]);
+            objBounds = pbrt.Expand(objBounds, std.max(w0, w1) * 0.5f);
 
             return common.renderFromObject.Apply(objBounds);
         }
@@ -1628,13 +1628,13 @@ namespace pbrt
 
         public override Float Area()
         {
-            pstd.array4<Point3f> cpObj = Globals.CubicBezierControlPoints(new pstd.span<Point3f>(common.cpObj), uMin, uMax);
-            Float width0 = Globals.Lerp(uMin, common.width[0], common.width[1]);
-            Float width1 = Globals.Lerp(uMax, common.width[0], common.width[1]);
+            pstd.array4<Point3f> cpObj = pbrt.CubicBezierControlPoints(new pstd.span<Point3f>(common.cpObj), uMin, uMax);
+            Float width0 = pbrt.Lerp(uMin, common.width[0], common.width[1]);
+            Float width1 = pbrt.Lerp(uMax, common.width[0], common.width[1]);
             Float avgWidth = (width0 + width1) * 0.5f;
             Float approxLength = 0.0f;
             for (int i = 0; i < 3; ++i)
-                approxLength += Globals.Distance(cpObj[i], cpObj[i + 1]);
+                approxLength += pbrt.Distance(cpObj[i], cpObj[i + 1]);
             return approxLength * avgWidth;
         }
 
@@ -1649,28 +1649,28 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            Globals.LOG_FATAL("Curve::Sample not implemented.");
+            pbrt.LOG_FATAL("Curve::Sample not implemented.");
             return default;
         }
         public override Float PDF(Interaction intr)
         {
-            Globals.LOG_FATAL("Curve::PDF not implemented.");
+            pbrt.LOG_FATAL("Curve::PDF not implemented.");
             return 0;
         }
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            Globals.LOG_FATAL("Curve::Sample not implemented.");
+            pbrt.LOG_FATAL("Curve::Sample not implemented.");
             return default;
         }
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
         {
-            Globals.LOG_FATAL("Curve::PDF not implemented.");
+            pbrt.LOG_FATAL("Curve::PDF not implemented.");
             return 0;
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ Curve common: %s uMin: %f uMax: %f ]", common, uMin, uMax);
+            return pbrt.StringPrintf("[ Curve common: %s uMin: %f uMax: %f ]", common, uMin, uMax);
         }
 
         // Curve Private Methods
@@ -1681,26 +1681,26 @@ namespace pbrt
             Ray ray = common.objectFromRender.Apply(r);
 
             // Get object-space control points for curve segment, _cpObj_
-            pstd.array4<Point3f> cpObj = Globals.CubicBezierControlPoints(new pstd.span<Point3f>(common.cpObj), uMin, uMax);
+            pstd.array4<Point3f> cpObj = pbrt.CubicBezierControlPoints(new pstd.span<Point3f>(common.cpObj), uMin, uMax);
 
             // Project curve control points to plane perpendicular to ray
-            Vector3f dx = Globals.Cross(ray.d, cpObj[3] - cpObj[0]);
-            if (Globals.LengthSquared(dx) == 0)
+            Vector3f dx = pbrt.Cross(ray.d, cpObj[3] - cpObj[0]);
+            if (pbrt.LengthSquared(dx) == 0)
             {
                 Vector3f dy;
-                Globals.CoordinateSystem(ray.d, &dx, &dy);
+                pbrt.CoordinateSystem(ray.d, &dx, &dy);
             }
-            Transform rayFromObject = Globals.LookAt(ray.o, ray.o + ray.d, dx);
+            Transform rayFromObject = pbrt.LookAt(ray.o, ray.o + ray.d, dx);
             Point3f[] cp = new Point3f[4] { rayFromObject.Apply(cpObj[0]), rayFromObject.Apply(cpObj[1]),
                                             rayFromObject.Apply(cpObj[2]), rayFromObject.Apply(cpObj[3]) };
 
             // Test ray against bound of projected control points
-            Float maxWidth = std.max(Globals.Lerp(uMin, common.width[0], common.width[1]),
-                                     Globals.Lerp(uMax, common.width[0], common.width[1]));
-            Bounds3f curveBounds = Globals.Union(new Bounds3f(cp[0], cp[1]), new Bounds3f(cp[2], cp[3]));
-            curveBounds = Globals.Expand(curveBounds, 0.5f * maxWidth);
-            Bounds3f rayBounds = new Bounds3f(new Point3f(0, 0, 0), new Point3f(0, 0, Globals.Length(ray.d) * tMax));
-            if (!Globals.Overlaps(rayBounds, curveBounds))
+            Float maxWidth = std.max(pbrt.Lerp(uMin, common.width[0], common.width[1]),
+                                     pbrt.Lerp(uMax, common.width[0], common.width[1]));
+            Bounds3f curveBounds = pbrt.Union(new Bounds3f(cp[0], cp[1]), new Bounds3f(cp[2], cp[3]));
+            curveBounds = pbrt.Expand(curveBounds, 0.5f * maxWidth);
+            Bounds3f rayBounds = new Bounds3f(new Point3f(0, 0, 0), new Point3f(0, 0, pbrt.Length(ray.d) * tMax));
+            if (!pbrt.Overlaps(rayBounds, curveBounds))
                 return false;
 
             // Compute refinement depth for curve, _maxDepth_
@@ -1715,37 +1715,37 @@ namespace pbrt
             {
                 // Compute log base 4 by dividing log2 in half.
                 Float eps = std.max(common.width[0], common.width[1]) * .05f;  // width / 20
-                int r0 = Globals.Log2Int(1.41421356237f * 6.0f * L0 / (8.0f * eps)) / 2;
-                maxDepth = Globals.Clamp(r0, 0, 10);
+                int r0 = pbrt.Log2Int(1.41421356237f * 6.0f * L0 / (8.0f * eps)) / 2;
+                maxDepth = pbrt.Clamp(r0, 0, 10);
             }
 
             // Recursively test for ray--curve intersection
             pstd.span<Point3f> cpSpan = new pstd.span<Point3f>(cp);
-            return RecursiveIntersect(ray, tMax, cpSpan, Globals.Inverse(rayFromObject), uMin, uMax, maxDepth, si);
+            return RecursiveIntersect(ray, tMax, cpSpan, pbrt.Inverse(rayFromObject), uMin, uMax, maxDepth, si);
         }
 
         bool RecursiveIntersect(Ray ray, Float tMax, pstd.span<Point3f> cp, Transform objectFromRay, Float u0,
                                 Float u1, int depth, pstd.optional<ShapeIntersection>* si)
         {
-            Float rayLength = Globals.Length(ray.d);
+            Float rayLength = pbrt.Length(ray.d);
             if (depth > 0)
             {
                 // Split curve segment into sub-segments and test for intersection
-                pstd.array7<Point3f> cpSplit = Globals.SubdivideCubicBezier(cp);
+                pstd.array7<Point3f> cpSplit = pbrt.SubdivideCubicBezier(cp);
                 Float[] u = { u0, (u0 + u1) / 2, u1 };
                 for (int seg = 0; seg < 2; ++seg)
                 {
                     // Check ray against bounds of control points for segment
-                    Float maxWidth = std.max(Globals.Lerp(u[seg], common.width[0], common.width[1]),
-                                             Globals.Lerp(u[seg + 1], common.width[0], common.width[1]));
+                    Float maxWidth = std.max(pbrt.Lerp(u[seg], common.width[0], common.width[1]),
+                                             pbrt.Lerp(u[seg + 1], common.width[0], common.width[1]));
                     Point3f[] cpsArr = new Point3f[4] { cpSplit[3 * seg], cpSplit[3 * seg + 1], cpSplit[3 * seg + 2],
                                                         cpSplit[3 * seg + 3] };
                     pstd.span<Point3f> cps = new pstd.span<Point3f>(cpsArr);
-                    Bounds3f curveBounds = Globals.Union(new Bounds3f(cps[0], cps[1]), new Bounds3f(cps[2], cps[3]));
-                    curveBounds = Globals.Expand(curveBounds, 0.5f * maxWidth);
+                    Bounds3f curveBounds = pbrt.Union(new Bounds3f(cps[0], cps[1]), new Bounds3f(cps[2], cps[3]));
+                    curveBounds = pbrt.Expand(curveBounds, 0.5f * maxWidth);
                     Bounds3f rayBounds = new Bounds3f(new Point3f(0, 0, 0),
-                                                      new Point3f(0, 0, Globals.Length(ray.d) * tMax));
-                    if (!Globals.Overlaps(rayBounds, curveBounds))
+                                                      new Point3f(0, 0, pbrt.Length(ray.d) * tMax));
+                    if (!pbrt.Overlaps(rayBounds, curveBounds))
                         continue;
 
                     // Recursively test for ray--curve intersection
@@ -1773,14 +1773,14 @@ namespace pbrt
 
                 // Find line $w$ that gives minimum distance to sample point
                 Vector2f segmentDir = new Point2f(cp[3].x, cp[3].y) - new Point2f(cp[0].x, cp[0].y);
-                Float denom = Globals.LengthSquared(segmentDir);
+                Float denom = pbrt.LengthSquared(segmentDir);
                 if (denom == 0)
                     return false;
-                Float w = Globals.Dot(-new Vector2f(cp[0].x, cp[0].y), segmentDir) / denom;
+                Float w = pbrt.Dot(-new Vector2f(cp[0].x, cp[0].y), segmentDir) / denom;
 
                 // Compute $u$ coordinate of curve intersection point and _hitWidth_
-                Float u = Globals.Clamp(Globals.Lerp(w, u0, u1), u0, u1);
-                Float hitWidth = Globals.Lerp(u, common.width[0], common.width[1]);
+                Float u = pbrt.Clamp(pbrt.Lerp(w, u0, u1), u0, u1);
+                Float hitWidth = pbrt.Lerp(u, common.width[0], common.width[1]);
                 Normal3f nHit = default;
                 if (common.type == CurveType.Ribbon)
                 {
@@ -1793,14 +1793,14 @@ namespace pbrt
                         Float sin1 = std.sin(u * common.normalAngle) * common.invSinNormalAngle;
                         nHit = sin0 * common.n[0] + sin1 * common.n[1];
                     }
-                    hitWidth *= Globals.AbsDot(nHit, ray.d) / rayLength;
+                    hitWidth *= pbrt.AbsDot(nHit, ray.d) / rayLength;
                 }
 
                 // Test intersection point against curve width
                 Vector3f dpcdw;
-                Point3f pc = Globals.EvaluateCubicBezier(cp, Globals.Clamp(w, 0, 1), &dpcdw);
-                Float ptCurveDist2 = Globals.Sqr(pc.x) + Globals.Sqr(pc.y);
-                if (ptCurveDist2 > Globals.Sqr(hitWidth) * 0.25f)
+                Point3f pc = pbrt.EvaluateCubicBezier(cp, pbrt.Clamp(w, 0, 1), &dpcdw);
+                Float ptCurveDist2 = pbrt.Sqr(pc.x) + pbrt.Sqr(pc.y);
+                if (ptCurveDist2 > pbrt.Sqr(hitWidth) * 0.25f)
                     return false;
                 if (pc.z < 0 || pc.z > rayLength * tMax)
                     return false;
@@ -1823,20 +1823,20 @@ namespace pbrt
 
                     // Compute hit position and partial derivatives for curve intersection
                     Vector3f dpdu, dpdv;
-                    Globals.EvaluateCubicBezier(new pstd.span<Point3f>(common.cpObj), u, &dpdu);
-                    Globals.CHECK_NE(new Vector3f(0, 0, 0), dpdu);
+                    pbrt.EvaluateCubicBezier(new pstd.span<Point3f>(common.cpObj), u, &dpdu);
+                    pbrt.CHECK_NE(new Vector3f(0, 0, 0), dpdu);
                     if (common.type == CurveType.Ribbon)
-                        dpdv = Globals.Normalize(Globals.Cross(nHit, dpdu)) * hitWidth;
+                        dpdv = pbrt.Normalize(pbrt.Cross(nHit, dpdu)) * hitWidth;
                     else
                     {
                         // Compute curve $\dpdv$ for flat and cylinder curves
                         Vector3f dpduPlane = objectFromRay.ApplyInverse(dpdu);
-                        Vector3f dpdvPlane = Globals.Normalize(new Vector3f(-dpduPlane.y, dpduPlane.x, 0)) * hitWidth;
+                        Vector3f dpdvPlane = pbrt.Normalize(new Vector3f(-dpduPlane.y, dpduPlane.x, 0)) * hitWidth;
                         if (common.type == CurveType.Cylinder)
                         {
                             // Rotate _dpdvPlane_ to give cylindrical appearance
-                            Float theta = Globals.Lerp(v, -90, 90);
-                            Transform rot = Globals.Rotate(-theta, dpduPlane);
+                            Float theta = pbrt.Lerp(v, -90, 90);
+                            Transform rot = pbrt.Rotate(-theta, dpduPlane);
                             dpdvPlane = rot.Apply(dpdvPlane);
                         }
                         dpdv = objectFromRay.Apply(dpdvPlane);
@@ -1869,7 +1869,7 @@ namespace pbrt
         public BilinearIntersection(Point2f uv, Float t) { this.uv = uv; this.t = t; }
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BilinearIntersection uv: %s t: %f", uv, t);
+            return pbrt.StringPrintf("[ BilinearIntersection uv: %s t: %f", uv, t);
         }
 
         public Point2f uv;
@@ -1906,7 +1906,7 @@ namespace pbrt
             Point3f p01 = mesh.p[mesh.vertexIndices[4 * blpIndex + 2]], p11 = mesh.p[mesh.vertexIndices[4 * blpIndex + 3]];
 
             if (IsRectangle(mesh))
-                area = Globals.Distance(p00, p01) * Globals.Distance(p00, p10);
+                area = pbrt.Distance(p00, p01) * pbrt.Distance(p00, p10);
             else
             {
                 // Compute approximate area of bilinear patch
@@ -1919,14 +1919,14 @@ namespace pbrt
                     for (int j = 0; j <= na; ++j)
                     {
                         Float v = (Float)j / (Float)na;
-                        p[i, j] = Globals.Lerp(u, Globals.Lerp(v, p00, p01), Globals.Lerp(v, p10, p11));
+                        p[i, j] = pbrt.Lerp(u, pbrt.Lerp(v, p00, p01), pbrt.Lerp(v, p10, p11));
                     }
                 }
 
                 area = 0;
                 for (int i = 0; i < na; ++i)
                     for (int j = 0; j < na; ++j)
-                        area += 0.5f * Globals.Length(Globals.Cross(p[i + 1, j + 1] - p[i, j], p[i + 1, j] - p[i, j + 1]));
+                        area += 0.5f * pbrt.Length(pbrt.Cross(p[i + 1, j + 1] - p[i, j], p[i + 1, j] - p[i, j + 1]));
             }
         }
 
@@ -1949,14 +1949,14 @@ namespace pbrt
                     vertexIndices = new List<int> { 0, 1, 2, 3 };
                 else
                 {
-                    Globals.Error(loc, "Vertex indices \"indices\" must be provided with " +
+                    pbrt.Error(loc, "Vertex indices \"indices\" must be provided with " +
                                        "bilinear patch mesh shape.");
                     return null;
                 }
             }
             else if ((vertexIndices.Count % 4) != 0)
             {
-                Globals.Error(loc, Globals.StringPrintf("Number of vertex indices %d not a multiple of 4. Discarding %d " +
+                pbrt.Error(loc, pbrt.StringPrintf("Number of vertex indices %d not a multiple of 4. Discarding %d " +
                                                         "excess.", vertexIndices.Count, vertexIndices.Count % 4));
                 while ((vertexIndices.Count % 4) != 0)
                     vertexIndices.RemoveAt(vertexIndices.Count - 1);
@@ -1964,14 +1964,14 @@ namespace pbrt
 
             if (P.Count == 0)
             {
-                Globals.Error(loc, "Vertex positions \"P\" must be provided with bilinear " +
+                pbrt.Error(loc, "Vertex positions \"P\" must be provided with bilinear " +
                                    "patch mesh shape.");
                 return null;
             }
 
             if (uv.Count != 0 && uv.Count != P.Count)
             {
-                Globals.Error(loc, "Number of \"uv\"s for bilinear patch mesh must match \"P\"s. " +
+                pbrt.Error(loc, "Number of \"uv\"s for bilinear patch mesh must match \"P\"s. " +
                                    "Discarding uvs.");
                 uv = new List<Point2f>();
             }
@@ -1979,7 +1979,7 @@ namespace pbrt
             List<Normal3f> N = parameters.GetNormal3fArray("N");
             if (N.Count != 0 && N.Count != P.Count)
             {
-                Globals.Error(loc, "Number of \"N\"s for bilinear patch mesh must match \"P\"s. " +
+                pbrt.Error(loc, "Number of \"N\"s for bilinear patch mesh must match \"P\"s. " +
                                    "Discarding \"N\"s.");
                 N = new List<Normal3f>();
             }
@@ -1987,7 +1987,7 @@ namespace pbrt
             for (int i = 0; i < vertexIndices.Count; ++i)
                 if (vertexIndices[i] >= P.Count)
                 {
-                    Globals.Error(loc, Globals.StringPrintf("Bilinear patch mesh has out of-bounds vertex index %d (%d " +
+                    pbrt.Error(loc, pbrt.StringPrintf("Bilinear patch mesh has out of-bounds vertex index %d (%d " +
                                                             "\"P\" values were given. Discarding this mesh.",
                                                             vertexIndices[i], P.Count));
                     return null;
@@ -1996,19 +1996,19 @@ namespace pbrt
             List<int> faceIndices = parameters.GetIntArray("faceIndices");
             if (faceIndices.Count != 0 && faceIndices.Count != vertexIndices.Count / 4)
             {
-                Globals.Error(loc, Globals.StringPrintf("Number of face indices %d does not match number of bilinear " +
+                pbrt.Error(loc, pbrt.StringPrintf("Number of face indices %d does not match number of bilinear " +
                                                         "patches %d. Discarding face indices.",
                                                         faceIndices.Count, vertexIndices.Count / 4));
                 faceIndices = new List<int>();
             }
 
             // Bilinear patch emission image
-            string filename = Globals.ResolveFilename(parameters.GetOneString("emissionfilename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("emissionfilename", ""));
             PiecewiseConstant2D imageDist = null;
             if (filename.Length != 0)
             {
                 if (uv.Count != 0)
-                    Globals.Error(loc, "\"emissionfilename\" is currently ignored for bilinear patches " +
+                    pbrt.Error(loc, "\"emissionfilename\" is currently ignored for bilinear patches " +
                                        "if \"uv\" coordinates have been provided--sorry!");
                 else
                 {
@@ -2034,7 +2034,7 @@ namespace pbrt
             int meshIndex;
             lock (allMeshesLock)
             {
-                Globals.CHECK_LT(allMeshes.Count, 1 << 30);
+                pbrt.CHECK_LT(allMeshes.Count, 1 << 30);
                 meshIndex = allMeshes.Count;
                 allMeshes.Add(mesh);
             }
@@ -2053,7 +2053,7 @@ namespace pbrt
             int vi = 4 * blpIndex;
             Point3f p00 = mesh.p[mesh.vertexIndices[vi]], p10 = mesh.p[mesh.vertexIndices[vi + 1]];
             Point3f p01 = mesh.p[mesh.vertexIndices[vi + 2]], p11 = mesh.p[mesh.vertexIndices[vi + 3]];
-            return Globals.Union(new Bounds3f(p00, p01), new Bounds3f(p10, p11));
+            return pbrt.Union(new Bounds3f(p00, p01), new Bounds3f(p10, p11));
         }
 
         public override DirectionCone NormalBounds()
@@ -2068,13 +2068,13 @@ namespace pbrt
             // If patch is a triangle, return bounds for single surface normal
             if (p00 == p10 || p10 == p11 || p11 == p01 || p01 == p00)
             {
-                Vector3f dpdu = Globals.Lerp(0.5f, p10, p11) - Globals.Lerp(0.5f, p00, p01);
-                Vector3f dpdv = Globals.Lerp(0.5f, p01, p11) - Globals.Lerp(0.5f, p00, p10);
-                Vector3f nTri = Globals.Normalize(Globals.Cross(dpdu, dpdv));
+                Vector3f dpdu = pbrt.Lerp(0.5f, p10, p11) - pbrt.Lerp(0.5f, p00, p01);
+                Vector3f dpdv = pbrt.Lerp(0.5f, p01, p11) - pbrt.Lerp(0.5f, p00, p10);
+                Vector3f nTri = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
                 if (mesh.n != null)
                 {
                     Normal3f ns = (mesh.n[v[0]] + mesh.n[v[1]] + mesh.n[v[2]] + mesh.n[v[3]]) / 4;
-                    nTri = Globals.FaceForward(nTri, ns);
+                    nTri = pbrt.FaceForward(nTri, ns);
                 }
                 else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                     nTri = -nTri;
@@ -2083,21 +2083,21 @@ namespace pbrt
             }
 
             // Compute bilinear patch normal _n00_ at $(0,0)$
-            Vector3f n00 = Globals.Normalize(Globals.Cross(p10 - p00, p01 - p00));
+            Vector3f n00 = pbrt.Normalize(pbrt.Cross(p10 - p00, p01 - p00));
             if (mesh.n != null)
-                n00 = Globals.FaceForward(n00, mesh.n[v[0]]);
+                n00 = pbrt.FaceForward(n00, mesh.n[v[0]]);
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n00 = -n00;
 
             // Compute bilinear patch normals _n10_, _n01_, and _n11_
-            Vector3f n10 = Globals.Normalize(Globals.Cross(p11 - p10, p00 - p10));
-            Vector3f n01 = Globals.Normalize(Globals.Cross(p00 - p01, p11 - p01));
-            Vector3f n11 = Globals.Normalize(Globals.Cross(p01 - p11, p10 - p11));
+            Vector3f n10 = pbrt.Normalize(pbrt.Cross(p11 - p10, p00 - p10));
+            Vector3f n01 = pbrt.Normalize(pbrt.Cross(p00 - p01, p11 - p01));
+            Vector3f n11 = pbrt.Normalize(pbrt.Cross(p01 - p11, p10 - p11));
             if (mesh.n != null)
             {
-                n10 = Globals.FaceForward(n10, mesh.n[v[1]]);
-                n01 = Globals.FaceForward(n01, mesh.n[v[2]]);
-                n11 = Globals.FaceForward(n11, mesh.n[v[3]]);
+                n10 = pbrt.FaceForward(n10, mesh.n[v[1]]);
+                n01 = pbrt.FaceForward(n01, mesh.n[v[2]]);
+                n11 = pbrt.FaceForward(n11, mesh.n[v[3]]);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
             {
@@ -2107,10 +2107,10 @@ namespace pbrt
             }
 
             // Compute average normal and return normal bounds for patch
-            Vector3f n = Globals.Normalize(n00 + n10 + n01 + n11);
-            Float cosTheta = std.min(std.min(Globals.Dot(n, n00), Globals.Dot(n, n01)),
-                                     std.min(Globals.Dot(n, n10), Globals.Dot(n, n11)));
-            return new DirectionCone(n, Globals.Clamp(cosTheta, -1, 1));
+            Vector3f n = pbrt.Normalize(n00 + n10 + n01 + n11);
+            Float cosTheta = std.min(std.min(pbrt.Dot(n, n00), pbrt.Dot(n, n01)),
+                                     std.min(pbrt.Dot(n, n10), pbrt.Dot(n, n11)));
+            return new DirectionCone(n, pbrt.Clamp(cosTheta, -1, 1));
         }
 
         public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
@@ -2119,7 +2119,7 @@ namespace pbrt
             int vi = 4 * blpIndex;
             Point3f p00 = mesh.p[mesh.vertexIndices[vi]], p10 = mesh.p[mesh.vertexIndices[vi + 1]];
             Point3f p01 = mesh.p[mesh.vertexIndices[vi + 2]], p11 = mesh.p[mesh.vertexIndices[vi + 3]];
-            pstd.optional<BilinearIntersection> blpIsect = Globals.IntersectBilinearPatch(ray, tMax, p00, p10, p01, p11);
+            pstd.optional<BilinearIntersection> blpIsect = pbrt.IntersectBilinearPatch(ray, tMax, p00, p10, p01, p11);
             if (!blpIsect)
                 return default;
             SurfaceInteraction intr = InteractionFromIntersection(mesh, blpIndex, blpIsect.value().uv, ray.time, -ray.d);
@@ -2132,7 +2132,7 @@ namespace pbrt
             int vi = 4 * blpIndex;
             Point3f p00 = mesh.p[mesh.vertexIndices[vi]], p10 = mesh.p[mesh.vertexIndices[vi + 1]];
             Point3f p01 = mesh.p[mesh.vertexIndices[vi + 2]], p11 = mesh.p[mesh.vertexIndices[vi + 3]];
-            return Globals.IntersectBilinearPatch(ray, tMax, p00, p10, p01, p11);
+            return pbrt.IntersectBilinearPatch(ray, tMax, p00, p10, p01, p11);
         }
 
         public override Float Area() { return area; }
@@ -2147,9 +2147,9 @@ namespace pbrt
             Point3f p00 = mesh.p[v[0]], p10 = mesh.p[v[1]];
             Point3f p01 = mesh.p[v[2]], p11 = mesh.p[v[3]];
 
-            Point3f p = Globals.Lerp(uv[0], Globals.Lerp(uv[1], p00, p01), Globals.Lerp(uv[1], p10, p11));
-            Vector3f dpdu = Globals.Lerp(uv[1], p10, p11) - Globals.Lerp(uv[1], p00, p01);
-            Vector3f dpdv = Globals.Lerp(uv[0], p01, p11) - Globals.Lerp(uv[0], p00, p10);
+            Point3f p = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], p00, p01), pbrt.Lerp(uv[1], p10, p11));
+            Vector3f dpdu = pbrt.Lerp(uv[1], p10, p11) - pbrt.Lerp(uv[1], p00, p01);
+            Vector3f dpdv = pbrt.Lerp(uv[0], p01, p11) - pbrt.Lerp(uv[0], p00, p10);
 
             // Compute $(s,t)$ texture coordinates at bilinear patch $(u,v)$
             Point2f st = uv;
@@ -2159,12 +2159,12 @@ namespace pbrt
                 // Compute texture coordinates for bilinear patch intersection point
                 Point2f uv00 = mesh.uv[v[0]], uv10 = mesh.uv[v[1]];
                 Point2f uv01 = mesh.uv[v[2]], uv11 = mesh.uv[v[3]];
-                st = Globals.Lerp(uv[0], Globals.Lerp(uv[1], uv00, uv01), Globals.Lerp(uv[1], uv10, uv11));
+                st = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], uv00, uv01), pbrt.Lerp(uv[1], uv10, uv11));
 
                 // Update bilinear patch $\dpdu$ and $\dpdv$ accounting for $(s,t)$
                 // Compute partial derivatives of $(u,v)$ with respect to $(s,t)$
-                Vector2f dstdu = Globals.Lerp(uv[1], uv10, uv11) - Globals.Lerp(uv[1], uv00, uv01);
-                Vector2f dstdv = Globals.Lerp(uv[0], uv01, uv11) - Globals.Lerp(uv[0], uv00, uv10);
+                Vector2f dstdu = pbrt.Lerp(uv[1], uv10, uv11) - pbrt.Lerp(uv[1], uv00, uv01);
+                Vector2f dstdv = pbrt.Lerp(uv[0], uv01, uv11) - pbrt.Lerp(uv[0], uv00, uv10);
 
                 duds = std.abs(dstdu[0]) < 1e-8f ? 0 : 1 / dstdu[0];
                 dvds = std.abs(dstdv[0]) < 1e-8f ? 0 : 1 / dstdv[0];
@@ -2176,13 +2176,13 @@ namespace pbrt
                 Vector3f dpdt = dpdu * dudt + dpdv * dvdt;
 
                 // Set _dpdu_ and _dpdv_ to updated partial derivatives
-                if (Globals.Cross(dpds, dpdt) != new Vector3f(0, 0, 0))
+                if (pbrt.Cross(dpds, dpdt) != new Vector3f(0, 0, 0))
                 {
-                    if (Globals.Dot(Globals.Cross(dpdu, dpdv), Globals.Cross(dpds, dpdt)) < 0)
+                    if (pbrt.Dot(pbrt.Cross(dpdu, dpdv), pbrt.Cross(dpds, dpdt)) < 0)
                         dpdt = -dpdt;
 
-                    Globals.DCHECK_GE(Globals.Dot(Globals.Normalize(Globals.Cross(dpdu, dpdv)),
-                                                  Globals.Normalize(Globals.Cross(dpds, dpdt))), -1e-3f);
+                    pbrt.DCHECK_GE(pbrt.Dot(pbrt.Normalize(pbrt.Cross(dpdu, dpdv)),
+                                                  pbrt.Normalize(pbrt.Cross(dpds, dpdt))), -1e-3f);
                     dpdu = dpds;
                     dpdv = dpdt;
                 }
@@ -2192,12 +2192,12 @@ namespace pbrt
             Vector3f d2Pduu = new Vector3f(0, 0, 0), d2Pdvv = new Vector3f(0, 0, 0);
             Vector3f d2Pduv = (p00 - p01) + (p11 - p10);
             // Compute coefficients for fundamental forms
-            Float E = Globals.Dot(dpdu, dpdu), F = Globals.Dot(dpdu, dpdv), G = Globals.Dot(dpdv, dpdv);
-            Vector3f n = Globals.Normalize(Globals.Cross(dpdu, dpdv));
-            Float e = Globals.Dot(n, d2Pduu), f = Globals.Dot(n, d2Pduv), g = Globals.Dot(n, d2Pdvv);
+            Float E = pbrt.Dot(dpdu, dpdu), F = pbrt.Dot(dpdu, dpdv), G = pbrt.Dot(dpdv, dpdv);
+            Vector3f n = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
+            Float e = pbrt.Dot(n, d2Pduu), f = pbrt.Dot(n, d2Pduv), g = pbrt.Dot(n, d2Pdvv);
 
             // Compute $\dndu$ and $\dndv$ from fundamental form coefficients
-            Float EGF2 = Globals.DifferenceOfProducts(E, G, F, F);
+            Float EGF2 = pbrt.DifferenceOfProducts(E, G, F, F);
             Float invEGF2 = (EGF2 == 0) ? (Float)0 : 1 / EGF2;
             Normal3f dndu = (Normal3f)((f * F - e * G) * invEGF2 * dpdu + (e * F - f * E) * invEGF2 * dpdv);
             Normal3f dndv = (Normal3f)((g * F - f * G) * invEGF2 * dpdu + (f * F - g * E) * invEGF2 * dpdv);
@@ -2209,8 +2209,8 @@ namespace pbrt
             dndv = dndt;
 
             // Initialize bilinear patch intersection point error _pError_
-            Point3f pAbsSum = Globals.Abs(p00) + Globals.Abs(p01) + Globals.Abs(p10) + Globals.Abs(p11);
-            Vector3f pError = Globals.gamma(6) * (Vector3f)pAbsSum;
+            Point3f pAbsSum = pbrt.Abs(p00) + pbrt.Abs(p01) + pbrt.Abs(p10) + pbrt.Abs(p11);
+            Vector3f pError = pbrt.gamma(6) * (Vector3f)pAbsSum;
 
             // Initialize _SurfaceInteraction_ for bilinear patch intersection
             int faceIndex = mesh.faceIndices != null ? mesh.faceIndices[blpIndex] : 0;
@@ -2224,20 +2224,20 @@ namespace pbrt
                 // Compute shading normals for bilinear patch intersection point
                 Normal3f n00 = mesh.n[v[0]], n10 = mesh.n[v[1]];
                 Normal3f n01 = mesh.n[v[2]], n11 = mesh.n[v[3]];
-                Normal3f ns = Globals.Lerp(uv[0], Globals.Lerp(uv[1], n00, n01), Globals.Lerp(uv[1], n10, n11));
-                if (Globals.LengthSquared(ns) > 0)
+                Normal3f ns = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], n00, n01), pbrt.Lerp(uv[1], n10, n11));
+                if (pbrt.LengthSquared(ns) > 0)
                 {
-                    ns = Globals.Normalize(ns);
+                    ns = pbrt.Normalize(ns);
                     // Set shading geometry for bilinear patch intersection
-                    Normal3f dnduS = Globals.Lerp(uv[1], n10, n11) - Globals.Lerp(uv[1], n00, n01);
-                    Normal3f dndvS = Globals.Lerp(uv[0], n01, n11) - Globals.Lerp(uv[0], n00, n10);
+                    Normal3f dnduS = pbrt.Lerp(uv[1], n10, n11) - pbrt.Lerp(uv[1], n00, n01);
+                    Normal3f dndvS = pbrt.Lerp(uv[0], n01, n11) - pbrt.Lerp(uv[0], n00, n10);
                     // Update $\dndu$ and $\dndv$ to account for $(s,t)$ parameterization
                     Normal3f dndsS = dnduS * duds + dndvS * dvds;
                     Normal3f dndtS = dnduS * dudt + dndvS * dvdt;
                     dnduS = dndsS;
                     dndvS = dndtS;
 
-                    Transform r = Globals.RotateFromTo((Vector3f)Globals.Normalize(isect.n), (Vector3f)ns);
+                    Transform r = pbrt.RotateFromTo((Vector3f)pbrt.Normalize(isect.n), (Vector3f)ns);
                     isect.SetShadingGeometry(ns, r.Apply(dpdu), r.Apply(dpdv), dnduS, dndvS, true);
                 }
             }
@@ -2264,22 +2264,22 @@ namespace pbrt
                 // Sample patch $(u,v)$ with approximate uniform area sampling
                 // Initialize _w_ array with differential area at bilinear patch corners
                 pstd.span<Float> w = new pstd.span<Float>(new Float[] {
-                    Globals.Length(Globals.Cross(p10 - p00, p01 - p00)), Globals.Length(Globals.Cross(p10 - p00, p11 - p10)),
-                    Globals.Length(Globals.Cross(p01 - p00, p11 - p01)), Globals.Length(Globals.Cross(p11 - p10, p11 - p01)) });
+                    pbrt.Length(pbrt.Cross(p10 - p00, p01 - p00)), pbrt.Length(pbrt.Cross(p10 - p00, p11 - p10)),
+                    pbrt.Length(pbrt.Cross(p01 - p00, p11 - p01)), pbrt.Length(pbrt.Cross(p11 - p10, p11 - p01)) });
 
-                uv = Globals.SampleBilinear(u, w);
-                pdf = Globals.BilinearPDF(uv, w);
+                uv = pbrt.SampleBilinear(u, w);
+                pdf = pbrt.BilinearPDF(uv, w);
             }
             else
                 uv = u;
 
             // Compute bilinear patch geometric quantities at sampled $(u,v)$
             // Compute $\pt{}$, $\dpdu$, and $\dpdv$ for sampled $(u,v)$
-            Point3f pu0 = Globals.Lerp(uv[1], p00, p01), pu1 = Globals.Lerp(uv[1], p10, p11);
-            Point3f p = Globals.Lerp(uv[0], pu0, pu1);
+            Point3f pu0 = pbrt.Lerp(uv[1], p00, p01), pu1 = pbrt.Lerp(uv[1], p10, p11);
+            Point3f p = pbrt.Lerp(uv[0], pu0, pu1);
             Vector3f dpdu = pu1 - pu0;
-            Vector3f dpdv = Globals.Lerp(uv[0], p01, p11) - Globals.Lerp(uv[0], p00, p10);
-            if (Globals.LengthSquared(dpdu) == 0 || Globals.LengthSquared(dpdv) == 0)
+            Vector3f dpdv = pbrt.Lerp(uv[0], p01, p11) - pbrt.Lerp(uv[0], p00, p10);
+            if (pbrt.LengthSquared(dpdu) == 0 || pbrt.LengthSquared(dpdv) == 0)
                 return default;
 
             // Compute $(s,t)$ coordinates at sampled $(u,v)$
@@ -2289,30 +2289,30 @@ namespace pbrt
                 // Compute texture coordinates for bilinear patch intersection point
                 Point2f uv00 = mesh.uv[v[0]], uv10 = mesh.uv[v[1]];
                 Point2f uv01 = mesh.uv[v[2]], uv11 = mesh.uv[v[3]];
-                st = Globals.Lerp(uv[0], Globals.Lerp(uv[1], uv00, uv01), Globals.Lerp(uv[1], uv10, uv11));
+                st = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], uv00, uv01), pbrt.Lerp(uv[1], uv10, uv11));
             }
 
             // Compute surface normal for sampled bilinear patch $(u,v)$
-            Normal3f n = (Normal3f)Globals.Normalize(Globals.Cross(dpdu, dpdv));
+            Normal3f n = (Normal3f)pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
             // Flip normal if necessary
             if (mesh.n != null)
             {
                 // Compute shading normals for bilinear patch intersection point
                 Normal3f n00 = mesh.n[v[0]], n10 = mesh.n[v[1]];
                 Normal3f n01 = mesh.n[v[2]], n11 = mesh.n[v[3]];
-                Normal3f ns = Globals.Lerp(uv[0], Globals.Lerp(uv[1], n00, n01), Globals.Lerp(uv[1], n10, n11));
-                n = Globals.FaceForward(n, ns);
+                Normal3f ns = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], n00, n01), pbrt.Lerp(uv[1], n10, n11));
+                n = pbrt.FaceForward(n, ns);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n = -n;
 
             // Compute _pError_ for sampled bilinear patch $(u,v)$
-            Point3f pAbsSum = Globals.Abs(p00) + Globals.Abs(p01) + Globals.Abs(p10) + Globals.Abs(p11);
-            Vector3f pError = Globals.gamma(6) * (Vector3f)pAbsSum;
+            Point3f pAbsSum = pbrt.Abs(p00) + pbrt.Abs(p01) + pbrt.Abs(p10) + pbrt.Abs(p11);
+            Vector3f pError = pbrt.gamma(6) * (Vector3f)pAbsSum;
 
             // Return _ShapeSample_ for sampled bilinear patch point
             return new ShapeSample(new Interaction(new Point3fi(p, pError), n, st),
-                                   pdf / Globals.Length(Globals.Cross(dpdu, dpdv)));
+                                   pdf / pbrt.Length(pbrt.Cross(dpdu, dpdv)));
         }
 
         public override Float PDF(Interaction intr)
@@ -2331,7 +2331,7 @@ namespace pbrt
                 // Compute texture coordinates for bilinear patch intersection point
                 Point2f uv00 = mesh.uv[v[0]], uv10 = mesh.uv[v[1]];
                 Point2f uv01 = mesh.uv[v[2]], uv11 = mesh.uv[v[3]];
-                uv = Globals.InvertBilinear(uv, new pstd.span<Point2f>(new Point2f[] { uv00, uv10, uv01, uv11 }));
+                uv = pbrt.InvertBilinear(uv, new pstd.span<Point2f>(new Point2f[] { uv00, uv10, uv01, uv11 }));
             }
 
             // Compute PDF for sampling the $(u,v)$ coordinates given by _intr.uv_
@@ -2343,21 +2343,21 @@ namespace pbrt
             {
                 // Return PDF for bilinear area sampling
                 pstd.span<Float> w = new pstd.span<Float>(new Float[] {
-                    Globals.Length(Globals.Cross(p10 - p00, p01 - p00)), Globals.Length(Globals.Cross(p10 - p00, p11 - p10)),
-                    Globals.Length(Globals.Cross(p01 - p00, p11 - p01)), Globals.Length(Globals.Cross(p11 - p10, p11 - p01)) });
-                pdf = Globals.BilinearPDF(uv, w);
+                    pbrt.Length(pbrt.Cross(p10 - p00, p01 - p00)), pbrt.Length(pbrt.Cross(p10 - p00, p11 - p10)),
+                    pbrt.Length(pbrt.Cross(p01 - p00, p11 - p01)), pbrt.Length(pbrt.Cross(p11 - p10, p11 - p01)) });
+                pdf = pbrt.BilinearPDF(uv, w);
             }
             else
                 pdf = 1;
 
             // Find $\dpdu$ and $\dpdv$ at bilinear patch $(u,v)$
             // Compute $\pt{}$, $\dpdu$, and $\dpdv$ for sampled $(u,v)$
-            Point3f pu0 = Globals.Lerp(uv[1], p00, p01), pu1 = Globals.Lerp(uv[1], p10, p11);
+            Point3f pu0 = pbrt.Lerp(uv[1], p00, p01), pu1 = pbrt.Lerp(uv[1], p10, p11);
             Vector3f dpdu = pu1 - pu0;
-            Vector3f dpdv = Globals.Lerp(uv[0], p01, p11) - Globals.Lerp(uv[0], p00, p10);
+            Vector3f dpdv = pbrt.Lerp(uv[0], p01, p11) - pbrt.Lerp(uv[0], p00, p10);
 
             // Return final bilinear patch area sampling PDF
-            return pdf / Globals.Length(Globals.Cross(dpdu, dpdv));
+            return pdf / pbrt.Length(pbrt.Cross(dpdu, dpdv));
         }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
@@ -2371,10 +2371,10 @@ namespace pbrt
 
             // Sample bilinear patch using uniform area sampling
             // Compute solid angle of bilinear patch and test against threshold
-            Vector3f v00 = Globals.Normalize(p00 - ctx.p()), v10 = Globals.Normalize(p10 - ctx.p());
-            Vector3f v01 = Globals.Normalize(p01 - ctx.p()), v11 = Globals.Normalize(p11 - ctx.p());
+            Vector3f v00 = pbrt.Normalize(p00 - ctx.p()), v10 = pbrt.Normalize(p10 - ctx.p());
+            Vector3f v01 = pbrt.Normalize(p01 - ctx.p()), v11 = pbrt.Normalize(p11 - ctx.p());
             if (!IsRectangle(mesh) || mesh.imageDistribution != null ||
-                Globals.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
+                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
                 return ShapeUtil.SampleByArea(this, ctx, u);
 
             // Sample spherical rectangle at reference point
@@ -2384,29 +2384,29 @@ namespace pbrt
             {
                 // Compute $\cos\theta$ weights for rectangle seen from reference point
                 pstd.span<Float> w = new pstd.span<Float>(new Float[] {
-                    std.max<Float>(0.01f, Globals.AbsDot(v00, ctx.ns)), std.max<Float>(0.01f, Globals.AbsDot(v10, ctx.ns)),
-                    std.max<Float>(0.01f, Globals.AbsDot(v01, ctx.ns)), std.max<Float>(0.01f, Globals.AbsDot(v11, ctx.ns)) });
-                u = Globals.SampleBilinear(u, w);
-                pdf *= Globals.BilinearPDF(u, w);
+                    std.max<Float>(0.01f, pbrt.AbsDot(v00, ctx.ns)), std.max<Float>(0.01f, pbrt.AbsDot(v10, ctx.ns)),
+                    std.max<Float>(0.01f, pbrt.AbsDot(v01, ctx.ns)), std.max<Float>(0.01f, pbrt.AbsDot(v11, ctx.ns)) });
+                u = pbrt.SampleBilinear(u, w);
+                pdf *= pbrt.BilinearPDF(u, w);
             }
 
             Vector3f eu = p10 - p00, ev = p01 - p00;
             Float quadPDF;
-            Point3f p = Globals.SampleSphericalRectangle(ctx.p(), p00, eu, ev, u, &quadPDF);
+            Point3f p = pbrt.SampleSphericalRectangle(ctx.p(), p00, eu, ev, u, &quadPDF);
             pdf *= quadPDF;
 
             // Compute $(u,v)$ and surface normal for sampled point on rectangle
-            Point2f uv = new Point2f(Globals.Dot(p - p00, eu) / Globals.DistanceSquared(p10, p00),
-                                     Globals.Dot(p - p00, ev) / Globals.DistanceSquared(p01, p00));
-            Normal3f n = (Normal3f)Globals.Normalize(Globals.Cross(eu, ev));
+            Point2f uv = new Point2f(pbrt.Dot(p - p00, eu) / pbrt.DistanceSquared(p10, p00),
+                                     pbrt.Dot(p - p00, ev) / pbrt.DistanceSquared(p01, p00));
+            Normal3f n = (Normal3f)pbrt.Normalize(pbrt.Cross(eu, ev));
             // Flip normal if necessary
             if (mesh.n != null)
             {
                 // Compute shading normals for bilinear patch intersection point
                 Normal3f n00 = mesh.n[v[0]], n10 = mesh.n[v[1]];
                 Normal3f n01 = mesh.n[v[2]], n11 = mesh.n[v[3]];
-                Normal3f ns = Globals.Lerp(uv[0], Globals.Lerp(uv[1], n00, n01), Globals.Lerp(uv[1], n10, n11));
-                n = Globals.FaceForward(n, ns);
+                Normal3f ns = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], n00, n01), pbrt.Lerp(uv[1], n10, n11));
+                n = pbrt.FaceForward(n, ns);
             }
             else if (mesh.reverseOrientation ^ mesh.transformSwapsHandedness)
                 n = -n;
@@ -2418,7 +2418,7 @@ namespace pbrt
                 // Compute texture coordinates for bilinear patch intersection point
                 Point2f uv00 = mesh.uv[v[0]], uv10 = mesh.uv[v[1]];
                 Point2f uv01 = mesh.uv[v[2]], uv11 = mesh.uv[v[3]];
-                st = Globals.Lerp(uv[0], Globals.Lerp(uv[1], uv00, uv01), Globals.Lerp(uv[1], uv10, uv11));
+                st = pbrt.Lerp(uv[0], pbrt.Lerp(uv[1], uv00, uv01), pbrt.Lerp(uv[1], uv10, uv11));
             }
 
             return new ShapeSample(new Interaction(p, n, ctx.time, st), pdf);
@@ -2442,29 +2442,29 @@ namespace pbrt
 
             // Compute PDF for sampling the intersection point
             // Test for rectangle and compute solid angle
-            Vector3f v00 = Globals.Normalize(p00 - ctx.p()), v10 = Globals.Normalize(p10 - ctx.p());
-            Vector3f v01 = Globals.Normalize(p01 - ctx.p()), v11 = Globals.Normalize(p11 - ctx.p());
+            Vector3f v00 = pbrt.Normalize(p00 - ctx.p()), v10 = pbrt.Normalize(p10 - ctx.p());
+            Vector3f v01 = pbrt.Normalize(p01 - ctx.p()), v11 = pbrt.Normalize(p11 - ctx.p());
             if (!IsRectangle(mesh) || mesh.imageDistribution != null ||
-                Globals.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
+                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
             {
                 // Return solid angle PDF for area-sampled bilinear patch
-                Float pdf = PDF(isect.value().intr) * (Globals.DistanceSquared(ctx.p(), isect.value().intr.p()) /
-                                                       Globals.AbsDot(isect.value().intr.n, -wi));
-                return Globals.IsInf(pdf) ? 0 : pdf;
+                Float pdf = PDF(isect.value().intr) * (pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()) /
+                                                       pbrt.AbsDot(isect.value().intr.n, -wi));
+                return pbrt.IsInf(pdf) ? 0 : pdf;
             }
             else
             {
                 // Return PDF for sampled bilinear patch
-                Float pdf = 1 / Globals.SphericalQuadArea(v00, v10, v11, v01);
+                Float pdf = 1 / pbrt.SphericalQuadArea(v00, v10, v11, v01);
                 if (ctx.ns != new Normal3f(0, 0, 0))
                 {
                     // Compute $\cos\theta$ weights for rectangle seen from reference point
                     pstd.span<Float> w = new pstd.span<Float>(new Float[] {
-                        std.max<Float>(0.01f, Globals.AbsDot(v00, ctx.ns)), std.max<Float>(0.01f, Globals.AbsDot(v10, ctx.ns)),
-                        std.max<Float>(0.01f, Globals.AbsDot(v01, ctx.ns)), std.max<Float>(0.01f, Globals.AbsDot(v11, ctx.ns)) });
-                    Point2f u = Globals.InvertSphericalRectangleSample(ctx.p(), p00, p10 - p00, p01 - p00,
+                        std.max<Float>(0.01f, pbrt.AbsDot(v00, ctx.ns)), std.max<Float>(0.01f, pbrt.AbsDot(v10, ctx.ns)),
+                        std.max<Float>(0.01f, pbrt.AbsDot(v01, ctx.ns)), std.max<Float>(0.01f, pbrt.AbsDot(v11, ctx.ns)) });
+                    Point2f u = pbrt.InvertSphericalRectangleSample(ctx.p(), p00, p10 - p00, p01 - p00,
                                                                        isect.value().intr.p());
-                    return Globals.BilinearPDF(u, w) * pdf;
+                    return pbrt.BilinearPDF(u, w) * pdf;
                 }
                 else
                     return pdf;
@@ -2473,7 +2473,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BilinearPatch meshIndex: %d blpIndex: %d area: %f ]", meshIndex, blpIndex,
+            return pbrt.StringPrintf("[ BilinearPatch meshIndex: %d blpIndex: %d area: %f ]", meshIndex, blpIndex,
                                         area);
         }
 
@@ -2490,14 +2490,14 @@ namespace pbrt
             if (p00 == p01 || p01 == p11 || p11 == p10 || p10 == p00)
                 return false;
             // Check if bilinear patch vertices are coplanar
-            Normal3f n = (Normal3f)Globals.Normalize(Globals.Cross(p10 - p00, p01 - p00));
-            if (Globals.AbsDot((Vector3f)Globals.Normalize(p11 - p00), n) > 1e-5f)
+            Normal3f n = (Normal3f)pbrt.Normalize(pbrt.Cross(p10 - p00, p01 - p00));
+            if (pbrt.AbsDot((Vector3f)pbrt.Normalize(p11 - p00), n) > 1e-5f)
                 return false;
 
             // Check if planar vertices form a rectangle
             Point3f pCenter = (p00 + (Vector3f)p01 + (Vector3f)p10 + (Vector3f)p11) / 4;
-            Float[] d2 = { Globals.DistanceSquared(p00, pCenter), Globals.DistanceSquared(p01, pCenter),
-                           Globals.DistanceSquared(p10, pCenter), Globals.DistanceSquared(p11, pCenter) };
+            Float[] d2 = { pbrt.DistanceSquared(p00, pCenter), pbrt.DistanceSquared(p01, pCenter),
+                           pbrt.DistanceSquared(p10, pCenter), pbrt.DistanceSquared(p11, pCenter) };
             for (int i = 1; i < 4; ++i)
                 if (std.abs(d2[i] - d2[0]) / d2[0] > 1e-4f)
                     return false;
@@ -2509,7 +2509,7 @@ namespace pbrt
         Float area;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Triangle Function Declarations
         public static pstd.optional<TriangleIntersection> IntersectTriangle(Ray ray, Float tMax, Point3f p0, Point3f p1,
@@ -2750,19 +2750,19 @@ namespace pbrt
             }
             else if (name == "plymesh")
             {
-                string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+                string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
                 TriQuadMesh plyMesh = TriQuadMesh.ReadPLY(filename);
 
                 Float edgeLength = parameters.GetOneFloat("edgelength", 1.0f);
-                edgeLength *= Globals.Options.displacementEdgeScale;
+                edgeLength *= pbrt.Options.displacementEdgeScale;
 
                 string displacementTexName = parameters.GetTexture("displacement");
                 if (displacementTexName.Length != 0)
                 {
                     if (!floatTextures.TryGetValue(displacementTexName, out FloatTexture displacement))
-                        Globals.ErrorExit(loc, Globals.StringPrintf("%s: no such texture defined.", displacementTexName));
+                        pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: no such texture defined.", displacementTexName));
 
-                    Globals.LOG_VERBOSE("Starting to displace mesh \"%s\" with \"%s\"", filename, displacementTexName);
+                    pbrt.LOG_VERBOSE("Starting to displace mesh \"%s\" with \"%s\"", filename, displacementTexName);
 
                     int origTriCount = (int)(plyMesh.triIndices.size() / 3);
                     Transform rfo = renderFromObject;
@@ -2771,12 +2771,12 @@ namespace pbrt
                         {
                             v0 = rfo.Apply(v0);
                             v1 = rfo.Apply(v1);
-                            return Globals.Distance(v0, v1);
+                            return pbrt.Distance(v0, v1);
                         },
                         edgeLength,
                         (Point3f[] p, Normal3f[] n, Point2f[] uv, int nVertices) =>
                         {
-                            Globals.ParallelFor(0, nVertices, (int i) =>
+                            pbrt.ParallelFor(0, nVertices, (int i) =>
                             {
                                 TextureEvalContext ctx = default;
                                 ctx.p = p[i];
@@ -2787,7 +2787,7 @@ namespace pbrt
                         },
                         loc);
 
-                    Globals.LOG_VERBOSE("Finished displacing mesh \"%s\" with \"%s\" -> %d tris", filename,
+                    pbrt.LOG_VERBOSE("Finished displacing mesh \"%s\" with \"%s\" -> %d tris", filename,
                                         displacementTexName, plyMesh.triIndices.size() / 3);
                     displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origTriCount;
                 }
@@ -2816,25 +2816,25 @@ namespace pbrt
                 int nLevels = parameters.GetOneInt("levels", 3);
                 List<int> vertexIndices = parameters.GetIntArray("indices");
                 if (vertexIndices.Count == 0)
-                    Globals.ErrorExit(loc, "Vertex indices \"indices\" not provided for " +
+                    pbrt.ErrorExit(loc, "Vertex indices \"indices\" not provided for " +
                                            "LoopSubdiv shape.");
                 List<Point3f> P = parameters.GetPoint3fArray("P");
                 if (P.Count == 0)
-                    Globals.ErrorExit(loc, "Vertex positions \"P\" not provided for LoopSubdiv shape.");
+                    pbrt.ErrorExit(loc, "Vertex positions \"P\" not provided for LoopSubdiv shape.");
 
                 string scheme = parameters.GetOneString("scheme", "loop");
 
                 Transform rfo = renderFromObject;
-                TriangleMesh mesh = Globals.LoopSubdivide(&rfo, reverseOrientation, nLevels,
+                TriangleMesh mesh = pbrt.LoopSubdivide(&rfo, reverseOrientation, nLevels,
                                                           new pstd.span<int>(vertexIndices.ToArray()),
                                                           new pstd.span<Point3f>(P.ToArray()), alloc);
                 shapes = Triangle.CreateTriangles(mesh, alloc);
             }
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: shape type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: shape type unknown.", name));
 
             if (shapes.empty())
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create shape.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create shape.", name));
             return shapes;
         }
     }

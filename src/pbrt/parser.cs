@@ -123,12 +123,12 @@ namespace pbrt
         protected void ErrorExitDeferred(string message)
         {
             errorExit = true;
-            Globals.Error(message);
+            pbrt.Error(message);
         }
         protected void ErrorExitDeferred(FileLoc loc, string message)
         {
             errorExit = true;
-            Globals.Error(loc, message);
+            pbrt.Error(loc, message);
         }
 
         protected bool errorExit = false;
@@ -141,7 +141,7 @@ namespace pbrt
         public Token(string token, FileLoc loc) { this.token = token; this.loc = loc; }
         public override string ToString()
         {
-            return Globals.StringPrintf("[ Token token: %s loc: %s ]", token, loc);
+            return pbrt.StringPrintf("[ Token token: %s loc: %s ]", token, loc);
         }
         public string token;
         public FileLoc loc;
@@ -166,7 +166,7 @@ namespace pbrt
             switch (ch)
             {
                 case EOF:
-                    Globals.ErrorExit(loc, "premature EOF after character escape '\\'");
+                    pbrt.ErrorExit(loc, "premature EOF after character escape '\\'");
                     break;
                 case 'b':
                     return '\b';
@@ -185,7 +185,7 @@ namespace pbrt
                 case '\"':
                     return '\"';
                 default:
-                    Globals.ErrorExit(loc, "unexpected escaped character \"" + (char)ch + "\"");
+                    pbrt.ErrorExit(loc, "unexpected escaped character \"" + (char)ch + "\"");
                     break;
             }
             return (char)0;  // NOTREACHED
@@ -200,18 +200,18 @@ namespace pbrt
                 return new Tokenizer(str, "<stdin>", errorCallback);
             }
 
-            if (Globals.HasExtension(filename, ".gz"))
+            if (pbrt.HasExtension(filename, ".gz"))
             {
-                string str = Globals.ReadDecompressedFileContents(filename);
+                string str = pbrt.ReadDecompressedFileContents(filename);
                 return new Tokenizer(str, filename, errorCallback);
             }
 
             if (!File.Exists(filename))
             {
-                errorCallback(Globals.StringPrintf("%s: %s", filename, "No such file or directory"), null);
+                errorCallback(pbrt.StringPrintf("%s: %s", filename, "No such file or directory"), null);
                 return null;
             }
-            byte[] bytes = Globals.ReadFileBytes(filename);
+            byte[] bytes = pbrt.ReadFileBytes(filename);
             Tokenizer t = new Tokenizer(Encoding.UTF8.GetString(bytes), filename, errorCallback);
             t.CheckUTF(bytes);
             return t;
@@ -386,7 +386,7 @@ namespace pbrt
         int pos, end;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         static string toString(string s) { return s; }
 
@@ -2130,9 +2130,9 @@ namespace pbrt
                     string plyPrefix = Environment.GetEnvironmentVariable("PLY_PREFIX") ?? "mesh";
                     string fn = StringPrintf("%s_%05d.ply", plyPrefix, plyCount++);
 
-                    pbrt.Transform identity = new pbrt.Transform();
+                    global::pbrt.Transform identity = new global::pbrt.Transform();
                     TriangleMesh mesh =
-                        pbrt.Triangle.CreateMesh(identity, false, dict, loc, new Allocator());
+                        global::pbrt.Triangle.CreateMesh(identity, false, dict, loc, new Allocator());
                     if (!mesh.WritePLY(fn))
                         ErrorExit(loc, StringPrintf("%s: unable to write PLY file.", fn));
 

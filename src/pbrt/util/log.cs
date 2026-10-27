@@ -16,7 +16,7 @@ namespace pbrt
         public FatalException(string s) : base(s) { }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static string ToString(LogLevel level)
         {

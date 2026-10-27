@@ -27,14 +27,14 @@ namespace pbrt
         // AreaLights only
         public virtual SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("Light::L() called for a light that is not an area light");
+            pbrt.LOG_FATAL("Light::L() called for a light that is not an area light");
             return default;
         }
 
         // InfiniteLights only
         public virtual SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("Light::Le() called for a light that is not an infinite light");
+            pbrt.LOG_FATAL("Light::Le() called for a light that is not an infinite light");
             return default;
         }
 
@@ -46,7 +46,7 @@ namespace pbrt
         // AreaLights only
         public virtual void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
         {
-            Globals.LOG_FATAL("Light::PDF_Le(Interaction) called for a light that is not an area light");
+            pbrt.LOG_FATAL("Light::PDF_Le(Interaction) called for a light that is not an area light");
         }
     }
 

@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // std::stoi/stoll/stof/stod parse a numeric prefix, skipping leading whitespace, and
         // throw if there is none; these helpers do the same.

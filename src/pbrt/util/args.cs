@@ -13,7 +13,7 @@ using System.Globalization;
 namespace pbrt
 {
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Downcase the string and remove any '-' or '_' characters; thus we can be
         // a little flexible in what we match for argument names.

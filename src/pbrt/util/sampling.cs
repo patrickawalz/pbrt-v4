@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Sampling Inline Functions
         public static Float BalanceHeuristic(int nf, Float fPdf, int ng, Float gPdf)
@@ -1711,7 +1711,7 @@ namespace pbrt
         public IEnumerator<Point2f> GetEnumerator()
         {
             for (int i = 0; i < n; ++i)
-                yield return new Point2f((Float)i / (Float)n, Globals.RadicalInverse(0, (uint64_t)i));
+                yield return new Point2f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i));
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
         private int n;
@@ -1723,7 +1723,7 @@ namespace pbrt
         public IEnumerator<Point3f> GetEnumerator()
         {
             for (int i = 0; i < n; ++i)
-                yield return new Point3f((Float)i / (Float)n, Globals.RadicalInverse(0, (uint64_t)i), Globals.RadicalInverse(1, (uint64_t)i));
+                yield return new Point3f((Float)i / (Float)n, pbrt.RadicalInverse(0, (uint64_t)i), pbrt.RadicalInverse(1, (uint64_t)i));
         }
         IEnumerator IEnumerable.GetEnumerator() { return GetEnumerator(); }
         private int n;

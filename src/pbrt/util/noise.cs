@@ -8,7 +8,7 @@ using System;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Perlin Noise Data
         private const int NoisePermSize = 256;

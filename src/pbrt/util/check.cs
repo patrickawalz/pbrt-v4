@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // CHECK Macro Definitions
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

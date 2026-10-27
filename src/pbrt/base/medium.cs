@@ -38,7 +38,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ RayMajorantSegment tMin: %f tMax: %f sigma_maj: %s ]", tMin, tMax, sigma_maj);
+            return pbrt.StringPrintf("[ RayMajorantSegment tMin: %f tMax: %f sigma_maj: %s ]", tMin, tMax, sigma_maj);
         }
     }
 
@@ -69,7 +69,7 @@ namespace pbrt
         // MediumInterface Public Methods
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MediumInterface inside: %s outside: %s ]",
+            return pbrt.StringPrintf("[ MediumInterface inside: %s outside: %s ]",
                                         inside != null ? inside.ToString() : "(nullptr)",
                                         outside != null ? outside.ToString() : "(nullptr)");
         }

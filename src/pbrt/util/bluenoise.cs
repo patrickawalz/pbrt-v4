@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public const int BlueNoiseResolution = 128;
         public const int NumBlueNoiseTextures = 48;

@@ -48,7 +48,7 @@ namespace pbrt
     // SpectrumType Definition
     public enum SpectrumType { Illuminant, Albedo, Unbounded }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static string ToString(SpectrumType t)
         {
@@ -144,7 +144,7 @@ namespace pbrt
             this.colorSpace = colorSpace;
             nOwnedParams = @params.Count;
             @params.Reverse();
-            Globals.CHECK(colorSpace != null);
+            pbrt.CHECK(colorSpace != null);
             checkParameterTypes();
         }
 
@@ -154,7 +154,7 @@ namespace pbrt
             this.colorSpace = colorSpace;
             nOwnedParams = @params.Count;
             @params.Reverse();
-            Globals.CHECK(colorSpace != null);
+            pbrt.CHECK(colorSpace != null);
             for (int i = params1.Count - 1; i >= 0; --i)
                 @params.Add(params1[i]);
             checkParameterTypes();
@@ -168,9 +168,9 @@ namespace pbrt
                     continue;
 
                 if (p.strings.empty())
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("No string values provided for parameter \"%s\".", name));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("No string values provided for parameter \"%s\".", name));
                 if (p.strings.size() > 1)
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("More than one value provided for parameter \"%s\".", name));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("More than one value provided for parameter \"%s\".", name));
 
                 p.lookedUp = true;
                 return p.strings[0];
@@ -186,7 +186,7 @@ namespace pbrt
                 if (p.name == name && p.type == "rgb")
                 {
                     if (p.floats.size() % 3 != 0)
-                        Globals.ErrorExit(p.loc, "Number of values given for \"rgb\" parameter \"" + name + "\" isn't a multiple of 3.");
+                        pbrt.ErrorExit(p.loc, "Number of values given for \"rgb\" parameter \"" + name + "\" isn't a multiple of 3.");
                     List<RGB> rgb = new List<RGB>((int)(p.floats.size() / 3));
                     for (int i = 0; i < (int)(p.floats.size() / 3); ++i)
                         rgb.Add(new RGB(p.floats[3 * i], p.floats[3 * i + 1], p.floats[3 * i + 2]));
@@ -205,7 +205,7 @@ namespace pbrt
                 if (p.name == name && p.type == "rgb")
                 {
                     if (p.floats.size() < 3)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("Insufficient values for \"rgb\" parameter \"%s\".", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Insufficient values for \"rgb\" parameter \"%s\".", p.name));
                     return new RGB(p.floats[0], p.floats[1], p.floats[2]);
                 }
             }
@@ -221,7 +221,7 @@ namespace pbrt
                 if (p.name == name && p.type == "blackbody")
                 {
                     if (p.floats.size() != 2)
-                        Globals.ErrorExit(p.loc, "Expected two values for legacy \"blackbody\" parameter.");
+                        pbrt.ErrorExit(p.loc, "Expected two values for legacy \"blackbody\" parameter.");
                     scale *= p.floats[1];
                     p.floats.pop_back();
                 }
@@ -259,7 +259,7 @@ namespace pbrt
             {
                 if (p.type != "texture")
                     continue;
-                Globals.CHECK_EQ(1, (int)p.strings.size());
+                pbrt.CHECK_EQ(1, (int)p.strings.size());
                 if (m.TryGetValue(p.strings[0], out string renamed))
                     p.strings[0] = renamed;
             }
@@ -290,7 +290,7 @@ namespace pbrt
             string s = "[ ParameterDictionary params: ";
             foreach (ParsedParameter p in @params)
                 s += "[ " + p.ToString() + "] ";
-            s += Globals.StringPrintf("colorSpace: %s ", colorSpace != null ? colorSpace.ToString() : "<nullptr>");
+            s += pbrt.StringPrintf("colorSpace: %s ", colorSpace != null ? colorSpace.ToString() : "<nullptr>");
             s += "]";
             return s;
         }
@@ -336,7 +336,7 @@ namespace pbrt
                 if (s.Count != 0)
                 {
                     if (s.Count > 1)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("More than one value provided for parameter \"%s\".", name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("More than one value provided for parameter \"%s\".", name));
                     return s[0];
                 }
             }
@@ -392,7 +392,7 @@ namespace pbrt
                     // It's shadowed by another parameter; that's fine.
                 }
                 else
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": unused parameter.", p.name));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": unused parameter.", p.name));
             }
         }
 
@@ -410,9 +410,9 @@ namespace pbrt
 
                 // Issue error if an incorrect number of parameter values were provided
                 if (nvalues == 0)
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("No values provided for parameter \"%s\".", name));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("No values provided for parameter \"%s\".", name));
                 if (nvalues != (ulong)traits.nPerItem)
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("Expected %d values for parameter \"%s\".", traits.nPerItem, name));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Expected %d values for parameter \"%s\".", traits.nPerItem, name));
 
                 // Return parameter values as _ReturnType_
                 p.lookedUp = true;
@@ -432,9 +432,9 @@ namespace pbrt
         private static List<T> returnArray<T>(ulong nValues, ParsedParameter param, int nPerItem, Func<ParsedParameter, int, T> convert)
         {
             if (nValues == 0)
-                Globals.ErrorExit(param.loc, Globals.StringPrintf("No values provided for \"%s\".", param.name));
+                pbrt.ErrorExit(param.loc, pbrt.StringPrintf("No values provided for \"%s\".", param.name));
             if (nValues % (ulong)nPerItem != 0)
-                Globals.ErrorExit(param.loc, Globals.StringPrintf("Number of values provided for \"%s\" not a multiple of %d", param.name, nPerItem));
+                pbrt.ErrorExit(param.loc, pbrt.StringPrintf("Number of values provided for \"%s\" not a multiple of %d", param.name, nPerItem));
 
             param.lookedUp = true;
             int n = (int)(nValues / (ulong)nPerItem);
@@ -446,18 +446,18 @@ namespace pbrt
 
         private List<Spectrum> extractSpectrumArray(ParsedParameter param, SpectrumType spectrumType, Allocator alloc)
         {
-            if (param.type == "rgb" || (Globals.Options.upgrade && param.type == "color"))
+            if (param.type == "rgb" || (pbrt.Options.upgrade && param.type == "color"))
                 return returnArray<Spectrum>(param.floats.size(), param, 3, (ParsedParameter pp, int i) =>
                 {
                     RGB rgb = new RGB(pp.floats[i], pp.floats[i + 1], pp.floats[i + 2]);
                     RGBColorSpace cs = param.colorSpace != null ? param.colorSpace : colorSpace;
                     if (rgb.r < 0 || rgb.g < 0 || rgb.b < 0)
-                        Globals.ErrorExit(param.loc, Globals.StringPrintf("RGB parameter \"%s\" has negative component.", param.name));
+                        pbrt.ErrorExit(param.loc, pbrt.StringPrintf("RGB parameter \"%s\" has negative component.", param.name));
 
                     if (spectrumType == SpectrumType.Albedo)
                     {
                         if (rgb.r > 1 || rgb.g > 1 || rgb.b > 1)
-                            Globals.ErrorExit(param.loc, Globals.StringPrintf("RGB parameter \"%s\" has > 1 component.", param.name));
+                            pbrt.ErrorExit(param.loc, pbrt.StringPrintf("RGB parameter \"%s\" has > 1 component.", param.name));
                         return new RGBAlbedoSpectrum(cs, rgb);
                     }
                     else if (spectrumType == SpectrumType.Unbounded)
@@ -466,7 +466,7 @@ namespace pbrt
                     }
                     else
                     {
-                        Globals.CHECK(spectrumType == SpectrumType.Illuminant);
+                        pbrt.CHECK(spectrumType == SpectrumType.Illuminant);
                         return new RGBIlluminantSpectrum(cs, rgb);
                     }
                 });
@@ -478,17 +478,17 @@ namespace pbrt
             else if (param.type == "spectrum" && !param.floats.empty())
             {
                 if (param.floats.size() % 2 != 0)
-                    Globals.ErrorExit(param.loc, Globals.StringPrintf("Found odd number of values for \"%s\"", param.name));
+                    pbrt.ErrorExit(param.loc, pbrt.StringPrintf("Found odd number of values for \"%s\"", param.name));
                 int nSamples = (int)(param.floats.size() / 2);
                 if (nSamples == 1)
-                    Globals.Warning(param.loc, "Specified spectrum is only non-zero at a single wavelength. This is probably unintended.");
+                    pbrt.Warning(param.loc, "Specified spectrum is only non-zero at a single wavelength. This is probably unintended.");
                 return returnArray<Spectrum>(param.floats.size(), param, (int)param.floats.size(), (ParsedParameter pp, int i) =>
                 {
                     Float[] lambda = new Float[nSamples], value = new Float[nSamples];
                     for (int k = 0; k < nSamples; ++k)
                     {
                         if (k > 0 && pp.floats[i + 2 * k] <= lambda[k - 1])
-                            Globals.ErrorExit(param.loc, Globals.StringPrintf("Spectrum description invalid: at %d'th entry, " +
+                            pbrt.ErrorExit(param.loc, pbrt.StringPrintf("Spectrum description invalid: at %d'th entry, " +
                                               "wavelengths aren't increasing: %f >= %f.", k - 1, lambda[k - 1], pp.floats[i + 2 * k]));
                         lambda[k] = pp.floats[i + 2 * k];
                         value[k] = pp.floats[i + 2 * k + 1];
@@ -500,13 +500,13 @@ namespace pbrt
                 return returnArray<Spectrum>(param.strings.size(), param, 1, (ParsedParameter pp, int i) =>
                 {
                     string s = pp.strings[i];
-                    Spectrum spd = Globals.GetNamedSpectrum(s);
+                    Spectrum spd = pbrt.GetNamedSpectrum(s);
                     if (spd != null)
                         return spd;
 
                     spd = readSpectrumFromFile(s, alloc);
                     if (spd == null)
-                        Globals.ErrorExit(param.loc, Globals.StringPrintf("%s: unable to read valid spectrum file", s));
+                        pbrt.ErrorExit(param.loc, pbrt.StringPrintf("%s: unable to read valid spectrum file", s));
                     return spd;
                 });
             return new List<Spectrum>();
@@ -517,7 +517,7 @@ namespace pbrt
         // TODO: move this functionality (but not the caching?) to a Spectrum method.
         private static Spectrum readSpectrumFromFile(string filename, Allocator alloc)
         {
-            string fn = Globals.ResolveFilename(filename);
+            string fn = pbrt.ResolveFilename(filename);
             if (cachedSpectra.TryGetValue(fn, out Spectrum cached))
                 return cached;
 
@@ -545,7 +545,7 @@ namespace pbrt
                 if (p.type == BooleanTraits.typeName)
                 {
                     if (p.bools.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": non-Boolean values provided for Boolean-valued parameter", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": non-Boolean values provided for Boolean-valued parameter", p.name));
                 }
                 else if (p.type == FloatTraits.typeName || p.type == IntegerTraits.typeName ||
                          p.type == Point2fTraits.typeName || p.type == Vector2fTraits.typeName ||
@@ -553,26 +553,26 @@ namespace pbrt
                          p.type == Normal3fTraits.typeName || p.type == "rgb" || p.type == "blackbody")
                 {
                     if (p.ints.empty() && p.floats.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": non-numeric values provided for numeric-valued parameter", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": non-numeric values provided for numeric-valued parameter", p.name));
                 }
                 else if (p.type == StringTraits.typeName || p.type == "texture")
                 {
                     if (p.strings.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": non-string values provided for string-valued parameter", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": non-string values provided for string-valued parameter", p.name));
                 }
                 else if (p.type == "spectrum")
                 {
                     if (p.strings.empty() && p.ints.empty() && p.floats.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": expecting string or numeric-valued parameter for spectrum parameter", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": expecting string or numeric-valued parameter for spectrum parameter", p.name));
                 }
                 else
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("\"%s\": unknown parameter type", p.type));
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": unknown parameter type", p.type));
             }
         }
 
         private static string ToParameterDefinition(ParsedParameter p, int indentCount)
         {
-            string s = Globals.StringPrintf("\"%s %s\" [ ", p.type, p.name);
+            string s = pbrt.StringPrintf("\"%s %s\" [ ", p.type, p.name);
             int continuationIndent = indentCount + 10 + p.type.Length + p.name.Length;
             int column = indentCount + 4 + s.Length;
 
@@ -590,9 +590,9 @@ namespace pbrt
             }
 
             for (int i = 0; i < (int)p.floats.size(); ++i)
-                printOne(Globals.StringPrintf("%f ", p.floats[i]));
+                printOne(pbrt.StringPrintf("%f ", p.floats[i]));
             for (int i = 0; i < (int)p.ints.size(); ++i)
-                printOne(Globals.StringPrintf("%i ", p.ints[i]));
+                printOne(pbrt.StringPrintf("%i ", p.ints[i]));
             for (int i = 0; i < (int)p.strings.size(); ++i)
                 printOne('"' + p.strings[i] + "\" ");
             for (int i = 0; i < (int)p.bools.size(); ++i)
@@ -662,16 +662,16 @@ namespace pbrt
                 if (p.type == "texture")
                 {
                     if (p.strings.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("No texture name provided for parameter \"%s\".", name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("No texture name provided for parameter \"%s\".", name));
                     if (p.strings.size() != 1)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("More than one texture name provided for parameter \"%s\".", name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("More than one texture name provided for parameter \"%s\".", name));
 
                     p.lookedUp = true;
 
                     if (textures.floatTextures.TryGetValue(p.strings[0], out FloatTexture ft))
                         return ft;
 
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("Couldn't find float texture named \"%s\" for parameter \"%s\"",
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Couldn't find float texture named \"%s\" for parameter \"%s\"",
                                                                   p.strings[0], p.name));
                 }
                 else if (p.type == "float")
@@ -711,27 +711,27 @@ namespace pbrt
                 if (p.type == "texture")
                 {
                     if (p.strings.empty())
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("No texture name provided for parameter \"%s\".", name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("No texture name provided for parameter \"%s\".", name));
                     if (p.strings.size() != 1)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("More than one texture name provided for parameter \"%s\".", name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("More than one texture name provided for parameter \"%s\".", name));
 
                     p.lookedUp = true;
 
                     if (spectrumTextures.TryGetValue(p.strings[0], out SpectrumTexture st))
                         return st;
 
-                    Globals.ErrorExit(p.loc, Globals.StringPrintf("Couldn't find spectrum texture named \"%s\" for parameter \"%s\"",
+                    pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Couldn't find spectrum texture named \"%s\" for parameter \"%s\"",
                                                                   p.strings[0], p.name));
                 }
                 else if (p.type == "rgb")
                 {
                     if (p.floats.size() != 3)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("Didn't find three values for \"rgb\" parameter \"%s\".", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Didn't find three values for \"rgb\" parameter \"%s\".", p.name));
                     p.lookedUp = true;
 
                     RGB rgb = new RGB(p.floats[0], p.floats[1], p.floats[2]);
                     if (rgb.r < 0 || rgb.g < 0 || rgb.b < 0)
-                        Globals.ErrorExit(p.loc, Globals.StringPrintf("Negative value provided for RGB parameter \"%s\".", p.name));
+                        pbrt.ErrorExit(p.loc, pbrt.StringPrintf("Negative value provided for RGB parameter \"%s\".", p.name));
 
                     Spectrum s;
                     if (spectrumType == SpectrumType.Illuminant)
@@ -740,9 +740,9 @@ namespace pbrt
                         s = new RGBUnboundedSpectrum(dict.ColorSpace(), rgb);
                     else
                     {
-                        Globals.CHECK(spectrumType == SpectrumType.Albedo);
+                        pbrt.CHECK(spectrumType == SpectrumType.Albedo);
                         if (rgb.r > 1 || rgb.g > 1 || rgb.b > 1)
-                            Globals.ErrorExit(p.loc, Globals.StringPrintf("RGB parameter \"%s\" used as an albedo has > 1 component.", p.name));
+                            pbrt.ErrorExit(p.loc, pbrt.StringPrintf("RGB parameter \"%s\" used as an albedo has > 1 component.", p.name));
                         s = new RGBAlbedoSpectrum(dict.ColorSpace(), rgb);
                     }
                     return new SpectrumConstantTexture(s);
@@ -750,7 +750,7 @@ namespace pbrt
                 else if (p.type == "spectrum" || p.type == "blackbody")
                 {
                     Spectrum s = GetOneSpectrum(name, null, spectrumType, alloc);
-                    Globals.CHECK(s != null);
+                    pbrt.CHECK(s != null);
                     return new SpectrumConstantTexture(s);
                 }
             }

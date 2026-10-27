@@ -790,7 +790,7 @@ namespace pbrt
 
         public Point2f Lerp(Point2f t)
         {
-            return new Point2f(pbrt.Globals.Lerp(t.x, pMin.x, pMax.x), pbrt.Globals.Lerp(t.y, pMin.y, pMax.y));
+            return new Point2f(pbrt.Lerp(t.x, pMin.x, pMax.x), pbrt.Lerp(t.y, pMin.y, pMax.y));
         }
 
         public Vector2f Offset(Point2f p)
@@ -870,7 +870,7 @@ namespace pbrt
 
         public Point2i Lerp(Point2f t)
         {
-            return new Point2i((int)pbrt.Globals.Lerp(t.x, pMin.x, pMax.x), (int)pbrt.Globals.Lerp(t.y, pMin.y, pMax.y));
+            return new Point2i((int)pbrt.Lerp(t.x, pMin.x, pMax.x), (int)pbrt.Lerp(t.y, pMin.y, pMax.y));
         }
 
         public Vector2i Offset(Point2i p)
@@ -953,8 +953,8 @@ namespace pbrt
 
         public Point3f Lerp(Point3f t)
         {
-            return new Point3f(pbrt.Globals.Lerp(t.x, pMin.x, pMax.x), pbrt.Globals.Lerp(t.y, pMin.y, pMax.y),
-                               pbrt.Globals.Lerp(t.z, pMin.z, pMax.z));
+            return new Point3f(pbrt.Lerp(t.x, pMin.x, pMax.x), pbrt.Lerp(t.y, pMin.y, pMax.y),
+                               pbrt.Lerp(t.z, pMin.z, pMax.z));
         }
 
         public Vector3f Offset(Point3f p)
@@ -1109,8 +1109,8 @@ namespace pbrt
 
         public Point3i Lerp(Point3f t)
         {
-            return new Point3i((int)pbrt.Globals.Lerp(t.x, pMin.x, pMax.x), (int)pbrt.Globals.Lerp(t.y, pMin.y, pMax.y),
-                               (int)pbrt.Globals.Lerp(t.z, pMin.z, pMax.z));
+            return new Point3i((int)pbrt.Lerp(t.x, pMin.x, pMax.x), (int)pbrt.Lerp(t.y, pMin.y, pMax.y),
+                               (int)pbrt.Lerp(t.z, pMin.z, pMax.z));
         }
 
         public Vector3i Offset(Point3i p)
@@ -1174,7 +1174,7 @@ namespace pbrt
     {
         private Bounds2iIterator it, end;
         private bool started;
-        public Bounds2iEnumerator(Bounds2i b) { it = Globals.begin(b); end = Globals.end(b); started = false; }
+        public Bounds2iEnumerator(Bounds2i b) { it = pbrt.begin(b); end = pbrt.end(b); started = false; }
         public bool MoveNext()
         {
             if (started) it.advance(); else started = true;
@@ -1183,7 +1183,7 @@ namespace pbrt
         public Point2i Current { get { return it.p; } }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         private static bool IsNaN(Interval fi) { return IsNaN((Float)fi); }
 
@@ -2448,7 +2448,7 @@ namespace pbrt
                 return new Point2f((h.x - f.x * v1) / (e.x + g.x * v1), v1);
             return new Point2f(u, v0);
         }
-    }  // Globals
+    }  // pbrt
 
     // OctahedralVector Definition
     public unsafe struct OctahedralVector
@@ -2615,7 +2615,7 @@ namespace pbrt
         public Vector3f x, y, z;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static bool Inside(DirectionCone d, Vector3f w)
         {

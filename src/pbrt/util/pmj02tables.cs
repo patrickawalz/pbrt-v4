@@ -4,7 +4,7 @@
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public const int nPMJ02bnSets = 5;
         public const int nPMJ02bnSamples = 65536;

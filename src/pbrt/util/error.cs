@@ -18,7 +18,7 @@ namespace pbrt
         public int line = 1, column = 0;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         private static bool hasErrored = false;
         private static bool suppressErrorMessages = false;

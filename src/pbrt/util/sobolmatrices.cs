@@ -34,7 +34,7 @@
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Sobol Matrix Declarations
         public const int NSobolDimensions = 1024;

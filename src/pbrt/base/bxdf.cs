@@ -121,7 +121,7 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // BxDFFlags Inline Functions
         public static bool IsReflective(BxDFFlags f) { return (f & BxDFFlags.Reflection) != 0; }
@@ -156,15 +156,15 @@ namespace pbrt
             this.pdfIsProportional = pdfIsProportional;
         }
 
-        public bool IsReflection() { return Globals.IsReflective(flags); }
-        public bool IsTransmission() { return Globals.IsTransmissive(flags); }
-        public bool IsDiffuse() { return Globals.IsDiffuse(flags); }
-        public bool IsGlossy() { return Globals.IsGlossy(flags); }
-        public bool IsSpecular() { return Globals.IsSpecular(flags); }
+        public bool IsReflection() { return pbrt.IsReflective(flags); }
+        public bool IsTransmission() { return pbrt.IsTransmissive(flags); }
+        public bool IsDiffuse() { return pbrt.IsDiffuse(flags); }
+        public bool IsGlossy() { return pbrt.IsGlossy(flags); }
+        public bool IsSpecular() { return pbrt.IsSpecular(flags); }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BSDFSample f: %s wi: %s pdf: %f flags: %s eta: %f pdfIsProportional: %s ]",
+            return pbrt.StringPrintf("[ BSDFSample f: %s wi: %s pdf: %f flags: %s eta: %f pdfIsProportional: %s ]",
                                         f, wi, pdf, flags, eta, pdfIsProportional);
         }
 

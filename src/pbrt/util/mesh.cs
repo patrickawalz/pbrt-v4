@@ -43,13 +43,13 @@ namespace pbrt
             nTris += nTriangles;
             triangleBytes += 64;  // sizeof(*this)
             // Initialize mesh _vertexIndices_
-            vertexIndices = Globals.intBufferCache.LookupOrAdd(new pstd.span<int>(indices.data(), 0, (int)indices.size()), alloc);
+            vertexIndices = pbrt.intBufferCache.LookupOrAdd(new pstd.span<int>(indices.data(), 0, (int)indices.size()), alloc);
 
             // Transform mesh vertices to rendering space and initialize mesh _p_
             Point3f[] pts = p.ToArray();
             for (int i = 0; i < pts.Length; ++i)
                 pts[i] = renderFromObject.Apply(pts[i]);
-            this.p = Globals.point3BufferCache.LookupOrAdd(new pstd.span<Point3f>(pts), alloc);
+            this.p = pbrt.point3BufferCache.LookupOrAdd(new pstd.span<Point3f>(pts), alloc);
 
             // Remainder of _TriangleMesh_ constructor
             this.reverseOrientation = reverseOrientation;
@@ -58,7 +58,7 @@ namespace pbrt
             if (!uv.empty())
             {
                 CHECK_EQ((ulong)nVertices, uv.size());
-                this.uv = Globals.point2BufferCache.LookupOrAdd(new pstd.span<Point2f>(uv.data(), 0, (int)uv.size()), alloc);
+                this.uv = pbrt.point2BufferCache.LookupOrAdd(new pstd.span<Point2f>(uv.data(), 0, (int)uv.size()), alloc);
             }
             if (!n.empty())
             {
@@ -70,7 +70,7 @@ namespace pbrt
                     if (reverseOrientation)
                         nns[i] = -nns[i];
                 }
-                this.n = Globals.normal3BufferCache.LookupOrAdd(new pstd.span<Normal3f>(nns), alloc);
+                this.n = pbrt.normal3BufferCache.LookupOrAdd(new pstd.span<Normal3f>(nns), alloc);
             }
             if (!s.empty())
             {
@@ -78,13 +78,13 @@ namespace pbrt
                 Vector3f[] sss = s.ToArray();
                 for (int i = 0; i < sss.Length; ++i)
                     sss[i] = renderFromObject.Apply(sss[i]);
-                this.s = Globals.vector3BufferCache.LookupOrAdd(new pstd.span<Vector3f>(sss), alloc);
+                this.s = pbrt.vector3BufferCache.LookupOrAdd(new pstd.span<Vector3f>(sss), alloc);
             }
 
             if (!faceIndices.empty())
             {
                 CHECK_EQ((ulong)nTriangles, faceIndices.size());
-                this.faceIndices = Globals.intBufferCache.LookupOrAdd(new pstd.span<int>(faceIndices.data(), 0, (int)faceIndices.size()), alloc);
+                this.faceIndices = pbrt.intBufferCache.LookupOrAdd(new pstd.span<int>(faceIndices.data(), 0, (int)faceIndices.size()), alloc);
             }
 
             // Make sure that we don't have too much stuff to be using integers to
@@ -106,7 +106,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ TriangleMesh reverseOrientation: %s transformSwapsHandedness: %s " +
                 "nTriangles: %d nVertices: %d vertexIndices: %s p: %s n: %s " +
                 "s: %s uv: %s faceIndices: %s ]",
@@ -120,7 +120,7 @@ namespace pbrt
             if (s != null)
                 Warning($"{filename}: PLY mesh will be missing tangent vectors \"S\".");
 
-            return Globals.WritePLY(
+            return pbrt.WritePLY(
                 filename, new pstd.span<int>(vertexIndices, 0, 3 * nTriangles),
                 new pstd.span<int>(), new pstd.span<Point3f>(p, 0, nVertices),
                 new pstd.span<Normal3f>(n, 0, n != null ? nVertices : 0),
@@ -177,7 +177,7 @@ namespace pbrt
             CHECK_LE(P.size(), (ulong)int.MaxValue);
             CHECK_LE(indices.size(), (ulong)int.MaxValue);
 
-            vertexIndices = Globals.intBufferCache.LookupOrAdd(new pstd.span<int>(indices.data(), 0, (int)indices.size()), alloc);
+            vertexIndices = pbrt.intBufferCache.LookupOrAdd(new pstd.span<int>(indices.data(), 0, (int)indices.size()), alloc);
 
             blpBytes += 64;  // sizeof(*this)
 
@@ -185,13 +185,13 @@ namespace pbrt
             Point3f[] pts = P.ToArray();
             for (int i = 0; i < pts.Length; ++i)
                 pts[i] = renderFromObject.Apply(pts[i]);
-            p = Globals.point3BufferCache.LookupOrAdd(new pstd.span<Point3f>(pts), alloc);
+            p = pbrt.point3BufferCache.LookupOrAdd(new pstd.span<Point3f>(pts), alloc);
 
             // Copy _UV_ and _N_ vertex data, if present
             if (!UV.empty())
             {
                 CHECK_EQ((ulong)nVertices, UV.size());
-                uv = Globals.point2BufferCache.LookupOrAdd(new pstd.span<Point2f>(UV.data(), 0, (int)UV.size()), alloc);
+                uv = pbrt.point2BufferCache.LookupOrAdd(new pstd.span<Point2f>(UV.data(), 0, (int)UV.size()), alloc);
             }
             if (!N.empty())
             {
@@ -203,13 +203,13 @@ namespace pbrt
                     if (reverseOrientation)
                         nns[i] = -nns[i];
                 }
-                n = Globals.normal3BufferCache.LookupOrAdd(new pstd.span<Normal3f>(nns), alloc);
+                n = pbrt.normal3BufferCache.LookupOrAdd(new pstd.span<Normal3f>(nns), alloc);
             }
 
             if (!fIndices.empty())
             {
                 CHECK_EQ((ulong)nPatches, fIndices.size());
-                faceIndices = Globals.intBufferCache.LookupOrAdd(new pstd.span<int>(fIndices.data(), 0, (int)fIndices.size()), alloc);
+                faceIndices = pbrt.intBufferCache.LookupOrAdd(new pstd.span<int>(fIndices.data(), 0, (int)fIndices.size()), alloc);
             }
         }
 
@@ -223,7 +223,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ BilinearMatchMesh reverseOrientation: %s transformSwapsHandedness: " +
                 "%s " +
                 "nPatches: %d nVertices: %d vertexIndices: %s p: %s n: %s " +
@@ -622,7 +622,7 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         private static void PlyErrorCallback(p_ply ply, string message)
         {

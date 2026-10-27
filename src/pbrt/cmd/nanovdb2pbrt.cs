@@ -18,7 +18,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using pbrt;
-using static pbrt.Globals;
+using static global::pbrt.pbrt;
 
 public static unsafe class Nanovdb2pbrtMain
 {

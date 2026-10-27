@@ -38,7 +38,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ FilterSampler domain: %s f: %s distrib: %s ]", domain, f, distrib);
+            return pbrt.StringPrintf("[ FilterSampler domain: %s f: %s distrib: %s ]", domain, f, distrib);
         }
 
         public FilterSample Sample(Point2f u)
@@ -71,7 +71,7 @@ namespace pbrt
 
         public override Vector2f Radius() { return radius; }
 
-        public override string ToString() { return Globals.StringPrintf("[ BoxFilter radius: %s ]", radius); }
+        public override string ToString() { return pbrt.StringPrintf("[ BoxFilter radius: %s ]", radius); }
 
         public override Float Evaluate(Point2f p)
         {
@@ -80,7 +80,7 @@ namespace pbrt
 
         public override FilterSample Sample(Point2f u)
         {
-            Point2f p = new Point2f(Globals.Lerp(u[0], -radius.x, radius.x), Globals.Lerp(u[1], -radius.y, radius.y));
+            Point2f p = new Point2f(pbrt.Lerp(u[0], -radius.x, radius.x), pbrt.Lerp(u[1], -radius.y, radius.y));
             return new FilterSample(p, (Float)1);
         }
 
@@ -97,8 +97,8 @@ namespace pbrt
         {
             this.radius = radius;
             this.sigma = sigma;
-            expX = Globals.Gaussian(radius.x, 0, sigma);
-            expY = Globals.Gaussian(radius.y, 0, sigma);
+            expX = pbrt.Gaussian(radius.x, 0, sigma);
+            expY = pbrt.Gaussian(radius.y, 0, sigma);
             sampler = new FilterSampler(this, alloc);
         }
 
@@ -115,20 +115,20 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ GaussianFilter radius: %s sigma: %f expX: %f expY: %f sampler: %s ]", radius,
+            return pbrt.StringPrintf("[ GaussianFilter radius: %s sigma: %f expX: %f expY: %f sampler: %s ]", radius,
                                         sigma, expX, expY, sampler);
         }
 
         public override Float Evaluate(Point2f p)
         {
-            return (std.max<Float>(0, Globals.Gaussian(p.x, 0, sigma) - expX) *
-                    std.max<Float>(0, Globals.Gaussian(p.y, 0, sigma) - expY));
+            return (std.max<Float>(0, pbrt.Gaussian(p.x, 0, sigma) - expX) *
+                    std.max<Float>(0, pbrt.Gaussian(p.y, 0, sigma) - expY));
         }
 
         public override Float Integral()
         {
-            return ((Globals.GaussianIntegral(-radius.x, radius.x, 0, sigma) - 2 * radius.x * expX) *
-                    (Globals.GaussianIntegral(-radius.y, radius.y, 0, sigma) - 2 * radius.y * expY));
+            return ((pbrt.GaussianIntegral(-radius.x, radius.x, 0, sigma) - 2 * radius.x * expX) *
+                    (pbrt.GaussianIntegral(-radius.y, radius.y, 0, sigma) - 2 * radius.y * expY));
         }
 
         public override FilterSample Sample(Point2f u) { return sampler.Sample(u); }
@@ -163,7 +163,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MitchellFilter radius: %s b: %f c: %f sampler: %s ]", radius, b, c, sampler);
+            return pbrt.StringPrintf("[ MitchellFilter radius: %s b: %f c: %f sampler: %s ]", radius, b, c, sampler);
         }
 
         public override Float Evaluate(Point2f p)
@@ -216,12 +216,12 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ LanczosSincFilter radius: %s tau: %f sampler: %s ]", radius, tau, sampler);
+            return pbrt.StringPrintf("[ LanczosSincFilter radius: %s tau: %f sampler: %s ]", radius, tau, sampler);
         }
 
         public override Float Evaluate(Point2f p)
         {
-            return Globals.WindowedSinc(p.x, radius.x, tau) * Globals.WindowedSinc(p.y, radius.y, tau);
+            return pbrt.WindowedSinc(p.x, radius.x, tau) * pbrt.WindowedSinc(p.y, radius.y, tau);
         }
 
         public override FilterSample Sample(Point2f u) { return sampler.Sample(u); }
@@ -239,7 +239,7 @@ namespace pbrt
                 for (int x = 0; x < sqrtSamples; ++x)
                 {
                     Point2f u = new Point2f((x + rng.Uniform<Float>()) / sqrtSamples, (y + rng.Uniform<Float>()) / sqrtSamples);
-                    Point2f p = new Point2f(Globals.Lerp(u.x, -radius.x, radius.x), Globals.Lerp(u.y, -radius.y, radius.y));
+                    Point2f p = new Point2f(pbrt.Lerp(u.x, -radius.x, radius.x), pbrt.Lerp(u.y, -radius.y, radius.y));
                     sum += Evaluate(p);
                 }
             }
@@ -268,7 +268,7 @@ namespace pbrt
 
         public override Vector2f Radius() { return radius; }
 
-        public override string ToString() { return Globals.StringPrintf("[ TriangleFilter radius: %s ]", radius); }
+        public override string ToString() { return pbrt.StringPrintf("[ TriangleFilter radius: %s ]", radius); }
 
         public override Float Evaluate(Point2f p)
         {
@@ -277,10 +277,10 @@ namespace pbrt
 
         public override FilterSample Sample(Point2f u)
         {
-            return new FilterSample(new Point2f(Globals.SampleTent(u[0], radius.x), Globals.SampleTent(u[1], radius.y)), (Float)1);
+            return new FilterSample(new Point2f(pbrt.SampleTent(u[0], radius.x), pbrt.SampleTent(u[1], radius.y)), (Float)1);
         }
 
-        public override Float Integral() { return Globals.Sqr(radius.x) * Globals.Sqr(radius.y); }
+        public override Float Integral() { return pbrt.Sqr(radius.x) * pbrt.Sqr(radius.y); }
 
         private Vector2f radius;
     }
@@ -301,10 +301,10 @@ namespace pbrt
             else if (name == "triangle")
                 filter = TriangleFilter.Create(parameters, loc, alloc);
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: filter type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: filter type unknown.", name));
 
             if (filter == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create filter.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create filter.", name));
 
             parameters.ReportUnused();
             return filter;

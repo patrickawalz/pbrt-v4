@@ -16,7 +16,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SampledLight light: %s p: %f ]", light != null ? light.ToString() : "(nullptr)", p);
+            return pbrt.StringPrintf("[ SampledLight light: %s p: %f ]", light != null ? light.ToString() : "(nullptr)", p);
         }
     }
 

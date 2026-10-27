@@ -72,7 +72,7 @@ namespace pbrt
             for (ulong i = 0; i < lights.size(); ++i)
             {
                 Light light = lights[i];
-                SampledSpectrum phi = Globals.SafeDiv(light.Phi(lambda), lambda.PDF());
+                SampledSpectrum phi = pbrt.SafeDiv(light.Phi(lambda), lambda.PDF());
                 lightPower[i] = phi.Average();
             }
             Float total = 0;
@@ -109,7 +109,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ PowerLightSampler aliasTable: %s ]", aliasTable);
+            return pbrt.StringPrintf("[ PowerLightSampler aliasTable: %s ]", aliasTable);
         }
 
         // PowerLightSampler Private Members
@@ -124,7 +124,7 @@ namespace pbrt
         // CompactLightBounds Public Methods
         public CompactLightBounds(LightBounds lb, Bounds3f allb)
         {
-            w = new OctahedralVector(Globals.Normalize(lb.w));
+            w = new OctahedralVector(pbrt.Normalize(lb.w));
             phi = lb.phi;
             qCosTheta_o = QuantizeCos(lb.cosTheta_o);
             qCosTheta_e = QuantizeCos(lb.cosTheta_e);
@@ -139,7 +139,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
                 "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
                 (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w, (Vector3f)w, phi,
@@ -148,7 +148,7 @@ namespace pbrt
 
         public string ToString(Bounds3f allBounds)
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ CompactLightBounds b: %s qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
                 "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
                 Bounds(allBounds), (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w,
@@ -162,12 +162,12 @@ namespace pbrt
         public Bounds3f Bounds(Bounds3f allb)
         {
             return new Bounds3f(
-                new Point3f(Globals.Lerp(qb[0 * 3 + 0] / 65535.0f, allb.pMin.x, allb.pMax.x),
-                            Globals.Lerp(qb[0 * 3 + 1] / 65535.0f, allb.pMin.y, allb.pMax.y),
-                            Globals.Lerp(qb[0 * 3 + 2] / 65535.0f, allb.pMin.z, allb.pMax.z)),
-                new Point3f(Globals.Lerp(qb[1 * 3 + 0] / 65535.0f, allb.pMin.x, allb.pMax.x),
-                            Globals.Lerp(qb[1 * 3 + 1] / 65535.0f, allb.pMin.y, allb.pMax.y),
-                            Globals.Lerp(qb[1 * 3 + 2] / 65535.0f, allb.pMin.z, allb.pMax.z)));
+                new Point3f(pbrt.Lerp(qb[0 * 3 + 0] / 65535.0f, allb.pMin.x, allb.pMax.x),
+                            pbrt.Lerp(qb[0 * 3 + 1] / 65535.0f, allb.pMin.y, allb.pMax.y),
+                            pbrt.Lerp(qb[0 * 3 + 2] / 65535.0f, allb.pMin.z, allb.pMax.z)),
+                new Point3f(pbrt.Lerp(qb[1 * 3 + 0] / 65535.0f, allb.pMin.x, allb.pMax.x),
+                            pbrt.Lerp(qb[1 * 3 + 1] / 65535.0f, allb.pMin.y, allb.pMax.y),
+                            pbrt.Lerp(qb[1 * 3 + 2] / 65535.0f, allb.pMin.z, allb.pMax.z)));
         }
 
         public Float Importance(Point3f p, Normal3f n, Bounds3f allb)
@@ -177,8 +177,8 @@ namespace pbrt
             // Return importance for light bounds at reference point
             // Compute clamped squared distance to reference point
             Point3f pc = (bounds.pMin + bounds.pMax) / 2;
-            Float d2 = Globals.DistanceSquared(p, pc);
-            d2 = std.max(d2, Globals.Length(bounds.Diagonal()) / 2);
+            Float d2 = pbrt.DistanceSquared(p, pc);
+            d2 = std.max(d2, pbrt.Length(bounds.Diagonal()) / 2);
 
             // Define cosine and sine clamped subtraction lambdas
             Func<Float, Float, Float, Float, Float> cosSubClamped =
@@ -198,18 +198,18 @@ namespace pbrt
                 };
 
             // Compute sine and cosine of angle to vector _w_, $\theta_\roman{w}$
-            Vector3f wi = Globals.Normalize(p - pc);
-            Float cosTheta_w = Globals.Dot((Vector3f)w, wi);
+            Vector3f wi = pbrt.Normalize(p - pc);
+            Float cosTheta_w = pbrt.Dot((Vector3f)w, wi);
             if (twoSided != 0)
                 cosTheta_w = std.abs(cosTheta_w);
-            Float sinTheta_w = Globals.SafeSqrt(1 - Globals.Sqr(cosTheta_w));
+            Float sinTheta_w = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta_w));
 
             // Compute $\cos\,\theta_\roman{\+b}$ for reference point
-            Float cosTheta_b = Globals.BoundSubtendedDirections(bounds, p).cosTheta;
-            Float sinTheta_b = Globals.SafeSqrt(1 - Globals.Sqr(cosTheta_b));
+            Float cosTheta_b = pbrt.BoundSubtendedDirections(bounds, p).cosTheta;
+            Float sinTheta_b = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta_b));
 
             // Compute $\cos\,\theta'$ and test against $\cos\,\theta_\roman{e}$
-            Float sinTheta_o = Globals.SafeSqrt(1 - Globals.Sqr(cosTheta_o));
+            Float sinTheta_o = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta_o));
             Float cosTheta_x = cosSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
             Float sinTheta_x = sinSubClamped(sinTheta_w, cosTheta_w, sinTheta_o, cosTheta_o);
             Float cosThetap = cosSubClamped(sinTheta_x, cosTheta_x, sinTheta_b, cosTheta_b);
@@ -218,12 +218,12 @@ namespace pbrt
 
             // Return final importance at reference point
             Float importance = phi * cosThetap / d2;
-            Globals.DCHECK_GE(importance, -1e-3f);
+            pbrt.DCHECK_GE(importance, -1e-3f);
             // Account for $\cos\theta_\roman{i}$ in importance at surfaces
             if (n != new Normal3f(0, 0, 0))
             {
-                Float cosTheta_i = Globals.AbsDot(wi, n);
-                Float sinTheta_i = Globals.SafeSqrt(1 - Globals.Sqr(cosTheta_i));
+                Float cosTheta_i = pbrt.AbsDot(wi, n);
+                Float sinTheta_i = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta_i));
                 Float cosThetap_i = cosSubClamped(sinTheta_i, cosTheta_i, sinTheta_b, cosTheta_b);
                 importance *= cosThetap_i;
             }
@@ -235,16 +235,16 @@ namespace pbrt
         // CompactLightBounds Private Methods
         static uint QuantizeCos(Float c)
         {
-            Globals.CHECK(c >= -1 && c <= 1);
+            pbrt.CHECK(c >= -1 && c <= 1);
             return (uint)pstd.floor(32767.0f * ((c + 1) / 2));
         }
 
         static Float QuantizeBounds(Float c, Float min, Float max)
         {
-            Globals.CHECK(c >= min && c <= max);
+            pbrt.CHECK(c >= min && c <= max);
             if (min == max)
                 return 0;
-            return 65535.0f * Globals.Clamp((c - min) / (max - min), 0, 1);
+            return 65535.0f * pbrt.Clamp((c - min) / (max - min), 0, 1);
         }
 
         // CompactLightBounds Private Members
@@ -280,7 +280,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ LightBVHNode lightBounds: %s childOrLightIndex: %d isLeaf: %d ]", lightBounds,
                 childOrLightIndex, isLeaf);
         }
@@ -335,7 +335,7 @@ namespace pbrt
                 else if (lightBounds.value().phi > 0)
                 {
                     bvhLights.Add(((int)i, lightBounds.value()));
-                    allLightBounds = Globals.Union(allLightBounds, lightBounds.value().bounds);
+                    allLightBounds = pbrt.Union(allLightBounds, lightBounds.value().bounds);
                 }
             }
             if (bvhLights.Count != 0)
@@ -367,7 +367,7 @@ namespace pbrt
                 // Declare common variables for light BVH traversal
                 Point3f p = ctx.p();
                 Normal3f n = ctx.ns;
-                u = std.min<Float>((u - pInfinite) / (1 - pInfinite), (Float)Globals.OneMinusEpsilon);
+                u = std.min<Float>((u - pInfinite) / (1 - pInfinite), (Float)pbrt.OneMinusEpsilon);
                 int nodeIndex = 0;
                 Float pmf = 1 - pInfinite;
 
@@ -388,7 +388,7 @@ namespace pbrt
 
                         // Randomly sample light BVH child node
                         Float nodePMF;
-                        int child = Globals.SampleDiscrete(new pstd.span<Float>(ci), u, &nodePMF, &u);
+                        int child = pbrt.SampleDiscrete(new pstd.span<Float>(ci), u, &nodePMF, &u);
                         pmf *= nodePMF;
                         nodeIndex = (child == 0) ? (nodeIndex + 1) : (int)node.childOrLightIndex;
                     }
@@ -396,7 +396,7 @@ namespace pbrt
                     {
                         // Confirm light has nonzero importance before returning light sample
                         if (nodeIndex > 0)
-                            Globals.DCHECK_GT(node.lightBounds.Importance(p, n, allLightBounds), 0);
+                            pbrt.DCHECK_GT(node.lightBounds.Importance(p, n, allLightBounds), 0);
                         if (nodeIndex > 0 || node.lightBounds.Importance(p, n, allLightBounds) > 0)
                             return new SampledLight { light = lights[node.childOrLightIndex], p = pmf };
                         return default;
@@ -428,7 +428,7 @@ namespace pbrt
                 LightBVHNode node = nodes[(ulong)nodeIndex];
                 if (node.isLeaf != 0)
                 {
-                    Globals.DCHECK(light == lights[node.childOrLightIndex]);
+                    pbrt.DCHECK(light == lights[node.childOrLightIndex]);
                     return pmf;
                 }
                 // Compute child importances and update PMF for current node
@@ -436,7 +436,7 @@ namespace pbrt
                 LightBVHNode child1 = nodes[node.childOrLightIndex];
                 Float[] ci = { child0.lightBounds.Importance(p, n, allLightBounds),
                                child1.lightBounds.Importance(p, n, allLightBounds) };
-                Globals.DCHECK_GT(ci[bitTrail & 1], 0);
+                pbrt.DCHECK_GT(ci[bitTrail & 1], 0);
                 pmf *= ci[bitTrail & 1] / (ci[0] + ci[1]);
 
                 // Use _bitTrail_ to find next node index and update its value
@@ -462,14 +462,14 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BVHLightSampler nodes: %s ]", nodes);
+            return pbrt.StringPrintf("[ BVHLightSampler nodes: %s ]", nodes);
         }
 
         // BVHLightSampler Private Methods
         (int, LightBounds) buildBVH(List<(int, LightBounds)> bvhLights, int start, int end, uint32_t bitTrail,
                                     int depth)
         {
-            Globals.DCHECK_LT(start, end);
+            pbrt.DCHECK_LT(start, end);
             // Initialize leaf node if only a single light remains
             if (end - start == 1)
             {
@@ -487,11 +487,11 @@ namespace pbrt
             for (int i = start; i < end; ++i)
             {
                 LightBounds lb = bvhLights[i].Item2;
-                bounds = Globals.Union(bounds, lb.bounds);
-                centroidBounds = Globals.Union(centroidBounds, lb.Centroid());
+                bounds = pbrt.Union(bounds, lb.bounds);
+                centroidBounds = pbrt.Union(centroidBounds, lb.Centroid());
             }
 
-            Float minCost = Globals.Infinity;
+            Float minCost = pbrt.Infinity;
             int minCostSplitBucket = -1, minCostSplitDim = -1;
             const int nBuckets = 12;
             for (int dim = 0; dim < 3; ++dim)
@@ -507,9 +507,9 @@ namespace pbrt
                     int b = (int)(nBuckets * centroidBounds.Offset(pc)[dim]);
                     if (b == nBuckets)
                         b = nBuckets - 1;
-                    Globals.DCHECK_GE(b, 0);
-                    Globals.DCHECK_LT(b, nBuckets);
-                    bucketLightBounds[b] = Globals.Union(bucketLightBounds[b], bvhLights[i].Item2);
+                    pbrt.DCHECK_GE(b, 0);
+                    pbrt.DCHECK_LT(b, nBuckets);
+                    bucketLightBounds[b] = pbrt.Union(bucketLightBounds[b], bvhLights[i].Item2);
                 }
 
                 // Compute costs for splitting lights after each bucket
@@ -519,9 +519,9 @@ namespace pbrt
                     // Find _LightBounds_ for lights below and above bucket split
                     LightBounds b0 = default, b1 = default;
                     for (int j = 0; j <= i; ++j)
-                        b0 = Globals.Union(b0, bucketLightBounds[j]);
+                        b0 = pbrt.Union(b0, bucketLightBounds[j]);
                     for (int j = i + 1; j < nBuckets; ++j)
-                        b1 = Globals.Union(b1, bucketLightBounds[j]);
+                        b1 = pbrt.Union(b1, bucketLightBounds[j]);
 
                     // Compute final light split cost for bucket
                     cost[i] = EvaluateCost(b0, bounds, dim) + EvaluateCost(b1, bounds, dim);
@@ -552,8 +552,8 @@ namespace pbrt
                     int b = (int)(nBuckets * cb3.Offset(l.Item2.Centroid())[splitDim]);
                     if (b == nBuckets)
                         b = nBuckets - 1;
-                    Globals.DCHECK_GE(b, 0);
-                    Globals.DCHECK_LT(b, nBuckets);
+                    pbrt.DCHECK_GE(b, 0);
+                    pbrt.DCHECK_LT(b, nBuckets);
                     return b <= splitBucket;
                 };
                 // std::partition (bidirectional iterator algorithm)
@@ -582,19 +582,19 @@ namespace pbrt
                 mid = first;
                 if (mid == start || mid == end)
                     mid = (start + end) / 2;
-                Globals.DCHECK(mid > start && mid < end);
+                pbrt.DCHECK(mid > start && mid < end);
             }
 
             // Allocate interior _LightBVHNode_ and recursively initialize children
             int nodeIndex2 = (int)nodes.size();
             nodes.push_back(new LightBVHNode());
-            Globals.CHECK_LT(depth, 64);
+            pbrt.CHECK_LT(depth, 64);
             (int, LightBounds) child0 = buildBVH(bvhLights, start, mid, bitTrail, depth + 1);
-            Globals.DCHECK_EQ(nodeIndex2 + 1, child0.Item1);
+            pbrt.DCHECK_EQ(nodeIndex2 + 1, child0.Item1);
             (int, LightBounds) child1 = buildBVH(bvhLights, mid, end, bitTrail | (1u << depth), depth + 1);
 
             // Initialize interior node and return node index and bounds
-            LightBounds lb2 = Globals.Union(child0.Item2, child1.Item2);
+            LightBounds lb2 = pbrt.Union(child0.Item2, child1.Item2);
             CompactLightBounds cb2 = new CompactLightBounds(lb2, allLightBounds);
             nodes[(ulong)nodeIndex2] = LightBVHNode.MakeInterior((uint)child1.Item1, cb2);
             return (nodeIndex2, lb2);
@@ -605,14 +605,14 @@ namespace pbrt
             // Evaluate direction bounds measure for _LightBounds_
             Float theta_o = std.acos(b.cosTheta_o), theta_e = std.acos(b.cosTheta_e);
             Float theta_w = std.min(theta_o + theta_e, Pi);
-            Float sinTheta_o = Globals.SafeSqrt(1 - Globals.Sqr(b.cosTheta_o));
+            Float sinTheta_o = pbrt.SafeSqrt(1 - pbrt.Sqr(b.cosTheta_o));
             Float M_omega = 2 * Pi * (1 - b.cosTheta_o) +
                             Pi / 2 *
                                 (2 * theta_w * sinTheta_o - std.cos(theta_o - 2 * theta_w) -
                                  2 * theta_o * sinTheta_o + b.cosTheta_o);
 
             // Return complete cost estimate for _LightBounds_
-            Float Kr = Globals.MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
+            Float Kr = pbrt.MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
             return b.phi * M_omega * Kr * b.bounds.SurfaceArea();
         }
 
@@ -668,9 +668,9 @@ namespace pbrt
             }
             else
             {
-                u = std.min<Float>((u - pInfinite) / (1 - pInfinite), (Float)Globals.OneMinusEpsilon);
+                u = std.min<Float>((u - pInfinite) / (1 - pInfinite), (Float)pbrt.OneMinusEpsilon);
 
-                uint64_t seed = Globals.MixBits(Globals.FloatToBits(u));
+                uint64_t seed = pbrt.MixBits(pbrt.FloatToBits(u));
                 WeightedReservoirSampler<Light> wrs = new WeightedReservoirSampler<Light>(seed);
 
                 for (ulong i = 0; i < boundedLights.size(); ++i)
@@ -722,7 +722,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ExhaustiveLightSampler lightBounds: %s]", lightBounds);
+            return pbrt.StringPrintf("[ ExhaustiveLightSampler lightBounds: %s]", lightBounds);
         }
 
         pstd.vector<Light> lights, boundedLights, infiniteLights;
@@ -744,7 +744,7 @@ namespace pbrt
                 return new ExhaustiveLightSampler(lights, alloc);
             else
             {
-                Globals.Error(Globals.StringPrintf("Light sample distribution type \"%s\" unknown. Using \"bvh\".", name));
+                pbrt.Error(pbrt.StringPrintf("Light sample distribution type \"%s\" unknown. Using \"bvh\".", name));
                 return new BVHLightSampler(lights, alloc);
             }
         }

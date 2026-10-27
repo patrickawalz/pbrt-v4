@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public const Float Infinity = Float.PositiveInfinity;
 
@@ -338,11 +338,11 @@ namespace pbrt
         // Half Private Members
         private uint16_t h;
 
-        private static int HalfNegativeZero => Globals.HalfNegativeZero;
-        private static int HalfPositiveZero => Globals.HalfPositiveZero;
-        private static int HalfPositiveInfinity => Globals.HalfPositiveInfinity;
-        private static int HalfNegativeInfinity => Globals.HalfNegativeInfinity;
-        private static int HalfExponentMask => Globals.HalfExponentMask;
-        private static int HalfSignificandMask => Globals.HalfSignificandMask;
+        private static int HalfNegativeZero => pbrt.HalfNegativeZero;
+        private static int HalfPositiveZero => pbrt.HalfPositiveZero;
+        private static int HalfPositiveInfinity => pbrt.HalfPositiveInfinity;
+        private static int HalfNegativeInfinity => pbrt.HalfNegativeInfinity;
+        private static int HalfExponentMask => pbrt.HalfExponentMask;
+        private static int HalfSignificandMask => pbrt.HalfSignificandMask;
     }
 }

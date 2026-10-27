@@ -15,7 +15,7 @@ namespace pbrt
         public BSDF(Normal3f ns, Vector3f dpdus, BxDF bxdf)
         {
             this.bxdf = bxdf;
-            this.shadingFrame = Frame.FromXZ(Globals.Normalize(dpdus), (Vector3f)ns);
+            this.shadingFrame = Frame.FromXZ(pbrt.Normalize(dpdus), (Vector3f)ns);
         }
 
         public static implicit operator bool(BSDF b) { return b.bxdf != null; }
@@ -55,7 +55,7 @@ namespace pbrt
             // Sample _bxdf_ and return _BSDFSample_
             pstd.optional<BSDFSample> bs = bxdf.Sample_f(wo, u, u2, mode, sampleFlags);
             if (bs)
-                Globals.DCHECK_GE(bs.value().pdf, 0f);
+                pbrt.DCHECK_GE(bs.value().pdf, 0f);
             if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                 return default;
             BSDFSample s = bs.value();
@@ -93,7 +93,7 @@ namespace pbrt
             pstd.optional<BSDFSample> bs = specificBxDF.Sample_f(wo, u, u2, mode, sampleFlags);
             if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                 return default;
-            Globals.DCHECK_GT(bs.value().pdf, 0f);
+            pbrt.DCHECK_GT(bs.value().pdf, 0f);
 
             BSDFSample s = bs.value();
             s.wi = LocalToRender(s.wi);
@@ -112,7 +112,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BSDF bxdf: %s shadingFrame: %s ]", bxdf, shadingFrame);
+            return pbrt.StringPrintf("[ BSDF bxdf: %s shadingFrame: %s ]", bxdf, shadingFrame);
         }
 
         public SampledSpectrum rho(pstd.span<Point2f> u1, pstd.span<Float> uc, pstd.span<Point2f> u2)

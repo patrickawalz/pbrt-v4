@@ -8,7 +8,7 @@ using System;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Bezier Inline Functions
         // (the C++ templates over P are expanded for Float and Point3f)

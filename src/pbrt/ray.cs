@@ -105,7 +105,7 @@ namespace pbrt
     }
 
     // Ray Inline Functions
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static Point3f OffsetRayOrigin(Point3fi pi, Normal3f n, Vector3f w)
         {

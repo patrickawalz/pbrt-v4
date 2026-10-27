@@ -12,7 +12,7 @@ using System.Runtime.CompilerServices;
 namespace pbrt
 {
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Hashing Inline Functions
         // http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html

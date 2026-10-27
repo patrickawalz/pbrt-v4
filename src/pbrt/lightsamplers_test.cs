@@ -291,7 +291,7 @@ namespace pbrt
                                                          new pstd.vector<Point2f>(), new pstd.vector<int>(),
                                                          new Allocator());
                     pstd.vector<Shape> tris = Triangle.CreateTriangles(mesh, new Allocator());
-                    Globals.CHECK_EQ(1, (int)tris.size());
+                    pbrt.CHECK_EQ(1, (int)tris.size());
                     Transform sid = new Transform();
                     lights.Add(new DiffuseAreaLight(sid, new MediumInterface(), new ConstantSpectrum(r()), 1.0f,
                                                     tris[0], null, new Image(), null, false /* two sided */));

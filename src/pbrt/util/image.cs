@@ -40,7 +40,7 @@ namespace pbrt
         public pstd.array2<WrapMode> wrap;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // PixelFormat Inline Functions
         public static bool Is8Bit(PixelFormat format) { return format == PixelFormat.U256; }
@@ -1378,7 +1378,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return "[ Image format: " + Globals.ToString(format) + " resolution: " + resolution +
+            return "[ Image format: " + pbrt.ToString(format) + " resolution: " + resolution +
                    " channelNames: [ " + string.Join(", ", channelNames.ToArray()) + " ] encoding: " +
                    (encoding != null ? encoding.ToString() : "(nullptr)") + " ]";
         }

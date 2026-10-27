@@ -23,7 +23,7 @@ namespace pbrt
             this.pi = pi;
             this.n = n;
             this.uv = uv;
-            this.wo = Globals.Normalize(wo);
+            this.wo = pbrt.Normalize(wo);
             this.time = time;
         }
 
@@ -34,7 +34,7 @@ namespace pbrt
 
         public SurfaceInteraction AsSurface()
         {
-            Globals.CHECK(IsSurfaceInteraction());
+            pbrt.CHECK(IsSurfaceInteraction());
             return (SurfaceInteraction)this;
         }
 
@@ -91,13 +91,13 @@ namespace pbrt
 
         public MediumInteraction AsMedium()
         {
-            Globals.CHECK(IsMediumInteraction());
+            pbrt.CHECK(IsMediumInteraction());
             return (MediumInteraction)this;
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ Interaction pi: %s n: %s uv: %s wo: %s time: %s " +
                 "medium: %s mediumInterface: %s ]",
                 pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
@@ -107,7 +107,7 @@ namespace pbrt
         // (C++ copies Interaction objects by value)
         public Interaction Clone() { return (Interaction)MemberwiseClone(); }
 
-        public Point3f OffsetRayOrigin(Vector3f w) { return Globals.OffsetRayOrigin(pi, n, w); }
+        public Point3f OffsetRayOrigin(Vector3f w) { return pbrt.OffsetRayOrigin(pi, n, w); }
 
         public Point3f OffsetRayOrigin(Point3f pt) { return OffsetRayOrigin(pt - p()); }
 
@@ -118,14 +118,14 @@ namespace pbrt
 
         public Ray SpawnRayTo(Point3f p2)
         {
-            Ray r = Globals.SpawnRayTo(pi, n, time, p2);
+            Ray r = pbrt.SpawnRayTo(pi, n, time, p2);
             r.medium = GetMedium(r.d);
             return r;
         }
 
         public Ray SpawnRayTo(Interaction it)
         {
-            Ray r = Globals.SpawnRayTo(pi, n, time, it.pi, it.n);
+            Ray r = pbrt.SpawnRayTo(pi, n, time, it.pi, it.n);
             r.medium = GetMedium(r.d);
             return r;
         }
@@ -133,14 +133,14 @@ namespace pbrt
         public Medium GetMedium(Vector3f w)
         {
             if (mediumInterface != null)
-                return Globals.Dot(w, n) > 0 ? mediumInterface.outside : mediumInterface.inside;
+                return pbrt.Dot(w, n) > 0 ? mediumInterface.outside : mediumInterface.inside;
             return medium;
         }
 
         public Medium GetMedium()
         {
             if (mediumInterface != null)
-                Globals.DCHECK(mediumInterface.inside == mediumInterface.outside);
+                pbrt.DCHECK(mediumInterface.inside == mediumInterface.outside);
             return mediumInterface != null ? mediumInterface.inside : medium;
         }
 
@@ -167,7 +167,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ MediumInteraction pi: %s n: %s uv: %s wo: %s time: %s " +
                 "medium: %s mediumInterface: %s phase: %s ]",
                 pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
@@ -195,7 +195,7 @@ namespace pbrt
 
         public SurfaceInteraction(Point3fi pi, Point2f uv, Vector3f wo, Vector3f dpdu, Vector3f dpdv, Normal3f dndu,
                                   Normal3f dndv, Float time, bool flipNormal)
-            : base(pi, (Normal3f)Globals.Normalize(Globals.Cross(dpdu, dpdv)), uv, wo, time)
+            : base(pi, (Normal3f)pbrt.Normalize(pbrt.Cross(dpdu, dpdv)), uv, wo, time)
         {
             this.dpdu = dpdu;
             this.dpdv = dpdv;
@@ -228,18 +228,18 @@ namespace pbrt
         {
             // Compute _shading.n_ for _SurfaceInteraction_
             shading.n = ns;
-            Globals.DCHECK(shading.n != new Normal3f(0, 0, 0));
+            pbrt.DCHECK(shading.n != new Normal3f(0, 0, 0));
             if (orientationIsAuthoritative)
-                n = Globals.FaceForward(n, shading.n);
+                n = pbrt.FaceForward(n, shading.n);
             else
-                shading.n = Globals.FaceForward(shading.n, n);
+                shading.n = pbrt.FaceForward(shading.n, n);
 
             // Initialize _shading_ partial derivative values
             shading.dpdu = dpdus;
             shading.dpdv = dpdvs;
             shading.dndu = dndus;
             shading.dndv = dndvs;
-            while (Globals.LengthSquared(shading.dpdu) > 1e16f || Globals.LengthSquared(shading.dpdv) > 1e16f)
+            while (pbrt.LengthSquared(shading.dpdu) > 1e16f || pbrt.LengthSquared(shading.dpdv) > 1e16f)
             {
                 shading.dpdu /= 1e8f;
                 shading.dpdv /= 1e8f;
@@ -248,7 +248,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf(
+            return pbrt.StringPrintf(
                 "[ SurfaceInteraction pi: %s n: %s uv: %s wo: %s time: %s " +
                 "medium: %s mediumInterface: %s dpdu: %s dpdv: %s dndu: %s dndv: %s " +
                 "shading.n: %s shading.dpdu: %s shading.dpdv: %s " +
@@ -267,7 +267,7 @@ namespace pbrt
         {
             material = mtl;
             areaLight = area;
-            Globals.CHECK_GE(Globals.Dot(n, shading.n), 0f);
+            pbrt.CHECK_GE(pbrt.Dot(n, shading.n), 0f);
             // Set medium properties at surface intersection
             if (primMediumInterface != null && primMediumInterface.IsMediumTransition())
                 mediumInterface = primMediumInterface;
@@ -277,22 +277,22 @@ namespace pbrt
 
         public void ComputeDifferentials(RayDifferential ray, Camera camera, int samplesPerPixel)
         {
-            if (Globals.GetOptions().disableTextureFiltering)
+            if (pbrt.GetOptions().disableTextureFiltering)
             {
                 dudx = dudy = dvdx = dvdy = 0;
                 dpdx = dpdy = new Vector3f(0, 0, 0);
                 return;
             }
-            if (ray.hasDifferentials && Globals.Dot(n, ray.rxDirection) != 0 && Globals.Dot(n, ray.ryDirection) != 0)
+            if (ray.hasDifferentials && pbrt.Dot(n, ray.rxDirection) != 0 && pbrt.Dot(n, ray.ryDirection) != 0)
             {
                 // Estimate screen-space change in $\pt{}$ using ray differentials
                 // Compute auxiliary intersection points with plane, _px_ and _py_
-                Float d = -Globals.Dot(n, (Vector3f)p());
-                Float tx = (-Globals.Dot(n, (Vector3f)ray.rxOrigin) - d) / Globals.Dot(n, ray.rxDirection);
-                Globals.DCHECK(!Globals.IsInf(tx) && !Globals.IsNaN(tx));
+                Float d = -pbrt.Dot(n, (Vector3f)p());
+                Float tx = (-pbrt.Dot(n, (Vector3f)ray.rxOrigin) - d) / pbrt.Dot(n, ray.rxDirection);
+                pbrt.DCHECK(!pbrt.IsInf(tx) && !pbrt.IsNaN(tx));
                 Point3f px = ray.rxOrigin + tx * ray.rxDirection;
-                Float ty = (-Globals.Dot(n, (Vector3f)ray.ryOrigin) - d) / Globals.Dot(n, ray.ryDirection);
-                Globals.DCHECK(!Globals.IsInf(ty) && !Globals.IsNaN(ty));
+                Float ty = (-pbrt.Dot(n, (Vector3f)ray.ryOrigin) - d) / pbrt.Dot(n, ray.ryDirection);
+                pbrt.DCHECK(!pbrt.IsInf(ty) && !pbrt.IsNaN(ty));
                 Point3f py = ray.ryOrigin + ty * ray.ryDirection;
 
                 dpdx = px - p();
@@ -308,26 +308,26 @@ namespace pbrt
             }
             // Estimate screen-space change in $(u,v)$
             // Compute $\transpose{\XFORM{A}} \XFORM{A}$ and its determinant
-            Float ata00 = Globals.Dot(dpdu, dpdu), ata01 = Globals.Dot(dpdu, dpdv);
-            Float ata11 = Globals.Dot(dpdv, dpdv);
-            Float invDet = 1 / Globals.DifferenceOfProducts(ata00, ata11, ata01, ata01);
-            invDet = Globals.IsFinite(invDet) ? invDet : 0f;
+            Float ata00 = pbrt.Dot(dpdu, dpdu), ata01 = pbrt.Dot(dpdu, dpdv);
+            Float ata11 = pbrt.Dot(dpdv, dpdv);
+            Float invDet = 1 / pbrt.DifferenceOfProducts(ata00, ata11, ata01, ata01);
+            invDet = pbrt.IsFinite(invDet) ? invDet : 0f;
 
             // Compute $\transpose{\XFORM{A}} \VEC{b}$ for $x$ and $y$
-            Float atb0x = Globals.Dot(dpdu, dpdx), atb1x = Globals.Dot(dpdv, dpdx);
-            Float atb0y = Globals.Dot(dpdu, dpdy), atb1y = Globals.Dot(dpdv, dpdy);
+            Float atb0x = pbrt.Dot(dpdu, dpdx), atb1x = pbrt.Dot(dpdv, dpdx);
+            Float atb0y = pbrt.Dot(dpdu, dpdy), atb1y = pbrt.Dot(dpdv, dpdy);
 
             // Compute $u$ and $v$ derivatives with respect to $x$ and $y$
-            dudx = Globals.DifferenceOfProducts(ata11, atb0x, ata01, atb1x) * invDet;
-            dvdx = Globals.DifferenceOfProducts(ata00, atb1x, ata01, atb0x) * invDet;
-            dudy = Globals.DifferenceOfProducts(ata11, atb0y, ata01, atb1y) * invDet;
-            dvdy = Globals.DifferenceOfProducts(ata00, atb1y, ata01, atb0y) * invDet;
+            dudx = pbrt.DifferenceOfProducts(ata11, atb0x, ata01, atb1x) * invDet;
+            dvdx = pbrt.DifferenceOfProducts(ata00, atb1x, ata01, atb0x) * invDet;
+            dudy = pbrt.DifferenceOfProducts(ata11, atb0y, ata01, atb1y) * invDet;
+            dvdy = pbrt.DifferenceOfProducts(ata00, atb1y, ata01, atb0y) * invDet;
 
             // Clamp derivatives of $u$ and $v$ to reasonable values
-            dudx = Globals.IsFinite(dudx) ? Globals.Clamp(dudx, -1e8f, 1e8f) : 0f;
-            dvdx = Globals.IsFinite(dvdx) ? Globals.Clamp(dvdx, -1e8f, 1e8f) : 0f;
-            dudy = Globals.IsFinite(dudy) ? Globals.Clamp(dudy, -1e8f, 1e8f) : 0f;
-            dvdy = Globals.IsFinite(dvdy) ? Globals.Clamp(dvdy, -1e8f, 1e8f) : 0f;
+            dudx = pbrt.IsFinite(dudx) ? pbrt.Clamp(dudx, -1e8f, 1e8f) : 0f;
+            dvdx = pbrt.IsFinite(dvdx) ? pbrt.Clamp(dvdx, -1e8f, 1e8f) : 0f;
+            dudy = pbrt.IsFinite(dudy) ? pbrt.Clamp(dudy, -1e8f, 1e8f) : 0f;
+            dvdy = pbrt.IsFinite(dvdy) ? pbrt.Clamp(dvdy, -1e8f, 1e8f) : 0f;
         }
 
         public void SkipIntersection(ref RayDifferential ray, Float t)
@@ -365,10 +365,10 @@ namespace pbrt
                     rd.ryOrigin = p() + dpdy;
 
                     // Compute differential reflected directions
-                    Float dwoDotn_dx = Globals.Dot(dwodx, n) + Globals.Dot(wo, dndx);
-                    Float dwoDotn_dy = Globals.Dot(dwody, n) + Globals.Dot(wo, dndy);
-                    rd.rxDirection = wi - dwodx + 2 * (Vector3f)(Globals.Dot(wo, n) * dndx + dwoDotn_dx * n);
-                    rd.ryDirection = wi - dwody + 2 * (Vector3f)(Globals.Dot(wo, n) * dndy + dwoDotn_dy * n);
+                    Float dwoDotn_dx = pbrt.Dot(dwodx, n) + pbrt.Dot(wo, dndx);
+                    Float dwoDotn_dy = pbrt.Dot(dwody, n) + pbrt.Dot(wo, dndy);
+                    rd.rxDirection = wi - dwodx + 2 * (Vector3f)(pbrt.Dot(wo, n) * dndx + dwoDotn_dx * n);
+                    rd.ryDirection = wi - dwody + 2 * (Vector3f)(pbrt.Dot(wo, n) * dndy + dwoDotn_dy * n);
                 }
                 else if (flags == BxDFFlags.SpecularTransmission)
                 {
@@ -379,7 +379,7 @@ namespace pbrt
 
                     // Compute differential transmitted directions
                     // Find oriented surface normal for transmission
-                    if (Globals.Dot(wo, n) < 0)
+                    if (pbrt.Dot(wo, n) < 0)
                     {
                         n = -n;
                         dndx = -dndx;
@@ -387,19 +387,19 @@ namespace pbrt
                     }
 
                     // Compute partial derivatives of $\mu$
-                    Float dwoDotn_dx = Globals.Dot(dwodx, n) + Globals.Dot(wo, dndx);
-                    Float dwoDotn_dy = Globals.Dot(dwody, n) + Globals.Dot(wo, dndy);
-                    Float mu = Globals.Dot(wo, n) / eta - Globals.AbsDot(wi, n);
-                    Float dmudx = dwoDotn_dx * (1 / eta + 1 / Globals.Sqr(eta) * Globals.Dot(wo, n) / Globals.Dot(wi, n));
-                    Float dmudy = dwoDotn_dy * (1 / eta + 1 / Globals.Sqr(eta) * Globals.Dot(wo, n) / Globals.Dot(wi, n));
+                    Float dwoDotn_dx = pbrt.Dot(dwodx, n) + pbrt.Dot(wo, dndx);
+                    Float dwoDotn_dy = pbrt.Dot(dwody, n) + pbrt.Dot(wo, dndy);
+                    Float mu = pbrt.Dot(wo, n) / eta - pbrt.AbsDot(wi, n);
+                    Float dmudx = dwoDotn_dx * (1 / eta + 1 / pbrt.Sqr(eta) * pbrt.Dot(wo, n) / pbrt.Dot(wi, n));
+                    Float dmudy = dwoDotn_dy * (1 / eta + 1 / pbrt.Sqr(eta) * pbrt.Dot(wo, n) / pbrt.Dot(wi, n));
 
                     rd.rxDirection = wi - eta * dwodx + (Vector3f)(mu * dndx + dmudx * n);
                     rd.ryDirection = wi - eta * dwody + (Vector3f)(mu * dndy + dmudy * n);
                 }
             }
             // Squash potentially troublesome differentials
-            if (Globals.LengthSquared(rd.rxDirection) > 1e16f || Globals.LengthSquared(rd.ryDirection) > 1e16f ||
-                Globals.LengthSquared((Vector3f)rd.rxOrigin) > 1e16f || Globals.LengthSquared((Vector3f)rd.ryOrigin) > 1e16f)
+            if (pbrt.LengthSquared(rd.rxDirection) > 1e16f || pbrt.LengthSquared(rd.ryDirection) > 1e16f ||
+                pbrt.LengthSquared((Vector3f)rd.rxOrigin) > 1e16f || pbrt.LengthSquared((Vector3f)rd.ryOrigin) > 1e16f)
                 rd.hasDifferentials = false;
 
             return rd;
@@ -432,17 +432,17 @@ namespace pbrt
                 dpdu = default;
                 dpdv = default;
                 if (normalMap != null)
-                    Globals.NormalMap(normalMap, new NormalBumpEvalContext(this), &dpdu, &dpdv);
+                    pbrt.NormalMap(normalMap, new NormalBumpEvalContext(this), &dpdu, &dpdv);
                 else
-                    Globals.BumpMap(new UniversalTextureEvaluator(), displacement, new NormalBumpEvalContext(this), &dpdu, &dpdv);
+                    pbrt.BumpMap(new UniversalTextureEvaluator(), displacement, new NormalBumpEvalContext(this), &dpdu, &dpdv);
 
-                Normal3f ns = (Normal3f)Globals.Normalize(Globals.Cross(dpdu, dpdv));
+                Normal3f ns = (Normal3f)pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
                 SetShadingGeometry(ns, dpdu, dpdv, shading.dndu, shading.dndv, false);
             }
 
             // Return BSDF for surface interaction
             BSDF bsdf = material.GetBSDF(new UniversalTextureEvaluator(), new MaterialEvalContext(this), ref lambda, scratchBuffer);
-            if (bsdf && Globals.GetOptions().forceDiffuse)
+            if (bsdf && pbrt.GetOptions().forceDiffuse)
             {
                 // Override _bsdf_ with diffuse equivalent
                 SampledSpectrum r = bsdf.rho(wo, new pstd.span<Float>(new Float[] { sampler.Get1D() }),

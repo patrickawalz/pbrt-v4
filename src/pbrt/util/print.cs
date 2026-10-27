@@ -8,7 +8,7 @@ using System.Text;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Printing Function Declarations
         // C-style formatting. C++ variadic templates become params object[]; the directive

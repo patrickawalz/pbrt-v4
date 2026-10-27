@@ -22,7 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using pbrt;
-using static pbrt.Globals;
+using static global::pbrt.pbrt;
 
 public sealed class CommandUsage
 {

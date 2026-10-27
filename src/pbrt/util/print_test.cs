@@ -83,9 +83,9 @@ namespace pbrt
         public static void StringPrintf_Precision()
         {
             // (double-conversion's StringToFloat/StringToDouble are float.Parse/double.Parse here)
-            string pi = StringPrintf("%f", (float)Globals.Pi);
+            string pi = StringPrintf("%f", (float)pbrt.Pi);
             float val = float.Parse(pi, CultureInfo.InvariantCulture);
-            EXPECT_EQ(val, Globals.Pi);
+            EXPECT_EQ(val, pbrt.Pi);
 
             string e = StringPrintf("%f", Math.Exp(1.0));
             double dval = double.Parse(e, CultureInfo.InvariantCulture);

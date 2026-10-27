@@ -203,7 +203,7 @@ namespace pbrt
         private Float c0, c1, c2;
     }
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         public const int RGBToSpectrumTableRes = 64;
     }
@@ -454,7 +454,7 @@ namespace pbrt
         private Float[] inverseLUT;
     }
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         // Color Function Declarations
         public static RGB max(RGB a, RGB b)

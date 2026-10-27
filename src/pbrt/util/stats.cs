@@ -19,7 +19,7 @@ using System.IO;
 
 namespace pbrt
 {
-    // (kept out of Globals so registration from Globals' own static initializers works)
+    // (kept out of pbrt so registration from pbrt' own static initializers works)
     internal static class StatRegistry
     {
         internal static readonly object statsLock = new object();
@@ -85,7 +85,7 @@ namespace pbrt
         public PixelStatsAccumulator accum = new PixelStatsAccumulator();
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Statistics Local Variables
 
@@ -213,11 +213,11 @@ namespace pbrt
         // PixelStatsAccumulator Method Definitions
         public void ReportPixelMS(Point2i p, float ms)
         {
-            Point2i res = (Point2i)Globals.imageBounds.Diagonal();
+            Point2i res = (Point2i)pbrt.imageBounds.Diagonal();
             if (stats.time.Resolution() != res)
                 stats.time = new Image(PixelFormat.Float, res, new string[] { "ms" });
 
-            Point2i pp = new Point2i(p.x - Globals.imageBounds.pMin.x, p.y - Globals.imageBounds.pMin.y);
+            Point2i pp = new Point2i(p.x - pbrt.imageBounds.pMin.x, p.y - pbrt.imageBounds.pMin.y);
             stats.time.SetChannel(pp, 0, stats.time.GetChannel(pp, 0) + ms);
         }
 
@@ -231,14 +231,14 @@ namespace pbrt
             }
 
             Image im = stats.counterImages[statIndex];
-            Point2i res = (Point2i)Globals.imageBounds.Diagonal();
+            Point2i res = (Point2i)pbrt.imageBounds.Diagonal();
             if (im.Resolution() != res)
             {
                 im = new Image(PixelFormat.Float, res, new string[] { "count" });
                 stats.counterImages[statIndex] = im;
             }
 
-            Point2i pp = new Point2i(p.x - Globals.imageBounds.pMin.x, p.y - Globals.imageBounds.pMin.y);
+            Point2i pp = new Point2i(p.x - pbrt.imageBounds.pMin.x, p.y - pbrt.imageBounds.pMin.y);
             im.SetChannel(pp, 0, im.GetChannel(pp, 0) + val);
         }
 
@@ -252,14 +252,14 @@ namespace pbrt
             }
 
             Image im = stats.ratioImages[statIndex];
-            Point2i res = (Point2i)Globals.imageBounds.Diagonal();
+            Point2i res = (Point2i)pbrt.imageBounds.Diagonal();
             if (im.Resolution() != res)
             {
                 im = new Image(PixelFormat.Float, res, new string[] { "numerator", "denominator", "ratio" });
                 stats.ratioImages[statIndex] = im;
             }
 
-            Point2i pp = new Point2i(p.x - Globals.imageBounds.pMin.x, p.y - Globals.imageBounds.pMin.y);
+            Point2i pp = new Point2i(p.x - pbrt.imageBounds.pMin.x, p.y - pbrt.imageBounds.pMin.y);
             im.SetChannel(pp, 0, im.GetChannel(pp, 0) + num);
             im.SetChannel(pp, 1, im.GetChannel(pp, 1) + denom);
             if (im.GetChannel(pp, 0) == 0)
@@ -384,7 +384,7 @@ namespace pbrt
 
         public void AccumulatePixelStats(PixelStatsAccumulator accum)
         {
-            Point2i res = (Point2i)Globals.imageBounds.Diagonal();
+            Point2i res = (Point2i)pbrt.imageBounds.Diagonal();
             if (stats.pixelTime.Resolution() == new Point2i(0, 0))
                 stats.pixelTime = new Image(PixelFormat.Float, res, new string[] { "ms" });
             else
@@ -459,14 +459,14 @@ namespace pbrt
         {
             float kb = (float)((double)bytes / 1024.0);
             if (Math.Abs(kb) < 1024.0f)
-                return Globals.StringPrintf("%9.2f kB", kb);
+                return pbrt.StringPrintf("%9.2f kB", kb);
 
             float mib = kb / 1024.0f;
             if (Math.Abs(mib) < 1024.0f)
-                return Globals.StringPrintf("%9.2f MiB", mib);
+                return pbrt.StringPrintf("%9.2f MiB", mib);
 
             float gib = mib / 1024.0f;
-            return Globals.StringPrintf("%9.2f GiB", gib);
+            return pbrt.StringPrintf("%9.2f GiB", gib);
         }
 
         public void Print(TextWriter dest)
@@ -485,8 +485,8 @@ namespace pbrt
                 if (counter.Value == 0)
                     continue;
                 string category, title;
-                Globals.getCategoryAndTitle(counter.Key, out category, out title);
-                add(category, Globals.StringPrintf("%-42s               %12d", title, counter.Value));
+                pbrt.getCategoryAndTitle(counter.Key, out category, out title);
+                add(category, pbrt.StringPrintf("%-42s               %12d", title, counter.Value));
             }
 
             size_t totalMemoryReported = 0;
@@ -497,12 +497,12 @@ namespace pbrt
                 totalMemoryReported += (size_t)counter.Value;
 
                 string category, title;
-                Globals.getCategoryAndTitle(counter.Key, out category, out title);
-                add(category, Globals.StringPrintf("%-42s                  %s", title, printBytes((size_t)counter.Value)));
+                pbrt.getCategoryAndTitle(counter.Key, out category, out title);
+                add(category, pbrt.StringPrintf("%-42s                  %s", title, printBytes((size_t)counter.Value)));
             }
-            int64_t unreportedBytes = (int64_t)Globals.GetCurrentRSS() - (int64_t)totalMemoryReported;
+            int64_t unreportedBytes = (int64_t)pbrt.GetCurrentRSS() - (int64_t)totalMemoryReported;
             if (unreportedBytes > 0)
-                add("Memory", Globals.StringPrintf("%-42s                  %s", "Unreported / unused",
+                add("Memory", pbrt.StringPrintf("%-42s                  %s", "Unreported / unused",
                                                    printBytes((size_t)unreportedBytes)));
 
             foreach (KeyValuePair<string, Stats.Distribution<int64_t>> distrib in stats.intDistributions)
@@ -511,9 +511,9 @@ namespace pbrt
                 if (distrib.Value.count == 0)
                     continue;
                 string category, title;
-                Globals.getCategoryAndTitle(name, out category, out title);
+                pbrt.getCategoryAndTitle(name, out category, out title);
                 double avg = (double)distrib.Value.sum / (double)distrib.Value.count;
-                add(category, Globals.StringPrintf(
+                add(category, pbrt.StringPrintf(
                     "%-42s                      %.3f avg [range %d - %d]", title, avg, distrib.Value.min, distrib.Value.max));
             }
             foreach (KeyValuePair<string, Stats.Distribution<double>> distrib in stats.floatDistributions)
@@ -522,9 +522,9 @@ namespace pbrt
                 if (distrib.Value.count == 0)
                     continue;
                 string category, title;
-                Globals.getCategoryAndTitle(name, out category, out title);
+                pbrt.getCategoryAndTitle(name, out category, out title);
                 double avg = (double)distrib.Value.sum / (double)distrib.Value.count;
-                add(category, Globals.StringPrintf("%-42s                      %.3f avg [range %f - %f]", title,
+                add(category, pbrt.StringPrintf("%-42s                      %.3f avg [range %f - %f]", title,
                                                    avg, distrib.Value.min, distrib.Value.max));
             }
             foreach (KeyValuePair<string, (int64_t first, int64_t second)> percentage in stats.percentages)
@@ -534,8 +534,8 @@ namespace pbrt
                 int64_t num = percentage.Value.first;
                 int64_t denom = percentage.Value.second;
                 string category, title;
-                Globals.getCategoryAndTitle(percentage.Key, out category, out title);
-                add(category, Globals.StringPrintf("%-42s%12d / %12d (%.2f%%)", title, num, denom,
+                pbrt.getCategoryAndTitle(percentage.Key, out category, out title);
+                add(category, pbrt.StringPrintf("%-42s%12d / %12d (%.2f%%)", title, num, denom,
                                                    (100.0f * num) / denom));
             }
             foreach (KeyValuePair<string, (int64_t first, int64_t second)> ratio in stats.ratios)
@@ -545,8 +545,8 @@ namespace pbrt
                 int64_t num = ratio.Value.first;
                 int64_t denom = ratio.Value.second;
                 string category, title;
-                Globals.getCategoryAndTitle(ratio.Key, out category, out title);
-                add(category, Globals.StringPrintf("%-42s%12d / %12d (%.2fx)", title, num, denom,
+                pbrt.getCategoryAndTitle(ratio.Key, out category, out title);
+                add(category, pbrt.StringPrintf("%-42s%12d / %12d (%.2fx)", title, num, denom,
                                                    (double)num / (double)denom));
             }
 
@@ -561,13 +561,13 @@ namespace pbrt
         public void WritePixelImages()
         {
             // FIXME: do this where?
-            CHECK(stats.pixelTime.Write(Globals.pixelStatsBaseName + "-time.exr"));
+            CHECK(stats.pixelTime.Write(pbrt.pixelStatsBaseName + "-time.exr"));
 
             Func<string, string> rewriteSlashes = (string s) => s.Replace('/', '_');
 
             for (int i = 0; i < stats.pixelCounterImages.Count; ++i)
             {
-                string n = Globals.pixelStatsBaseName + "-" + rewriteSlashes(stats.pixelCounterNames[i]) + ".exr";
+                string n = pbrt.pixelStatsBaseName + "-" + rewriteSlashes(stats.pixelCounterNames[i]) + ".exr";
 
                 Func<Image, bool> AllZero = (Image im) =>
                 {
@@ -583,7 +583,7 @@ namespace pbrt
 
             for (int i = 0; i < stats.pixelRatioImages.Count; ++i)
             {
-                string n = Globals.pixelStatsBaseName + "-" + rewriteSlashes(stats.pixelRatioNames[i]) + ".exr";
+                string n = pbrt.pixelStatsBaseName + "-" + rewriteSlashes(stats.pixelRatioNames[i]) + ".exr";
 
                 Func<Image, bool> AllZero = (Image im) =>
                 {
@@ -608,7 +608,7 @@ namespace pbrt
                 Float varianceEstimate = (Float)(1 / (double)(rc.total - 1) * trueFreq * (1 - trueFreq));
                 if (trueFreq - 2 * varianceEstimate >= rc.maxFrequency)
                 {
-                    dest.Write(Globals.StringPrintf(
+                    dest.Write(pbrt.StringPrintf(
                         "%s @ %.9g failures was %fx over limit %.9g (%d samples, sigma est %.9g)\n",
                         iter.Key, trueFreq, trueFreq / rc.maxFrequency, rc.maxFrequency, rc.total, varianceEstimate));
                     anyFailed = true;

@@ -39,8 +39,8 @@ namespace pbrt
 
             // Compute _xyzOutput_ values for training swatches
             Float[,] xyzOutput = new Float[24, 3];
-            Float sensorWhiteG = Globals.InnerProduct(sensorIllum, g_bar);
-            Float sensorWhiteY = Globals.InnerProduct(sensorIllum, Spectra.Y());
+            Float sensorWhiteG = pbrt.InnerProduct(sensorIllum, g_bar);
+            Float sensorWhiteY = pbrt.InnerProduct(sensorIllum, Spectra.Y());
             for (int i = 0; i < nSwatchReflectances; ++i)
             {
                 Spectrum s = swatchReflectances[i];
@@ -51,9 +51,9 @@ namespace pbrt
             }
 
             // Initialize _XYZFromSensorRGB_ using linear least squares
-            pstd.optional<SquareMatrix3> m = Globals.LinearLeastSquares3(rgbCamera, xyzOutput, nSwatchReflectances);
+            pstd.optional<SquareMatrix3> m = pbrt.LinearLeastSquares3(rgbCamera, xyzOutput, nSwatchReflectances);
             if (!m)
-                Globals.ErrorExit("Sensor XYZ from RGB matrix could not be solved.");
+                pbrt.ErrorExit("Sensor XYZ from RGB matrix could not be solved.");
             XYZFromSensorRGB = m.value();
         }
 
@@ -67,15 +67,15 @@ namespace pbrt
             // Compute white balancing matrix for XYZ _PixelSensor_
             if (sensorIllum != null)
             {
-                Point2f sourceWhite = Globals.SpectrumToXYZ(sensorIllum).xy();
+                Point2f sourceWhite = pbrt.SpectrumToXYZ(sensorIllum).xy();
                 Point2f targetWhite = outputColorSpace.w;
-                XYZFromSensorRGB = Globals.WhiteBalance(sourceWhite, targetWhite);
+                XYZFromSensorRGB = pbrt.WhiteBalance(sourceWhite, targetWhite);
             }
         }
 
         public RGB ToSensorRGB(SampledSpectrum L, SampledWavelengths lambda)
         {
-            L = Globals.SafeDiv(L, lambda.PDF());
+            L = pbrt.SafeDiv(L, lambda.PDF());
             return imagingRatio * new RGB((r_bar.Sample(lambda) * L).Average(), (g_bar.Sample(lambda) * L).Average(),
                                           (b_bar.Sample(lambda) * L).Average());
         }
@@ -112,12 +112,12 @@ namespace pbrt
             }
             else
             {
-                Spectrum r = Globals.GetNamedSpectrum(sensorName + "_r");
-                Spectrum g = Globals.GetNamedSpectrum(sensorName + "_g");
-                Spectrum b = Globals.GetNamedSpectrum(sensorName + "_b");
+                Spectrum r = pbrt.GetNamedSpectrum(sensorName + "_r");
+                Spectrum g = pbrt.GetNamedSpectrum(sensorName + "_g");
+                Spectrum b = pbrt.GetNamedSpectrum(sensorName + "_b");
 
                 if (r == null || g == null || b == null)
-                    Globals.ErrorExit(loc, Globals.StringPrintf("%s: unknown sensor type", sensorName));
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unknown sensor type", sensorName));
 
                 return new PixelSensor(r, g, b, colorSpace, sensorIllum, imagingRatio, alloc);
             }
@@ -377,8 +377,8 @@ namespace pbrt
             // Initialize geometric _VisibleSurface_ members
             p = si.p();
             Vector3f wo = si.wo;
-            n = Globals.FaceForward(si.n, wo);
-            ns = Globals.FaceForward(si.shading.n, wo);
+            n = pbrt.FaceForward(si.n, wo);
+            ns = pbrt.FaceForward(si.shading.n, wo);
             uv = si.uv;
             time = si.time;
             dpdx = si.dpdx;
@@ -391,7 +391,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ VisibleSurface set: %s p: %s n: %s ns: %s dpdx: %f dpdy: %f " +
+            return pbrt.StringPrintf("[ VisibleSurface set: %s p: %s n: %s ns: %s dpdx: %f dpdy: %f " +
                                         "time: %f albedo: %s ]",
                                         set, p, n, ns, dpdx, dpdy, time, albedo);
         }
@@ -433,23 +433,23 @@ namespace pbrt
             this.filter = filter;
             this.sensor = sensor;
             filename = parameters.GetOneString("filename", "");
-            if (Globals.Options.imageFile.Length != 0)
+            if (pbrt.Options.imageFile.Length != 0)
             {
                 if (filename.Length != 0)
-                    Globals.Warning(loc, Globals.StringPrintf(
+                    pbrt.Warning(loc, pbrt.StringPrintf(
                                              "Output filename supplied on command line, \"%s\" will " +
                                              "override " +
                                              "filename provided in scene description file, \"%s\".",
-                                             Globals.Options.imageFile, filename));
-                filename = Globals.Options.imageFile;
+                                             pbrt.Options.imageFile, filename));
+                filename = pbrt.Options.imageFile;
             }
             else if (filename.Length == 0)
                 filename = "pbrt.exr";
 
-            if (Globals.Options.fullscreen)
+            if (pbrt.Options.fullscreen)
             {
                 // GUI::GetResolution() -- the GUI is not ported.
-                Globals.ErrorExit("Fullscreen mode requires the GUI, which is not ported.");
+                pbrt.ErrorExit("Fullscreen mode requires the GUI, which is not ported.");
                 fullResolution = default;
             }
             else
@@ -457,7 +457,7 @@ namespace pbrt
                 fullResolution = new Point2i(parameters.GetOneInt("xresolution", 1280),
                                              parameters.GetOneInt("yresolution", 720));
             }
-            if (Globals.Options.quickRender)
+            if (pbrt.Options.quickRender)
             {
                 fullResolution.x = std.max(1, fullResolution.x / 4);
                 fullResolution.y = std.max(1, fullResolution.y / 4);
@@ -465,43 +465,43 @@ namespace pbrt
 
             pixelBounds = new Bounds2i(new Point2i(0, 0), fullResolution);
             List<int> pb = parameters.GetIntArray("pixelbounds");
-            if (Globals.Options.pixelBounds)
+            if (pbrt.Options.pixelBounds)
             {
-                Bounds2i newBounds = Globals.Options.pixelBounds.value();
-                if (Globals.Intersect(newBounds, pixelBounds) != newBounds)
-                    Globals.Warning(loc, "Supplied pixel bounds extend beyond image " +
+                Bounds2i newBounds = pbrt.Options.pixelBounds.value();
+                if (pbrt.Intersect(newBounds, pixelBounds) != newBounds)
+                    pbrt.Warning(loc, "Supplied pixel bounds extend beyond image " +
                                          "resolution. Clamping.");
-                pixelBounds = Globals.Intersect(newBounds, pixelBounds);
+                pixelBounds = pbrt.Intersect(newBounds, pixelBounds);
 
                 if (pb.Count != 0)
-                    Globals.Warning(loc, "Both pixel bounds and crop window were specified. Using the " +
+                    pbrt.Warning(loc, "Both pixel bounds and crop window were specified. Using the " +
                                          "crop window.");
             }
             else if (pb.Count != 0)
             {
                 if (pb.Count != 4)
-                    Globals.Error(loc, Globals.StringPrintf("%d values supplied for \"pixelbounds\". Expected 4.",
+                    pbrt.Error(loc, pbrt.StringPrintf("%d values supplied for \"pixelbounds\". Expected 4.",
                                                             (int)pb.Count));
                 else
                 {
                     Bounds2i newBounds = new Bounds2i(new Point2i(pb[0], pb[2]), new Point2i(pb[1], pb[3]));
-                    if (Globals.Intersect(newBounds, pixelBounds) != newBounds)
-                        Globals.Warning(loc, "Supplied pixel bounds extend beyond image " +
+                    if (pbrt.Intersect(newBounds, pixelBounds) != newBounds)
+                        pbrt.Warning(loc, "Supplied pixel bounds extend beyond image " +
                                              "resolution. Clamping.");
-                    pixelBounds = Globals.Intersect(newBounds, pixelBounds);
+                    pixelBounds = pbrt.Intersect(newBounds, pixelBounds);
                 }
             }
 
             List<Float> cr = parameters.GetFloatArray("cropwindow");
-            if (Globals.Options.cropWindow)
+            if (pbrt.Options.cropWindow)
             {
-                Bounds2f crop = Globals.Options.cropWindow.value();
-                if (Globals.Intersect(crop, new Bounds2f(new Point2f(0, 0), new Point2f(1, 1))) != crop)
+                Bounds2f crop = pbrt.Options.cropWindow.value();
+                if (pbrt.Intersect(crop, new Bounds2f(new Point2f(0, 0), new Point2f(1, 1))) != crop)
                 {
-                    Globals.Error(loc, Globals.StringPrintf(
+                    pbrt.Error(loc, pbrt.StringPrintf(
                                            "Film crop window %s is not in [0,1] range; did you " +
                                            "mean to use \"pixelbounds\"? Clamping to valid range.", crop));
-                    crop = Globals.Intersect(crop, new Bounds2f(new Point2f(0, 0), new Point2f(1, 1)));
+                    crop = pbrt.Intersect(crop, new Bounds2f(new Point2f(0, 0), new Point2f(1, 1)));
                 }
 
                 // Compute film image bounds
@@ -511,29 +511,29 @@ namespace pbrt
                                                        (int)pstd.ceil(fullResolution.y * crop.pMax.y)));
 
                 if (cr.Count != 0)
-                    Globals.Warning(loc, "Crop window supplied on command line will override " +
+                    pbrt.Warning(loc, "Crop window supplied on command line will override " +
                                          "crop window specified with Film.");
-                if (Globals.Options.pixelBounds || pb.Count != 0)
-                    Globals.Warning(loc, "Both pixel bounds and crop window were specified. Using the " +
+                if (pbrt.Options.pixelBounds || pb.Count != 0)
+                    pbrt.Warning(loc, "Both pixel bounds and crop window were specified. Using the " +
                                          "crop window.");
             }
             else if (cr.Count != 0)
             {
-                if (Globals.Options.pixelBounds)
-                    Globals.Warning(loc, "Ignoring \"cropwindow\" since pixel bounds were specified " +
+                if (pbrt.Options.pixelBounds)
+                    pbrt.Warning(loc, "Ignoring \"cropwindow\" since pixel bounds were specified " +
                                          "on the command line.");
                 else if (cr.Count == 4)
                 {
                     if (pb.Count != 0)
-                        Globals.Warning(loc, "Both pixel bounds and crop window were " +
+                        pbrt.Warning(loc, "Both pixel bounds and crop window were " +
                                              "specified. Using the " +
                                              "crop window.");
 
                     Bounds2f crop = new Bounds2f();
-                    crop.pMin.x = Globals.Clamp(std.min(cr[0], cr[1]), 0.0f, 1.0f);
-                    crop.pMax.x = Globals.Clamp(std.max(cr[0], cr[1]), 0.0f, 1.0f);
-                    crop.pMin.y = Globals.Clamp(std.min(cr[2], cr[3]), 0.0f, 1.0f);
-                    crop.pMax.y = Globals.Clamp(std.max(cr[2], cr[3]), 0.0f, 1.0f);
+                    crop.pMin.x = pbrt.Clamp(std.min(cr[0], cr[1]), 0.0f, 1.0f);
+                    crop.pMax.x = pbrt.Clamp(std.max(cr[0], cr[1]), 0.0f, 1.0f);
+                    crop.pMin.y = pbrt.Clamp(std.min(cr[2], cr[3]), 0.0f, 1.0f);
+                    crop.pMax.y = pbrt.Clamp(std.max(cr[2], cr[3]), 0.0f, 1.0f);
 
                     // Compute film image bounds
                     pixelBounds = new Bounds2i(new Point2i((int)pstd.ceil(fullResolution.x * crop.pMin.x),
@@ -542,12 +542,12 @@ namespace pbrt
                                                            (int)pstd.ceil(fullResolution.y * crop.pMax.y)));
                 }
                 else
-                    Globals.Error(loc, Globals.StringPrintf("%d values supplied for \"cropwindow\". Expected 4.",
+                    pbrt.Error(loc, pbrt.StringPrintf("%d values supplied for \"cropwindow\". Expected 4.",
                                                             (int)cr.Count));
             }
 
             if (pixelBounds.IsEmpty())
-                Globals.ErrorExit(loc, Globals.StringPrintf("Degenerate pixel bounds provided to film: %s.", pixelBounds));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("Degenerate pixel bounds provided to film: %s.", pixelBounds));
 
             diagonal = parameters.GetOneFloat("diagonal", 35.0f);
         }
@@ -580,12 +580,12 @@ namespace pbrt
             diagonal = p.diagonal * .001f;
             sensor = p.sensor;
             filename = p.filename;
-            Globals.CHECK(!pixelBounds.IsEmpty());
-            Globals.CHECK_GE(pixelBounds.pMin.x, 0);
-            Globals.CHECK_LE(pixelBounds.pMax.x, fullResolution.x);
-            Globals.CHECK_GE(pixelBounds.pMin.y, 0);
-            Globals.CHECK_LE(pixelBounds.pMax.y, fullResolution.y);
-            Globals.LOG_VERBOSE("Created film with full resolution %s, pixelBounds %s", fullResolution, pixelBounds);
+            pbrt.CHECK(!pixelBounds.IsEmpty());
+            pbrt.CHECK_GE(pixelBounds.pMin.x, 0);
+            pbrt.CHECK_LE(pixelBounds.pMax.x, fullResolution.x);
+            pbrt.CHECK_GE(pixelBounds.pMin.y, 0);
+            pbrt.CHECK_LE(pixelBounds.pMax.y, fullResolution.y);
+            pbrt.LOG_VERBOSE("Created film with full resolution %s, pixelBounds %s", fullResolution, pixelBounds);
         }
 
         public override Point2i FullResolution() { return fullResolution; }
@@ -610,7 +610,7 @@ namespace pbrt
 
         protected string BaseToString()
         {
-            return Globals.StringPrintf("fullResolution: %s diagonal: %f filter: %s filename: %s " +
+            return pbrt.StringPrintf("fullResolution: %s diagonal: %f filter: %s filename: %s " +
                                         "pixelBounds: %s",
                                         fullResolution, diagonal, filter, filename, pixelBounds);
         }
@@ -656,7 +656,7 @@ namespace pbrt
             if (m > maxComponentValue)
                 rgb *= maxComponentValue / m;
 
-            Globals.DCHECK(Globals.InsideExclusive(pFilm, pixelBounds));
+            pbrt.DCHECK(pbrt.InsideExclusive(pFilm, pixelBounds));
             // Update pixel values with filtered sample contribution
             ref Pixel pixel = ref pixels[pFilm];
             for (int c = 0; c < 3; ++c)
@@ -693,8 +693,8 @@ namespace pbrt
             this.maxComponentValue = maxComponentValue;
             this.writeFP16 = writeFP16;
             filterIntegral = filter.Integral();
-            Globals.CHECK(!pixelBounds.IsEmpty());
-            Globals.CHECK(colorSpace != null);
+            pbrt.CHECK(!pixelBounds.IsEmpty());
+            pbrt.CHECK(colorSpace != null);
             filmPixelMemory += pixelBounds.Area() * sizeof(Pixel);
             // Compute _outputRGBFromSensorRGB_ matrix
             outputRGBFromSensorRGB = colorSpace.RGBFromXYZ * sensor.XYZFromSensorRGB;
@@ -702,7 +702,7 @@ namespace pbrt
 
         public override void AddSplat(Point2f p, SampledSpectrum L, SampledWavelengths lambda)
         {
-            Globals.CHECK(!L.HasNaNs());
+            pbrt.CHECK(!L.HasNaNs());
             // Convert sample radiance to _PixelSensor_ RGB
             RGB rgb = sensor.ToSensorRGB(L, lambda);
 
@@ -714,9 +714,9 @@ namespace pbrt
             // Compute bounds of affected pixels for splat, _splatBounds_
             Point2f pDiscrete = p + new Vector2f(0.5f, 0.5f);
             Vector2f radius = filter.Radius();
-            Bounds2i splatBounds = new Bounds2i((Point2i)Globals.Floor(pDiscrete - radius),
-                                                (Point2i)Globals.Floor(pDiscrete + radius) + new Vector2i(1, 1));
-            splatBounds = Globals.Intersect(splatBounds, pixelBounds);
+            Bounds2i splatBounds = new Bounds2i((Point2i)pbrt.Floor(pDiscrete - radius),
+                                                (Point2i)pbrt.Floor(pDiscrete + radius) + new Vector2i(1, 1));
+            splatBounds = pbrt.Intersect(splatBounds, pixelBounds);
 
             foreach (Point2i pi in splatBounds)
             {
@@ -734,20 +734,20 @@ namespace pbrt
         public override void WriteImage(ImageMetadata metadata, Float splatScale = 1)
         {
             Image image = GetImage(metadata, splatScale);
-            Globals.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
+            pbrt.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
             image.Write(filename, metadata);
         }
 
         public override Image GetImage(ImageMetadata metadata, Float splatScale = 1)
         {
             // Convert image to RGB and compute final pixel values
-            Globals.LOG_VERBOSE("Converting image to RGB and computing final weighted pixel values");
+            pbrt.LOG_VERBOSE("Converting image to RGB and computing final weighted pixel values");
             PixelFormat format = writeFP16 ? PixelFormat.Half : PixelFormat.Float;
             Vector2i diag = pixelBounds.Diagonal();
             Image image = new Image(format, new Point2i(diag.x, diag.y), new string[] { "R", "G", "B" });
 
             int nClamped = 0;
-            Globals.ParallelFor2D(pixelBounds, (Point2i p) =>
+            pbrt.ParallelFor2D(pixelBounds, (Point2i p) =>
             {
                 RGB rgb = GetPixelRGB(p, splatScale);
 
@@ -767,7 +767,7 @@ namespace pbrt
             });
 
             if (Volatile.Read(ref nClamped) > 0)
-                Globals.Warning(Globals.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
+                pbrt.Warning(pbrt.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
 
             metadata.pixelBounds = pixelBounds;
             metadata.fullResolution = fullResolution;
@@ -778,7 +778,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ RGBFilm %s colorSpace: %s maxComponentValue: %f writeFP16: %s ]",
+            return pbrt.StringPrintf("[ RGBFilm %s colorSpace: %s maxComponentValue: %f writeFP16: %s ]",
                                         BaseToString(), colorSpace, maxComponentValue, writeFP16);
         }
 
@@ -904,7 +904,7 @@ namespace pbrt
             this.maxComponentValue = maxComponentValue;
             this.writeFP16 = writeFP16;
             filterIntegral = filter.Integral();
-            Globals.CHECK(!pixelBounds.IsEmpty());
+            pbrt.CHECK(!pixelBounds.IsEmpty());
             filmPixelMemory += pixelBounds.Area() * sizeof(Pixel);
             outputRGBFromSensorRGB = colorSpace.RGBFromXYZ * sensor.XYZFromSensorRGB;
         }
@@ -912,16 +912,16 @@ namespace pbrt
         public override void AddSplat(Point2f p, SampledSpectrum v, SampledWavelengths lambda)
         {
             // NOTE: same code as RGBFilm::AddSplat()...
-            Globals.CHECK(!v.HasNaNs());
+            pbrt.CHECK(!v.HasNaNs());
             RGB rgb = sensor.ToSensorRGB(v, lambda);
             Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
             if (m > maxComponentValue)
                 rgb *= maxComponentValue / m;
 
             Point2f pDiscrete = p + new Vector2f(0.5f, 0.5f);
-            Bounds2i splatBounds = new Bounds2i((Point2i)Globals.Floor(pDiscrete - filter.Radius()),
-                                                (Point2i)Globals.Floor(pDiscrete + filter.Radius()) + new Vector2i(1, 1));
-            splatBounds = Globals.Intersect(splatBounds, pixelBounds);
+            Bounds2i splatBounds = new Bounds2i((Point2i)pbrt.Floor(pDiscrete - filter.Radius()),
+                                                (Point2i)pbrt.Floor(pDiscrete + filter.Radius()) + new Vector2i(1, 1));
+            splatBounds = pbrt.Intersect(splatBounds, pixelBounds);
             foreach (Point2i pi in splatBounds)
             {
                 Float wt = filter.Evaluate((Point2f)(p - (Point2f)pi - new Vector2f(0.5f, 0.5f)));
@@ -964,14 +964,14 @@ namespace pbrt
         public override void WriteImage(ImageMetadata metadata, Float splatScale = 1)
         {
             Image image = GetImage(metadata, splatScale);
-            Globals.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
+            pbrt.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
             image.Write(filename, metadata);
         }
 
         public override Image GetImage(ImageMetadata metadata, Float splatScale = 1)
         {
             // Convert image to RGB and compute final pixel values
-            Globals.LOG_VERBOSE("Converting image to RGB and computing final weighted pixel values");
+            pbrt.LOG_VERBOSE("Converting image to RGB and computing final weighted pixel values");
             PixelFormat format = writeFP16 ? PixelFormat.Half : PixelFormat.Float;
             Vector2i diag = pixelBounds.Diagonal();
             Image image = new Image(format, new Point2i(diag.x, diag.y),
@@ -992,7 +992,7 @@ namespace pbrt
                 new string[] { "RelativeVariance.R", "RelativeVariance.G", "RelativeVariance.B" });
 
             int nClamped = 0;
-            Globals.ParallelFor2D(pixelBounds, (Point2i p) =>
+            pbrt.ParallelFor2D(pixelBounds, (Point2i p) =>
             {
                 ref Pixel pixel = ref pixels[p];
                 RGB rgb = new RGB((Float)pixel.rgbSum[0], (Float)pixel.rgbSum[1], (Float)pixel.rgbSum[2]);
@@ -1038,8 +1038,8 @@ namespace pbrt
                 image.SetChannels(pOffset, rgbDesc, new Float[] { rgb[0], rgb[1], rgb[2] });
                 image.SetChannels(pOffset, albedoRgbDesc, new Float[] { albedoRgb[0], albedoRgb[1], albedoRgb[2] });
 
-                Normal3f n = Globals.LengthSquared(pixel.nSum) > 0 ? Globals.Normalize(pixel.nSum) : new Normal3f(0, 0, 0);
-                Normal3f ns = Globals.LengthSquared(pixel.nsSum) > 0 ? Globals.Normalize(pixel.nsSum) : new Normal3f(0, 0, 0);
+                Normal3f n = pbrt.LengthSquared(pixel.nSum) > 0 ? pbrt.Normalize(pixel.nSum) : new Normal3f(0, 0, 0);
+                Normal3f ns = pbrt.LengthSquared(pixel.nsSum) > 0 ? pbrt.Normalize(pixel.nsSum) : new Normal3f(0, 0, 0);
                 image.SetChannels(pOffset, pDesc, new Float[] { pt.x, pt.y, pt.z });
                 image.SetChannels(pOffset, dzDesc, new Float[] { std.abs(dzdx), std.abs(dzdy) });
                 image.SetChannels(pOffset, nDesc, new Float[] { n.x, n.y, n.z });
@@ -1055,7 +1055,7 @@ namespace pbrt
             });
 
             if (Volatile.Read(ref nClamped) > 0)
-                Globals.Warning(Globals.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
+                pbrt.Warning(pbrt.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
 
             metadata.pixelBounds = pixelBounds;
             metadata.fullResolution = fullResolution;
@@ -1066,7 +1066,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ GBufferFilm %s outputFromRender: %s applyInverse: %s " +
+            return pbrt.StringPrintf("[ GBufferFilm %s outputFromRender: %s applyInverse: %s " +
                                         "colorSpace: %s maxComponentValue: %f writeFP16: %s ]",
                                         BaseToString(), outputFromRender, applyInverse, colorSpace, maxComponentValue,
                                         writeFP16);
@@ -1083,8 +1083,8 @@ namespace pbrt
 
             FilmBaseParameters filmBaseParameters = new FilmBaseParameters(parameters, filter, sensor, loc);
 
-            if (!Globals.HasExtension(filmBaseParameters.filename, "exr"))
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: EXR is the only format supported by the GBufferFilm.",
+            if (!pbrt.HasExtension(filmBaseParameters.filename, "exr"))
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: EXR is the only format supported by the GBufferFilm.",
                                                             filmBaseParameters.filename));
 
             string coordinateSystem = parameters.GetOneString("coordinatesystem", "camera");
@@ -1098,7 +1098,7 @@ namespace pbrt
             else if (coordinateSystem == "world")
                 outputFromRender = new AnimatedTransform(cameraTransform.WorldFromRender());
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unknown coordinate system for GBufferFilm. (Expecting \"camera\" " +
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unknown coordinate system for GBufferFilm. (Expecting \"camera\" " +
                                                             "or \"world\".)", coordinateSystem));
 
             return new GBufferFilm(filmBaseParameters, outputFromRender, applyInverse, colorSpace, maxComponentValue,
@@ -1166,7 +1166,7 @@ namespace pbrt
             if (m > maxComponentValue)
                 rgb *= maxComponentValue / m;
 
-            Globals.DCHECK(Globals.InsideExclusive(pFilm, pixelBounds));
+            pbrt.DCHECK(pbrt.InsideExclusive(pFilm, pixelBounds));
             // Update RGB fields in Pixel structure.
             ref Pixel pixel = ref pixels[pFilm];
             for (int c = 0; c < 3; ++c)
@@ -1215,7 +1215,7 @@ namespace pbrt
             outputRGBFromSensorRGB = colorSpace.RGBFromXYZ * sensor.XYZFromSensorRGB;
 
             filterIntegral = filter.Integral();
-            Globals.CHECK(!pixelBounds.IsEmpty());
+            pbrt.CHECK(!pixelBounds.IsEmpty());
             filmPixelMemory += pixelBounds.Area() * (sizeof(Pixel) + 3 * nBuckets * sizeof(double));
 
             // Allocate memory for the pixel buffers in big arrays. Note that it's
@@ -1264,7 +1264,7 @@ namespace pbrt
             // This, too, is similar to RGBFilm::AddSplat(), with additions for
             // spectra.
 
-            Globals.CHECK(!L.HasNaNs());
+            pbrt.CHECK(!L.HasNaNs());
 
             // Convert sample radiance to _PixelSensor_ RGB
             RGB rgb = sensor.ToSensorRGB(L, lambda);
@@ -1278,14 +1278,14 @@ namespace pbrt
             Float lm = L.MaxComponentValue();
             if (lm > maxComponentValue)
                 L *= maxComponentValue / lm;
-            L = Globals.SafeDiv(L, lambda.PDF()) / NSpectrumSamples;
+            L = pbrt.SafeDiv(L, lambda.PDF()) / NSpectrumSamples;
 
             // Compute bounds of affected pixels for splat, _splatBounds_
             Point2f pDiscrete = p + new Vector2f(0.5f, 0.5f);
             Vector2f radius = filter.Radius();
-            Bounds2i splatBounds = new Bounds2i((Point2i)Globals.Floor(pDiscrete - radius),
-                                                (Point2i)Globals.Floor(pDiscrete + radius) + new Vector2i(1, 1));
-            splatBounds = Globals.Intersect(splatBounds, pixelBounds);
+            Bounds2i splatBounds = new Bounds2i((Point2i)pbrt.Floor(pDiscrete - radius),
+                                                (Point2i)pbrt.Floor(pDiscrete + radius) + new Vector2i(1, 1));
+            splatBounds = pbrt.Intersect(splatBounds, pixelBounds);
 
             // Splat both RGB and spectral bucket contributions.
             foreach (Point2i pi in splatBounds)
@@ -1311,7 +1311,7 @@ namespace pbrt
         public override void WriteImage(ImageMetadata metadata, Float splatScale = 1)
         {
             Image image = GetImage(metadata, splatScale);
-            Globals.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
+            pbrt.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
             image.Write(filename, metadata);
         }
 
@@ -1321,7 +1321,7 @@ namespace pbrt
         public override Image GetImage(ImageMetadata metadata, Float splatScale = 1)
         {
             // Convert image to RGB and compute final pixel values
-            Globals.LOG_VERBOSE("Computing final weighted pixel values");
+            pbrt.LOG_VERBOSE("Computing final weighted pixel values");
             PixelFormat format = writeFP16 ? PixelFormat.Half : PixelFormat.Float;
 
             List<string> imageChannels = new List<string> { "R", "G", "B" };
@@ -1329,7 +1329,7 @@ namespace pbrt
             {
                 // The OpenEXR spectral layout takes the bucket center (and then
                 // determines bucket widths based on the neighbor wavelengths).
-                string lambda = Globals.StringPrintf("%.3fnm", Globals.Lerp((i + 0.5f) / nBuckets, lambdaMin, lambdaMax));
+                string lambda = pbrt.StringPrintf("%.3fnm", pbrt.Lerp((i + 0.5f) / nBuckets, lambdaMin, lambdaMax));
                 // Convert any '.' to ',' in the number since OpenEXR uses '.' for
                 // separating layers.
                 lambda = lambda.Replace('.', ',');
@@ -1340,7 +1340,7 @@ namespace pbrt
             Image image = new Image(format, new Point2i(diag.x, diag.y), imageChannels);
 
             int nClamped = 0;
-            Globals.ParallelFor2D(pixelBounds, (Point2i p) =>
+            pbrt.ParallelFor2D(pixelBounds, (Point2i p) =>
             {
                 ref Pixel pixel = ref pixels[p];
 
@@ -1382,7 +1382,7 @@ namespace pbrt
             });
 
             if (Volatile.Read(ref nClamped) > 0)
-                Globals.Warning(Globals.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
+                pbrt.Warning(pbrt.StringPrintf("%d pixel values clamped to maximum fp16 value.", Volatile.Read(ref nClamped)));
 
             metadata.pixelBounds = pixelBounds;
             metadata.fullResolution = fullResolution;
@@ -1398,7 +1398,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SpectralFilm %s lambdaMin: %f lambdaMax: %f nBuckets: %d " +
+            return pbrt.StringPrintf("[ SpectralFilm %s lambdaMin: %f lambdaMax: %f nBuckets: %d " +
                                         "writeFP16: %s maxComponentValue: %f ]",
                                         BaseToString(), lambdaMin, lambdaMax, nBuckets, writeFP16, maxComponentValue);
         }
@@ -1410,15 +1410,15 @@ namespace pbrt
             FilmBaseParameters filmBaseParameters = new FilmBaseParameters(parameters, filter, sensor, loc);
             bool writeFP16 = parameters.GetOneBool("savefp16", true);
 
-            if (!Globals.HasExtension(filmBaseParameters.filename, "exr"))
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: EXR is the only output format supported by the SpectralFilm.",
+            if (!pbrt.HasExtension(filmBaseParameters.filename, "exr"))
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: EXR is the only output format supported by the SpectralFilm.",
                                                             filmBaseParameters.filename));
 
             int nBuckets = parameters.GetOneInt("nbuckets", 16);
             Float lambdaMin = parameters.GetOneFloat("lambdamin", Lambda_min);
             Float lambdaMax = parameters.GetOneFloat("lambdamax", Lambda_max);
             if (lambdaMin < Lambda_min || lambdaMax > Lambda_max)
-                Globals.ErrorExit(Globals.StringPrintf(
+                pbrt.ErrorExit(pbrt.StringPrintf(
                     "Unfortunately pbrt must be recompiled to render wavelengths " +
                     "beyond the [%f,%f] range ([%f,%f] was specified). Please " +
                     "update Lambda_min and/or Lambda_max as necessary in " +
@@ -1433,7 +1433,7 @@ namespace pbrt
 
         public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("ToOutputRGB() is unimplemented. But that's ok since it's only used " +
+            pbrt.LOG_FATAL("ToOutputRGB() is unimplemented. But that's ok since it's only used " +
                               "in the SPPM integrator, which is inherently very much based on " +
                               "RGB output.");
             return default;
@@ -1456,9 +1456,9 @@ namespace pbrt
         // SpectralFilm Private Methods
         int LambdaToBucket(Float lambda)
         {
-            Globals.DCHECK_RARE(1e6f, lambda < lambdaMin || lambda > lambdaMax);
+            pbrt.DCHECK_RARE(1e6f, lambda < lambdaMin || lambda > lambdaMax);
             int bucket = (int)(nBuckets * (lambda - lambdaMin) / (lambdaMax - lambdaMin));
-            return Globals.Clamp(bucket, 0, nBuckets - 1);
+            return pbrt.Clamp(bucket, 0, nBuckets - 1);
         }
 
         // SpectralFilm Private Members
@@ -1486,10 +1486,10 @@ namespace pbrt
             else if (name == "spectral")
                 film = SpectralFilm.Create(parameters, exposureTime, filter, parameters.ColorSpace(), loc, alloc);
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: film type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: film type unknown.", name));
 
             if (film == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create film.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create film.", name));
 
             parameters.ReportUnused();
             return film;

@@ -54,7 +54,7 @@ public static unsafe class pstd
         [MethodImpl(AI)]
         public T value()
         {
-            if (!set) pbrt.Globals.CHECK(set);
+            if (!set) global::pbrt.pbrt.CHECK(set);
             return v;
         }
 
@@ -62,7 +62,7 @@ public static unsafe class pstd
         [System.Diagnostics.CodeAnalysis.UnscopedRef]
         public ref T Ref()
         {
-            if (!set) pbrt.Globals.CHECK(set);
+            if (!set) global::pbrt.pbrt.CHECK(set);
             return ref v;
         }
 
@@ -75,7 +75,7 @@ public static unsafe class pstd
         public override string ToString()
         {
             if (set)
-                return "[ pstd::optional<" + typeof(T).Name + "> set: true value: " + pbrt.Globals.PrintObject(v) + " ]";
+                return "[ pstd::optional<" + typeof(T).Name + "> set: true value: " + global::pbrt.pbrt.PrintObject(v) + " ]";
             else
                 return "[ pstd::optional<" + typeof(T).Name + "> set: false value: n/a ]";
         }
@@ -124,7 +124,7 @@ public static unsafe class pstd
             System.Text.StringBuilder sb = new System.Text.StringBuilder("[ ");
             for (int i = 0; i < length; ++i)
             {
-                sb.Append(pbrt.Globals.PrintObject(arr[offset + i]));
+                sb.Append(global::pbrt.pbrt.PrintObject(arr[offset + i]));
                 if (i < length - 1) sb.Append(", ");
             }
             return sb.Append(" ]").ToString();
@@ -152,7 +152,7 @@ public static unsafe class pstd
             System.Text.StringBuilder sb = new System.Text.StringBuilder("[ ");
             for (int i = 0; i < count; ++i)
             {
-                sb.Append(pbrt.Globals.PrintObject(data_[i]));
+                sb.Append(global::pbrt.pbrt.PrintObject(data_[i]));
                 if (i < count - 1) sb.Append(", ");
             }
             return sb.Append(" ]").ToString();

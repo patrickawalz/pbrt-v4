@@ -106,7 +106,7 @@ namespace pbrt
             for (int i = 0; i < 3; ++i)
                 if (v[i] == vert)
                     return i;
-            Globals.LOG_FATAL("Basic logic error in SDFace::vnum()");
+            pbrt.LOG_FATAL("Basic logic error in SDFace::vnum()");
             return -1;
         }
         public SDFace nextFace(SDVertex vert) { return f[vnum(vert)]; }
@@ -118,7 +118,7 @@ namespace pbrt
             for (int i = 0; i < 3; ++i)
                 if (v[i] != v0 && v[i] != v1)
                     return v[i];
-            Globals.LOG_FATAL("Basic logic error in SDFace::otherVert()");
+            pbrt.LOG_FATAL("Basic logic error in SDFace::otherVert()");
             return null;
         }
         public SDVertex[] v = new SDVertex[3];
@@ -150,7 +150,7 @@ namespace pbrt
         public int f0edgeNum;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // LoopSubdiv Inline Functions
         private static Float beta(int valence)

@@ -29,19 +29,19 @@ namespace pbrt
             // Compute random permutations for all digits
             for (int digitIndex = 0; digitIndex < nDigits; ++digitIndex)
             {
-                uint64_t dseed = Globals.Hash(base_, digitIndex, seed);
+                uint64_t dseed = pbrt.Hash(base_, digitIndex, seed);
                 for (int digitValue = 0; digitValue < base_; ++digitValue)
                 {
                     int index = digitIndex * base_ + digitValue;
-                    permutations[index] = (uint16_t)Globals.PermutationElement((uint32_t)digitValue, (uint32_t)base_, (uint32_t)dseed);
+                    permutations[index] = (uint16_t)pbrt.PermutationElement((uint32_t)digitValue, (uint32_t)base_, (uint32_t)dseed);
                 }
             }
         }
 
         public int Permute(int digitIndex, int digitValue)
         {
-            Globals.DCHECK_LT(digitIndex, nDigits);
-            Globals.DCHECK_LT(digitValue, base_);
+            pbrt.DCHECK_LT(digitIndex, nDigits);
+            pbrt.DCHECK_LT(digitValue, base_);
             return permutations[digitIndex * base_ + digitValue];
         }
 
@@ -95,13 +95,13 @@ namespace pbrt
         // FastOwenScrambler Public Methods
         public uint32_t Apply(uint32_t v)
         {
-            v = Globals.ReverseBits32(v);
+            v = pbrt.ReverseBits32(v);
             v ^= v * 0x3d20adea;
             v += seed;
             v *= (seed >> 16) | 1;
             v ^= v * 0x05526c56;
             v ^= v * 0x53a22864;
-            return Globals.ReverseBits32(v);
+            return pbrt.ReverseBits32(v);
         }
 
         public uint32_t seed;
@@ -120,7 +120,7 @@ namespace pbrt
             {
                 // Apply Owen scrambling to binary digit _b_ in _v_
                 uint32_t mask = (~0u) << (32 - b);
-                if (((uint32_t)Globals.MixBits((v & mask) ^ seed) & (1u << b)) != 0)
+                if (((uint32_t)pbrt.MixBits((v & mask) ^ seed) & (1u << b)) != 0)
                     v ^= 1u << (31 - b);
             }
             return v;
@@ -132,7 +132,7 @@ namespace pbrt
     // RandomizeStrategy Definition
     public enum RandomizeStrategy { None, PermuteDigits, FastOwen, Owen }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static string ToString(RandomizeStrategy r)
         {

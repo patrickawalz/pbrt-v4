@@ -24,7 +24,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ Timer start(ns): %d ]", (long)(start * (1e9 / Stopwatch.Frequency)));
+            return pbrt.StringPrintf("[ Timer start(ns): %d ]", (long)(start * (1e9 / Stopwatch.Frequency)));
         }
 
         private long start;
@@ -43,7 +43,7 @@ namespace pbrt
             this.quiet = quiet;
             workDone = 0;
             exitThread = 0;
-            Globals.CHECK(gpu == false);
+            pbrt.CHECK(gpu == false);
 
             // Launch thread to periodically update progress bar
             if (!quiet)
@@ -90,7 +90,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ProgressReporter totalWork: %d title: %s " +
+            return pbrt.StringPrintf("[ ProgressReporter totalWork: %d title: %s " +
                                         "timer: %s workDone: %d exitThread: %s",
                                         totalWork, title, timer, Interlocked.Read(ref workDone),
                                         Volatile.Read(ref exitThread) != 0);
@@ -155,13 +155,13 @@ namespace pbrt
                 Float elapsed = (Float)ElapsedSeconds();
                 Float estRemaining = elapsed / percentDone - elapsed;
                 if (Volatile.Read(ref exitThread) != 0)
-                    Console.Out.Write(Globals.StringPrintf(" (%.1fs)       ", finishTime.Value));
+                    Console.Out.Write(pbrt.StringPrintf(" (%.1fs)       ", finishTime.Value));
                 else if (percentDone == 1f)
-                    Console.Out.Write(Globals.StringPrintf(" (%.1fs)       ", elapsed));
+                    Console.Out.Write(pbrt.StringPrintf(" (%.1fs)       ", elapsed));
                 else if (!Float.IsInfinity(estRemaining) && !Float.IsNaN(estRemaining))
-                    Console.Out.Write(Globals.StringPrintf(" (%.1fs|%.1fs)  ", elapsed, std.max<Float>(0, estRemaining)));
+                    Console.Out.Write(pbrt.StringPrintf(" (%.1fs|%.1fs)  ", elapsed, std.max<Float>(0, estRemaining)));
                 else
-                    Console.Out.Write(Globals.StringPrintf(" (%.1fs|?s)  ", elapsed));
+                    Console.Out.Write(pbrt.StringPrintf(" (%.1fs|?s)  ", elapsed));
                 Console.Out.Flush();
             }
         }

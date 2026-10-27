@@ -23,7 +23,7 @@ namespace pbrt
         public T new_object<T>() where T : new() { return new T(); }
     }
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         public static size_t GetCurrentRSS()
         {

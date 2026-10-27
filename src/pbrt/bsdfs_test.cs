@@ -342,7 +342,7 @@ namespace pbrt
                            actual bug. Therefore, the criterion here is a bit more
                            lenient. */
 
-                        result = Globals.StringPrintf("Encountered %f samples in a c with expected " +
+                        result = pbrt.StringPrintf("Encountered %f samples in a c with expected " +
                                                       "frequency 0. Rejecting the null hypothesis!",
                                                       frequencies[c.index]);
                         return false;
@@ -384,7 +384,7 @@ namespace pbrt
 
             if (dof <= 0)
             {
-                result = Globals.StringPrintf("The number of degrees of freedom %d is too low!", dof);
+                result = pbrt.StringPrintf("The number of degrees of freedom %d is too low!", dof);
                 return false;
             }
 
@@ -402,7 +402,7 @@ namespace pbrt
 
             if (pval < alpha || !std.isfinite(pval))
             {
-                result = Globals.StringPrintf("Rejected the null hypothesis (p-value = %f, " +
+                result = pbrt.StringPrintf("Rejected the null hypothesis (p-value = %f, " +
                                               "significance level = %f", pval, alpha);
                 return false;
             }
@@ -457,7 +457,7 @@ namespace pbrt
 
                 IntegrateFrequencyTable(bsdf, wo, sampleCount, thetaRes, phiRes, expFrequencies);
 
-                string filename = Globals.StringPrintf("chi2test_%s_%03d.m", description, ++index);
+                string filename = pbrt.StringPrintf("chi2test_%s_%03d.m", description, ++index);
                 DumpTables(frequencies, expFrequencies, thetaRes, phiRes, filename);
 
                 string msg;

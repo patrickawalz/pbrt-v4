@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public const Float ShadowEpsilon = 0.0001f;
 

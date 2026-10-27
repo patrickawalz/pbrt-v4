@@ -1474,7 +1474,7 @@ namespace pbrt
         Bounds3f bounds;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         public static Primitive CreateAccelerator(string name, List<Primitive> prims,
                                                   ParameterDictionary parameters)

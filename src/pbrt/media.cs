@@ -889,7 +889,7 @@ namespace pbrt
         private Float LeScale, temperatureOffset, temperatureScale;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Media Function Definitions
         private struct MeasuredSS

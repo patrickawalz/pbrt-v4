@@ -18,7 +18,7 @@ namespace pbrt
         // CameraTransform Method Definitions
         public CameraTransform(AnimatedTransform worldFromCamera)
         {
-            switch (Globals.Options.renderingSpace)
+            switch (pbrt.Options.renderingSpace)
             {
                 case RenderingCoordinateSystem.Camera:
                     {
@@ -32,7 +32,7 @@ namespace pbrt
                         // Compute _worldFromRender_ for camera-world space rendering
                         Float tMid = (worldFromCamera.startTime + worldFromCamera.endTime) / 2;
                         Point3f pCamera = worldFromCamera.Apply(new Point3f(0, 0, 0), tMid);
-                        worldFromRender = Globals.Translate(new Vector3f(pCamera.x, pCamera.y, pCamera.z));
+                        worldFromRender = pbrt.Translate(new Vector3f(pCamera.x, pCamera.y, pCamera.z));
                         break;
                     }
                 case RenderingCoordinateSystem.World:
@@ -42,12 +42,12 @@ namespace pbrt
                         break;
                     }
                 default:
-                    Globals.LOG_FATAL("Unhandled rendering coordinate space");
+                    pbrt.LOG_FATAL("Unhandled rendering coordinate space");
                     break;
             }
-            Globals.LOG_VERBOSE("World-space position: %s", worldFromRender.Apply(new Point3f(0, 0, 0)));
+            pbrt.LOG_VERBOSE("World-space position: %s", worldFromRender.Apply(new Point3f(0, 0, 0)));
             // Compute _renderFromCamera_ transformation
-            Transform renderFromWorld = Globals.Inverse(worldFromRender);
+            Transform renderFromWorld = pbrt.Inverse(worldFromRender);
             Transform[] rfc = { renderFromWorld * worldFromCamera.startTransform,
                                 renderFromWorld * worldFromCamera.endTransform };
             renderFromCamera = new AnimatedTransform(rfc[0], worldFromCamera.startTime, rfc[1], worldFromCamera.endTime);
@@ -57,11 +57,11 @@ namespace pbrt
         public Point3f CameraFromRender(Point3f p, Float time) { return renderFromCamera.ApplyInverse(p, time); }
         public Point3f RenderFromWorld(Point3f p) { return worldFromRender.ApplyInverse(p); }
 
-        public Transform RenderFromWorld() { return Globals.Inverse(worldFromRender); }
-        public Transform CameraFromRender(Float time) { return Globals.Inverse(renderFromCamera.Interpolate(time)); }
+        public Transform RenderFromWorld() { return pbrt.Inverse(worldFromRender); }
+        public Transform CameraFromRender(Float time) { return pbrt.Inverse(renderFromCamera.Interpolate(time)); }
         public Transform CameraFromWorld(Float time)
         {
-            return Globals.Inverse(worldFromRender * renderFromCamera.Interpolate(time));
+            return pbrt.Inverse(worldFromRender * renderFromCamera.Interpolate(time));
         }
 
         public bool CameraFromRenderHasScale() { return renderFromCamera.HasScale(); }
@@ -84,7 +84,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ CameraTransform renderFromCamera: %s worldFromRender: %s ]",
+            return pbrt.StringPrintf("[ CameraTransform renderFromCamera: %s worldFromRender: %s ]",
                                         renderFromCamera, worldFromRender);
         }
 
@@ -149,7 +149,7 @@ namespace pbrt
             shutterClose = parameters.GetOneFloat("shutterclose", 1.0f);
             if (shutterClose < shutterOpen)
             {
-                Globals.Warning(loc, Globals.StringPrintf("Shutter close time %f < shutter open %f.  Swapping them.",
+                pbrt.Warning(loc, pbrt.StringPrintf("Shutter close time %f < shutter open %f.  Swapping them.",
                                                           shutterClose, shutterOpen));
                 pstd.swap(ref shutterClose, ref shutterOpen);
             }
@@ -163,7 +163,7 @@ namespace pbrt
         public override Film GetFilm() { return film; }
         public override CameraTransform GetCameraTransform() { return cameraTransform; }
 
-        public override Float SampleTime(Float u) { return Globals.Lerp(u, shutterOpen, shutterClose); }
+        public override Float SampleTime(Float u) { return pbrt.Lerp(u, shutterOpen, shutterClose); }
 
         // CameraBase Method Definitions
         public override void InitMetadata(ImageMetadata metadata)
@@ -173,7 +173,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("cameraTransform: %s shutterOpen: %f shutterClose: %f film: %s " +
+            return pbrt.StringPrintf("cameraTransform: %s shutterOpen: %f shutterClose: %f film: %s " +
                                         "medium: %s minPosDifferentialX: %s minPosDifferentialY: %s " +
                                         "minDirDifferentialX: %s minDirDifferentialY: %s ",
                                         cameraTransform, shutterOpen, shutterClose, film,
@@ -188,7 +188,7 @@ namespace pbrt
             // Compute tangent plane equation for ray differential intersections
             Point3f pCamera = CameraFromRender(p, time);
             Transform DownZFromCamera =
-                Globals.RotateFromTo(Globals.Normalize((Vector3f)pCamera), new Vector3f(0, 0, 1));
+                pbrt.RotateFromTo(pbrt.Normalize((Vector3f)pCamera), new Vector3f(0, 0, 1));
             Point3f pDownZ = DownZFromCamera.Apply(pCamera);
             Normal3f nDownZ = DownZFromCamera.Apply(CameraFromRender(n, time));
             Float d = nDownZ.z * pDownZ.z;
@@ -196,14 +196,14 @@ namespace pbrt
             // Find intersection points for approximated camera differential rays
             Ray xRay = new Ray(new Point3f(0, 0, 0) + minPosDifferentialX,
                                new Vector3f(0, 0, 1) + minDirDifferentialX);
-            Float tx = -(Globals.Dot(nDownZ, (Vector3f)xRay.o) - d) / Globals.Dot(nDownZ, xRay.d);
+            Float tx = -(pbrt.Dot(nDownZ, (Vector3f)xRay.o) - d) / pbrt.Dot(nDownZ, xRay.d);
             Ray yRay = new Ray(new Point3f(0, 0, 0) + minPosDifferentialY,
                                new Vector3f(0, 0, 1) + minDirDifferentialY);
-            Float ty = -(Globals.Dot(nDownZ, (Vector3f)yRay.o) - d) / Globals.Dot(nDownZ, yRay.d);
+            Float ty = -(pbrt.Dot(nDownZ, (Vector3f)yRay.o) - d) / pbrt.Dot(nDownZ, yRay.d);
             Point3f px = xRay.Apply(tx), py = yRay.Apply(ty);
 
             // Estimate $\dpdx$ and $\dpdy$ in tangent plane at intersection point
-            Float sppScale = Globals.Options.disablePixelJitter
+            Float sppScale = pbrt.Options.disablePixelJitter
                                  ? 1
                                  : std.max<Float>(.125f, 1 / std.sqrt((Float)samplesPerPixel));
             *dpdx = sppScale * RenderFromCamera(DownZFromCamera.ApplyInverse(px - pDownZ), time);
@@ -229,7 +229,7 @@ namespace pbrt
             film = p.film;
             medium = p.medium;
             if (cameraTransform.CameraFromRenderHasScale())
-                Globals.Warning("Scaling detected in rendering space to camera space transformation!\n" +
+                pbrt.Warning("Scaling detected in rendering space to camera space transformation!\n" +
                                 "The system has numerous assumptions, implicit and explicit,\n" +
                                 "that this transform will have no scale factors in it.\n" +
                                 "Proceed at your own risk; your image may have errors or\n" +
@@ -301,7 +301,7 @@ namespace pbrt
         protected void FindMinimumDifferentials(Camera camera)
         {
             minPosDifferentialX = minPosDifferentialY = minDirDifferentialX =
-                minDirDifferentialY = new Vector3f(Globals.Infinity, Globals.Infinity, Globals.Infinity);
+                minDirDifferentialY = new Vector3f(pbrt.Infinity, pbrt.Infinity, pbrt.Infinity);
 
             CameraSample sample = default;
             sample.filterWeight = 1;
@@ -321,29 +321,29 @@ namespace pbrt
 
                 RayDifferential ray = crd.value().ray;
                 Vector3f dox = CameraFromRender(ray.rxOrigin - ray.o, ray.time);
-                if (Globals.Length(dox) < Globals.Length(minPosDifferentialX))
+                if (pbrt.Length(dox) < pbrt.Length(minPosDifferentialX))
                     minPosDifferentialX = dox;
                 Vector3f doy = CameraFromRender(ray.ryOrigin - ray.o, ray.time);
-                if (Globals.Length(doy) < Globals.Length(minPosDifferentialY))
+                if (pbrt.Length(doy) < pbrt.Length(minPosDifferentialY))
                     minPosDifferentialY = doy;
 
-                ray.d = Globals.Normalize(ray.d);
-                ray.rxDirection = Globals.Normalize(ray.rxDirection);
-                ray.ryDirection = Globals.Normalize(ray.ryDirection);
+                ray.d = pbrt.Normalize(ray.d);
+                ray.rxDirection = pbrt.Normalize(ray.rxDirection);
+                ray.ryDirection = pbrt.Normalize(ray.ryDirection);
 
                 Frame f = Frame.FromZ(ray.d);
                 Vector3f df = f.ToLocal(ray.d);  // should be (0, 0, 1);
-                Vector3f dxf = Globals.Normalize(f.ToLocal(ray.rxDirection));
-                Vector3f dyf = Globals.Normalize(f.ToLocal(ray.ryDirection));
+                Vector3f dxf = pbrt.Normalize(f.ToLocal(ray.rxDirection));
+                Vector3f dyf = pbrt.Normalize(f.ToLocal(ray.ryDirection));
 
-                if (Globals.Length(dxf - df) < Globals.Length(minDirDifferentialX))
+                if (pbrt.Length(dxf - df) < pbrt.Length(minDirDifferentialX))
                     minDirDifferentialX = dxf - df;
-                if (Globals.Length(dyf - df) < Globals.Length(minDirDifferentialY))
+                if (pbrt.Length(dyf - df) < pbrt.Length(minDirDifferentialY))
                     minDirDifferentialY = dyf - df;
             }
 
-            Globals.LOG_VERBOSE("Camera min pos differentials: %s, %s", minPosDifferentialX, minPosDifferentialY);
-            Globals.LOG_VERBOSE("Camera min dir differentials: %s, %s", minDirDifferentialX, minDirDifferentialY);
+            pbrt.LOG_VERBOSE("Camera min pos differentials: %s, %s", minPosDifferentialX, minPosDifferentialY);
+            pbrt.LOG_VERBOSE("Camera min dir differentials: %s, %s", minDirDifferentialX, minDirDifferentialY);
         }
     }
 
@@ -358,7 +358,7 @@ namespace pbrt
             metadata.cameraFromWorld = cameraTransform.CameraFromWorld(shutterOpen).GetMatrix();
 
             // TODO: double check this
-            Transform NDCFromWorld = Globals.Translate(new Vector3f(0.5f, 0.5f, 0.5f)) * Globals.Scale(0.5f, 0.5f, 0.5f) *
+            Transform NDCFromWorld = pbrt.Translate(new Vector3f(0.5f, 0.5f, 0.5f)) * pbrt.Scale(0.5f, 0.5f, 0.5f) *
                                      screenFromCamera * new Transform(metadata.cameraFromWorld.value());
             metadata.NDCFromWorld = NDCFromWorld.GetMatrix();
 
@@ -368,7 +368,7 @@ namespace pbrt
         protected string BaseToString()
         {
             return base.ToString() +
-                   Globals.StringPrintf("screenFromCamera: %s cameraFromRaster: %s " +
+                   pbrt.StringPrintf("screenFromCamera: %s cameraFromRaster: %s " +
                                         "rasterFromScreen: %s screenFromRaster: %s " +
                                         "lensRadius: %f focalDistance: %f",
                                         screenFromCamera, cameraFromRaster, rasterFromScreen, screenFromRaster,
@@ -385,14 +385,14 @@ namespace pbrt
             // Compute projective camera transformations
             // Compute projective camera screen transformations
             Transform NDCFromScreen =
-                Globals.Scale(1 / (screenWindow.pMax.x - screenWindow.pMin.x),
+                pbrt.Scale(1 / (screenWindow.pMax.x - screenWindow.pMin.x),
                                 1 / (screenWindow.pMax.y - screenWindow.pMin.y), 1) *
-                Globals.Translate(new Vector3f(-screenWindow.pMin.x, -screenWindow.pMax.y, 0));
-            Transform rasterFromNDC = Globals.Scale(film.FullResolution().x, -film.FullResolution().y, 1);
+                pbrt.Translate(new Vector3f(-screenWindow.pMin.x, -screenWindow.pMax.y, 0));
+            Transform rasterFromNDC = pbrt.Scale(film.FullResolution().x, -film.FullResolution().y, 1);
             rasterFromScreen = rasterFromNDC * NDCFromScreen;
-            screenFromRaster = Globals.Inverse(rasterFromScreen);
+            screenFromRaster = pbrt.Inverse(rasterFromScreen);
 
-            cameraFromRaster = Globals.Inverse(screenFromCamera) * screenFromRaster;
+            cameraFromRaster = pbrt.Inverse(screenFromCamera) * screenFromRaster;
         }
 
         // ProjectiveCamera Protected Members
@@ -407,7 +407,7 @@ namespace pbrt
         // OrthographicCamera Public Methods
         public OrthographicCamera(CameraBaseParameters baseParameters, Bounds2f screenWindow, Float lensRadius,
                                   Float focalDist)
-            : base(baseParameters, Globals.Orthographic(0, 1), screenWindow, lensRadius, focalDist)
+            : base(baseParameters, pbrt.Orthographic(0, 1), screenWindow, lensRadius, focalDist)
         {
             // Compute differential changes in origin for orthographic camera rays
             dxCamera = cameraFromRaster.Apply(new Vector3f(1, 0, 0));
@@ -431,7 +431,7 @@ namespace pbrt
             if (lensRadius > 0)
             {
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 // Compute point on plane of focus
                 Float ft = focalDistance / ray.d.z;
@@ -439,7 +439,7 @@ namespace pbrt
 
                 // Update ray for effect of lens
                 ray.o = new Point3f(pLens.x, pLens.y, 0);
-                ray.d = Globals.Normalize(pFocus - ray.o);
+                ray.d = pbrt.Normalize(pFocus - ray.o);
             }
 
             return new CameraRay(RenderFromCamera(ray));
@@ -458,7 +458,7 @@ namespace pbrt
             if (lensRadius > 0)
             {
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 // Compute point on plane of focus
                 Float ft = focalDistance / ray.d.z;
@@ -466,7 +466,7 @@ namespace pbrt
 
                 // Update ray for effect of lens
                 ray.o = new Point3f(pLens.x, pLens.y, 0);
-                ray.d = Globals.Normalize(pFocus - ray.o);
+                ray.d = pbrt.Normalize(pFocus - ray.o);
             }
 
             // Compute ray differentials for _OrthographicCamera_
@@ -474,16 +474,16 @@ namespace pbrt
             {
                 // Compute _OrthographicCamera_ ray differentials accounting for lens
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 Float ft = focalDistance / ray.d.z;
                 Point3f pFocus = pCamera + dxCamera + (ft * new Vector3f(0, 0, 1));
                 ray.rxOrigin = new Point3f(pLens.x, pLens.y, 0);
-                ray.rxDirection = Globals.Normalize(pFocus - ray.rxOrigin);
+                ray.rxDirection = pbrt.Normalize(pFocus - ray.rxOrigin);
 
                 pFocus = pCamera + dyCamera + (ft * new Vector3f(0, 0, 1));
                 ray.ryOrigin = new Point3f(pLens.x, pLens.y, 0);
-                ray.ryDirection = Globals.Normalize(pFocus - ray.ryOrigin);
+                ray.ryDirection = pbrt.Normalize(pFocus - ray.ryOrigin);
             }
             else
             {
@@ -498,7 +498,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ OrthographicCamera %s dxCamera: %s dyCamera: %s ]", BaseToString(), dxCamera,
+            return pbrt.StringPrintf("[ OrthographicCamera %s dxCamera: %s dyCamera: %s ]", BaseToString(), dxCamera,
                                         dyCamera);
         }
 
@@ -530,9 +530,9 @@ namespace pbrt
             List<Float> sw = parameters.GetFloatArray("screenwindow");
             if (sw.Count != 0)
             {
-                if (Globals.Options.fullscreen)
+                if (pbrt.Options.fullscreen)
                 {
-                    Globals.Warning("\"screenwindow\" is ignored in fullscreen mode");
+                    pbrt.Warning("\"screenwindow\" is ignored in fullscreen mode");
                 }
                 else
                 {
@@ -545,7 +545,7 @@ namespace pbrt
                     }
                     else
                     {
-                        Globals.Error("\"screenwindow\" should have four values");
+                        pbrt.Error("\"screenwindow\" should have four values");
                     }
                 }
             }
@@ -554,18 +554,18 @@ namespace pbrt
 
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
         {
-            Globals.LOG_FATAL("We() unimplemented for OrthographicCamera");
+            pbrt.LOG_FATAL("We() unimplemented for OrthographicCamera");
             return default;
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
-            Globals.LOG_FATAL("PDF_We() unimplemented for OrthographicCamera");
+            pbrt.LOG_FATAL("PDF_We() unimplemented for OrthographicCamera");
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("SampleWi() unimplemented for OrthographicCamera");
+            pbrt.LOG_FATAL("SampleWi() unimplemented for OrthographicCamera");
             return default;
         }
 
@@ -579,7 +579,7 @@ namespace pbrt
         // PerspectiveCamera Public Methods
         public PerspectiveCamera(CameraBaseParameters baseParameters, Float fov, Bounds2f screenWindow, Float lensRadius,
                                  Float focalDist)
-            : base(baseParameters, Globals.Perspective(fov, 1e-2f, 1000.0f), screenWindow, lensRadius, focalDist)
+            : base(baseParameters, pbrt.Perspective(fov, 1e-2f, 1000.0f), screenWindow, lensRadius, focalDist)
         {
             // Compute differential changes in origin for perspective camera rays
             dxCamera = cameraFromRaster.Apply(new Point3f(1, 0, 0)) - cameraFromRaster.Apply(new Point3f(0, 0, 0));
@@ -589,9 +589,9 @@ namespace pbrt
             Vector2f filterRadius = film.GetFilter().Radius();
             Point2f radius = new Point2f(filterRadius.x, filterRadius.y);
             Point3f pCorner = new Point3f(-radius.x, -radius.y, 0.0f);
-            Vector3f wCornerCamera = Globals.Normalize((Vector3f)cameraFromRaster.Apply(pCorner));
+            Vector3f wCornerCamera = pbrt.Normalize((Vector3f)cameraFromRaster.Apply(pCorner));
             cosTotalWidth = wCornerCamera.z;
-            Globals.DCHECK(.9999 * cosTotalWidth < std.cos(Globals.Radians(fov / 2)));
+            pbrt.DCHECK(.9999 * cosTotalWidth < std.cos(pbrt.Radians(fov / 2)));
 
             // Compute image plane area at $z=1$ for _PerspectiveCamera_
             Point2i res = film.FullResolution();
@@ -612,12 +612,12 @@ namespace pbrt
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
 
-            Ray ray = new Ray(new Point3f(0, 0, 0), Globals.Normalize((Vector3f)pCamera), SampleTime(sample.time), medium);
+            Ray ray = new Ray(new Point3f(0, 0, 0), pbrt.Normalize((Vector3f)pCamera), SampleTime(sample.time), medium);
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 // Compute point on plane of focus
                 Float ft = focalDistance / ray.d.z;
@@ -625,7 +625,7 @@ namespace pbrt
 
                 // Update ray for effect of lens
                 ray.o = new Point3f(pLens.x, pLens.y, 0);
-                ray.d = Globals.Normalize(pFocus - ray.o);
+                ray.d = pbrt.Normalize(pFocus - ray.o);
             }
 
             return new CameraRay(RenderFromCamera(ray));
@@ -637,13 +637,13 @@ namespace pbrt
             // Compute raster and camera sample positions
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
-            Vector3f dir = Globals.Normalize(new Vector3f(pCamera.x, pCamera.y, pCamera.z));
+            Vector3f dir = pbrt.Normalize(new Vector3f(pCamera.x, pCamera.y, pCamera.z));
             RayDifferential ray = new RayDifferential(new Point3f(0, 0, 0), dir, SampleTime(sample.time), medium);
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 // Compute point on plane of focus
                 Float ft = focalDistance / ray.d.z;
@@ -651,7 +651,7 @@ namespace pbrt
 
                 // Update ray for effect of lens
                 ray.o = new Point3f(pLens.x, pLens.y, 0);
-                ray.d = Globals.Normalize(pFocus - ray.o);
+                ray.d = pbrt.Normalize(pFocus - ray.o);
             }
 
             // Compute offset rays for _PerspectiveCamera_ ray differentials
@@ -659,27 +659,27 @@ namespace pbrt
             {
                 // Compute _PerspectiveCamera_ ray differentials accounting for lens
                 // Sample point on lens
-                Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(sample.pLens);
+                Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(sample.pLens);
 
                 // Compute $x$ ray differential for _PerspectiveCamera_ with lens
-                Vector3f dx = Globals.Normalize((Vector3f)(pCamera + dxCamera));
+                Vector3f dx = pbrt.Normalize((Vector3f)(pCamera + dxCamera));
                 Float ft = focalDistance / dx.z;
                 Point3f pFocus = new Point3f(0, 0, 0) + (ft * dx);
                 ray.rxOrigin = new Point3f(pLens.x, pLens.y, 0);
-                ray.rxDirection = Globals.Normalize(pFocus - ray.rxOrigin);
+                ray.rxDirection = pbrt.Normalize(pFocus - ray.rxOrigin);
 
                 // Compute $y$ ray differential for _PerspectiveCamera_ with lens
-                Vector3f dy = Globals.Normalize((Vector3f)(pCamera + dyCamera));
+                Vector3f dy = pbrt.Normalize((Vector3f)(pCamera + dyCamera));
                 ft = focalDistance / dy.z;
                 pFocus = new Point3f(0, 0, 0) + (ft * dy);
                 ray.ryOrigin = new Point3f(pLens.x, pLens.y, 0);
-                ray.ryDirection = Globals.Normalize(pFocus - ray.ryOrigin);
+                ray.ryDirection = pbrt.Normalize(pFocus - ray.ryOrigin);
             }
             else
             {
                 ray.rxOrigin = ray.ryOrigin = ray.o;
-                ray.rxDirection = Globals.Normalize((Vector3f)pCamera + dxCamera);
-                ray.ryDirection = Globals.Normalize((Vector3f)pCamera + dyCamera);
+                ray.rxDirection = pbrt.Normalize((Vector3f)pCamera + dxCamera);
+                ray.ryDirection = pbrt.Normalize((Vector3f)pCamera + dyCamera);
             }
 
             ray.hasDifferentials = true;
@@ -688,7 +688,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ PerspectiveCamera %s dxCamera: %s dyCamera: %s A: " +
+            return pbrt.StringPrintf("[ PerspectiveCamera %s dxCamera: %s dyCamera: %s A: " +
                                         "%f cosTotalWidth: %f ]",
                                         BaseToString(), dxCamera, dyCamera, A, cosTotalWidth);
         }
@@ -721,9 +721,9 @@ namespace pbrt
             List<Float> sw = parameters.GetFloatArray("screenwindow");
             if (sw.Count != 0)
             {
-                if (Globals.Options.fullscreen)
+                if (pbrt.Options.fullscreen)
                 {
-                    Globals.Warning("\"screenwindow\" is ignored in fullscreen mode");
+                    pbrt.Warning("\"screenwindow\" is ignored in fullscreen mode");
                 }
                 else
                 {
@@ -736,7 +736,7 @@ namespace pbrt
                     }
                     else
                     {
-                        Globals.Error(loc, "\"screenwindow\" should have four values");
+                        pbrt.Error(loc, "\"screenwindow\" should have four values");
                     }
                 }
             }
@@ -747,7 +747,7 @@ namespace pbrt
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRasterOut = null)
         {
             // Check if ray is forward-facing with respect to the camera
-            Float cosTheta = Globals.Dot(ray.d, RenderFromCamera(new Vector3f(0, 0, 1), ray.time));
+            Float cosTheta = pbrt.Dot(ray.d, RenderFromCamera(new Vector3f(0, 0, 1), ray.time));
             if (cosTheta <= cosTotalWidth)
                 return new SampledSpectrum(0.0f);
 
@@ -762,20 +762,20 @@ namespace pbrt
 
             // Return zero importance for out of bounds points
             Bounds2f sampleBounds = film.SampleBounds();
-            if (!Globals.Inside(new Point2f(pRaster.x, pRaster.y), sampleBounds))
+            if (!pbrt.Inside(new Point2f(pRaster.x, pRaster.y), sampleBounds))
                 return new SampledSpectrum(0.0f);
 
             // Compute lens area of perspective camera
-            Float lensArea = lensRadius != 0 ? (Pi * Globals.Sqr(lensRadius)) : 1;
+            Float lensArea = lensRadius != 0 ? (Pi * pbrt.Sqr(lensRadius)) : 1;
 
             // Return importance for point on image plane
-            return new SampledSpectrum(1 / (A * lensArea * Globals.Pow(4, cosTheta)));
+            return new SampledSpectrum(1 / (A * lensArea * pbrt.Pow(4, cosTheta)));
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
             // Return zero PDF values if ray direction is not front-facing
-            Float cosTheta = Globals.Dot(ray.d, RenderFromCamera(new Vector3f(0, 0, 1), ray.time));
+            Float cosTheta = pbrt.Dot(ray.d, RenderFromCamera(new Vector3f(0, 0, 1), ray.time));
             if (cosTheta <= cosTotalWidth)
             {
                 *pdfPos = *pdfDir = 0;
@@ -789,34 +789,34 @@ namespace pbrt
 
             // Return zero probability for out of bounds points
             Bounds2f sampleBounds = film.SampleBounds();
-            if (!Globals.Inside(new Point2f(pRaster.x, pRaster.y), sampleBounds))
+            if (!pbrt.Inside(new Point2f(pRaster.x, pRaster.y), sampleBounds))
             {
                 *pdfPos = *pdfDir = 0;
                 return;
             }
 
             // Compute lens area  and return perspective camera probabilities
-            Float lensArea = lensRadius != 0 ? (Pi * Globals.Sqr(lensRadius)) : 1;
+            Float lensArea = lensRadius != 0 ? (Pi * pbrt.Sqr(lensRadius)) : 1;
             *pdfPos = 1 / lensArea;
-            *pdfDir = 1 / (A * Globals.Pow(3, cosTheta));
+            *pdfDir = 1 / (A * pbrt.Pow(3, cosTheta));
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
             // Uniformly sample a lens interaction _lensIntr_
-            Point2f pLens = lensRadius * Globals.SampleUniformDiskConcentric(u);
+            Point2f pLens = lensRadius * pbrt.SampleUniformDiskConcentric(u);
             Point3f pLensRender = RenderFromCamera(new Point3f(pLens.x, pLens.y, 0), reference.time);
             Normal3f n = (Normal3f)RenderFromCamera(new Vector3f(0, 0, 1), reference.time);
             Interaction lensIntr = new Interaction(pLensRender, n, reference.time, medium);
 
             // Find incident direction to camera _wi_ at _ref_
             Vector3f wi = lensIntr.p() - reference.p();
-            Float dist = Globals.Length(wi);
+            Float dist = pbrt.Length(wi);
             wi /= dist;
 
             // Compute PDF for importance arriving at _ref_
-            Float lensArea = lensRadius != 0 ? (Pi * Globals.Sqr(lensRadius)) : 1;
-            Float pdf = Globals.Sqr(dist) / (Globals.AbsDot(lensIntr.n, wi) * lensArea);
+            Float lensArea = lensRadius != 0 ? (Pi * pbrt.Sqr(lensRadius)) : 1;
+            Float pdf = pbrt.Sqr(dist) / (pbrt.AbsDot(lensIntr.n, wi) * lensArea);
 
             // Compute importance and return _CameraWiSample_
             Point2f pRaster;
@@ -855,18 +855,18 @@ namespace pbrt
 
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
         {
-            Globals.LOG_FATAL("We() unimplemented for SphericalCamera");
+            pbrt.LOG_FATAL("We() unimplemented for SphericalCamera");
             return default;
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
-            Globals.LOG_FATAL("PDF_We() unimplemented for SphericalCamera");
+            pbrt.LOG_FATAL("PDF_We() unimplemented for SphericalCamera");
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("SampleWi() unimplemented for SphericalCamera");
+            pbrt.LOG_FATAL("SampleWi() unimplemented for SphericalCamera");
             return default;
         }
 
@@ -880,13 +880,13 @@ namespace pbrt
             {
                 // Compute ray direction using equirectangular mapping
                 Float theta = Pi * uv[1], phi = 2 * Pi * uv[0];
-                dir = Globals.SphericalDirection(std.sin(theta), std.cos(theta), phi);
+                dir = pbrt.SphericalDirection(std.sin(theta), std.cos(theta), phi);
             }
             else
             {
                 // Compute ray direction using equal area mapping
-                uv = Globals.WrapEqualAreaSquare(uv);
-                dir = Globals.EqualAreaSquareToSphere(uv);
+                uv = pbrt.WrapEqualAreaSquare(uv);
+                dir = pbrt.EqualAreaSquareToSphere(uv);
             }
             pstd.swap(ref dir.y, ref dir.z);
 
@@ -922,9 +922,9 @@ namespace pbrt
             List<Float> sw = parameters.GetFloatArray("screenwindow");
             if (sw.Count != 0)
             {
-                if (Globals.Options.fullscreen)
+                if (pbrt.Options.fullscreen)
                 {
-                    Globals.Warning("\"screenwindow\" is ignored in fullscreen mode");
+                    pbrt.Warning("\"screenwindow\" is ignored in fullscreen mode");
                 }
                 else
                 {
@@ -937,7 +937,7 @@ namespace pbrt
                     }
                     else
                     {
-                        Globals.Error(loc, "\"screenwindow\" should have four values");
+                        pbrt.Error(loc, "\"screenwindow\" should have four values");
                     }
                 }
             }
@@ -952,7 +952,7 @@ namespace pbrt
                 mapping = Mapping.EquiRectangular;
             else
             {
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unknown mapping for spherical camera. (Must be " +
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unknown mapping for spherical camera. (Must be " +
                                                             "\"equalarea\" or \"equirectangular\".)", m));
                 return null;
             }
@@ -962,7 +962,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SphericalCamera %s mapping: %s ]", base.ToString(),
+            return pbrt.StringPrintf("[ SphericalCamera %s mapping: %s ]", base.ToString(),
                                         mapping == Mapping.EquiRectangular ? "EquiRectangular" : "EqualArea");
         }
 
@@ -990,7 +990,7 @@ namespace pbrt
 
             public override string ToString()
             {
-                return Globals.StringPrintf("[ LensElementInterface curvatureRadius: %f thickness: %f " +
+                return pbrt.StringPrintf("[ LensElementInterface curvatureRadius: %f thickness: %f " +
                                             "eta: %f apertureRadius: %f ]",
                                             curvatureRadius, thickness, eta, apertureRadius);
             }
@@ -1008,7 +1008,7 @@ namespace pbrt
             // Compute film's physical extent
             Float aspect = (Float)film.FullResolution().y / (Float)film.FullResolution().x;
             Float diagonal = film.Diagonal();
-            Float x = std.sqrt(Globals.Sqr(diagonal) / (1 + Globals.Sqr(aspect)));
+            Float x = std.sqrt(pbrt.Sqr(diagonal) / (1 + pbrt.Sqr(aspect)));
             Float y = aspect * x;
             physicalExtent = new Bounds2f(new Point2f(-x / 2, -y / 2), new Point2f(x / 2, y / 2));
 
@@ -1026,7 +1026,7 @@ namespace pbrt
                     // Set aperture stop diameter
                     setApertureDiameter /= 1000;
                     if (setApertureDiameter > apertureDiameter)
-                        Globals.Warning(Globals.StringPrintf("Aperture diameter %f is greater than maximum possible %f. " +
+                        pbrt.Warning(pbrt.StringPrintf("Aperture diameter %f is greater than maximum possible %f. " +
                                                              "Clamping it.", setApertureDiameter, apertureDiameter));
                     else
                         apertureDiameter = setApertureDiameter;
@@ -1047,7 +1047,7 @@ namespace pbrt
             // Compute exit pupil bounds at sampled points on the film
             int nSamples = 64;
             exitPupilBounds.resize((ulong)nSamples);
-            Globals.ParallelFor(0, nSamples, (int i) =>
+            pbrt.ParallelFor(0, nSamples, (int i) =>
             {
                 Float r0 = (Float)i / nSamples * film.Diagonal() / 2;
                 Float r1 = (Float)(i + 1) / nSamples * film.Diagonal() / 2;
@@ -1066,18 +1066,18 @@ namespace pbrt
 
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
         {
-            Globals.LOG_FATAL("We() unimplemented for RealisticCamera");
+            pbrt.LOG_FATAL("We() unimplemented for RealisticCamera");
             return default;
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
-            Globals.LOG_FATAL("PDF_We() unimplemented for RealisticCamera");
+            pbrt.LOG_FATAL("PDF_We() unimplemented for RealisticCamera");
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
-            Globals.LOG_FATAL("SampleWi() unimplemented for RealisticCamera");
+            pbrt.LOG_FATAL("SampleWi() unimplemented for RealisticCamera");
             return default;
         }
 
@@ -1102,7 +1102,7 @@ namespace pbrt
             Float B = 2 * (ray.d.x * o.x + ray.d.y * o.y + ray.d.z * o.z);
             Float C = o.x * o.x + o.y * o.y + o.z * o.z - radius * radius;
             Float t0, t1;
-            if (!Globals.Quadratic(A, B, C, &t0, &t1))
+            if (!pbrt.Quadratic(A, B, C, &t0, &t1))
                 return false;
 
             // Select intersection $t$ based on ray direction and element curvature
@@ -1114,7 +1114,7 @@ namespace pbrt
             // Compute surface normal of element at ray intersection point
             Point3f hit = o + *t * ray.d;
             *n = new Normal3f(hit.x, hit.y, hit.z);
-            *n = Globals.FaceForward(Globals.Normalize(*n), -ray.d);
+            *n = pbrt.FaceForward(pbrt.Normalize(*n), -ray.d);
 
             return true;
         }
@@ -1150,7 +1150,7 @@ namespace pbrt
                     if (!IntersectSphericalElement(radius, zCenter, rLens, &t, &n))
                         return 0;
                 }
-                Globals.DCHECK_GE(t, 0);
+                pbrt.DCHECK_GE(t, 0);
 
                 // Test intersection point against element aperture
                 Point3f pHit = rLens.Apply(t);
@@ -1166,7 +1166,7 @@ namespace pbrt
                 else
                 {
                     // Check intersection point against spherical aperture
-                    if (Globals.Sqr(pHit.x) + Globals.Sqr(pHit.y) > Globals.Sqr(element.apertureRadius))
+                    if (pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y) > pbrt.Sqr(element.apertureRadius))
                         return 0;
                 }
                 rLens.o = pHit;
@@ -1179,7 +1179,7 @@ namespace pbrt
                     Float eta_t = (i > 0 && elementInterfaces[(ulong)(i - 1)].eta != 0)
                                       ? elementInterfaces[(ulong)(i - 1)].eta
                                       : 1;
-                    if (!Globals.Refract(Globals.Normalize(-rLens.d), n, eta_t / eta_i, null, &w))
+                    if (!pbrt.Refract(pbrt.Normalize(-rLens.d), n, eta_t / eta_i, null, &w))
                         return 0;
                     rLens.d = w;
                 }
@@ -1196,7 +1196,7 @@ namespace pbrt
         {
             Float elementZ = -LensFrontZ();
             // Transform _rCamera_ from camera to lens system space
-            Transform LensFromCamera = Globals.Scale(1, 1, -1);
+            Transform LensFromCamera = pbrt.Scale(1, 1, -1);
             Ray rLens = LensFromCamera.Apply(rCamera);
             for (int i = 0; i < (int)elementInterfaces.size(); ++i)
             {
@@ -1235,7 +1235,7 @@ namespace pbrt
                                       ? 1
                                       : elementInterfaces[(ulong)(i - 1)].eta;
                     Float eta_t = (elementInterfaces[(ulong)i].eta != 0) ? elementInterfaces[(ulong)i].eta : 1;
-                    if (!Globals.Refract(Globals.Normalize(-rLens.d), n, eta_t / eta_i, null, &wt))
+                    if (!pbrt.Refract(pbrt.Normalize(-rLens.d), n, eta_t / eta_i, null, &wt))
                         return 0;
                     rLens.d = wt;
                 }
@@ -1265,7 +1265,7 @@ namespace pbrt
             Ray rScene = new Ray(new Point3f(x, 0, LensFrontZ() + 1), new Vector3f(0, 0, -1));
             Ray rFilm;
             if (TraceLensesFromScene(rScene, &rFilm) == 0)
-                Globals.ErrorExit("Unable to trace ray from scene to film for thick lens " +
+                pbrt.ErrorExit("Unable to trace ray from scene to film for thick lens " +
                                   "approximation. Is aperture stop extremely small?");
             Float p0, f0;
             ComputeCardinalPoints(rScene, rFilm, &p0, &f0);
@@ -1274,7 +1274,7 @@ namespace pbrt
             // Compute cardinal points for scene side of lens system
             rFilm = new Ray(new Point3f(x, 0, LensRearZ() - 1), new Vector3f(0, 0, 1));
             if (TraceLensesFromFilm(rFilm, &rScene) == 0)
-                Globals.ErrorExit("Unable to trace ray from film to scene for thick lens " +
+                pbrt.ErrorExit("Unable to trace ray from film to scene for thick lens " +
                                   "approximation. Is aperture stop extremely small?");
             Float p1, f1;
             ComputeCardinalPoints(rFilm, rScene, &p1, &f1);
@@ -1285,14 +1285,14 @@ namespace pbrt
         {
             Float[] pz = new Float[2], fz = new Float[2];
             ComputeThickLensApproximation(pz, fz);
-            Globals.LOG_VERBOSE("Cardinal points: p' = %f f' = %f, p = %f f = %f.\n", pz[0], fz[0], pz[1], fz[1]);
-            Globals.LOG_VERBOSE("Effective focal length %f\n", fz[0] - pz[0]);
+            pbrt.LOG_VERBOSE("Cardinal points: p' = %f f' = %f, p = %f f = %f.\n", pz[0], fz[0], pz[1], fz[1]);
+            pbrt.LOG_VERBOSE("Effective focal length %f\n", fz[0] - pz[0]);
             // Compute translation of lens, _delta_, to focus at _focusDistance_
             Float f = fz[0] - pz[0];
             Float z = -focusDistance;
             Float c = (pz[1] - z - pz[0]) * (pz[1] - z - 4 * f - pz[0]);
             if (c <= 0)
-                Globals.ErrorExit(Globals.StringPrintf("Coefficient must be positive. It looks focusDistance %f " +
+                pbrt.ErrorExit(pbrt.StringPrintf("Coefficient must be positive. It looks focusDistance %f " +
                                                        " is too short for a given lenses configuration",
                                                        focusDistance));
             Float delta = (pz[1] - z + pz[0] - std.sqrt(c)) / 2;
@@ -1313,27 +1313,27 @@ namespace pbrt
             for (int i = 0; i < nSamples; ++i)
             {
                 // Find location of sample points on $x$ segment and rear lens element
-                Point3f pFilm = new Point3f(Globals.Lerp((i + 0.5f) / nSamples, filmX0, filmX1), 0, 0);
-                Float[] u = { Globals.RadicalInverse(0, (uint64_t)i), Globals.RadicalInverse(1, (uint64_t)i) };
-                Point3f pRear = new Point3f(Globals.Lerp(u[0], projRearBounds.pMin.x, projRearBounds.pMax.x),
-                                            Globals.Lerp(u[1], projRearBounds.pMin.y, projRearBounds.pMax.y),
+                Point3f pFilm = new Point3f(pbrt.Lerp((i + 0.5f) / nSamples, filmX0, filmX1), 0, 0);
+                Float[] u = { pbrt.RadicalInverse(0, (uint64_t)i), pbrt.RadicalInverse(1, (uint64_t)i) };
+                Point3f pRear = new Point3f(pbrt.Lerp(u[0], projRearBounds.pMin.x, projRearBounds.pMax.x),
+                                            pbrt.Lerp(u[1], projRearBounds.pMin.y, projRearBounds.pMax.y),
                                             LensRearZ());
 
                 // Expand pupil bounds if ray makes it through the lens system
-                if (!Globals.Inside(new Point2f(pRear.x, pRear.y), pupilBounds) &&
+                if (!pbrt.Inside(new Point2f(pRear.x, pRear.y), pupilBounds) &&
                     TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null) != 0)
-                    pupilBounds = Globals.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
+                    pupilBounds = pbrt.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
             }
 
             // Return degenerate bounds if no rays made it through the lens system
             if (pupilBounds.IsDegenerate())
             {
-                Globals.LOG_VERBOSE("Unable to find exit pupil in x = [%f,%f] on film.", filmX0, filmX1);
+                pbrt.LOG_VERBOSE("Unable to find exit pupil in x = [%f,%f] on film.", filmX0, filmX1);
                 return pupilBounds;
             }
 
             // Expand bounds to account for sample spacing
-            pupilBounds = Globals.Expand(pupilBounds, 2 * Globals.Length(projRearBounds.Diagonal()) / std.sqrt((Float)nSamples));
+            pupilBounds = pbrt.Expand(pupilBounds, 2 * pbrt.Length(projRearBounds.Diagonal()) / std.sqrt((Float)nSamples));
 
             return pupilBounds;
         }
@@ -1341,7 +1341,7 @@ namespace pbrt
         pstd.optional<ExitPupilSample> SampleExitPupil(Point2f pFilm, Point2f uLens)
         {
             // Find exit pupil bound for sample distance from film center
-            Float rFilm = std.sqrt(Globals.Sqr(pFilm.x) + Globals.Sqr(pFilm.y));
+            Float rFilm = std.sqrt(pbrt.Sqr(pFilm.x) + pbrt.Sqr(pFilm.y));
             int rIndex = (int)(rFilm / (film.Diagonal() / 2) * exitPupilBounds.size());
             rIndex = std.min((int)exitPupilBounds.size() - 1, rIndex);
             Bounds2f pupilBounds = exitPupilBounds[(ulong)rIndex];
@@ -1381,18 +1381,18 @@ namespace pbrt
             ray.time = SampleTime(sample.time);
             ray.medium = medium;
             ray = RenderFromCamera(ray);
-            ray.d = Globals.Normalize(ray.d);
+            ray.d = pbrt.Normalize(ray.d);
 
             // Compute weighting for _RealisticCamera_ ray
-            Float cosTheta = Globals.Normalize(rFilm.d).z;
-            weight *= Globals.Pow(4, cosTheta) / (eps.value().pdf * Globals.Sqr(LensRearZ()));
+            Float cosTheta = pbrt.Normalize(rFilm.d).z;
+            weight *= pbrt.Pow(4, cosTheta) / (eps.value().pdf * pbrt.Sqr(LensRearZ()));
 
             return new CameraRay(ray, new SampledSpectrum(weight));
         }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ RealisticCamera %s elementInterfaces: %s exitPupilBounds: %s ]",
+            return pbrt.StringPrintf("[ RealisticCamera %s elementInterfaces: %s exitPupilBounds: %s ]",
                                         base.ToString(), elementInterfaces, exitPupilBounds);
         }
 
@@ -1403,25 +1403,25 @@ namespace pbrt
                                                                                  parameters, loc);
 
             // Realistic camera-specific parameters
-            string lensFile = Globals.ResolveFilename(parameters.GetOneString("lensfile", ""));
+            string lensFile = pbrt.ResolveFilename(parameters.GetOneString("lensfile", ""));
             Float apertureDiameter = parameters.GetOneFloat("aperturediameter", 1.0f);
             Float focusDistance = parameters.GetOneFloat("focusdistance", 10.0f);
 
             if (lensFile.Length == 0)
             {
-                Globals.Error(loc, "No lens description file supplied!");
+                pbrt.Error(loc, "No lens description file supplied!");
                 return null;
             }
             // Load element data from lens description file
-            List<Float> lensParameters = Globals.ReadFloatFile(lensFile);
+            List<Float> lensParameters = pbrt.ReadFloatFile(lensFile);
             if (lensParameters.Count == 0)
             {
-                Globals.Error(loc, Globals.StringPrintf("Error reading lens specification file \"%s\".", lensFile));
+                pbrt.Error(loc, pbrt.StringPrintf("Error reading lens specification file \"%s\".", lensFile));
                 return null;
             }
             if (lensParameters.Count % 4 != 0)
             {
-                Globals.Error(loc, Globals.StringPrintf("%s: excess values in lens specification file; " +
+                pbrt.Error(loc, pbrt.StringPrintf("%s: excess values in lens specification file; " +
                                                         "must be multiple-of-four values, read %d.",
                                                         lensFile, (int)lensParameters.Count));
                 return null;
@@ -1473,7 +1473,7 @@ namespace pbrt
                         {
                             Point2f uv = new Point2f(-1 + 2 * (x + 0.5f) / apertureImage.Resolution().x,
                                                      -1 + 2 * (y + 0.5f) / apertureImage.Resolution().y);
-                            Float r2 = Globals.Sqr(uv.x) + Globals.Sqr(uv.y);
+                            Float r2 = pbrt.Sqr(uv.x) + pbrt.Sqr(uv.y);
                             Float sigma2 = 1;
                             Float v = std.max<Float>(0, std.exp(-r2 / sigma2) - std.exp(-1 / sigma2));
                             apertureImage.SetChannel(new Point2i(x, y), 0, v);
@@ -1509,7 +1509,7 @@ namespace pbrt
                     for (int i = 0; i < 10; ++i)
                     {
                         // inner radius: https://math.stackexchange.com/a/2136996
-                        Float r = ((i & 1) != 0) ? 1.0f : (std.cos(Globals.Radians(72.0f)) / std.cos(Globals.Radians(36.0f)));
+                        Float r = ((i & 1) != 0) ? 1.0f : (std.cos(pbrt.Radians(72.0f)) / std.cos(pbrt.Radians(36.0f)));
                         vert[i] = new Point2f(r * std.cos(Pi * i / 5.0f), r * std.sin(Pi * i / 5.0f));
                     }
                     Array.Reverse(vert);
@@ -1517,13 +1517,13 @@ namespace pbrt
                 }
                 else
                 {
-                    ImageAndMetadata im = Image.Read(Globals.ResolveFilename(apertureName), alloc);
+                    ImageAndMetadata im = Image.Read(pbrt.ResolveFilename(apertureName), alloc);
                     apertureImage = im.image;
                     if (apertureImage.NChannels() > 1)
                     {
                         ImageChannelDesc rgbDesc = apertureImage.GetChannelDesc(new string[] { "R", "G", "B" });
                         if (!rgbDesc)
-                            Globals.ErrorExit(Globals.StringPrintf("%s: didn't find R, G, B channels to average for " +
+                            pbrt.ErrorExit(pbrt.StringPrintf("%s: didn't find R, G, B channels to average for " +
                                                                    "aperture image.", apertureName));
 
                         Image mono = new Image(PixelFormat.Float, apertureImage.Resolution(), new string[] { "Y" }, null, alloc);
@@ -1584,10 +1584,10 @@ namespace pbrt
             else if (name == "spherical")
                 camera = SphericalCamera.Create(parameters, cameraTransform, film, medium, loc, alloc);
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: camera type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: camera type unknown.", name));
 
             if (camera == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create camera.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create camera.", name));
 
             parameters.ReportUnused();
             return camera;

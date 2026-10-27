@@ -1094,7 +1094,7 @@ namespace pbrt
         }
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Sampler Inline Functions
         public static CameraSample GetCameraSample(Sampler sampler, Point2i pPixel, Filter filter)

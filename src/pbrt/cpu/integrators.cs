@@ -1506,7 +1506,7 @@ namespace pbrt
 
         public bool IsDeltaLight()
         {
-            return type == VertexType.Light && ei.light != null && pbrt.Globals.IsDeltaLight(ei.light.Type());
+            return type == VertexType.Light && ei.light != null && pbrt.IsDeltaLight(ei.light.Type());
         }
 
         public bool IsInfiniteLight()

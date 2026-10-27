@@ -27,7 +27,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SceneEntity name: %s parameters: %s loc: %s ]", name, parameters, loc);
+            return pbrt.StringPrintf("[ SceneEntity name: %s parameters: %s loc: %s ]", name, parameters, loc);
         }
 
         // SceneEntity Public Members
@@ -48,7 +48,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TransformedSeneEntity name: %s parameters: %s loc: %s renderFromObject: %s ]",
+            return pbrt.StringPrintf("[ TransformedSeneEntity name: %s parameters: %s loc: %s renderFromObject: %s ]",
                                         name, parameters, loc, renderFromObject);
         }
 
@@ -212,7 +212,7 @@ namespace pbrt
         {
             TransformSet tInv = new TransformSet();
             for (int i = 0; i < MaxTransforms; ++i)
-                tInv.t[i] = Globals.Inverse(ts.t[i]);
+                tInv.t[i] = pbrt.Inverse(ts.t[i]);
             return tInv;
         }
         public bool IsAnimated()
@@ -1246,12 +1246,12 @@ namespace pbrt
 
         public override void Identity(FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => new pbrt.Transform());
+            graphicsState.ForActiveTransforms((Transform t) => new global::pbrt.Transform());
         }
 
         public override void Translate(Float dx, Float dy, Float dz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * Globals.Translate(new Vector3f(dx, dy, dz)));
+            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Translate(new Vector3f(dx, dy, dz)));
         }
 
         public override void CoordinateSystem(string origName, FileLoc loc)
@@ -1361,7 +1361,7 @@ namespace pbrt
             // Reset graphics state for _WorldBegin_
             currentBlock = BlockState.WorldBlock;
             for (int i = 0; i < MaxTransforms; ++i)
-                graphicsState.ctm[i] = new pbrt.Transform();
+                graphicsState.ctm[i] = new global::pbrt.Transform();
             graphicsState.activeTransformBits = AllTransformsBits;
             namedCoordinateSystems["world"] = graphicsState.ctm.Clone();
 
@@ -1415,7 +1415,7 @@ namespace pbrt
             if (CTMIsAnimated())
             {
                 AnimatedTransform renderFromShape = RenderFromObject();
-                pbrt.Transform identity = new pbrt.Transform();
+                global::pbrt.Transform identity = new global::pbrt.Transform();
 
                 AnimatedShapeSceneEntity entity = new AnimatedShapeSceneEntity(
                     name, dict, loc, renderFromShape, identity,
@@ -1430,8 +1430,8 @@ namespace pbrt
             }
             else
             {
-                pbrt.Transform renderFromObject = RenderFromObject(0);
-                pbrt.Transform objectFromRender = Globals.Inverse(renderFromObject);
+                global::pbrt.Transform renderFromObject = RenderFromObject(0);
+                global::pbrt.Transform objectFromRender = pbrt.Inverse(renderFromObject);
 
                 ShapeSceneEntity entity = new ShapeSceneEntity(
                     name, dict, loc, renderFromObject, objectFromRender,
@@ -1515,7 +1515,7 @@ namespace pbrt
                 return;
             }
 
-            pbrt.Transform worldFromRender = Globals.Inverse(renderFromWorld);
+            global::pbrt.Transform worldFromRender = pbrt.Inverse(renderFromWorld);
 
             if (CTMIsAnimated())
             {
@@ -1533,7 +1533,7 @@ namespace pbrt
                 }
             }
 
-            pbrt.Transform renderFromInstance = RenderFromObject(0) * worldFromRender;
+            global::pbrt.Transform renderFromInstance = RenderFromObject(0) * worldFromRender;
             instanceUses.Add(new InstanceSceneEntity(name, loc, renderFromInstance));
         }
 
@@ -1723,29 +1723,29 @@ namespace pbrt
         public override void Transform(Float[] tr, FileLoc loc)
         {
             graphicsState.ForActiveTransforms((Transform t) =>
-                Globals.Transpose(new pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
+                pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
         }
 
         public override void ConcatTransform(Float[] tr, FileLoc loc)
         {
             graphicsState.ForActiveTransforms((Transform t) =>
-                t * Globals.Transpose(new pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
+                t * pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
         }
 
         public override void Rotate(Float angle, Float dx, Float dy, Float dz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * Globals.Rotate(angle, new Vector3f(dx, dy, dz)));
+            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Rotate(angle, new Vector3f(dx, dy, dz)));
         }
 
         public override void Scale(Float sx, Float sy, Float sz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * Globals.Scale(sx, sy, sz));
+            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Scale(sx, sy, sz));
         }
 
         public override void LookAt(Float ex, Float ey, Float ez, Float lx, Float ly, Float lz,
                                     Float ux, Float uy, Float uz, FileLoc loc)
         {
-            pbrt.Transform lookAt = Globals.LookAt(new Point3f(ex, ey, ez), new Point3f(lx, ly, lz), new Vector3f(ux, uy, uz));
+            global::pbrt.Transform lookAt = pbrt.LookAt(new Point3f(ex, ey, ez), new Point3f(lx, ly, lz), new Vector3f(ux, uy, uz));
             graphicsState.ForActiveTransforms((Transform t) => t * lookAt);
         }
 
@@ -1891,9 +1891,9 @@ namespace pbrt
         }
 
         // BasicSceneBuilder Private Methods
-        pbrt.Transform RenderFromObject(int index)
+        global::pbrt.Transform RenderFromObject(int index)
         {
-            return new pbrt.Transform((renderFromWorld * graphicsState.ctm[index]).GetMatrix());
+            return new global::pbrt.Transform((renderFromWorld * graphicsState.ctm[index]).GetMatrix());
         }
 
         AnimatedTransform RenderFromObject()
@@ -1909,7 +1909,7 @@ namespace pbrt
         public BlockState currentBlock = BlockState.OptionsBlock;
         GraphicsState graphicsState = new GraphicsState();
         Dictionary<string, TransformSet> namedCoordinateSystems = new Dictionary<string, TransformSet>();
-        pbrt.Transform renderFromWorld = new pbrt.Transform();
+        global::pbrt.Transform renderFromWorld = new global::pbrt.Transform();
         List<GraphicsState> pushedGraphicsStates = new List<GraphicsState>();
         List<(char, FileLoc)> pushStack = new List<(char, FileLoc)>();  // 'a': attribute, 'o': object
         ActiveInstanceDefinition activeInstanceDefinition = null;

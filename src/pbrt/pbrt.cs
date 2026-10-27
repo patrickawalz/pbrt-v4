@@ -24,7 +24,7 @@ global using size_t = System.UInt64;
 global using ptrdiff_t = System.Int64;
 global using uintptr_t = System.UInt64;
 
-global using static pbrt.Globals;
+global using static global::pbrt.pbrt;
 
 using System;
 
@@ -33,7 +33,7 @@ namespace pbrt
     // All of pbrt's free functions (namespace-scope functions and constants) live in
     // this partial class; each file adds its own part. "global using static" above
     // makes them callable unqualified, as in C++.
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Define Cache Line Size Constant
         public const int PBRT_L1_CACHE_LINE_SIZE = 64;

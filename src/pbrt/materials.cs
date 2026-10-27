@@ -40,7 +40,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MaterialEvalContext %s wo: %s ns: %s dpdus: %s ]",
+            return pbrt.StringPrintf("[ MaterialEvalContext %s wo: %s ns: %s dpdus: %s ]",
                                         ((TextureEvalContext)this).ToString(), wo, ns, dpdus);
         }
 
@@ -83,7 +83,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ NormalBumpEvalContext p: %s uv: %s shading.n: %s shading.dpdu: %s " +
+            return pbrt.StringPrintf("[ NormalBumpEvalContext p: %s uv: %s shading.n: %s shading.dpdu: %s " +
                                         "shading.dpdv: %s shading.dndu: %s shading.dndv: %s dudx: %f " +
                                         "dudy: %f dvdx: %f dvdy: %f dpdx: %s dpdy: %s faceIndex: %d ]",
                                         p, uv, shading.n, shading.dpdu, shading.dpdv, shading.dndu, shading.dndv, dudx,
@@ -111,7 +111,7 @@ namespace pbrt
         public int faceIndex;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Normal Mapping Function Definitions
         public static void NormalMap(Image normalMap, NormalBumpEvalContext ctx, Vector3f* dpdu, Vector3f* dpdv)
@@ -219,7 +219,7 @@ namespace pbrt
 
         public static DielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
-            Spectrum eta = Globals.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
 
             FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
             FloatTexture vRoughness = parameters.GetFloatTextureOrNull("vroughness", alloc);
@@ -235,9 +235,9 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ DielectricMaterial displacement: %s normalMap: %s uRoughness: %s " +
+            return pbrt.StringPrintf("[ DielectricMaterial displacement: %s normalMap: %s uRoughness: %s " +
                                         "vRoughness: %s eta: %s remapRoughness: %s ]",
-                                        displacement, Globals.NormalMapString(normalMap), uRoughness, vRoughness, eta, remapRoughness);
+                                        displacement, pbrt.NormalMapString(normalMap), uRoughness, vRoughness, eta, remapRoughness);
         }
 
         public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
@@ -330,7 +330,7 @@ namespace pbrt
 
         public static ThinDielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
-            Spectrum eta = Globals.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
 
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
 
@@ -346,8 +346,8 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ThinDielectricMaterial displacement: %s normalMap: %s eta: %s ]", displacement,
-                                        Globals.NormalMapString(normalMap), eta);
+            return pbrt.StringPrintf("[ ThinDielectricMaterial displacement: %s normalMap: %s eta: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap), eta);
         }
 
         // ThinDielectricMaterial Private Data
@@ -376,7 +376,7 @@ namespace pbrt
             if (amt >= 1)
                 return materials[1];
             // (the C++ code hashes the two Material pointers; object identity hashes stand in)
-            Float u = Globals.HashFloat(ctx.p, ctx.wo, (ulong)RuntimeHelpers.GetHashCode(materials[0]),
+            Float u = pbrt.HashFloat(ctx.p, ctx.wo, (ulong)RuntimeHelpers.GetHashCode(materials[0]),
                                         (ulong)RuntimeHelpers.GetHashCode(materials[1]));
             return (amt < u) ? materials[0] : materials[1];
         }
@@ -387,13 +387,13 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement()
         {
-            Globals.LOG_FATAL("Shouldn't be called");
+            pbrt.LOG_FATAL("Shouldn't be called");
             return null;
         }
 
         public override Image GetNormalMap()
         {
-            Globals.LOG_FATAL("Shouldn't be called");
+            pbrt.LOG_FATAL("Shouldn't be called");
             return null;
         }
 
@@ -405,8 +405,8 @@ namespace pbrt
             // the error message. Note that both of these limitations could be
             // relaxed if they were problematic; the issue is that we currently
             // resolve MixMaterials in the closest hit shader...
-            if (Globals.Options.wavefront && !new BasicTextureEvaluator().CanEvaluate(new FloatTexture[] { amount }, new SpectrumTexture[0]))
-                Globals.ErrorExit(loc, "The wavefront renderer currently only supports basic textures " +
+            if (pbrt.Options.wavefront && !new BasicTextureEvaluator().CanEvaluate(new FloatTexture[] { amount }, new SpectrumTexture[0]))
+                pbrt.ErrorExit(loc, "The wavefront renderer currently only supports basic textures " +
                                        "for its \"amount\" parameter.");
 
             return new MixMaterial(materials, amount);
@@ -415,14 +415,14 @@ namespace pbrt
         public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
                                                            ref SampledWavelengths lambda, ScratchBuffer buf)
         {
-            Globals.LOG_FATAL("Shouldn't be called");
+            pbrt.LOG_FATAL("Shouldn't be called");
             return null;
         }
         public override bool HasSubsurfaceScattering() { return false; }
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MixMaterial materials: [ %s %s ] amount: %s ]", materials[0], materials[1], amount);
+            return pbrt.StringPrintf("[ MixMaterial materials: [ %s %s ] amount: %s ]", materials[0], materials[1], amount);
         }
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
@@ -434,7 +434,7 @@ namespace pbrt
                                                        ref SampledWavelengths lambda, ScratchBuffer buf)
         {
             // (ConcreteBxDF is void: "return BSDF();")
-            Globals.LOG_FATAL("MixMaterial::GetBxDF() shouldn't be called");
+            pbrt.LOG_FATAL("MixMaterial::GetBxDF() shouldn't be called");
             return default;
         }
 
@@ -472,15 +472,15 @@ namespace pbrt
 
             SampledSpectrum sig_a;
             if (sigma_a != null)
-                sig_a = Globals.ClampZero(texEval.Apply(sigma_a, ctx, lambda));
+                sig_a = pbrt.ClampZero(texEval.Apply(sigma_a, ctx, lambda));
             else if (color != null)
             {
-                SampledSpectrum c = Globals.Clamp(texEval.Apply(color, ctx, lambda), 0, 1);
+                SampledSpectrum c = pbrt.Clamp(texEval.Apply(color, ctx, lambda), 0, 1);
                 sig_a = HairBxDF.SigmaAFromReflectance(c, bn, lambda);
             }
             else
             {
-                Globals.CHECK(eumelanin != null || pheomelanin != null);
+                pbrt.CHECK(eumelanin != null || pheomelanin != null);
                 sig_a = HairBxDF.SigmaAFromConcentration(
                             std.max<Float>(0, eumelanin != null ? texEval.Apply(eumelanin, ctx) : 0),
                             std.max<Float>(0, pheomelanin != null ? texEval.Apply(pheomelanin, ctx) : 0))
@@ -510,27 +510,27 @@ namespace pbrt
             if (sigma_a != null)
             {
                 if (reflectance != null)
-                    Globals.Warning(loc, "Ignoring \"reflectance\" parameter since \"sigma_a\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"reflectance\" parameter since \"sigma_a\" was provided.");
                 if (eumelanin != null)
-                    Globals.Warning(loc, "Ignoring \"eumelanin\" parameter since \"sigma_a\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"eumelanin\" parameter since \"sigma_a\" was provided.");
                 if (pheomelanin != null)
-                    Globals.Warning(loc, "Ignoring \"pheomelanin\" parameter since \"sigma_a\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"pheomelanin\" parameter since \"sigma_a\" was provided.");
             }
             else if (reflectance != null)
             {
                 if (sigma_a != null)
-                    Globals.Warning(loc, "Ignoring \"sigma_a\" parameter since \"reflectance\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"sigma_a\" parameter since \"reflectance\" was provided.");
                 if (eumelanin != null)
-                    Globals.Warning(loc, "Ignoring \"eumelanin\" parameter since \"reflectance\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"eumelanin\" parameter since \"reflectance\" was provided.");
                 if (pheomelanin != null)
-                    Globals.Warning(loc, "Ignoring \"pheomelanin\" parameter since \"reflectance\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"pheomelanin\" parameter since \"reflectance\" was provided.");
             }
             else if (eumelanin != null || pheomelanin != null)
             {
                 if (sigma_a != null)
-                    Globals.Warning(loc, "Ignoring \"sigma_a\" parameter since \"eumelanin\"/\"pheomelanin\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"sigma_a\" parameter since \"eumelanin\"/\"pheomelanin\" was provided.");
                 if (reflectance != null)
-                    Globals.Warning(loc, "Ignoring \"reflectance\" parameter since \"eumelanin\"/\"pheomelanin\" was provided.");
+                    pbrt.Warning(loc, "Ignoring \"reflectance\" parameter since \"eumelanin\"/\"pheomelanin\" was provided.");
             }
             else
             {
@@ -558,7 +558,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ HairMaterial sigma_a: %s color: %s eumelanin: %s " +
+            return pbrt.StringPrintf("[ HairMaterial sigma_a: %s color: %s eumelanin: %s " +
                                         "pheomelanin: %s eta: %s beta_m: %s beta_n: %s alpha: %s ]",
                                         sigma_a, color, eumelanin, pheomelanin, eta, beta_m, beta_n, alpha);
         }
@@ -598,8 +598,8 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ DiffuseMaterial displacement: %s normapMap: %s reflectance: %s ]", displacement,
-                                        Globals.NormalMapString(normalMap), reflectance);
+            return pbrt.StringPrintf("[ DiffuseMaterial displacement: %s normapMap: %s reflectance: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap), reflectance);
         }
 
         public DiffuseMaterial(SpectrumTexture reflectance, FloatTexture displacement, Image normalMap)
@@ -615,7 +615,7 @@ namespace pbrt
         public DiffuseBxDF GetBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx, ref SampledWavelengths lambda)
             where TextureEvaluator : ITextureEvaluator
         {
-            SampledSpectrum r = Globals.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
             return new DiffuseBxDF(r);
         }
 
@@ -660,9 +660,9 @@ namespace pbrt
             else
             {
                 // Avoid r==0 NaN case...
-                SampledSpectrum r = Globals.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, .9999f);
+                SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, .9999f);
                 etas = new SampledSpectrum(1f);
-                ks = 2 * Globals.Sqrt(r) / Globals.Sqrt(Globals.ClampZero(new SampledSpectrum(1f) - r));
+                ks = 2 * pbrt.Sqrt(r) / pbrt.Sqrt(pbrt.ClampZero(new SampledSpectrum(1f) - r));
             }
             TrowbridgeReitzDistribution distrib = new TrowbridgeReitzDistribution(uRough, vRough);
             return new ConductorBxDF(distrib, etas, ks);
@@ -695,14 +695,14 @@ namespace pbrt
             SpectrumTexture reflectance = parameters.GetSpectrumTextureOrNull("reflectance", SpectrumType.Albedo, alloc);
 
             if (reflectance != null && (eta != null || k != null))
-                Globals.ErrorExit(loc, "For the conductor material, both \"reflectance\" " +
+                pbrt.ErrorExit(loc, "For the conductor material, both \"reflectance\" " +
                                        "and \"eta\" and \"k\" can't be provided.");
             if (reflectance == null)
             {
                 if (eta == null)
-                    eta = new SpectrumConstantTexture(Globals.GetNamedSpectrum("metal-Cu-eta"));
+                    eta = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-eta"));
                 if (k == null)
-                    k = new SpectrumConstantTexture(Globals.GetNamedSpectrum("metal-Cu-k"));
+                    k = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-k"));
             }
 
             FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
@@ -726,10 +726,10 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ ConductorMaterial displacement: %s normalMap: %s eta: %s " +
+            return pbrt.StringPrintf("[ ConductorMaterial displacement: %s normalMap: %s eta: %s " +
                                         "k: %s reflectance: %s uRoughness: %s vRoughness: %s " +
                                         "remapRoughness: %s ]",
-                                        displacement, Globals.NormalMapString(normalMap), eta, k, reflectance, uRoughness,
+                                        displacement, pbrt.NormalMapString(normalMap), eta, k, reflectance, uRoughness,
                                         vRoughness, remapRoughness);
         }
 
@@ -770,7 +770,7 @@ namespace pbrt
             where TextureEvaluator : ITextureEvaluator
         {
             // Initialize diffuse component of plastic material
-            SampledSpectrum r = Globals.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
 
             // Create microfacet distribution _distrib_ for coated diffuse material
             Float urough = texEval.Apply(uRoughness, ctx);
@@ -790,8 +790,8 @@ namespace pbrt
             if (sampledEta == 0)
                 sampledEta = 1;
 
-            SampledSpectrum a = Globals.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
-            Float gg = Globals.Clamp(texEval.Apply(g, ctx), -1, 1);
+            SampledSpectrum a = pbrt.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
+            Float gg = pbrt.Clamp(texEval.Apply(g, ctx), -1, 1);
 
             return new CoatedDiffuseBxDF(new DielectricBxDF(sampledEta, distrib), new DiffuseBxDF(r), thick, a, gg, maxDepth, nSamples);
         }
@@ -815,9 +815,9 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ CoatedDiffuseMaterial displacement: %s normalMap: %s reflectance: %s " +
+            return pbrt.StringPrintf("[ CoatedDiffuseMaterial displacement: %s normalMap: %s reflectance: %s " +
                                         "uRoughness: %s vRoughness: %s thickness: %s eta: %s remapRoughness: %s ]",
-                                        displacement, Globals.NormalMapString(normalMap), reflectance, uRoughness, vRoughness,
+                                        displacement, pbrt.NormalMapString(normalMap), reflectance, uRoughness, vRoughness,
                                         thickness, eta, remapRoughness);
         }
 
@@ -836,7 +836,7 @@ namespace pbrt
 
             FloatTexture thickness = parameters.GetFloatTexture("thickness", .01f, alloc);
 
-            Spectrum eta = Globals.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
 
             int maxDepth = parameters.GetOneInt("maxdepth", 10);
             int nSamples = parameters.GetOneInt("nsamples", 1);
@@ -921,9 +921,9 @@ namespace pbrt
             else
             {
                 // Avoid r==1 NaN case...
-                SampledSpectrum r = Globals.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, .9999f);
+                SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, .9999f);
                 ce = new SampledSpectrum(1f);
-                ck = 2 * Globals.Sqrt(r) / Globals.Sqrt(Globals.ClampZero(new SampledSpectrum(1f) - r));
+                ck = 2 * pbrt.Sqrt(r) / pbrt.Sqrt(pbrt.ClampZero(new SampledSpectrum(1f) - r));
             }
             ce /= ieta;
             ck /= ieta;
@@ -937,8 +937,8 @@ namespace pbrt
             }
             TrowbridgeReitzDistribution conductorDistrib = new TrowbridgeReitzDistribution(curough, cvrough);
 
-            SampledSpectrum a = Globals.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
-            Float gg = Globals.Clamp(texEval.Apply(g, ctx), -1, 1);
+            SampledSpectrum a = pbrt.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
+            Float gg = pbrt.Clamp(texEval.Apply(g, ctx), -1, 1);
 
             return new CoatedConductorBxDF(new DielectricBxDF(ieta, interfaceDistrib),
                                            new ConductorBxDF(conductorDistrib, ce, ck), thick, a, gg, maxDepth, nSamples);
@@ -963,12 +963,12 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ CoatedConductorMaterial displacement: %s normalMap: %s " +
+            return pbrt.StringPrintf("[ CoatedConductorMaterial displacement: %s normalMap: %s " +
                                         "interfaceURoughness: %s interfaceVRoughness: %s thickness: %s " +
                                         "interfaceEta: %s g: %s albedo: %s conductorURoughness: %s " +
                                         "conductorVRoughness: %s conductorEta: %s k: %s " +
                                         "conductorReflectance: %s remapRoughness: %s maxDepth: %d nSamples: %d ]",
-                                        displacement, Globals.NormalMapString(normalMap), interfaceURoughness,
+                                        displacement, pbrt.NormalMapString(normalMap), interfaceURoughness,
                                         interfaceVRoughness, thickness, interfaceEta, g, albedo, conductorURoughness,
                                         conductorVRoughness, conductorEta, k, reflectance, remapRoughness, maxDepth, nSamples);
         }
@@ -986,7 +986,7 @@ namespace pbrt
 
             FloatTexture thickness = parameters.GetFloatTexture("thickness", .01f, alloc);
 
-            Spectrum interfaceEta = Globals.GetEtaSpectrum(parameters, "interface.eta", alloc);
+            Spectrum interfaceEta = pbrt.GetEtaSpectrum(parameters, "interface.eta", alloc);
 
             // conductor
             FloatTexture conductorURoughness = parameters.GetFloatTextureOrNull("conductor.uroughness", alloc);
@@ -1000,14 +1000,14 @@ namespace pbrt
             SpectrumTexture reflectance = parameters.GetSpectrumTextureOrNull("reflectance", SpectrumType.Albedo, alloc);
 
             if (reflectance != null && (conductorEta != null || k != null))
-                Globals.ErrorExit(loc, "For the coated conductor material, both \"reflectance\" " +
+                pbrt.ErrorExit(loc, "For the coated conductor material, both \"reflectance\" " +
                                        "and \"eta\" and \"k\" can't be provided.");
             if (reflectance == null)
             {
                 if (conductorEta == null)
-                    conductorEta = new SpectrumConstantTexture(Globals.GetNamedSpectrum("metal-Cu-eta"));
+                    conductorEta = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-eta"));
                 if (k == null)
-                    k = new SpectrumConstantTexture(Globals.GetNamedSpectrum("metal-Cu-k"));
+                    k = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-k"));
             }
 
             int maxDepth = parameters.GetOneInt("maxdepth", 10);
@@ -1051,7 +1051,7 @@ namespace pbrt
             this.sigma_s = sigma_s; this.reflectance = reflectance; this.mfp = mfp; this.uRoughness = uRoughness;
             this.vRoughness = vRoughness; this.eta = eta; this.remapRoughness = remapRoughness;
             table = new BSSRDFTable(100, 64, alloc);
-            Globals.ComputeBeamDiffusionBSSRDF(g, eta, table);
+            pbrt.ComputeBeamDiffusionBSSRDF(g, eta, table);
         }
 
         public static string Name() { return "SubsurfaceMaterial"; }
@@ -1092,16 +1092,16 @@ namespace pbrt
             if (sigma_a != null && sigma_s != null)
             {
                 // Evaluate textures for $\sigma_\roman{a}$ and $\sigma_\roman{s}$
-                sig_a = Globals.ClampZero(scale * texEval.Apply(sigma_a, ctx, lambda));
-                sig_s = Globals.ClampZero(scale * texEval.Apply(sigma_s, ctx, lambda));
+                sig_a = pbrt.ClampZero(scale * texEval.Apply(sigma_a, ctx, lambda));
+                sig_s = pbrt.ClampZero(scale * texEval.Apply(sigma_s, ctx, lambda));
             }
             else
             {
                 // Compute _sig_a_ and _sig_s_ from reflectance and mfp
-                Globals.DCHECK(reflectance != null && mfp != null);
-                SampledSpectrum mfree = Globals.ClampZero(scale * texEval.Apply(mfp, ctx, lambda));
-                SampledSpectrum r = Globals.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
-                Globals.SubsurfaceFromDiffuse(table, r, mfree, &sig_a, &sig_s);
+                pbrt.DCHECK(reflectance != null && mfp != null);
+                SampledSpectrum mfree = pbrt.ClampZero(scale * texEval.Apply(mfp, ctx, lambda));
+                SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+                pbrt.SubsurfaceFromDiffuse(table, r, mfree, &sig_a, &sig_s);
             }
             return new TabulatedBSSRDF(ctx.p, ctx.ns, ctx.wo, eta, sig_a, sig_s, table);
         }
@@ -1130,10 +1130,10 @@ namespace pbrt
             {
                 // 1. By name
                 Spectrum sig_a = null, sig_s = null;
-                if (!Globals.GetMediumScatteringProperties(name, ref sig_a, ref sig_s, alloc))
-                    Globals.ErrorExit(loc, Globals.StringPrintf("%s: named medium not found.", name));
+                if (!pbrt.GetMediumScatteringProperties(name, ref sig_a, ref sig_s, alloc))
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: named medium not found.", name));
                 if (g != 0)
-                    Globals.Warning(loc, "Non-zero \"g\" ignored with named scattering coefficients.");
+                    pbrt.Warning(loc, "Non-zero \"g\" ignored with named scattering coefficients.");
                 g = 0; /* Enforce g=0 (the database specifies reduced scattering
                           coefficients) */
                 sigma_a = new SpectrumConstantTexture(sig_a);
@@ -1145,9 +1145,9 @@ namespace pbrt
                 sigma_a = parameters.GetSpectrumTextureOrNull("sigma_a", SpectrumType.Unbounded, alloc);
                 sigma_s = parameters.GetSpectrumTextureOrNull("sigma_s", SpectrumType.Unbounded, alloc);
                 if (sigma_a != null && sigma_s == null)
-                    Globals.ErrorExit(loc, "Provided \"sigma_a\" parameter without \"sigma_s\".");
+                    pbrt.ErrorExit(loc, "Provided \"sigma_a\" parameter without \"sigma_s\".");
                 if (sigma_s != null && sigma_a == null)
-                    Globals.ErrorExit(loc, "Provided \"sigma_s\" parameter without \"sigma_a\".");
+                    pbrt.ErrorExit(loc, "Provided \"sigma_s\" parameter without \"sigma_a\".");
 
                 if (sigma_a == null && sigma_s == null)
                 {
@@ -1187,10 +1187,10 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f " +
+            return pbrt.StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f " +
                                         "sigma_a: %s sigma_s: %s reflectance: %s mfp: %s uRoughness: %s " +
                                         "vRoughness: %s scale: %f eta: %f remapRoughness: %s ]",
-                                        displacement, Globals.NormalMapString(normalMap), scale, sigma_a, sigma_s, reflectance,
+                                        displacement, pbrt.NormalMapString(normalMap), scale, sigma_a, sigma_s, reflectance,
                                         mfp, uRoughness, vRoughness, scale, eta, remapRoughness);
         }
 
@@ -1226,8 +1226,8 @@ namespace pbrt
                                                                  ref SampledWavelengths lambda)
             where TextureEvaluator : ITextureEvaluator
         {
-            SampledSpectrum r = Globals.Clamp(scale * texEval.Apply(reflectance, ctx, lambda), 0, 1);
-            SampledSpectrum t = Globals.Clamp(scale * texEval.Apply(transmittance, ctx, lambda), 0, 1);
+            SampledSpectrum r = pbrt.Clamp(scale * texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            SampledSpectrum t = pbrt.Clamp(scale * texEval.Apply(transmittance, ctx, lambda), 0, 1);
             return new DiffuseTransmissionBxDF(r, t);
         }
 
@@ -1267,7 +1267,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ DiffuseTransmissionMaterial displacement: %s reflectance: %s " +
+            return pbrt.StringPrintf("[ DiffuseTransmissionMaterial displacement: %s reflectance: %s " +
                                         "transmittance: %s scale: %f ]", displacement, reflectance, transmittance, scale);
         }
 
@@ -1311,10 +1311,10 @@ namespace pbrt
 
         public static MeasuredMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
-            string filename = Globals.ResolveFilename(parameters.GetOneString("filename", ""));
+            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
             if (filename.Length == 0)
             {
-                Globals.Error("Filename must be provided for MeasuredMaterial");
+                pbrt.Error("Filename must be provided for MeasuredMaterial");
                 return null;
             }
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
@@ -1330,8 +1330,8 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ MeasuredMaterial displacement: %s normalMap: %s ]", displacement,
-                                        Globals.NormalMapString(normalMap));
+            return pbrt.StringPrintf("[ MeasuredMaterial displacement: %s normalMap: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap));
         }
 
         // MeasuredMaterial Private Members
@@ -1349,7 +1349,7 @@ namespace pbrt
             Material material = null;
             if (name.Length == 0 || name == "none")
             {
-                Globals.Warning(loc, Globals.StringPrintf("Material \"%s\" is deprecated; use \"interface\" instead.", name));
+                pbrt.Warning(loc, pbrt.StringPrintf("Material \"%s\" is deprecated; use \"interface\" instead.", name));
                 return null;
             }
             else if (name == "interface")
@@ -1378,30 +1378,30 @@ namespace pbrt
             {
                 List<string> materialNames = parameters.GetStringArray("materials");
                 if (materialNames.Count != 2)
-                    Globals.ErrorExit("Must provide two values for \"string materials\" for mix material.");
+                    pbrt.ErrorExit("Must provide two values for \"string materials\" for mix material.");
 
                 Material[] materials = new Material[2];
                 for (int i = 0; i < 2; ++i)
                 {
                     if (!namedMaterials.TryGetValue(materialNames[i], out Material m))
-                        Globals.ErrorExit(Globals.StringPrintf("%s: named material not found.", materialNames[i]));
+                        pbrt.ErrorExit(pbrt.StringPrintf("%s: named material not found.", materialNames[i]));
                     materials[i] = m;
 
                     if (materials[i] == null)
-                        Globals.ErrorExit(Globals.StringPrintf("%s: an \"interface\" material cannot be used as an element of " +
+                        pbrt.ErrorExit(pbrt.StringPrintf("%s: an \"interface\" material cannot be used as an element of " +
                                                                "the \"mix\" material.", materialNames[i]));
                 }
 
                 material = MixMaterial.Create(materials, parameters, loc, alloc);
             }
             else
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: material type unknown.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: material type unknown.", name));
 
             if (material == null)
-                Globals.ErrorExit(loc, Globals.StringPrintf("%s: unable to create material.", name));
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create material.", name));
 
             parameters.ReportUnused();
-            ++Globals.nMaterialsCreated;
+            ++pbrt.nMaterialsCreated;
             return material;
         }
     }

@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 namespace pbrt
 {
 
-    public static partial class Globals
+    public static partial class pbrt
     {
         // Parallel Declarations
         private static int g_nThreads = 0;  // 0: ParallelInit not called

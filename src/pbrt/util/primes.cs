@@ -4,7 +4,7 @@
 
 namespace pbrt
 {
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Prime Table Declarations
         public const int PrimeTableSize = 1000;

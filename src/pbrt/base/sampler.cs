@@ -18,7 +18,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ CameraSample pFilm: %s pLens: %s time: %f, filterWeight: %f ]",
+            return pbrt.StringPrintf("[ CameraSample pFilm: %s pLens: %s time: %f, filterWeight: %f ]",
                                         pFilm, pLens, time, filterWeight);
         }
     }

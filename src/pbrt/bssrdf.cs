@@ -74,14 +74,14 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ BSSRDFTable rhoSamples: %s radiusSamples: %s profile: %s " +
+            return pbrt.StringPrintf("[ BSSRDFTable rhoSamples: %s radiusSamples: %s profile: %s " +
                                         "rhoEff: %s profileCDF: %s ]", rhoSamples, radiusSamples, profile, rhoEff, profileCDF);
         }
 
         public Float EvalProfile(int rhoIndex, int radiusIndex)
         {
-            Globals.CHECK(rhoIndex >= 0 && rhoIndex < (int)rhoSamples.size());
-            Globals.CHECK(radiusIndex >= 0 && radiusIndex < (int)radiusSamples.size());
+            pbrt.CHECK(rhoIndex >= 0 && rhoIndex < (int)rhoSamples.size());
+            pbrt.CHECK(radiusIndex >= 0 && radiusIndex < (int)radiusSamples.size());
             return profile[rhoIndex * (int)radiusSamples.size() + radiusIndex];
         }
     }
@@ -104,25 +104,25 @@ namespace pbrt
         {
             this.po = po; this.wo = wo; this.eta = eta; this.ns = ns; this.table = table;
             sigma_t = sigma_a + sigma_s;
-            rho = Globals.SafeDiv(sigma_s, sigma_t);
+            rho = pbrt.SafeDiv(sigma_s, sigma_t);
         }
 
-        public SampledSpectrum Sp(Point3f pi) { return Sr(Globals.Distance(po, pi)); }
+        public SampledSpectrum Sp(Point3f pi) { return Sr(pbrt.Distance(po, pi)); }
 
         public SampledSpectrum Sr(Float r)
         {
             SampledSpectrum Sr = new SampledSpectrum(0f);
             Float[] rhoWeights = new Float[4];
             Float[] radiusWeights = new Float[4];
-            for (int i = 0; i < Globals.NSpectrumSamples; ++i)
+            for (int i = 0; i < pbrt.NSpectrumSamples; ++i)
             {
                 // Convert $r$ into unitless optical radius $r_{\roman{optical}}$
                 Float rOptical = r * sigma_t[i];
 
                 // Compute spline weights to interpolate BSSRDF at _i_th wavelength
                 int rhoOffset, radiusOffset;
-                if (!Globals.CatmullRomWeights(Globals.pstdspan(table.rhoSamples), rho[i], &rhoOffset, new pstd.span<Float>(rhoWeights)) ||
-                    !Globals.CatmullRomWeights(Globals.pstdspan(table.radiusSamples), rOptical, &radiusOffset,
+                if (!pbrt.CatmullRomWeights(pbrt.pstdspan(table.rhoSamples), rho[i], &rhoOffset, new pstd.span<Float>(rhoWeights)) ||
+                    !pbrt.CatmullRomWeights(pbrt.pstdspan(table.radiusSamples), rOptical, &radiusOffset,
                                                new pstd.span<Float>(radiusWeights)))
                     continue;
 
@@ -139,20 +139,20 @@ namespace pbrt
 
                 // Cancel marginal PDF factor from tabulated BSSRDF profile
                 if (rOptical != 0)
-                    sr /= 2 * Globals.Pi * rOptical;
+                    sr /= 2 * pbrt.Pi * rOptical;
                 Sr[i] = sr;
             }
             // Transform BSSRDF value into rendering space units
-            Sr *= Globals.Sqr(sigma_t);
-            return Globals.ClampZero(Sr);
+            Sr *= pbrt.Sqr(sigma_t);
+            return pbrt.ClampZero(Sr);
         }
 
         public pstd.optional<Float> SampleSr(Float u)
         {
             if (sigma_t[0] == 0)
                 return default;
-            return Globals.SampleCatmullRom2D(Globals.pstdspan(table.rhoSamples), Globals.pstdspan(table.radiusSamples),
-                                              Globals.pstdspan(table.profile), Globals.pstdspan(table.profileCDF), rho[0], u) /
+            return pbrt.SampleCatmullRom2D(pbrt.pstdspan(table.rhoSamples), pbrt.pstdspan(table.radiusSamples),
+                                              pbrt.pstdspan(table.profile), pbrt.pstdspan(table.profileCDF), rho[0], u) /
                    sigma_t[0];
         }
 
@@ -161,15 +161,15 @@ namespace pbrt
             SampledSpectrum pdf = new SampledSpectrum(0f);
             Float[] rhoWeights = new Float[4];
             Float[] radiusWeights = new Float[4];
-            for (int i = 0; i < Globals.NSpectrumSamples; ++i)
+            for (int i = 0; i < pbrt.NSpectrumSamples; ++i)
             {
                 // Convert $r$ into unitless optical radius $r_{\roman{optical}}$
                 Float rOptical = r * sigma_t[i];
 
                 // Compute spline weights to interpolate BSSRDF at _i_th wavelength
                 int rhoOffset, radiusOffset;
-                if (!Globals.CatmullRomWeights(Globals.pstdspan(table.rhoSamples), rho[i], &rhoOffset, new pstd.span<Float>(rhoWeights)) ||
-                    !Globals.CatmullRomWeights(Globals.pstdspan(table.radiusSamples), rOptical, &radiusOffset,
+                if (!pbrt.CatmullRomWeights(pbrt.pstdspan(table.rhoSamples), rho[i], &rhoOffset, new pstd.span<Float>(rhoWeights)) ||
+                    !pbrt.CatmullRomWeights(pbrt.pstdspan(table.radiusSamples), rOptical, &radiusOffset,
                                                new pstd.span<Float>(radiusWeights)))
                     continue;
 
@@ -192,10 +192,10 @@ namespace pbrt
 
                 // Cancel marginal PDF factor from tabulated BSSRDF profile
                 if (rOptical != 0)
-                    sr /= 2 * Globals.Pi * rOptical;
-                pdf[i] = sr * Globals.Sqr(sigma_t[i]) / rhoEff;
+                    sr /= 2 * pbrt.Pi * rOptical;
+                pdf[i] = sr * pbrt.Sqr(sigma_t[i]) / rhoEff;
             }
-            return Globals.ClampZero(pdf);
+            return pbrt.ClampZero(pdf);
         }
 
         public override pstd.optional<BSSRDFProbeSegment> SampleSp(Float u1, Point2f u2)
@@ -213,13 +213,13 @@ namespace pbrt
             pstd.optional<Float> r = SampleSr(u2[0]);
             if (!r)
                 return default;
-            Float phi = 2 * Globals.Pi * u2[1];
+            Float phi = 2 * pbrt.Pi * u2[1];
 
             // Compute BSSRDF profile bounds and intersection height
             pstd.optional<Float> r_max = SampleSr(0.999f);
             if (!r_max || r.value() >= r_max.value())
                 return default;
-            Float l = 2 * std.sqrt(Globals.Sqr(r_max.value()) - Globals.Sqr(r.value()));
+            Float l = 2 * std.sqrt(pbrt.Sqr(r_max.value()) - pbrt.Sqr(r.value()));
 
             // Return BSSRDF sampling ray segment
             Point3f pStart = po + r.value() * (f.x * std.cos(phi) + f.y * std.sin(phi)) - l * f.z / 2;
@@ -238,9 +238,9 @@ namespace pbrt
 
             // Compute BSSRDF profile radius under projection along each axis
             Float* rProj = stackalloc Float[3];
-            rProj[0] = std.sqrt(Globals.Sqr(dLocal.y) + Globals.Sqr(dLocal.z));
-            rProj[1] = std.sqrt(Globals.Sqr(dLocal.z) + Globals.Sqr(dLocal.x));
-            rProj[2] = std.sqrt(Globals.Sqr(dLocal.x) + Globals.Sqr(dLocal.y));
+            rProj[0] = std.sqrt(pbrt.Sqr(dLocal.y) + pbrt.Sqr(dLocal.z));
+            rProj[1] = std.sqrt(pbrt.Sqr(dLocal.z) + pbrt.Sqr(dLocal.x));
+            rProj[2] = std.sqrt(pbrt.Sqr(dLocal.x) + pbrt.Sqr(dLocal.y));
 
             // Return combined probability from all BSSRDF sampling strategies
             SampledSpectrum pdf = new SampledSpectrum(0f);
@@ -262,7 +262,7 @@ namespace pbrt
 
         public override string ToString()
         {
-            return Globals.StringPrintf("[ TabulatedBSSRDF po: %s eta: %f ns: %s sigma_t: %s rho: %s table: %s ]", po, eta, ns,
+            return pbrt.StringPrintf("[ TabulatedBSSRDF po: %s eta: %f ns: %s sigma_t: %s rho: %s table: %s ]", po, eta, ns,
                                         sigma_t, rho, table);
         }
 
@@ -275,7 +275,7 @@ namespace pbrt
         private BSSRDFTable table;
     }
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         internal static pstd.span<Float> pstdspan(pstd.vector<Float> v) { return new pstd.span<Float>(v.data(), 0, (int)v.size()); }
 

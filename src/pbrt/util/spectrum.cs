@@ -16,7 +16,7 @@ using System.Runtime.CompilerServices;
 namespace pbrt
 {
 
-    public static unsafe partial class Globals
+    public static unsafe partial class pbrt
     {
         // Spectrum Constants
         public const Float Lambda_min = 360, Lambda_max = 830;
