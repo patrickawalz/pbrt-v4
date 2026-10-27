@@ -13,30 +13,29 @@ using System.Runtime.CompilerServices;
 
 public static unsafe class pstd
 {
-    private const MethodImplOptions AI = MethodImplOptions.AggressiveInlining;
 
-    [MethodImpl(AI)] public static void swap<T>(ref T a, ref T b) { T t = a; a = b; b = t; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static void swap<T>(ref T a, ref T b) { T t = a; a = b; b = t; }
 
     // bit_cast
-    [MethodImpl(AI)] public static uint bit_cast_uint(float f) { return BitConverter.SingleToUInt32Bits(f); }
-    [MethodImpl(AI)] public static float bit_cast_float(uint u) { return BitConverter.UInt32BitsToSingle(u); }
-    [MethodImpl(AI)] public static ulong bit_cast_ulong(double f) { return BitConverter.DoubleToUInt64Bits(f); }
-    [MethodImpl(AI)] public static double bit_cast_double(ulong u) { return BitConverter.UInt64BitsToDouble(u); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static uint bit_cast_uint(float f) { return BitConverter.SingleToUInt32Bits(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float bit_cast_float(uint u) { return BitConverter.UInt32BitsToSingle(u); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static ulong bit_cast_ulong(double f) { return BitConverter.DoubleToUInt64Bits(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double bit_cast_double(ulong u) { return BitConverter.UInt64BitsToDouble(u); }
 
-    [MethodImpl(AI)] public static float sqrt(float f) { return MathF.Sqrt(f); }
-    [MethodImpl(AI)] public static double sqrt(double f) { return Math.Sqrt(f); }
-    [MethodImpl(AI)] public static float abs(float f) { return MathF.Abs(f); }
-    [MethodImpl(AI)] public static double abs(double f) { return Math.Abs(f); }
-    [MethodImpl(AI)] public static float copysign(float mag, float sign) { return MathF.CopySign(mag, sign); }
-    [MethodImpl(AI)] public static double copysign(double mag, double sign) { return Math.CopySign(mag, sign); }
-    [MethodImpl(AI)] public static float floor(float arg) { return MathF.Floor(arg); }
-    [MethodImpl(AI)] public static double floor(double arg) { return Math.Floor(arg); }
-    [MethodImpl(AI)] public static float ceil(float arg) { return MathF.Ceiling(arg); }
-    [MethodImpl(AI)] public static double ceil(double arg) { return Math.Ceiling(arg); }
-    [MethodImpl(AI)] public static float round(float arg) { return MathF.Round(arg, MidpointRounding.AwayFromZero); }
-    [MethodImpl(AI)] public static double round(double arg) { return Math.Round(arg, MidpointRounding.AwayFromZero); }
-    [MethodImpl(AI)] public static float fmod(float x, float y) { return x % y; }
-    [MethodImpl(AI)] public static double fmod(double x, double y) { return x % y; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float sqrt(float f) { return MathF.Sqrt(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double sqrt(double f) { return Math.Sqrt(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float abs(float f) { return MathF.Abs(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double abs(double f) { return Math.Abs(f); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float copysign(float mag, float sign) { return MathF.CopySign(mag, sign); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double copysign(double mag, double sign) { return Math.CopySign(mag, sign); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float floor(float arg) { return MathF.Floor(arg); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double floor(double arg) { return Math.Floor(arg); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float ceil(float arg) { return MathF.Ceiling(arg); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double ceil(double arg) { return Math.Ceiling(arg); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float round(float arg) { return MathF.Round(arg, MidpointRounding.AwayFromZero); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double round(double arg) { return Math.Round(arg, MidpointRounding.AwayFromZero); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float fmod(float x, float y) { return x % y; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double fmod(double x, double y) { return x % y; }
 
     // pstd::optional
     public unsafe struct optional<T>
@@ -51,7 +50,7 @@ public static unsafe class pstd
 
         public T value_or(T alt) { return set ? v : alt; }
 
-        [MethodImpl(AI)]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T value()
         {
             if (!set) global::pbrt.pbrt.CHECK(set);
@@ -100,15 +99,15 @@ public static unsafe class pstd
 
         public ref T this[int i]
         {
-            [MethodImpl(AI)] get { return ref arr[offset + i]; }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + i]; }
         }
         public ref T this[long i]
         {
-            [MethodImpl(AI)] get { return ref arr[offset + (int)i]; }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + (int)i]; }
         }
         public ref T this[ulong i]
         {
-            [MethodImpl(AI)] get { return ref arr[offset + (int)i]; }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + (int)i]; }
         }
 
         public ref T front() { return ref arr[offset]; }
@@ -168,9 +167,9 @@ public static unsafe class pstd
         public bool empty() { return count == 0; }
         public ulong capacity() { return (ulong)data_.Length; }
 
-        public ref T this[int i] { [MethodImpl(AI)] get { return ref data_[i]; } }
-        public ref T this[long i] { [MethodImpl(AI)] get { return ref data_[(int)i]; } }
-        public ref T this[ulong i] { [MethodImpl(AI)] get { return ref data_[(int)i]; } }
+        public ref T this[int i] { [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref data_[i]; } }
+        public ref T this[long i] { [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref data_[(int)i]; } }
+        public ref T this[ulong i] { [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref data_[(int)i]; } }
 
         public void reserve(ulong n)
         {
@@ -308,10 +307,10 @@ public static unsafe class pstd
         public Float re, im;
     }
 
-    [MethodImpl(AI)] public static Float real(complex z) { return z.re; }
-    [MethodImpl(AI)] public static Float imag(complex z) { return z.im; }
-    [MethodImpl(AI)] public static Float norm(complex z) { return z.re * z.re + z.im * z.im; }
-    [MethodImpl(AI)] public static Float abs(complex z) { return sqrt(norm(z)); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Float real(complex z) { return z.re; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Float imag(complex z) { return z.im; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Float norm(complex z) { return z.re * z.re + z.im * z.im; }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Float abs(complex z) { return sqrt(norm(z)); }
 
     public static complex sqrt(complex z)
     {
