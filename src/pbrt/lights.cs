@@ -904,14 +904,6 @@ namespace pbrt
     // DiffuseAreaLight Definition
     public sealed unsafe class DiffuseAreaLight : LightBase
     {
-        static LightType AreaOrDelta(FloatTexture alpha)
-        {
-            FloatConstantTexture fc = alpha as FloatConstantTexture;
-            if (fc != null && fc.Evaluate(new TextureEvalContext()) == 0)
-                return LightType.DeltaPosition;
-            return LightType.Area;
-        }
-
         public override void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
         {
             pbrt.CHECK_NE(intr.n, new Normal3f(0, 0, 0));
@@ -941,7 +933,23 @@ namespace pbrt
         public DiffuseAreaLight(Transform renderFromLight, MediumInterface mediumInterface, Spectrum Le, Float scale,
                                 Shape shape, FloatTexture alpha, Image im, RGBColorSpace imageColorSpace,
                                 bool twoSided)
-            : base(AreaOrDelta(alpha), renderFromLight, mediumInterface)
+            : base(((Func<FloatTexture, LightType>)((FloatTexture alpha_) =>
+            {
+                // Special case handling for area lights with constant zero-valued alpha
+                // textures to allow invisible area lights: we will null out the alpha
+                // texture below so that as far as the DiffuseAreaLight is concerned, there
+                // is no alpha texture and the light is fully emissive. However, such lights
+                // will never be intersected by rays (because their associated primitives
+                // still have the alpha texture), so we mark them as DeltaPosition lights
+                // here so that MIS isn't used for direct illumination. Thus, light sampling
+                // is the only strategy used and we get an unbiased (if potentially high
+                // variance) estimate.
+
+                FloatConstantTexture fc = alpha_ as FloatConstantTexture;
+                if (fc != null && fc.Evaluate(new TextureEvalContext()) == 0)
+                    return LightType.DeltaPosition;
+                return LightType.Area;
+            }))(alpha), renderFromLight, mediumInterface)
         {
             this.shape = shape;
             this.alpha = type == LightType.Area ? alpha : null;

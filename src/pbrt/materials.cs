@@ -80,19 +80,6 @@ namespace pbrt
             nMaterialsCreated = 0;
         });
 
-        internal static string NormalMapString(Image normalMap) { return normalMap != null ? normalMap.ToString() : "(nullptr)"; }
-
-        internal static Spectrum GetEtaSpectrum(TextureParameterDictionary parameters, string name, Allocator alloc)
-        {
-            Spectrum eta;
-            if (parameters.GetFloatArray(name).Count != 0)
-                eta = new ConstantSpectrum(parameters.GetFloatArray(name)[0]);
-            else
-                eta = parameters.GetOneSpectrum(name, null, SpectrumType.Unbounded, alloc);
-            if (eta == null)
-                eta = new ConstantSpectrum(1.5f);
-            return eta;
-        }
     }
 
 
@@ -222,7 +209,7 @@ namespace pbrt
         {
             return pbrt.StringPrintf("[ DielectricMaterial displacement: %s normalMap: %s uRoughness: %s " +
                                         "vRoughness: %s eta: %s remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), uRoughness, vRoughness, eta, remapRoughness);
+                                        displacement, (normalMap != null ? normalMap.ToString() : "(nullptr)"), uRoughness, vRoughness, eta, remapRoughness);
         }
 
         public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
@@ -233,7 +220,13 @@ namespace pbrt
 
         public static DielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
-            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta;
+            if (parameters.GetFloatArray("eta").Count != 0)
+                eta = new ConstantSpectrum(parameters.GetFloatArray("eta")[0]);
+            else
+                eta = parameters.GetOneSpectrum("eta", null, SpectrumType.Unbounded, alloc);
+            if (eta == null)
+                eta = new ConstantSpectrum(1.5f);
 
             FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
             FloatTexture vRoughness = parameters.GetFloatTextureOrNull("vroughness", alloc);
@@ -338,12 +331,18 @@ namespace pbrt
         public override string ToString()
         {
             return pbrt.StringPrintf("[ ThinDielectricMaterial displacement: %s normalMap: %s eta: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap), eta);
+                                        (normalMap != null ? normalMap.ToString() : "(nullptr)"), eta);
         }
 
         public static ThinDielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
-            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta;
+            if (parameters.GetFloatArray("eta").Count != 0)
+                eta = new ConstantSpectrum(parameters.GetFloatArray("eta")[0]);
+            else
+                eta = parameters.GetOneSpectrum("eta", null, SpectrumType.Unbounded, alloc);
+            if (eta == null)
+                eta = new ConstantSpectrum(1.5f);
 
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
 
@@ -593,7 +592,7 @@ namespace pbrt
         public override string ToString()
         {
             return pbrt.StringPrintf("[ DiffuseMaterial displacement: %s normapMap: %s reflectance: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap), reflectance);
+                                        (normalMap != null ? normalMap.ToString() : "(nullptr)"), reflectance);
         }
 
         public static DiffuseMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
@@ -700,7 +699,7 @@ namespace pbrt
             return pbrt.StringPrintf("[ ConductorMaterial displacement: %s normalMap: %s eta: %s " +
                                         "k: %s reflectance: %s uRoughness: %s vRoughness: %s " +
                                         "remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), eta, k, reflectance, uRoughness,
+                                        displacement, (normalMap != null ? normalMap.ToString() : "(nullptr)"), eta, k, reflectance, uRoughness,
                                         vRoughness, remapRoughness);
         }
 
@@ -817,7 +816,7 @@ namespace pbrt
         {
             return pbrt.StringPrintf("[ CoatedDiffuseMaterial displacement: %s normalMap: %s reflectance: %s " +
                                         "uRoughness: %s vRoughness: %s thickness: %s eta: %s remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), reflectance, uRoughness, vRoughness,
+                                        displacement, (normalMap != null ? normalMap.ToString() : "(nullptr)"), reflectance, uRoughness, vRoughness,
                                         thickness, eta, remapRoughness);
         }
 
@@ -836,7 +835,13 @@ namespace pbrt
 
             FloatTexture thickness = parameters.GetFloatTexture("thickness", .01f, alloc);
 
-            Spectrum eta = pbrt.GetEtaSpectrum(parameters, "eta", alloc);
+            Spectrum eta;
+            if (parameters.GetFloatArray("eta").Count != 0)
+                eta = new ConstantSpectrum(parameters.GetFloatArray("eta")[0]);
+            else
+                eta = parameters.GetOneSpectrum("eta", null, SpectrumType.Unbounded, alloc);
+            if (eta == null)
+                eta = new ConstantSpectrum(1.5f);
 
             int maxDepth = parameters.GetOneInt("maxdepth", 10);
             int nSamples = parameters.GetOneInt("nsamples", 1);
@@ -968,7 +973,7 @@ namespace pbrt
                                         "interfaceEta: %s g: %s albedo: %s conductorURoughness: %s " +
                                         "conductorVRoughness: %s conductorEta: %s k: %s " +
                                         "conductorReflectance: %s remapRoughness: %s maxDepth: %d nSamples: %d ]",
-                                        displacement, pbrt.NormalMapString(normalMap), interfaceURoughness,
+                                        displacement, (normalMap != null ? normalMap.ToString() : "(nullptr)"), interfaceURoughness,
                                         interfaceVRoughness, thickness, interfaceEta, g, albedo, conductorURoughness,
                                         conductorVRoughness, conductorEta, k, reflectance, remapRoughness, maxDepth, nSamples);
         }
@@ -986,7 +991,13 @@ namespace pbrt
 
             FloatTexture thickness = parameters.GetFloatTexture("thickness", .01f, alloc);
 
-            Spectrum interfaceEta = pbrt.GetEtaSpectrum(parameters, "interface.eta", alloc);
+            Spectrum interfaceEta;
+            if (parameters.GetFloatArray("interface.eta").Count != 0)
+                interfaceEta = new ConstantSpectrum(parameters.GetFloatArray("interface.eta")[0]);
+            else
+                interfaceEta = parameters.GetOneSpectrum("interface.eta", null, SpectrumType.Unbounded, alloc);
+            if (interfaceEta == null)
+                interfaceEta = new ConstantSpectrum(1.5f);
 
             // conductor
             FloatTexture conductorURoughness = parameters.GetFloatTextureOrNull("conductor.uroughness", alloc);
@@ -1123,7 +1134,7 @@ namespace pbrt
             return pbrt.StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f " +
                                         "sigma_a: %s sigma_s: %s reflectance: %s mfp: %s uRoughness: %s " +
                                         "vRoughness: %s scale: %f eta: %f remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), scale, sigma_a, sigma_s, reflectance,
+                                        displacement, (normalMap != null ? normalMap.ToString() : "(nullptr)"), scale, sigma_a, sigma_s, reflectance,
                                         mfp, uRoughness, vRoughness, scale, eta, remapRoughness);
         }
 
@@ -1319,7 +1330,7 @@ namespace pbrt
         public override string ToString()
         {
             return pbrt.StringPrintf("[ MeasuredMaterial displacement: %s normalMap: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap));
+                                        (normalMap != null ? normalMap.ToString() : "(nullptr)"));
         }
 
         public static MeasuredMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)

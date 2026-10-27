@@ -269,4 +269,82 @@ public static partial class std
         public const double quiet_NaN = double.NaN;
     }
 
+
+        public static int partition<T>(T[] arr, int first, int last, Func<T, bool> pred)
+        {
+            while (true)
+            {
+                while (true)
+                {
+                    if (first == last) return first;
+                    else if (pred(arr[first])) ++first;
+                    else break;
+                }
+                --last;
+                while (true)
+                {
+                    if (first == last) return first;
+                    else if (!pred(arr[last])) --last;
+                    else break;
+                }
+                swap(ref arr[first], ref arr[last]);
+                ++first;
+            }
+        }
+
+        // std::nth_element, following libstdc++'s introselect on an array range [first, last).
+        // (If the depth limit is exhausted, the range is fully sorted instead of heap-selected.)
+        public static void nth_element<T>(T[] a, int first, int nth, int last, Func<T, T, bool> comp)
+        {
+            if (first == last || nth == last)
+                return;
+            int depthLimit = (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)(last - first))) * 2;
+            while (last - first > 3)
+            {
+                if (depthLimit == 0)
+                {
+                    Array.Sort(a, first, last - first, System.Collections.Generic.Comparer<T>.Create((x, y) => comp(x, y) ? -1 : (comp(y, x) ? 1 : 0)));
+                    return;
+                }
+                --depthLimit;
+                // __unguarded_partition_pivot
+                int mid = first + (last - first) / 2;
+                // __move_median_to_first(first, first + 1, mid, last - 1)
+                int A = first + 1, B = mid, C = last - 1;
+                if (comp(a[A], a[B]))
+                {
+                    if (comp(a[B], a[C])) swap(ref a[first], ref a[B]);
+                    else if (comp(a[A], a[C])) swap(ref a[first], ref a[C]);
+                    else swap(ref a[first], ref a[A]);
+                }
+                else if (comp(a[A], a[C])) swap(ref a[first], ref a[A]);
+                else if (comp(a[B], a[C])) swap(ref a[first], ref a[C]);
+                else swap(ref a[first], ref a[B]);
+                // __unguarded_partition(first + 1, last, first)
+                int lo = first + 1, hi = last;
+                int cut;
+                while (true)
+                {
+                    while (comp(a[lo], a[first])) ++lo;
+                    --hi;
+                    while (comp(a[first], a[hi])) --hi;
+                    if (!(lo < hi)) { cut = lo; break; }
+                    swap(ref a[lo], ref a[hi]);
+                    ++lo;
+                }
+                if (cut <= nth) first = cut; else last = cut;
+            }
+            // __insertion_sort
+            for (int i = first + 1; i < last; ++i)
+            {
+                T val = a[i];
+                int j = i;
+                while (j > first && comp(val, a[j - 1]))
+                {
+                    a[j] = a[j - 1];
+                    --j;
+                }
+                a[j] = val;
+            }
+        }
 }

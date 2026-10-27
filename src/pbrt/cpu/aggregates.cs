@@ -207,118 +207,6 @@ namespace pbrt
             }
         }
 
-        // std::partition (bidirectional iterator algorithm, as in libstdc++)
-        static int partition(BVHPrimitive[] arr, int first, int last, Func<BVHPrimitive, bool> pred)
-        {
-            while (true)
-            {
-                while (true)
-                {
-                    if (first == last) return first;
-                    else if (pred(arr[first])) ++first;
-                    else break;
-                }
-                --last;
-                while (true)
-                {
-                    if (first == last) return first;
-                    else if (!pred(arr[last])) --last;
-                    else break;
-                }
-                BVHPrimitive tmp = arr[first];
-                arr[first] = arr[last];
-                arr[last] = tmp;
-                ++first;
-            }
-        }
-
-        static int partition(BVHBuildNode[] arr, int first, int last, Func<BVHBuildNode, bool> pred)
-        {
-            while (true)
-            {
-                while (true)
-                {
-                    if (first == last) return first;
-                    else if (pred(arr[first])) ++first;
-                    else break;
-                }
-                --last;
-                while (true)
-                {
-                    if (first == last) return first;
-                    else if (!pred(arr[last])) --last;
-                    else break;
-                }
-                BVHBuildNode tmp = arr[first];
-                arr[first] = arr[last];
-                arr[last] = tmp;
-                ++first;
-            }
-        }
-
-        // std::nth_element, following libstdc++'s introselect on an array range [first, last).
-        // (If the depth limit is exhausted, the range is fully sorted instead of heap-selected.)
-        static void nth_element(BVHPrimitive[] a, int first, int nth, int last, Func<BVHPrimitive, BVHPrimitive, bool> comp)
-        {
-            if (first == last || nth == last)
-                return;
-            int depthLimit = (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)(last - first))) * 2;
-            while (last - first > 3)
-            {
-                if (depthLimit == 0)
-                {
-                    Array.Sort(a, first, last - first, Comparer<BVHPrimitive>.Create((x, y) => comp(x, y) ? -1 : (comp(y, x) ? 1 : 0)));
-                    return;
-                }
-                --depthLimit;
-                // __unguarded_partition_pivot
-                int mid = first + (last - first) / 2;
-                // __move_median_to_first(first, first + 1, mid, last - 1)
-                int A = first + 1, B = mid, C = last - 1;
-                if (comp(a[A], a[B]))
-                {
-                    if (comp(a[B], a[C])) swapAt(a, first, B);
-                    else if (comp(a[A], a[C])) swapAt(a, first, C);
-                    else swapAt(a, first, A);
-                }
-                else if (comp(a[A], a[C])) swapAt(a, first, A);
-                else if (comp(a[B], a[C])) swapAt(a, first, C);
-                else swapAt(a, first, B);
-                // __unguarded_partition(first + 1, last, first)
-                int lo = first + 1, hi = last;
-                int cut;
-                while (true)
-                {
-                    while (comp(a[lo], a[first])) ++lo;
-                    --hi;
-                    while (comp(a[first], a[hi])) --hi;
-                    if (!(lo < hi)) { cut = lo; break; }
-                    swapAt(a, lo, hi);
-                    ++lo;
-                }
-                if (cut <= nth) first = cut; else last = cut;
-            }
-            // __insertion_sort
-            for (int i = first + 1; i < last; ++i)
-            {
-                BVHPrimitive val = a[i];
-                int j = i;
-                while (j > first && comp(val, a[j - 1]))
-                {
-                    a[j] = a[j - 1];
-                    --j;
-                }
-                a[j] = val;
-            }
-        }
-
-        static void swapAt(BVHPrimitive[] a, int i, int j)
-        {
-            BVHPrimitive t = a[i];
-            a[i] = a[j];
-            a[j] = t;
-        }
-
         // BVHAggregate Method Definitions
         public BVHAggregate(List<Primitive> prims, int maxPrimsInNode = 1,
                             SplitMethod splitMethod = SplitMethod.SAH)
@@ -426,7 +314,7 @@ namespace pbrt
                             {
                                 // Partition primitives through node's midpoint
                                 Float pmid = (centroidBounds.pMin[dim] + centroidBounds.pMax[dim]) / 2;
-                                int midIter = partition(arr, begin, end, (BVHPrimitive pi) => pi.Centroid()[dim] < pmid);
+                                int midIter = std.partition(arr, begin, end, (BVHPrimitive pi) => pi.Centroid()[dim] < pmid);
                                 mid = midIter - begin;
                                 // For lots of prims with large overlapping bounding boxes, this
                                 // may fail to partition; in that case do not break and fall through
@@ -439,7 +327,7 @@ namespace pbrt
                             {
                                 // Partition primitives into equally sized subsets
                                 mid = (int)bvhPrimitives.size() / 2;
-                                nth_element(arr, begin, begin + mid, end,
+                                std.nth_element(arr, begin, begin + mid, end,
                                             (BVHPrimitive a, BVHPrimitive b) => a.Centroid()[dim] < b.Centroid()[dim]);
 
                                 break;
@@ -452,7 +340,7 @@ namespace pbrt
                                 {
                                     // Partition primitives into equally sized subsets
                                     mid = (int)bvhPrimitives.size() / 2;
-                                    nth_element(arr, begin, begin + mid, end,
+                                    std.nth_element(arr, begin, begin + mid, end,
                                                 (BVHPrimitive a, BVHPrimitive b) => a.Centroid()[dim] < b.Centroid()[dim]);
                                 }
                                 else
@@ -521,7 +409,7 @@ namespace pbrt
                                     {
                                         int splitBucket = minCostSplitBucket;
                                         Bounds3f cb = centroidBounds;
-                                        int midIter = partition(arr, begin, end, (BVHPrimitive bp) =>
+                                        int midIter = std.partition(arr, begin, end, (BVHPrimitive bp) =>
                                         {
                                             int b = (int)(nBuckets * cb.Offset(bp.Centroid())[dim]);
                                             if (b == nBuckets)
@@ -953,7 +841,7 @@ namespace pbrt
 
             // Split nodes and create interior HLBVH SAH node
             Bounds3f cb = centroidBounds;
-            int mid = partition(treeletRoots, start, end, (BVHBuildNode n) =>
+            int mid = std.partition(treeletRoots, start, end, (BVHBuildNode n) =>
             {
                 Float centroid = (n.bounds.pMin[dim] + n.bounds.pMax[dim]) * 0.5f;
                 int b = (int)(nBuckets * ((centroid - cb.pMin[dim]) /
