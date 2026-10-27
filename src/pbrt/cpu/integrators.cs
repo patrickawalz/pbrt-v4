@@ -1299,6 +1299,56 @@ namespace pbrt
     // VertexType Definition
     public enum VertexType { Camera, Light, Surface, Medium }
 
+    // Types that are copied by value in C++ but are classes here (so "*target = value" copies the contents).
+    public interface IAssignable<T>
+    {
+        T Clone();
+        void Assign(T other);
+    }
+
+    // ScopedAssignment Definition
+    // (a ref struct holding a reference in place of the C++ Type *target; "Type *target = nullptr" is the
+    // default value and the C++ destructor is Dispose(), which is called explicitly in reverse order of
+    // construction.)
+    public ref struct ScopedAssignment<Type>
+    {
+        private static readonly bool assignable = typeof(IAssignable<Type>).IsAssignableFrom(typeof(Type));
+
+        // ScopedAssignment Public Methods
+        public ScopedAssignment(ref Type target, Type value)
+        {
+            this.target = ref target;
+            backup = default;
+            if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(ref this.target))
+            {
+                backup = Get();
+                Set(value);
+            }
+        }
+        public void Dispose()
+        {
+            if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(ref target))
+                Set(backup);
+        }
+
+        private Type Get()
+        {
+            if (assignable)
+                return ((IAssignable<Type>)target).Clone();
+            return target;
+        }
+        private void Set(Type v)
+        {
+            if (assignable)
+                ((IAssignable<Type>)target).Assign(v);
+            else
+                target = v;
+        }
+
+        private ref Type target;
+        private Type backup;
+    }
+
     // EndpointInteraction Definition
     public sealed unsafe class EndpointInteraction : Interaction
     {
@@ -1352,7 +1402,7 @@ namespace pbrt
     }
 
     // BDPT Vertex Definition
-    public sealed unsafe class Vertex
+    public sealed unsafe class Vertex : IAssignable<Vertex>
     {
         // Vertex Public Members
         public VertexType type;
@@ -1948,99 +1998,83 @@ namespace pbrt
                    ptMinus = t > 1 ? cameraVertices[t - 2] : null;
 
             // Update sampled vertex for $s=1$ or $t=1$ strategy
-            Vertex a1Target = null, a1Backup = null;
-            if (s == 1)
-                a1Target = qs;
-            else if (t == 1)
-                a1Target = pt;
-            if (a1Target != null)
-            {
-                a1Backup = a1Target.Clone();
-                a1Target.Assign(sampled);
-            }
-
+            ScopedAssignment<Vertex> a1 = default;
             // Mark connection vertices as non-degenerate
-            bool a2Backup = false, a3Backup = false;
-            if (pt != null)
-            {
-                a2Backup = pt.delta;
-                pt.delta = false;
-            }
-            if (qs != null)
-            {
-                a3Backup = qs.delta;
-                qs.delta = false;
-            }
-
+            ScopedAssignment<bool> a2 = default, a3 = default;
             // Update reverse density of vertex $\pt{}_{t-1}$
-            Float a4Backup = 0;
-            if (pt != null)
-            {
-                a4Backup = pt.pdfRev;
-                pt.pdfRev = s > 0 ? qs.PDF(integrator, qsMinus, pt)
-                                  : pt.PDFLightOrigin(integrator.infiniteLights, ptMinus, lightSampler);
-            }
-
+            ScopedAssignment<Float> a4 = default;
             // Update reverse density of vertex $\pt{}_{t-2}$
-            Float a5Backup = 0;
-            if (ptMinus != null)
-            {
-                a5Backup = ptMinus.pdfRev;
-                ptMinus.pdfRev = s > 0 ? pt.PDF(integrator, qs, ptMinus) : pt.PDFLight(integrator, ptMinus);
-            }
-
+            ScopedAssignment<Float> a5 = default;
             // Update reverse density of vertices $\pq{}_{s-1}$ and $\pq{}_{s-2}$
-            Float a6Backup = 0;
-            if (qs != null)
+            ScopedAssignment<Float> a6 = default;
+            ScopedAssignment<Float> a7 = default;
+            try
             {
-                a6Backup = qs.pdfRev;
-                qs.pdfRev = pt.PDF(integrator, ptMinus, qs);
-            }
-            Float a7Backup = 0;
-            if (qsMinus != null)
-            {
-                a7Backup = qsMinus.pdfRev;
-                qsMinus.pdfRev = qs.PDF(integrator, pt, qsMinus);
-            }
+                if (s == 1)
+                    a1 = new ScopedAssignment<Vertex>(ref lightVertices[s - 1], sampled);
+                else if (t == 1)
+                    a1 = new ScopedAssignment<Vertex>(ref cameraVertices[t - 1], sampled);
 
-            Film film = camera.GetFilm();
-            Float splatScale = (Float)film.FullResolution().x * (Float)film.FullResolution().y /
-                               (Float)film.PixelBounds().Area();
+                if (pt != null)
+                    a2 = new ScopedAssignment<bool>(ref pt.delta, false);
+                if (qs != null)
+                    a3 = new ScopedAssignment<bool>(ref qs.delta, false);
 
-            // Consider hypothetical connection strategies along the camera subpath
-            Float ri = 1;
-            for (int i = t - 1; i > 0; --i)
-            {
-                ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
+                if (pt != null)
+                    a4 = new ScopedAssignment<Float>(ref pt.pdfRev,
+                        s > 0 ? qs.PDF(integrator, qsMinus, pt)
+                              : pt.PDFLightOrigin(integrator.infiniteLights, ptMinus, lightSampler));
+
+                if (ptMinus != null)
+                    a5 = new ScopedAssignment<Float>(ref ptMinus.pdfRev,
+                        s > 0 ? pt.PDF(integrator, qs, ptMinus) : pt.PDFLight(integrator, ptMinus));
+
+                if (qs != null)
+                    a6 = new ScopedAssignment<Float>(ref qs.pdfRev, pt.PDF(integrator, ptMinus, qs));
+                if (qsMinus != null)
+                    a7 = new ScopedAssignment<Float>(ref qsMinus.pdfRev, qs.PDF(integrator, pt, qsMinus));
+
+                Film film = camera.GetFilm();
+                Float splatScale = (Float)film.FullResolution().x * (Float)film.FullResolution().y /
+                                   (Float)film.PixelBounds().Area();
+
+                // Consider hypothetical connection strategies along the camera subpath
+                Float ri = 1;
+                for (int i = t - 1; i > 0; --i)
+                {
+                    ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
+                    // See https://github.com/mmp/pbrt-v4/issues/347
+                    if (i == 1) ri /= splatScale;
+                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
+                        sumRi += ri;
+                }
+
+                // Consider hypothetical connection strategies along the light subpath
+                ri = 1;
+                for (int i = s - 1; i >= 0; --i)
+                {
+                    ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
+                    bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
+                    if (!lightVertices[i].delta && !deltaLightvertex)
+                        sumRi += ri;
+                }
+
                 // See https://github.com/mmp/pbrt-v4/issues/347
-                if (i == 1) ri /= splatScale;
-                if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
-                    sumRi += ri;
-            }
+                if (t == 1) sumRi /= splatScale;
+                return 1 / (1 + sumRi);
 
-            // Consider hypothetical connection strategies along the light subpath
-            ri = 1;
-            for (int i = s - 1; i >= 0; --i)
+            }
+            finally
             {
-                ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
-                bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
-                if (!lightVertices[i].delta && !deltaLightvertex)
-                    sumRi += ri;
+                // ~ScopedAssignment() in reverse order of construction
+                a7.Dispose();
+                a6.Dispose();
+                a5.Dispose();
+                a4.Dispose();
+                a3.Dispose();
+                a2.Dispose();
+                a1.Dispose();
             }
-
-            // See https://github.com/mmp/pbrt-v4/issues/347
-            if (t == 1) sumRi /= splatScale;
-            Float result = 1 / (1 + sumRi);
-
-            // Restore (reverse order of construction)
-            if (qsMinus != null) qsMinus.pdfRev = a7Backup;
-            if (qs != null) qs.pdfRev = a6Backup;
-            if (ptMinus != null) ptMinus.pdfRev = a5Backup;
-            if (pt != null) pt.pdfRev = a4Backup;
-            if (qs != null) qs.delta = a3Backup;
-            if (pt != null) pt.delta = a2Backup;
-            if (a1Target != null) a1Target.Assign(a1Backup);
-            return result;
         }
 
         public static Float InfiniteLightDensity(List<Light> infiniteLights, LightSampler lightSampler, Vector3f w)

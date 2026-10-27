@@ -59,18 +59,32 @@ public static partial class std
 
     public sealed class condition_variable
     {
-        public void notify_all() { Monitor.PulseAll(m.sync); }
+        public void notify_all()
+        {
+            lock (sync)
+            {
+                ++generation;
+                Monitor.PulseAll(sync);
+            }
+        }
         public void wait(unique_lock lk)
         {
-            m = lk.m;
-            Monitor.Wait(lk.m.sync);
+            Monitor.Enter(sync);
+            long myGeneration = generation;
+            // (the cv's monitor is held before releasing the mutex so notifications are not lost)
+            lk.unlock();
+            while (generation == myGeneration)
+                Monitor.Wait(sync);
+            Monitor.Exit(sync);
+            lk.@lock();
         }
         public void wait(unique_lock lk, Func<bool> pred)
         {
             while (!pred())
                 wait(lk);
         }
-        private mutex m;
+        private readonly object sync = new object();
+        private long generation = 0;
     }
 
     public sealed class lock_guard
