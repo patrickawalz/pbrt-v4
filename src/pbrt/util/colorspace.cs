@@ -21,70 +21,6 @@ namespace pbrt
     // RGBColorSpace Definition
     public sealed class RGBColorSpace
     {
-        // RGBColorSpace Public Methods
-        public RGBColorSpace(Point2f r, Point2f g, Point2f b, Spectrum illuminant,
-                             RGBToSpectrumTable rgbToSpec, Allocator alloc)
-        {
-            this.r = r;
-            this.g = g;
-            this.b = b;
-            this.illuminant = new DenselySampledSpectrum(illuminant, alloc);
-            this.rgbToSpectrumTable = rgbToSpec;
-            // Compute whitepoint primaries and XYZ coordinates
-            XYZ W = SpectrumToXYZ(illuminant);
-            w = W.xy();
-            XYZ R = XYZ.FromxyY(r), G = XYZ.FromxyY(g), B = XYZ.FromxyY(b);
-
-            // Initialize XYZ color space conversion matrices
-            SquareMatrix3 rgb = new SquareMatrix3(R.X, G.X, B.X, R.Y, G.Y, B.Y, R.Z, G.Z, B.Z);
-            XYZ C = InvertOrExit(rgb) * W;
-            XYZFromRGB = rgb * SquareMatrix3.Diag(C[0], C[1], C[2]);
-            RGBFromXYZ = InvertOrExit(XYZFromRGB);
-        }
-
-        public RGBSigmoidPolynomial ToRGBCoeffs(RGB rgb)
-        {
-            DCHECK(rgb.r >= 0 && rgb.g >= 0 && rgb.b >= 0);
-            return rgbToSpectrumTable.Apply(ClampZero(rgb));
-        }
-
-        public static void Init(Allocator alloc)
-        {
-            // Rec. ITU-R BT.709.3
-            sRGB = new RGBColorSpace(new Point2f(.64f, .33f), new Point2f(.3f, .6f), new Point2f(.15f, .06f),
-                                     GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.sRGB, alloc);
-            // P3-D65 (display)
-            DCI_P3 = new RGBColorSpace(new Point2f(.68f, .32f), new Point2f(.265f, .690f), new Point2f(.15f, .06f),
-                                       GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.DCI_P3, alloc);
-            // ITU-R Rec BT.2020
-            Rec2020 = new RGBColorSpace(new Point2f(.708f, .292f), new Point2f(.170f, .797f), new Point2f(.131f, .046f),
-                                        GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.Rec2020, alloc);
-            ACES2065_1 = new RGBColorSpace(new Point2f(.7347f, .2653f), new Point2f(0f, 1f), new Point2f(.0001f, -.077f),
-                                           GetNamedSpectrum("illum-acesD60"), RGBToSpectrumTable.ACES2065_1, alloc);
-        }
-
-        // RGBColorSpace Public Members
-        public Point2f r, g, b, w;
-        public DenselySampledSpectrum illuminant;
-        public SquareMatrix3 XYZFromRGB, RGBFromXYZ;
-        public static RGBColorSpace sRGB, DCI_P3, Rec2020, ACES2065_1;
-
-        public static bool operator ==(RGBColorSpace a, RGBColorSpace cs)
-        {
-            if (ReferenceEquals(a, cs)) return true;
-            if (a is null || cs is null) return false;
-            return (a.r == cs.r && a.g == cs.g && a.b == cs.b && a.w == cs.w &&
-                    a.rgbToSpectrumTable == cs.rgbToSpectrumTable);
-        }
-        public static bool operator !=(RGBColorSpace a, RGBColorSpace cs) { return !(a == cs); }
-        public override bool Equals(object o) { return o is RGBColorSpace cs && this == cs; }
-        public override int GetHashCode() { return HashCode.Combine(r, g, b, w); }
-
-        public override string ToString()
-        {
-            return $"[ RGBColorSpace r: {r} g: {g} b: {b} w: {w} illuminant: {illuminant} " +
-                   $"RGBToXYZ: {XYZFromRGB} XYZToRGB: {RGBFromXYZ} ]";
-        }
 
         public RGB LuminanceVector()
         {
@@ -112,6 +48,49 @@ namespace pbrt
                     result[i] += XYZFromRGB[i][j] * rgb[j];
             }
             return result;
+        }
+
+        // RGBColorSpace Public Members
+        public Point2f r, g, b, w;
+        public DenselySampledSpectrum illuminant;
+        public SquareMatrix3 XYZFromRGB, RGBFromXYZ;
+        public static RGBColorSpace sRGB, DCI_P3, Rec2020, ACES2065_1;
+
+        public static bool operator ==(RGBColorSpace a, RGBColorSpace cs)
+        {
+            if (ReferenceEquals(a, cs)) return true;
+            if (a is null || cs is null) return false;
+            return (a.r == cs.r && a.g == cs.g && a.b == cs.b && a.w == cs.w &&
+                    a.rgbToSpectrumTable == cs.rgbToSpectrumTable);
+        }
+        public static bool operator !=(RGBColorSpace a, RGBColorSpace cs) { return !(a == cs); }
+        public override bool Equals(object o) { return o is RGBColorSpace cs && this == cs; }
+        public override int GetHashCode() { return HashCode.Combine(r, g, b, w); }
+        // RGBColorSpace Public Methods
+        public RGBColorSpace(Point2f r, Point2f g, Point2f b, Spectrum illuminant,
+                             RGBToSpectrumTable rgbToSpec, Allocator alloc)
+        {
+            this.r = r;
+            this.g = g;
+            this.b = b;
+            this.illuminant = new DenselySampledSpectrum(illuminant, alloc);
+            this.rgbToSpectrumTable = rgbToSpec;
+            // Compute whitepoint primaries and XYZ coordinates
+            XYZ W = SpectrumToXYZ(illuminant);
+            w = W.xy();
+            XYZ R = XYZ.FromxyY(r), G = XYZ.FromxyY(g), B = XYZ.FromxyY(b);
+
+            // Initialize XYZ color space conversion matrices
+            SquareMatrix3 rgb = new SquareMatrix3(R.X, G.X, B.X, R.Y, G.Y, B.Y, R.Z, G.Z, B.Z);
+            XYZ C = InvertOrExit(rgb) * W;
+            XYZFromRGB = rgb * SquareMatrix3.Diag(C[0], C[1], C[2]);
+            RGBFromXYZ = InvertOrExit(XYZFromRGB);
+        }
+
+        public RGBSigmoidPolynomial ToRGBCoeffs(RGB rgb)
+        {
+            DCHECK(rgb.r >= 0 && rgb.g >= 0 && rgb.b >= 0);
+            return rgbToSpectrumTable.Apply(ClampZero(rgb));
         }
 
         public static RGBColorSpace GetNamed(string n)
@@ -145,6 +124,27 @@ namespace pbrt
                     return cs;
             }
             return null;
+        }
+
+        public static void Init(Allocator alloc)
+        {
+            // Rec. ITU-R BT.709.3
+            sRGB = new RGBColorSpace(new Point2f(.64f, .33f), new Point2f(.3f, .6f), new Point2f(.15f, .06f),
+                                     GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.sRGB, alloc);
+            // P3-D65 (display)
+            DCI_P3 = new RGBColorSpace(new Point2f(.68f, .32f), new Point2f(.265f, .690f), new Point2f(.15f, .06f),
+                                       GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.DCI_P3, alloc);
+            // ITU-R Rec BT.2020
+            Rec2020 = new RGBColorSpace(new Point2f(.708f, .292f), new Point2f(.170f, .797f), new Point2f(.131f, .046f),
+                                        GetNamedSpectrum("stdillum-D65"), RGBToSpectrumTable.Rec2020, alloc);
+            ACES2065_1 = new RGBColorSpace(new Point2f(.7347f, .2653f), new Point2f(0f, 1f), new Point2f(.0001f, -.077f),
+                                           GetNamedSpectrum("illum-acesD60"), RGBToSpectrumTable.ACES2065_1, alloc);
+        }
+
+        public override string ToString()
+        {
+            return $"[ RGBColorSpace r: {r} g: {g} b: {b} w: {w} illuminant: {illuminant} " +
+                   $"RGBToXYZ: {XYZFromRGB} XYZToRGB: {RGBFromXYZ} ]";
         }
 
         // RGBColorSpace Private Members

@@ -185,6 +185,13 @@ namespace pbrt
         public pstd.vector<Float> rhoEff;
         public pstd.vector<Float> profileCDF;
 
+        public Float EvalProfile(int rhoIndex, int radiusIndex)
+        {
+            pbrt.CHECK(rhoIndex >= 0 && rhoIndex < (int)rhoSamples.size());
+            pbrt.CHECK(radiusIndex >= 0 && radiusIndex < (int)radiusSamples.size());
+            return profile[rhoIndex * (int)radiusSamples.size() + radiusIndex];
+        }
+
         // BSSRDFTable Public Methods
         public BSSRDFTable(int nRhoSamples, int nRadiusSamples, Allocator alloc)
         {
@@ -199,13 +206,6 @@ namespace pbrt
         {
             return pbrt.StringPrintf("[ BSSRDFTable rhoSamples: %s radiusSamples: %s profile: %s " +
                                         "rhoEff: %s profileCDF: %s ]", rhoSamples, radiusSamples, profile, rhoEff, profileCDF);
-        }
-
-        public Float EvalProfile(int rhoIndex, int radiusIndex)
-        {
-            pbrt.CHECK(rhoIndex >= 0 && rhoIndex < (int)rhoSamples.size());
-            pbrt.CHECK(radiusIndex >= 0 && radiusIndex < (int)radiusSamples.size());
-            return profile[rhoIndex * (int)radiusSamples.size() + radiusIndex];
         }
     }
 

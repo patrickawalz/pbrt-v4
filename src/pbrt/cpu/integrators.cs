@@ -17,43 +17,10 @@ namespace pbrt
     // Integrator Definition
     public abstract unsafe class Integrator
     {
-        // Integrator Public Methods
-        public static Integrator Create(string name, ParameterDictionary parameters, Camera camera,
-                                        Sampler sampler, Primitive aggregate, List<Light> lights,
-                                        RGBColorSpace colorSpace, FileLoc loc)
+
+        public bool Unoccluded(Interaction p0, Interaction p1)
         {
-            Integrator integrator = null;
-            if (name == "path")
-                integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "simplepath")
-                integrator = SimplePathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "lightpath")
-                integrator = LightPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "simplevolpath")
-                integrator = SimpleVolPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "volpath")
-                integrator = VolPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "ambientocclusion")
-                integrator = AOIntegrator.Create(parameters, colorSpace.illuminant, camera, sampler, aggregate,
-                                                 lights, loc);
-            else if (name == "randomwalk")
-                integrator = RandomWalkIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "bdpt")
-                integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
-            else if (name == "mlt")
-                integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
-            else if (name == "function")
-                integrator = FunctionIntegrator.Create(parameters, camera, sampler, loc);
-            else if (name == "sppm")
-                integrator = SPPMIntegrator.Create(parameters, colorSpace, camera, sampler, aggregate, lights, loc);
-            else
-                ErrorExit(loc, StringPrintf("%s: integrator type unknown.", name));
-
-            if (integrator == null)
-                ErrorExit(loc, StringPrintf("%s: unable to create integrator.", name));
-
-            parameters.ReportUnused();
-            return integrator;
+            return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
         }
 
         public abstract void Render();
@@ -89,11 +56,6 @@ namespace pbrt
                 return aggregate.IntersectP(ray, tMax);
             else
                 return false;
-        }
-
-        public bool Unoccluded(Interaction p0, Interaction p1)
-        {
-            return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
         }
 
         public SampledSpectrum Tr(Interaction p0, Interaction p1, SampledWavelengths lambda)
@@ -148,6 +110,44 @@ namespace pbrt
                 ray = si.value().intr.SpawnRayTo(p1);
             }
             return Tr / inv_w.Average();
+        }
+        // Integrator Public Methods
+        public static Integrator Create(string name, ParameterDictionary parameters, Camera camera,
+                                        Sampler sampler, Primitive aggregate, List<Light> lights,
+                                        RGBColorSpace colorSpace, FileLoc loc)
+        {
+            Integrator integrator = null;
+            if (name == "path")
+                integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "simplepath")
+                integrator = SimplePathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "lightpath")
+                integrator = LightPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "simplevolpath")
+                integrator = SimpleVolPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "volpath")
+                integrator = VolPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "ambientocclusion")
+                integrator = AOIntegrator.Create(parameters, colorSpace.illuminant, camera, sampler, aggregate,
+                                                 lights, loc);
+            else if (name == "randomwalk")
+                integrator = RandomWalkIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "bdpt")
+                integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "mlt")
+                integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
+            else if (name == "function")
+                integrator = FunctionIntegrator.Create(parameters, camera, sampler, loc);
+            else if (name == "sppm")
+                integrator = SPPMIntegrator.Create(parameters, colorSpace, camera, sampler, aggregate, lights, loc);
+            else
+                ErrorExit(loc, StringPrintf("%s: integrator type unknown.", name));
+
+            if (integrator == null)
+                ErrorExit(loc, StringPrintf("%s: unable to create integrator.", name));
+
+            parameters.ReportUnused();
+            return integrator;
         }
 
         public abstract override string ToString();
@@ -444,19 +444,6 @@ namespace pbrt
             this.maxDepth = maxDepth;
         }
 
-        // RandomWalkIntegrator Method Definitions
-        public static RandomWalkIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler,
-                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
-        {
-            int maxDepth = parameters.GetOneInt("maxdepth", 5);
-            return new RandomWalkIntegrator(maxDepth, camera, sampler, aggregate, lights);
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ RandomWalkIntegrator maxDepth: %d ]", maxDepth);
-        }
-
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler,
                                            ScratchBuffer scratchBuffer, VisibleSurface visibleSurface)
         {
@@ -505,6 +492,19 @@ namespace pbrt
             ray = isect.SpawnRay(wp);
             return Le + fcos * LiRandomWalk(ray, ref lambda, sampler, scratchBuffer, depth + 1) /
                             (1 / (4 * Pi));
+        }
+
+        // RandomWalkIntegrator Method Definitions
+        public static RandomWalkIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler,
+                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
+        {
+            int maxDepth = parameters.GetOneInt("maxdepth", 5);
+            return new RandomWalkIntegrator(maxDepth, camera, sampler, aggregate, lights);
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ RandomWalkIntegrator maxDepth: %d ]", maxDepth);
         }
 
         // RandomWalkIntegrator Private Members
@@ -1472,17 +1472,17 @@ namespace pbrt
             return v;
         }
 
-        public static Vertex CreateMedium(MediumInteraction mi, SampledSpectrum beta, Float pdf, Vertex prev)
-        {
-            Vertex v = new Vertex(mi, beta);
-            v.pdfFwd = prev.ConvertDensity(pdf, v);
-            return v;
-        }
-
         public static Vertex CreateSurface(SurfaceInteraction si, BSDF bsdf, SampledSpectrum beta, Float pdf,
                                            Vertex prev)
         {
             Vertex v = new Vertex(si, bsdf, beta);
+            v.pdfFwd = prev.ConvertDensity(pdf, v);
+            return v;
+        }
+
+        public static Vertex CreateMedium(MediumInteraction mi, SampledSpectrum beta, Float pdf, Vertex prev)
+        {
+            Vertex v = new Vertex(mi, beta);
             v.pdfFwd = prev.ConvertDensity(pdf, v);
             return v;
         }

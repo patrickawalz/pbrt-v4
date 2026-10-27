@@ -51,6 +51,27 @@ namespace pbrt
     // PowerLightSampler Definition
     public sealed unsafe class PowerLightSampler : LightSampler
     {
+
+        public override pstd.optional<SampledLight> Sample(Float u)
+        {
+            if (aliasTable.size() == 0)
+                return default;
+            Float pmf;
+            int lightIndex = aliasTable.Sample(u, &pmf);
+            return new SampledLight { light = lights[(ulong)lightIndex], p = pmf };
+        }
+
+        public override pstd.optional<SampledLight> Sample(LightSampleContext ctx, Float u)
+        {
+            return Sample(u);
+        }
+
+        public override Float PMF(Light light)
+        {
+            if (aliasTable.size() == 0)
+                return 0;
+            return aliasTable.PMF((int)lightToIndex[light]);
+        }
         // PowerLightSampler Method Definitions
         public PowerLightSampler(pstd.span<Light> lights, Allocator alloc)
         {
@@ -84,27 +105,6 @@ namespace pbrt
             aliasTable = new AliasTable(new pstd.span<Float>(lightPower), alloc);
         }
 
-        public override pstd.optional<SampledLight> Sample(Float u)
-        {
-            if (aliasTable.size() == 0)
-                return default;
-            Float pmf;
-            int lightIndex = aliasTable.Sample(u, &pmf);
-            return new SampledLight { light = lights[(ulong)lightIndex], p = pmf };
-        }
-
-        public override Float PMF(Light light)
-        {
-            if (aliasTable.size() == 0)
-                return 0;
-            return aliasTable.PMF((int)lightToIndex[light]);
-        }
-
-        public override pstd.optional<SampledLight> Sample(LightSampleContext ctx, Float u)
-        {
-            return Sample(u);
-        }
-
         public override Float PMF(LightSampleContext ctx, Light light) { return PMF(light); }
 
         public override string ToString()
@@ -135,24 +135,6 @@ namespace pbrt
                 qb[0 * 3 + c] = (ushort)pstd.floor(QuantizeBounds(lb.bounds[0][c], allb.pMin[c], allb.pMax[c]));
                 qb[1 * 3 + c] = (ushort)pstd.ceil(QuantizeBounds(lb.bounds[1][c], allb.pMin[c], allb.pMax[c]));
             }
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf(
-                "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
-                "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
-                (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w, (Vector3f)w, phi,
-                qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
-        }
-
-        public string ToString(Bounds3f allBounds)
-        {
-            return pbrt.StringPrintf(
-                "[ CompactLightBounds b: %s qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
-                "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
-                Bounds(allBounds), (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w,
-                (Vector3f)w, phi, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
         }
 
         public bool TwoSided() { return twoSided != 0; }
@@ -247,6 +229,24 @@ namespace pbrt
             return 65535.0f * pbrt.Clamp((c - min) / (max - min), 0, 1);
         }
 
+        public override string ToString()
+        {
+            return pbrt.StringPrintf(
+                "[ CompactLightBounds qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
+                "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
+                (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w, (Vector3f)w, phi,
+                qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
+        }
+
+        public string ToString(Bounds3f allBounds)
+        {
+            return pbrt.StringPrintf(
+                "[ CompactLightBounds b: %s qb: [ [ %u %u %u ] [ %u %u %u ] ] w: %s (%s) phi: %f " +
+                "qCosTheta_o: %u (%f) qCosTheta_e: %u (%f) twoSided: %u ]",
+                Bounds(allBounds), (uint)qb[0], (uint)qb[1], (uint)qb[2], (uint)qb[3], (uint)qb[4], (uint)qb[5], w,
+                (Vector3f)w, phi, qCosTheta_o, CosTheta_o(), qCosTheta_e, CosTheta_e(), twoSided);
+        }
+
         // CompactLightBounds Private Members
         OctahedralVector w;
         Float phi;
@@ -312,39 +312,6 @@ namespace pbrt
             nLightsSampledSum = nLightsSampledCount = nLightsSampledMin = nLightsSampledMax = 0;
         });
 
-        // BVHLightSampler Method Definitions
-        public BVHLightSampler(pstd.span<Light> lights, Allocator alloc)
-        {
-            this.lights = new pstd.vector<Light>();
-            for (ulong i = 0; i < lights.size(); ++i)
-                this.lights.push_back(lights[i]);
-            infiniteLights = new pstd.vector<Light>();
-            nodes = new pstd.vector<LightBVHNode>();
-            lightToBitTrail = new HashMap<Light, uint32_t>(alloc);
-            allLightBounds = new Bounds3f();
-
-            // Initialize _infiniteLights_ array and light BVH
-            List<(int, LightBounds)> bvhLights = new List<(int, LightBounds)>();
-            for (size_t i = 0; i < lights.size(); ++i)
-            {
-                // Store $i$th light in either _infiniteLights_ or _bvhLights_
-                Light light = lights[i];
-                pstd.optional<LightBounds> lightBounds = light.Bounds();
-                if (!lightBounds)
-                    infiniteLights.push_back(light);
-                else if (lightBounds.value().phi > 0)
-                {
-                    bvhLights.Add(((int)i, lightBounds.value()));
-                    allLightBounds = pbrt.Union(allLightBounds, lightBounds.value().bounds);
-                }
-            }
-            if (bvhLights.Count != 0)
-                buildBVH(bvhLights, 0, bvhLights.Count, 0, 0);
-            lightBVHBytes += (long)(nodes.size() * (ulong)sizeof(LightBVHNode) +
-                                    lightToBitTrail.capacity() * sizeof(uint32_t) +
-                                    this.lights.size() * 8UL + infiniteLights.size() * 8UL);
-        }
-
         public override pstd.optional<SampledLight> Sample(LightSampleContext ctx, Float u)
         {
             // Compute infinite light sampling probability _pInfinite_
@@ -405,6 +372,14 @@ namespace pbrt
             }
         }
 
+        public override pstd.optional<SampledLight> Sample(Float u)
+        {
+            if (lights.empty())
+                return default;
+            int lightIndex = std.min((int)(u * lights.size()), (int)lights.size() - 1);
+            return new SampledLight { light = lights[(ulong)lightIndex], p = 1.0f / lights.size() };
+        }
+
         public override Float PMF(LightSampleContext ctx, Light light)
         {
             // Handle infinite _light_ PMF computation
@@ -445,12 +420,20 @@ namespace pbrt
             }
         }
 
-        public override pstd.optional<SampledLight> Sample(Float u)
+        Float EvaluateCost(LightBounds b, Bounds3f bounds, int dim)
         {
-            if (lights.empty())
-                return default;
-            int lightIndex = std.min((int)(u * lights.size()), (int)lights.size() - 1);
-            return new SampledLight { light = lights[(ulong)lightIndex], p = 1.0f / lights.size() };
+            // Evaluate direction bounds measure for _LightBounds_
+            Float theta_o = std.acos(b.cosTheta_o), theta_e = std.acos(b.cosTheta_e);
+            Float theta_w = std.min(theta_o + theta_e, Pi);
+            Float sinTheta_o = pbrt.SafeSqrt(1 - pbrt.Sqr(b.cosTheta_o));
+            Float M_omega = 2 * Pi * (1 - b.cosTheta_o) +
+                            Pi / 2 *
+                                (2 * theta_w * sinTheta_o - std.cos(theta_o - 2 * theta_w) -
+                                 2 * theta_o * sinTheta_o + b.cosTheta_o);
+
+            // Return complete cost estimate for _LightBounds_
+            Float Kr = pbrt.MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
+            return b.phi * M_omega * Kr * b.bounds.SurfaceArea();
         }
 
         public override Float PMF(Light light)
@@ -460,9 +443,37 @@ namespace pbrt
             return 1.0f / lights.size();
         }
 
-        public override string ToString()
+        // BVHLightSampler Method Definitions
+        public BVHLightSampler(pstd.span<Light> lights, Allocator alloc)
         {
-            return pbrt.StringPrintf("[ BVHLightSampler nodes: %s ]", nodes);
+            this.lights = new pstd.vector<Light>();
+            for (ulong i = 0; i < lights.size(); ++i)
+                this.lights.push_back(lights[i]);
+            infiniteLights = new pstd.vector<Light>();
+            nodes = new pstd.vector<LightBVHNode>();
+            lightToBitTrail = new HashMap<Light, uint32_t>(alloc);
+            allLightBounds = new Bounds3f();
+
+            // Initialize _infiniteLights_ array and light BVH
+            List<(int, LightBounds)> bvhLights = new List<(int, LightBounds)>();
+            for (size_t i = 0; i < lights.size(); ++i)
+            {
+                // Store $i$th light in either _infiniteLights_ or _bvhLights_
+                Light light = lights[i];
+                pstd.optional<LightBounds> lightBounds = light.Bounds();
+                if (!lightBounds)
+                    infiniteLights.push_back(light);
+                else if (lightBounds.value().phi > 0)
+                {
+                    bvhLights.Add(((int)i, lightBounds.value()));
+                    allLightBounds = pbrt.Union(allLightBounds, lightBounds.value().bounds);
+                }
+            }
+            if (bvhLights.Count != 0)
+                buildBVH(bvhLights, 0, bvhLights.Count, 0, 0);
+            lightBVHBytes += (long)(nodes.size() * (ulong)sizeof(LightBVHNode) +
+                                    lightToBitTrail.capacity() * sizeof(uint32_t) +
+                                    this.lights.size() * 8UL + infiniteLights.size() * 8UL);
         }
 
         // BVHLightSampler Private Methods
@@ -600,20 +611,9 @@ namespace pbrt
             return (nodeIndex2, lb2);
         }
 
-        Float EvaluateCost(LightBounds b, Bounds3f bounds, int dim)
+        public override string ToString()
         {
-            // Evaluate direction bounds measure for _LightBounds_
-            Float theta_o = std.acos(b.cosTheta_o), theta_e = std.acos(b.cosTheta_e);
-            Float theta_w = std.min(theta_o + theta_e, Pi);
-            Float sinTheta_o = pbrt.SafeSqrt(1 - pbrt.Sqr(b.cosTheta_o));
-            Float M_omega = 2 * Pi * (1 - b.cosTheta_o) +
-                            Pi / 2 *
-                                (2 * theta_w * sinTheta_o - std.cos(theta_o - 2 * theta_w) -
-                                 2 * theta_o * sinTheta_o + b.cosTheta_o);
-
-            // Return complete cost estimate for _LightBounds_
-            Float Kr = pbrt.MaxComponentValue(bounds.Diagonal()) / bounds.Diagonal()[dim];
-            return b.phi * M_omega * Kr * b.bounds.SurfaceArea();
+            return pbrt.StringPrintf("[ BVHLightSampler nodes: %s ]", nodes);
         }
 
         // BVHLightSampler Private Members
@@ -627,31 +627,6 @@ namespace pbrt
     // ExhaustiveLightSampler Definition
     public sealed unsafe class ExhaustiveLightSampler : LightSampler
     {
-        // ExhaustiveLightSampler Method Definitions
-        public ExhaustiveLightSampler(pstd.span<Light> lights, Allocator alloc)
-        {
-            this.lights = new pstd.vector<Light>();
-            for (ulong i = 0; i < lights.size(); ++i)
-                this.lights.push_back(lights[i]);
-            boundedLights = new pstd.vector<Light>();
-            infiniteLights = new pstd.vector<Light>();
-            lightBounds = new pstd.vector<LightBounds>();
-            lightToBoundedIndex = new HashMap<Light, size_t>(alloc);
-
-            for (ulong i = 0; i < lights.size(); ++i)
-            {
-                Light light = lights[i];
-                pstd.optional<LightBounds> lb = light.Bounds();
-                if (lb)
-                {
-                    lightToBoundedIndex.Insert(light, boundedLights.size());
-                    lightBounds.push_back(lb.value());
-                    boundedLights.push_back(light);
-                }
-                else
-                    infiniteLights.push_back(light);
-            }
-        }
 
         public override pstd.optional<SampledLight> Sample(LightSampleContext ctx, Float u)
         {
@@ -684,6 +659,15 @@ namespace pbrt
             }
         }
 
+        public override pstd.optional<SampledLight> Sample(Float u)
+        {
+            if (lights.empty())
+                return default;
+
+            int lightIndex = std.min((int)(u * lights.size()), (int)lights.size() - 1);
+            return new SampledLight { light = lights[(ulong)lightIndex], p = 1.0f / lights.size() };
+        }
+
         public override Float PMF(LightSampleContext ctx, Light light)
         {
             if (!lightToBoundedIndex.HasKey(light))
@@ -703,14 +687,30 @@ namespace pbrt
             Float pdf = lightImportance / importanceSum * (1.0f - pInfinite);
             return pdf;
         }
-
-        public override pstd.optional<SampledLight> Sample(Float u)
+        // ExhaustiveLightSampler Method Definitions
+        public ExhaustiveLightSampler(pstd.span<Light> lights, Allocator alloc)
         {
-            if (lights.empty())
-                return default;
+            this.lights = new pstd.vector<Light>();
+            for (ulong i = 0; i < lights.size(); ++i)
+                this.lights.push_back(lights[i]);
+            boundedLights = new pstd.vector<Light>();
+            infiniteLights = new pstd.vector<Light>();
+            lightBounds = new pstd.vector<LightBounds>();
+            lightToBoundedIndex = new HashMap<Light, size_t>(alloc);
 
-            int lightIndex = std.min((int)(u * lights.size()), (int)lights.size() - 1);
-            return new SampledLight { light = lights[(ulong)lightIndex], p = 1.0f / lights.size() };
+            for (ulong i = 0; i < lights.size(); ++i)
+            {
+                Light light = lights[i];
+                pstd.optional<LightBounds> lb = light.Bounds();
+                if (lb)
+                {
+                    lightToBoundedIndex.Insert(light, boundedLights.size());
+                    lightBounds.push_back(lb.value());
+                    boundedLights.push_back(light);
+                }
+                else
+                    infiniteLights.push_back(light);
+            }
         }
 
         public override Float PMF(Light light)

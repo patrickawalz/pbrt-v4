@@ -52,16 +52,16 @@ namespace pbrt
 
         public static string Name() { return "DiffuseBxDF"; }
 
-        public override string ToString()
-        {
-            return StringPrintf("[ DiffuseBxDF R: %s ]", R);
-        }
-
         public override void Regularize() { }
 
         public override BxDFFlags Flags()
         {
             return (bool)R ? BxDFFlags.DiffuseReflection : BxDFFlags.Unset;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ DiffuseBxDF R: %s ]", R);
         }
 
         private SampledSpectrum R;
@@ -131,17 +131,17 @@ namespace pbrt
 
         public static string Name() { return "DiffuseTransmissionBxDF"; }
 
-        public override string ToString()
-        {
-            return StringPrintf("[ DiffuseTransmissionBxDF R: %s T: %s ]", R, T);
-        }
-
         public override void Regularize() { }
 
         public override BxDFFlags Flags()
         {
             return (((bool)R ? BxDFFlags.DiffuseReflection : BxDFFlags.Unset) |
                     ((bool)T ? BxDFFlags.DiffuseTransmission : BxDFFlags.Unset));
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ DiffuseTransmissionBxDF R: %s T: %s ]", R, T);
         }
 
         // DiffuseTransmissionBxDF Private Members
@@ -164,6 +164,8 @@ namespace pbrt
             BxDFFlags flags = (eta == 1) ? BxDFFlags.Transmission : (BxDFFlags.Reflection | BxDFFlags.Transmission);
             return flags | (mfDistrib.EffectivelySmooth() ? BxDFFlags.Specular : BxDFFlags.Glossy);
         }
+
+        public override void Regularize() { mfDistrib.Regularize(); }
 
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
                                                            BxDFReflTransFlags sampleFlags)
@@ -265,46 +267,6 @@ namespace pbrt
             }
         }
 
-        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
-        {
-            if (eta == 1 || mfDistrib.EffectivelySmooth())
-                return new SampledSpectrum(0f);
-            // Evaluate rough dielectric BSDF
-            // Compute generalized half vector _wm_
-            Float cosTheta_o = CosTheta(wo), cosTheta_i = CosTheta(wi);
-            bool reflect = cosTheta_i * cosTheta_o > 0;
-            float etap = 1;
-            if (!reflect)
-                etap = cosTheta_o > 0 ? eta : (1 / eta);
-            Vector3f wm = wi * etap + wo;
-            CHECK_RARE(1e-5f, LengthSquared(wm) == 0);
-            if (cosTheta_i == 0 || cosTheta_o == 0 || LengthSquared(wm) == 0)
-                return default;
-            wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
-
-            // Discard backfacing microfacets
-            if (Dot(wm, wi) * cosTheta_i < 0 || Dot(wm, wo) * cosTheta_o < 0)
-                return default;
-
-            Float F = FrDielectric(Dot(wo, wm), eta);
-            if (reflect)
-            {
-                // Compute reflection at rough dielectric interface
-                return new SampledSpectrum(mfDistrib.D(wm) * mfDistrib.G(wo, wi) * F / std.abs(4 * cosTheta_i * cosTheta_o));
-            }
-            else
-            {
-                // Compute transmission at rough dielectric interface
-                Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap) * cosTheta_i * cosTheta_o;
-                Float ft = mfDistrib.D(wm) * (1 - F) * mfDistrib.G(wo, wi) * std.abs(Dot(wi, wm) * Dot(wo, wm) / denom);
-                // Account for non-symmetry with transmission to different medium
-                if (mode == TransportMode.Radiance)
-                    ft /= Sqr(etap);
-
-                return new SampledSpectrum(ft);
-            }
-        }
-
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             if (eta == 1 || mfDistrib.EffectivelySmooth())
@@ -358,12 +320,50 @@ namespace pbrt
 
         public static string Name() { return "DielectricBxDF"; }
 
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (eta == 1 || mfDistrib.EffectivelySmooth())
+                return new SampledSpectrum(0f);
+            // Evaluate rough dielectric BSDF
+            // Compute generalized half vector _wm_
+            Float cosTheta_o = CosTheta(wo), cosTheta_i = CosTheta(wi);
+            bool reflect = cosTheta_i * cosTheta_o > 0;
+            float etap = 1;
+            if (!reflect)
+                etap = cosTheta_o > 0 ? eta : (1 / eta);
+            Vector3f wm = wi * etap + wo;
+            CHECK_RARE(1e-5f, LengthSquared(wm) == 0);
+            if (cosTheta_i == 0 || cosTheta_o == 0 || LengthSquared(wm) == 0)
+                return default;
+            wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+
+            // Discard backfacing microfacets
+            if (Dot(wm, wi) * cosTheta_i < 0 || Dot(wm, wo) * cosTheta_o < 0)
+                return default;
+
+            Float F = FrDielectric(Dot(wo, wm), eta);
+            if (reflect)
+            {
+                // Compute reflection at rough dielectric interface
+                return new SampledSpectrum(mfDistrib.D(wm) * mfDistrib.G(wo, wi) * F / std.abs(4 * cosTheta_i * cosTheta_o));
+            }
+            else
+            {
+                // Compute transmission at rough dielectric interface
+                Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap) * cosTheta_i * cosTheta_o;
+                Float ft = mfDistrib.D(wm) * (1 - F) * mfDistrib.G(wo, wi) * std.abs(Dot(wi, wm) * Dot(wo, wm) / denom);
+                // Account for non-symmetry with transmission to different medium
+                if (mode == TransportMode.Radiance)
+                    ft /= Sqr(etap);
+
+                return new SampledSpectrum(ft);
+            }
+        }
+
         public override string ToString()
         {
             return StringPrintf("[ DielectricBxDF eta: %f mfDistrib: %s ]", eta, mfDistrib.ToString());
         }
-
-        public override void Regularize() { mfDistrib.Regularize(); }
 
         // DielectricBxDF Private Members
         private Float eta;
@@ -425,16 +425,16 @@ namespace pbrt
 
         public static string Name() { return "ThinDielectricBxDF"; }
 
-        public override string ToString()
-        {
-            return StringPrintf("[ ThinDielectricBxDF eta: %f ]", eta);
-        }
-
         public override void Regularize() { /* TODO */ }
 
         public override BxDFFlags Flags()
         {
             return (BxDFFlags.Reflection | BxDFFlags.Transmission | BxDFFlags.Specular);
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ ThinDielectricBxDF eta: %f ]", eta);
         }
 
         private Float eta;
@@ -532,12 +532,12 @@ namespace pbrt
 
         public static string Name() { return "ConductorBxDF"; }
 
+        public override void Regularize() { mfDistrib.Regularize(); }
+
         public override string ToString()
         {
             return StringPrintf("[ ConductorBxDF mfDistrib: %s eta: %s k: %s ]", mfDistrib, eta, k);
         }
-
-        public override void Regularize() { mfDistrib.Regularize(); }
 
         // ConductorBxDF Private Members
         private TrowbridgeReitzDistribution mfDistrib;
@@ -572,12 +572,6 @@ namespace pbrt
 
         // std::numeric_limits<Float>::min(): smallest positive normal value
         private static readonly Float FloatMinNormal = (Float)1.17549435e-38f;
-
-        public override string ToString()
-        {
-            return StringPrintf("[ LayeredBxDF top: %s bottom: %s thickness: %f albedo: %s g: %f ]", top, bottom,
-                                thickness, albedo, g);
-        }
 
         public override void Regularize()
         {
@@ -927,6 +921,14 @@ namespace pbrt
             return default;
         }
 
+        // LayeredBxDF Private Methods
+        private static Float Tr(Float dz, Vector3f w)
+        {
+            if (std.abs(dz) <= FloatMinNormal)
+                return 1;
+            return FastExp(-std.abs(dz / w.z));
+        }
+
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             CHECK(sampleFlags == BxDFReflTransFlags.All);  // for now
@@ -1057,12 +1059,10 @@ namespace pbrt
             return Lerp(0.9f, 1 / (4 * Pi), pdfSum / nSamples);
         }
 
-        // LayeredBxDF Private Methods
-        private static Float Tr(Float dz, Vector3f w)
+        public override string ToString()
         {
-            if (std.abs(dz) <= FloatMinNormal)
-                return 1;
-            return FastExp(-std.abs(dz / w.z));
+            return StringPrintf("[ LayeredBxDF top: %s bottom: %s thickness: %f albedo: %s g: %f ]", top, bottom,
+                                thickness, albedo, g);
         }
 
         // LayeredBxDF Private Members
@@ -1101,6 +1101,123 @@ namespace pbrt
     // HairBxDF Definition
     public sealed unsafe class HairBxDF : BxDF
     {
+
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags() { return BxDFFlags.GlossyReflection; }
+
+        // HairBxDF Private Methods
+        private static Float Mp(Float cosTheta_i, Float cosTheta_o, Float sinTheta_i, Float sinTheta_o, Float v)
+        {
+            Float a = cosTheta_i * cosTheta_o / v, b = sinTheta_i * sinTheta_o / v;
+            Float mp = (v <= .1f) ? (FastExp(LogI0(a) - b - 1 / v + 0.6931f + std.log(1 / (2 * v))))
+                                  : (FastExp(-b) * I0(a)) / (std.sinh(1 / v) * 2 * v);
+            DCHECK(!IsInf(mp) && !IsNaN(mp));
+            return mp;
+        }
+
+        private static SampledSpectrum[] Ap(Float cosTheta_o, Float eta, Float h, SampledSpectrum T)
+        {
+            SampledSpectrum[] ap = new SampledSpectrum[pMax + 1];
+            // Compute $p=0$ attenuation at initial cylinder intersection
+            Float cosGamma_o = SafeSqrt(1 - Sqr(h));
+            Float cosTheta = cosTheta_o * cosGamma_o;
+            Float f = FrDielectric(cosTheta, eta);
+            ap[0] = new SampledSpectrum(f);
+
+            // Compute $p=1$ attenuation term
+            ap[1] = Sqr(1 - f) * T;
+
+            // Compute attenuation terms up to $p=_pMax_$
+            for (int p = 2; p < pMax; ++p)
+                ap[p] = ap[p - 1] * T * f;
+
+            // Compute attenuation term accounting for remaining orders of scattering
+            if ((bool)(1 - T * f))
+                ap[pMax] = ap[pMax - 1] * f * T / (1 - T * f);
+
+            return ap;
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            // TODO? flags...
+
+            // Compute hair coordinate system terms related to _wo_
+            Float sinTheta_o = wo.x;
+            Float cosTheta_o = SafeSqrt(1 - Sqr(sinTheta_o));
+            Float phi_o = std.atan2(wo.z, wo.y);
+            Float gamma_o = SafeASin(h);
+
+            // Compute hair coordinate system terms related to _wi_
+            Float sinTheta_i = wi.x;
+            Float cosTheta_i = SafeSqrt(1 - Sqr(sinTheta_i));
+            Float phi_i = std.atan2(wi.z, wi.y);
+
+            // Compute $\gammat$ for refracted ray
+            Float etap = SafeSqrt(eta * eta - Sqr(sinTheta_o)) / cosTheta_o;
+            Float sinGamma_t = h / etap;
+            Float gamma_t = SafeASin(sinGamma_t);
+
+            // Compute PDF for $A_p$ terms
+            Float[] apPDF = ApPDF(cosTheta_o);
+
+            // Compute PDF sum for hair scattering events
+            Float phi = phi_i - phi_o;
+            Float pdf = 0;
+            for (int p = 0; p < pMax; ++p)
+            {
+                // Compute $\sin\,\thetao$ and $\cos\,\thetao$ terms accounting for scales
+                Float sinThetap_o, cosThetap_o;
+                if (p == 0)
+                {
+                    sinThetap_o = sinTheta_o * cos2kAlpha[1] - cosTheta_o * sin2kAlpha[1];
+                    cosThetap_o = cosTheta_o * cos2kAlpha[1] + sinTheta_o * sin2kAlpha[1];
+                }
+                // Handle remainder of $p$ values for hair scale tilt
+                else if (p == 1)
+                {
+                    sinThetap_o = sinTheta_o * cos2kAlpha[0] + cosTheta_o * sin2kAlpha[0];
+                    cosThetap_o = cosTheta_o * cos2kAlpha[0] - sinTheta_o * sin2kAlpha[0];
+                }
+                else if (p == 2)
+                {
+                    sinThetap_o = sinTheta_o * cos2kAlpha[2] + cosTheta_o * sin2kAlpha[2];
+                    cosThetap_o = cosTheta_o * cos2kAlpha[2] - sinTheta_o * sin2kAlpha[2];
+                }
+                else
+                {
+                    sinThetap_o = sinTheta_o;
+                    cosThetap_o = cosTheta_o;
+                }
+
+                // Handle out-of-range $\cos\,\thetao$ from scale adjustment
+                cosThetap_o = std.abs(cosThetap_o);
+
+                pdf += Mp(cosTheta_i, cosThetap_o, sinTheta_i, sinThetap_o, v[p]) * apPDF[p] * Np(phi, p, s, gamma_o, gamma_t);
+            }
+            pdf += Mp(cosTheta_i, cosTheta_o, sinTheta_i, sinTheta_o, v[pMax]) * apPDF[pMax] * (1 / (2 * Pi));
+            return pdf;
+        }
+
+        private static Float Phi(int p, Float gamma_o, Float gamma_t)
+        {
+            return 2 * p * gamma_t - 2 * gamma_o + p * Pi;
+        }
+
+        public static string Name() { return "HairBxDF"; }
+
+        private static Float Np(Float phi, int p, Float s, Float gamma_o, Float gamma_t)
+        {
+            Float dphi = phi - Phi(p, gamma_o, gamma_t);
+            // Remap _dphi_ to $[-\pi,\pi]$
+            while (dphi > Pi)
+                dphi -= 2 * Pi;
+            while (dphi < -Pi)
+                dphi += 2 * Pi;
+
+            return TrimmedLogistic(dphi, s, -Pi, Pi);
+        }
         // HairBxDF Public Methods
         public HairBxDF() { }
 
@@ -1204,6 +1321,39 @@ namespace pbrt
                 fsum /= AbsCosTheta(wi);
             DCHECK(!IsInf(fsum.Average()) && !IsNaN(fsum.Average()));
             return fsum;
+        }
+
+        // HairBxDF Constants
+        private const int pMax = 3;
+
+        private Float[] ApPDF(Float cosTheta_o)
+        {
+            // Initialize array of $A_p$ values for _cosTheta_o_
+            Float sinTheta_o = SafeSqrt(1 - Sqr(cosTheta_o));
+            // Compute $\cos\,\thetat$ for refracted ray
+            Float sinTheta_t = sinTheta_o / eta;
+            Float cosTheta_t = SafeSqrt(1 - Sqr(sinTheta_t));
+
+            // Compute $\gammat$ for refracted ray
+            Float etap = SafeSqrt(Sqr(eta) - Sqr(sinTheta_o)) / cosTheta_o;
+            Float sinGamma_t = h / etap;
+            Float cosGamma_t = SafeSqrt(1 - Sqr(sinGamma_t));
+            Float gamma_t = SafeASin(sinGamma_t);
+
+            // Compute the transmittance _T_ of a single path through the cylinder
+            SampledSpectrum T = Exp(-sigma_a * (2 * cosGamma_t / cosTheta_t));
+
+            SampledSpectrum[] ap = Ap(cosTheta_o, eta, h, T);
+
+            // Compute $A_p$ PDF from individual $A_p$ terms
+            Float[] apPDF = new Float[pMax + 1];
+            Float sumY = 0;
+            foreach (SampledSpectrum asp in ap)
+                sumY += asp.Average();
+            for (int i = 0; i <= pMax; ++i)
+                apPDF[i] = ap[i].Average() / sumY;
+
+            return apPDF;
         }
 
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
@@ -1311,79 +1461,6 @@ namespace pbrt
             return new BSDFSample(f(wo, wi, mode), wi, pdf, Flags());
         }
 
-        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            // TODO? flags...
-
-            // Compute hair coordinate system terms related to _wo_
-            Float sinTheta_o = wo.x;
-            Float cosTheta_o = SafeSqrt(1 - Sqr(sinTheta_o));
-            Float phi_o = std.atan2(wo.z, wo.y);
-            Float gamma_o = SafeASin(h);
-
-            // Compute hair coordinate system terms related to _wi_
-            Float sinTheta_i = wi.x;
-            Float cosTheta_i = SafeSqrt(1 - Sqr(sinTheta_i));
-            Float phi_i = std.atan2(wi.z, wi.y);
-
-            // Compute $\gammat$ for refracted ray
-            Float etap = SafeSqrt(eta * eta - Sqr(sinTheta_o)) / cosTheta_o;
-            Float sinGamma_t = h / etap;
-            Float gamma_t = SafeASin(sinGamma_t);
-
-            // Compute PDF for $A_p$ terms
-            Float[] apPDF = ApPDF(cosTheta_o);
-
-            // Compute PDF sum for hair scattering events
-            Float phi = phi_i - phi_o;
-            Float pdf = 0;
-            for (int p = 0; p < pMax; ++p)
-            {
-                // Compute $\sin\,\thetao$ and $\cos\,\thetao$ terms accounting for scales
-                Float sinThetap_o, cosThetap_o;
-                if (p == 0)
-                {
-                    sinThetap_o = sinTheta_o * cos2kAlpha[1] - cosTheta_o * sin2kAlpha[1];
-                    cosThetap_o = cosTheta_o * cos2kAlpha[1] + sinTheta_o * sin2kAlpha[1];
-                }
-                // Handle remainder of $p$ values for hair scale tilt
-                else if (p == 1)
-                {
-                    sinThetap_o = sinTheta_o * cos2kAlpha[0] + cosTheta_o * sin2kAlpha[0];
-                    cosThetap_o = cosTheta_o * cos2kAlpha[0] - sinTheta_o * sin2kAlpha[0];
-                }
-                else if (p == 2)
-                {
-                    sinThetap_o = sinTheta_o * cos2kAlpha[2] + cosTheta_o * sin2kAlpha[2];
-                    cosThetap_o = cosTheta_o * cos2kAlpha[2] - sinTheta_o * sin2kAlpha[2];
-                }
-                else
-                {
-                    sinThetap_o = sinTheta_o;
-                    cosThetap_o = cosTheta_o;
-                }
-
-                // Handle out-of-range $\cos\,\thetao$ from scale adjustment
-                cosThetap_o = std.abs(cosThetap_o);
-
-                pdf += Mp(cosTheta_i, cosThetap_o, sinTheta_i, sinThetap_o, v[p]) * apPDF[p] * Np(phi, p, s, gamma_o, gamma_t);
-            }
-            pdf += Mp(cosTheta_i, cosTheta_o, sinTheta_i, sinTheta_o, v[pMax]) * apPDF[pMax] * (1 / (2 * Pi));
-            return pdf;
-        }
-
-        public override void Regularize() { }
-
-        public static string Name() { return "HairBxDF"; }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ HairBxDF h: %f eta: %f beta_m: %f beta_n: %f v[0]: %f s: %f sigma_a: %s ]", h, eta,
-                                beta_m, beta_n, v[0], s, sigma_a);
-        }
-
-        public override BxDFFlags Flags() { return BxDFFlags.GlossyReflection; }
-
         public static RGBUnboundedSpectrum SigmaAFromConcentration(Float ce, Float cp)
         {
             RGB eumelaninSigma_a = new RGB(0.419f, 0.697f, 1.37f);
@@ -1401,87 +1478,10 @@ namespace pbrt
             return sigma_a;
         }
 
-        // HairBxDF Constants
-        private const int pMax = 3;
-
-        // HairBxDF Private Methods
-        private static Float Mp(Float cosTheta_i, Float cosTheta_o, Float sinTheta_i, Float sinTheta_o, Float v)
+        public override string ToString()
         {
-            Float a = cosTheta_i * cosTheta_o / v, b = sinTheta_i * sinTheta_o / v;
-            Float mp = (v <= .1f) ? (FastExp(LogI0(a) - b - 1 / v + 0.6931f + std.log(1 / (2 * v))))
-                                  : (FastExp(-b) * I0(a)) / (std.sinh(1 / v) * 2 * v);
-            DCHECK(!IsInf(mp) && !IsNaN(mp));
-            return mp;
-        }
-
-        private static SampledSpectrum[] Ap(Float cosTheta_o, Float eta, Float h, SampledSpectrum T)
-        {
-            SampledSpectrum[] ap = new SampledSpectrum[pMax + 1];
-            // Compute $p=0$ attenuation at initial cylinder intersection
-            Float cosGamma_o = SafeSqrt(1 - Sqr(h));
-            Float cosTheta = cosTheta_o * cosGamma_o;
-            Float f = FrDielectric(cosTheta, eta);
-            ap[0] = new SampledSpectrum(f);
-
-            // Compute $p=1$ attenuation term
-            ap[1] = Sqr(1 - f) * T;
-
-            // Compute attenuation terms up to $p=_pMax_$
-            for (int p = 2; p < pMax; ++p)
-                ap[p] = ap[p - 1] * T * f;
-
-            // Compute attenuation term accounting for remaining orders of scattering
-            if ((bool)(1 - T * f))
-                ap[pMax] = ap[pMax - 1] * f * T / (1 - T * f);
-
-            return ap;
-        }
-
-        private static Float Phi(int p, Float gamma_o, Float gamma_t)
-        {
-            return 2 * p * gamma_t - 2 * gamma_o + p * Pi;
-        }
-
-        private static Float Np(Float phi, int p, Float s, Float gamma_o, Float gamma_t)
-        {
-            Float dphi = phi - Phi(p, gamma_o, gamma_t);
-            // Remap _dphi_ to $[-\pi,\pi]$
-            while (dphi > Pi)
-                dphi -= 2 * Pi;
-            while (dphi < -Pi)
-                dphi += 2 * Pi;
-
-            return TrimmedLogistic(dphi, s, -Pi, Pi);
-        }
-
-        private Float[] ApPDF(Float cosTheta_o)
-        {
-            // Initialize array of $A_p$ values for _cosTheta_o_
-            Float sinTheta_o = SafeSqrt(1 - Sqr(cosTheta_o));
-            // Compute $\cos\,\thetat$ for refracted ray
-            Float sinTheta_t = sinTheta_o / eta;
-            Float cosTheta_t = SafeSqrt(1 - Sqr(sinTheta_t));
-
-            // Compute $\gammat$ for refracted ray
-            Float etap = SafeSqrt(Sqr(eta) - Sqr(sinTheta_o)) / cosTheta_o;
-            Float sinGamma_t = h / etap;
-            Float cosGamma_t = SafeSqrt(1 - Sqr(sinGamma_t));
-            Float gamma_t = SafeASin(sinGamma_t);
-
-            // Compute the transmittance _T_ of a single path through the cylinder
-            SampledSpectrum T = Exp(-sigma_a * (2 * cosGamma_t / cosTheta_t));
-
-            SampledSpectrum[] ap = Ap(cosTheta_o, eta, h, T);
-
-            // Compute $A_p$ PDF from individual $A_p$ terms
-            Float[] apPDF = new Float[pMax + 1];
-            Float sumY = 0;
-            foreach (SampledSpectrum asp in ap)
-                sumY += asp.Average();
-            for (int i = 0; i <= pMax; ++i)
-                apPDF[i] = ap[i].Average() / sumY;
-
-            return apPDF;
+            return StringPrintf("[ HairBxDF h: %f eta: %f beta_m: %f beta_n: %f v[0]: %f s: %f sigma_a: %s ]", h, eta,
+                                beta_m, beta_n, v[0], s, sigma_a);
         }
 
         // HairBxDF Private Members
@@ -1882,6 +1882,54 @@ namespace pbrt
 
         private static readonly Dictionary<string, MeasuredBxDFData> loadedData = new Dictionary<string, MeasuredBxDFData>();
 
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags() { return (BxDFFlags.Reflection | BxDFFlags.Glossy); }
+
+        // MeasuredBxDF Private Methods
+        private static Float theta2u(Float theta) { return std.sqrt(theta * (2 / Pi)); }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                return 0;
+            if (!SameHemisphere(wo, wi))
+                return 0;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+
+            Vector3f wm = wi + wo;
+            if (LengthSquared(wm) == 0)
+                return 0;
+            wm = Normalize(wm);
+
+            /* Cartesian -> spherical coordinates */
+            Float theta_o = SphericalTheta(wo), phi_o = std.atan2(wo.y, wo.x);
+            Float theta_m = SphericalTheta(wm), phi_m = std.atan2(wm.y, wm.x);
+
+            /* Spherical coordinates -> unit coordinate system */
+            Point2f u_wm = new Point2f(theta2u(theta_m), phi2u(brdf.isotropic ? (phi_m - phi_o) : phi_m));
+            u_wm.y = u_wm.y - pstd.floor(u_wm.y);
+
+            PLSample ui = brdf.vndf.Invert(u_wm, phi_o, theta_o);
+            Point2f sample = ui.p;
+            Float vndfPDF = ui.pdf;
+
+            Float pdf = brdf.luminance.Evaluate(sample, phi_o, theta_o);
+            Float sinTheta_m = std.sqrt(Sqr(wm.x) + Sqr(wm.y));
+            Float jacobian = 4f * Dot(wo, wm) * std.max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
+            return vndfPDF * pdf / jacobian;
+        }
+        private static Float phi2u(Float phi) { return phi * (1 / (2 * Pi)) + .5f; }
+
+        public static string Name() { return "MeasuredBxDF"; }
+
+        private static Float u2theta(Float u) { return Sqr(u) * (Pi / 2f); }
+        private static Float u2phi(Float u) { return (2f * u - 1f) * Pi; }
+
         public static MeasuredBxDFData BRDFDataFromFile(string filename, Allocator alloc)
         {
             lock (loadedData)
@@ -1980,58 +2028,10 @@ namespace pbrt
             return new BSDFSample(fr, wi, pdf * lum_pdf, BxDFFlags.GlossyReflection);
         }
 
-        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
-                return 0;
-            if (!SameHemisphere(wo, wi))
-                return 0;
-            if (wo.z < 0)
-            {
-                wo = -wo;
-                wi = -wi;
-            }
-
-            Vector3f wm = wi + wo;
-            if (LengthSquared(wm) == 0)
-                return 0;
-            wm = Normalize(wm);
-
-            /* Cartesian -> spherical coordinates */
-            Float theta_o = SphericalTheta(wo), phi_o = std.atan2(wo.y, wo.x);
-            Float theta_m = SphericalTheta(wm), phi_m = std.atan2(wm.y, wm.x);
-
-            /* Spherical coordinates -> unit coordinate system */
-            Point2f u_wm = new Point2f(theta2u(theta_m), phi2u(brdf.isotropic ? (phi_m - phi_o) : phi_m));
-            u_wm.y = u_wm.y - pstd.floor(u_wm.y);
-
-            PLSample ui = brdf.vndf.Invert(u_wm, phi_o, theta_o);
-            Point2f sample = ui.p;
-            Float vndfPDF = ui.pdf;
-
-            Float pdf = brdf.luminance.Evaluate(sample, phi_o, theta_o);
-            Float sinTheta_m = std.sqrt(Sqr(wm.x) + Sqr(wm.y));
-            Float jacobian = 4f * Dot(wo, wm) * std.max<Float>(2 * Sqr(Pi) * u_wm.x * sinTheta_m, 1e-6f);
-            return vndfPDF * pdf / jacobian;
-        }
-
-        public override void Regularize() { }
-
-        public static string Name() { return "MeasuredBxDF"; }
-
         public override string ToString()
         {
             return StringPrintf("[ MeasuredBxDF brdf: %s ]", brdf);
         }
-
-        public override BxDFFlags Flags() { return (BxDFFlags.Reflection | BxDFFlags.Glossy); }
-
-        // MeasuredBxDF Private Methods
-        private static Float theta2u(Float theta) { return std.sqrt(theta * (2 / Pi)); }
-        private static Float phi2u(Float phi) { return phi * (1 / (2 * Pi)) + .5f; }
-
-        private static Float u2theta(Float u) { return Sqr(u) * (Pi / 2f); }
-        private static Float u2phi(Float u) { return (2f * u - 1f) * Pi; }
 
         // MeasuredBxDF Private Members
         private MeasuredBxDFData brdf;
@@ -2070,11 +2070,6 @@ namespace pbrt
 
         public static string Name() { return "NormalizedFresnelBxDF"; }
 
-        public override string ToString()
-        {
-            return StringPrintf("[ NormalizedFresnelBxDF eta: %f ]", eta);
-        }
-
         public override BxDFFlags Flags()
         {
             return BxDFFlags.Reflection | BxDFFlags.Diffuse;
@@ -2093,6 +2088,11 @@ namespace pbrt
                 f *= Sqr(eta);
 
             return f;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ NormalizedFresnelBxDF eta: %f ]", eta);
         }
 
         private Float eta;

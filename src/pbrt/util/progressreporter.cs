@@ -33,6 +33,18 @@ namespace pbrt
     // ProgressReporter Definition
     public class ProgressReporter
     {
+
+        public double ElapsedSeconds()
+        {
+            return finishTime.HasValue ? finishTime.Value : timer.ElapsedSeconds();
+        }
+
+        public void Update(long num = 1)
+        {
+            if (num == 0 || quiet)
+                return;
+            Interlocked.Add(ref workDone, num);
+        }
         // ProgressReporter Public Methods
         public ProgressReporter() { quiet = true; }
 
@@ -57,43 +69,6 @@ namespace pbrt
         ~ProgressReporter()
         {
             Done();
-        }
-
-        public void Update(long num = 1)
-        {
-            if (num == 0 || quiet)
-                return;
-            Interlocked.Add(ref workDone, num);
-        }
-
-        public double ElapsedSeconds()
-        {
-            return finishTime.HasValue ? finishTime.Value : timer.ElapsedSeconds();
-        }
-
-        public void Done()
-        {
-            if (!quiet)
-            {
-                // Only let one thread shut things down.
-                finishTime = (float)ElapsedSeconds();
-                if (Interlocked.CompareExchange(ref exitThread, 1, 0) == 0)
-                {
-                    Interlocked.Exchange(ref workDone, totalWork);
-                    if (updateThread != null && updateThread.IsAlive)
-                        updateThread.Join();
-                    Console.Out.Write("\n");
-                    Console.Out.Flush();
-                }
-            }
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ ProgressReporter totalWork: %d title: %s " +
-                                        "timer: %s workDone: %d exitThread: %s",
-                                        totalWork, title, timer, Interlocked.Read(ref workDone),
-                                        Volatile.Read(ref exitThread) != 0);
         }
 
         // ProgressReporter Private Methods
@@ -164,6 +139,31 @@ namespace pbrt
                     Console.Out.Write(pbrt.StringPrintf(" (%.1fs|?s)  ", elapsed));
                 Console.Out.Flush();
             }
+        }
+
+        public void Done()
+        {
+            if (!quiet)
+            {
+                // Only let one thread shut things down.
+                finishTime = (float)ElapsedSeconds();
+                if (Interlocked.CompareExchange(ref exitThread, 1, 0) == 0)
+                {
+                    Interlocked.Exchange(ref workDone, totalWork);
+                    if (updateThread != null && updateThread.IsAlive)
+                        updateThread.Join();
+                    Console.Out.Write("\n");
+                    Console.Out.Flush();
+                }
+            }
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ProgressReporter totalWork: %d title: %s " +
+                                        "timer: %s workDone: %d exitThread: %s",
+                                        totalWork, title, timer, Interlocked.Read(ref workDone),
+                                        Volatile.Read(ref exitThread) != 0);
         }
 
         private static int TerminalWidth()

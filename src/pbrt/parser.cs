@@ -1019,6 +1019,30 @@ namespace pbrt
             return (char)0;  // NOTREACHED
         }
 
+        int getChar()
+        {
+            if (pos == end)
+                return EOF;
+            int ch = contents[pos++];
+            if (ch == '\n')
+            {
+                ++loc.line;
+                loc.column = 0;
+            }
+            else
+                ++loc.column;
+            return ch;
+        }
+
+        void ungetChar()
+        {
+            --pos;
+            if (contents[pos] == '\n')
+                // Don't worry about the column; we'll be going to the start of
+                // the next line again shortly...
+                --loc.line;
+        }
+
         public static Tokenizer CreateFromFile(string filename, Action<string, FileLoc> errorCallback)
         {
             if (filename == "-")
@@ -1050,6 +1074,14 @@ namespace pbrt
             return new Tokenizer(str, "<stdin>", errorCallback);
         }
 
+        static FileLoc Copy(FileLoc l)
+        {
+            FileLoc c = new FileLoc(l.filename);
+            c.line = l.line;
+            c.column = l.column;
+            return c;
+        }
+
         public Tokenizer(string str, string filename, Action<string, FileLoc> errorCallback)
         {
             this.errorCallback = errorCallback;
@@ -1070,14 +1102,6 @@ namespace pbrt
                 errorCallback("File is encoded with UTF-16, which is not currently " +
                               "supported by pbrt (https://github.com/mmp/pbrt-v4/issues/136).",
                               loc);
-        }
-
-        static FileLoc Copy(FileLoc l)
-        {
-            FileLoc c = new FileLoc(l.filename);
-            c.line = l.line;
-            c.column = l.column;
-            return c;
         }
 
         public Token Next()
@@ -1175,30 +1199,6 @@ namespace pbrt
                     return new Token(contents.Substring(tokenStart, pos - tokenStart), startLoc);
                 }
             }
-        }
-
-        int getChar()
-        {
-            if (pos == end)
-                return EOF;
-            int ch = contents[pos++];
-            if (ch == '\n')
-            {
-                ++loc.line;
-                loc.column = 0;
-            }
-            else
-                ++loc.column;
-            return ch;
-        }
-
-        void ungetChar()
-        {
-            --pos;
-            if (contents[pos] == '\n')
-                // Don't worry about the column; we'll be going to the start of
-                // the next line again shortly...
-                --loc.line;
         }
 
         // Just for parse().

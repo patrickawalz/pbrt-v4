@@ -474,6 +474,8 @@ namespace pbrt
     // ThreadPool Definition
     public class ThreadPool
     {
+
+        public long size() { return threads.Count; }
         // ThreadPool Method Definitions
         public ThreadPool(int nThreads)
         {
@@ -485,8 +487,6 @@ namespace pbrt
                 threads.Add(t);
             }
         }
-
-        public long size() { return threads.Count; }
 
         private void Worker()
         {

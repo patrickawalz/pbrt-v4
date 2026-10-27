@@ -281,52 +281,12 @@ namespace pbrt
         public override bool Equals(object o) { return o is SampledSpectrum s && this == s; }
         public override int GetHashCode() { return HashCode.Combine(values[0], values[1], values[2], values[3]); }
 
-        public override string ToString()
-        {
-            string str = "[ ";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values[i]);
-                if (i + 1 < NSpectrumSamples)
-                    str += ", ";
-            }
-            str += " ]";
-            return str;
-        }
-
         public bool HasNaNs()
         {
             for (int i = 0; i < NSpectrumSamples; ++i)
                 if (IsNaN(values[i]))
                     return true;
             return false;
-        }
-
-        public XYZ ToXYZ(SampledWavelengths lambda)
-        {
-            // Sample the $X$, $Y$, and $Z$ matching curves at _lambda_
-            SampledSpectrum X = Spectra.X().Sample(lambda);
-            SampledSpectrum Y = Spectra.Y().Sample(lambda);
-            SampledSpectrum Z = Spectra.Z().Sample(lambda);
-
-            // Evaluate estimator to compute $(x,y,z)$ coefficients
-            SampledSpectrum pdf = lambda.PDF();
-            return new XYZ(SafeDiv(X * this, pdf).Average(), SafeDiv(Y * this, pdf).Average(),
-                           SafeDiv(Z * this, pdf).Average()) /
-                   CIE_Y_integral;
-        }
-
-        public RGB ToRGB(SampledWavelengths lambda, RGBColorSpace cs)
-        {
-            XYZ xyz = ToXYZ(lambda);
-            return cs.ToRGB(xyz);
-        }
-
-        public Float y(SampledWavelengths lambda)
-        {
-            SampledSpectrum Ys = Spectra.Y().Sample(lambda);
-            SampledSpectrum pdf = lambda.PDF();
-            return SafeDiv(Ys * this, pdf).Average() / CIE_Y_integral;
         }
 
         public SampledSpectrum(Float c)
@@ -345,18 +305,6 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
                 values[i] = v[i];
         }
-
-        public ref Float this[int i]
-        {
-            [UnscopedRef]
-            get
-            {
-                DCHECK(i >= 0 && i < NSpectrumSamples);
-                return ref values[i];
-            }
-        }
-
-        public static bool operator !(SampledSpectrum s) { return !(bool)s; }
 
         public static explicit operator bool(SampledSpectrum s)
         {
@@ -390,6 +338,58 @@ namespace pbrt
             return sum / NSpectrumSamples;
         }
 
+        public ref Float this[int i]
+        {
+            [UnscopedRef]
+            get
+            {
+                DCHECK(i >= 0 && i < NSpectrumSamples);
+                return ref values[i];
+            }
+        }
+
+        public static bool operator !(SampledSpectrum s) { return !(bool)s; }
+
+        public override string ToString()
+        {
+            string str = "[ ";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values[i]);
+                if (i + 1 < NSpectrumSamples)
+                    str += ", ";
+            }
+            str += " ]";
+            return str;
+        }
+
+        public XYZ ToXYZ(SampledWavelengths lambda)
+        {
+            // Sample the $X$, $Y$, and $Z$ matching curves at _lambda_
+            SampledSpectrum X = Spectra.X().Sample(lambda);
+            SampledSpectrum Y = Spectra.Y().Sample(lambda);
+            SampledSpectrum Z = Spectra.Z().Sample(lambda);
+
+            // Evaluate estimator to compute $(x,y,z)$ coefficients
+            SampledSpectrum pdf = lambda.PDF();
+            return new XYZ(SafeDiv(X * this, pdf).Average(), SafeDiv(Y * this, pdf).Average(),
+                           SafeDiv(Z * this, pdf).Average()) /
+                   CIE_Y_integral;
+        }
+
+        public Float y(SampledWavelengths lambda)
+        {
+            SampledSpectrum Ys = Spectra.Y().Sample(lambda);
+            SampledSpectrum pdf = lambda.PDF();
+            return SafeDiv(Ys * this, pdf).Average() / CIE_Y_integral;
+        }
+
+        public RGB ToRGB(SampledWavelengths lambda, RGBColorSpace cs)
+        {
+            XYZ xyz = ToXYZ(lambda);
+            return cs.ToRGB(xyz);
+        }
+
         // SampledSpectrum Private Members
         private SampledSpectrumValues values;
     }
@@ -407,18 +407,6 @@ namespace pbrt
         public static bool operator !=(SampledWavelengths a, SampledWavelengths swl) { return !(a == swl); }
         public override bool Equals(object o) { return o is SampledWavelengths s && this == s; }
         public override int GetHashCode() { return HashCode.Combine(lambda[0], lambda[1], pdf[0], pdf[1]); }
-
-        public override string ToString()
-        {
-            string r = "[ SampledWavelengths lambda: [";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {lambda[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
-            r += "] pdf: [";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {pdf[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
-            r += "] ]";
-            return r;
-        }
 
         public static SampledWavelengths SampleUniform(Float u, Float lambda_min = Lambda_min,
                                                        Float lambda_max = Lambda_max)
@@ -443,14 +431,6 @@ namespace pbrt
             return swl;
         }
 
-        public Float this[int i]
-        {
-            get { return lambda[i]; }
-            set { lambda[i] = value; }
-        }
-
-        public SampledSpectrum PDF() { return new SampledSpectrum(pdf); }
-
         public void TerminateSecondary()
         {
             if (SecondaryTerminated())
@@ -460,6 +440,14 @@ namespace pbrt
                 pdf[i] = 0;
             pdf[0] /= NSpectrumSamples;
         }
+
+        public Float this[int i]
+        {
+            get { return lambda[i]; }
+            set { lambda[i] = value; }
+        }
+
+        public SampledSpectrum PDF() { return new SampledSpectrum(pdf); }
 
         public bool SecondaryTerminated()
         {
@@ -485,6 +473,18 @@ namespace pbrt
             return swl;
         }
 
+        public override string ToString()
+        {
+            string r = "[ SampledWavelengths lambda: [";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                r += $" {lambda[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+            r += "] pdf: [";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                r += $" {pdf[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+            r += "] ]";
+            return r;
+        }
+
         // SampledWavelengths Private Members
         private SampledSpectrumValues lambda, pdf;
     }
@@ -494,8 +494,8 @@ namespace pbrt
     {
         public ConstantSpectrum(Float c) { this.c = c; }
         public override Float Apply(Float lambda) { return c; }
-        public override SampledSpectrum Sample(SampledWavelengths w) { return new SampledSpectrum(c); }
         public override Float MaxValue() { return c; }
+        public override SampledSpectrum Sample(SampledWavelengths w) { return new SampledSpectrum(c); }
         public override string ToString() { return $"[ ConstantSpectrum c: {c:F6} ]"; }
 
         private Float c;
@@ -564,21 +564,21 @@ namespace pbrt
             return m;
         }
 
-        public override string ToString()
-        {
-            string s = $"[ DenselySampledSpectrum lambda_min: {lambda_min} lambda_max: {lambda_max} values: [ ";
-            for (int i = 0; i < values.Length; ++i)
-                s += $"{values[i]:F6} ";
-            s += "] ]";
-            return s;
-        }
-
         public static DenselySampledSpectrum SampleFunction(Func<Float, Float> func, int lambda_min = (int)Lambda_min,
                                                             int lambda_max = (int)Lambda_max, Allocator alloc = null)
         {
             DenselySampledSpectrum s = new DenselySampledSpectrum(lambda_min, lambda_max, alloc);
             for (int lambda = lambda_min; lambda <= lambda_max; ++lambda)
                 s.values[lambda - lambda_min] = func(lambda);
+            return s;
+        }
+
+        public override string ToString()
+        {
+            string s = $"[ DenselySampledSpectrum lambda_min: {lambda_min} lambda_max: {lambda_max} values: [ ";
+            for (int i = 0; i < values.Length; ++i)
+                s += $"{values[i]:F6} ";
+            s += "] ]";
             return s;
         }
 
@@ -616,13 +616,19 @@ namespace pbrt
     // PiecewiseLinearSpectrum Definition
     public sealed class PiecewiseLinearSpectrum : Spectrum
     {
-        // PiecewiseLinearSpectrum Public Methods
-        public PiecewiseLinearSpectrum() { lambdas = new List<Float>(); values = new List<Float>(); }
 
         public void Scale(Float s)
         {
             for (int i = 0; i < values.Count; ++i)
                 values[i] *= s;
+        }
+
+        public override SampledSpectrum Sample(SampledWavelengths lambda)
+        {
+            SampledSpectrum s = new SampledSpectrum();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                s[i] = Apply(lambda[i]);
+            return s;
         }
 
         public override Float MaxValue()
@@ -634,14 +640,8 @@ namespace pbrt
                 m = std.max(m, values[i]);
             return m;
         }
-
-        public override SampledSpectrum Sample(SampledWavelengths lambda)
-        {
-            SampledSpectrum s = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = Apply(lambda[i]);
-            return s;
-        }
+        // PiecewiseLinearSpectrum Public Methods
+        public PiecewiseLinearSpectrum() { lambdas = new List<Float>(); values = new List<Float>(); }
 
         public override Float Apply(Float lambda)
         {
@@ -654,18 +654,6 @@ namespace pbrt
             DCHECK(lambda >= lambdas[o] && lambda <= lambdas[o + 1]);
             Float t = (lambda - lambdas[o]) / (lambdas[o + 1] - lambdas[o]);
             return Lerp(t, values[o], values[o + 1]);
-        }
-
-        public override string ToString()
-        {
-            string name = FindMatchingNamedSpectrum(this);
-            if (!string.IsNullOrEmpty(name))
-                return $"\"{name}\"";
-
-            string ret = "[ PiecewiseLinearSpectrum ";
-            for (int i = 0; i < lambdas.Count; ++i)
-                ret += $"{lambdas[i]:F6} {values[i]:F6} ";
-            return ret + " ]";
         }
 
         public PiecewiseLinearSpectrum(pstd.span<Float> l, pstd.span<Float> v, Allocator alloc = null)
@@ -684,6 +672,18 @@ namespace pbrt
 
         public PiecewiseLinearSpectrum(List<Float> l, List<Float> v, Allocator alloc = null)
             : this(l.ToArray(), v.ToArray(), alloc) { }
+
+        public override string ToString()
+        {
+            string name = FindMatchingNamedSpectrum(this);
+            if (!string.IsNullOrEmpty(name))
+                return $"\"{name}\"";
+
+            string ret = "[ PiecewiseLinearSpectrum ";
+            for (int i = 0; i < lambdas.Count; ++i)
+                ret += $"{lambdas[i]:F6} {values[i]:F6} ";
+            return ret + " ]";
+        }
 
         public static pstd.optional<Spectrum> Read(string fn, Allocator alloc)
         {
@@ -791,19 +791,19 @@ namespace pbrt
         public override Float Apply(Float lambda) { return rsp.Apply(lambda); }
         public override Float MaxValue() { return rsp.MaxValue(); }
 
-        public RGBAlbedoSpectrum(RGBColorSpace cs, RGB rgb)
-        {
-            DCHECK_LE(std.max(rgb.r, std.max(rgb.g, rgb.b)), 1);
-            DCHECK_GE(std.min(rgb.r, std.min(rgb.g, rgb.b)), 0);
-            rsp = cs.ToRGBCoeffs(rgb);
-        }
-
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
                 s[i] = rsp.Apply(lambda[i]);
             return s;
+        }
+
+        public RGBAlbedoSpectrum(RGBColorSpace cs, RGB rgb)
+        {
+            DCHECK_LE(std.max(rgb.r, std.max(rgb.g, rgb.b)), 1);
+            DCHECK_GE(std.min(rgb.r, std.min(rgb.g, rgb.b)), 0);
+            rsp = cs.ToRGBCoeffs(rgb);
         }
 
         public override string ToString() { return $"[ RGBAlbedoSpectrum rsp: {rsp} ]"; }
@@ -847,22 +847,6 @@ namespace pbrt
     // RGBIlluminantSpectrum Definition
     public sealed class RGBIlluminantSpectrum : Spectrum
     {
-        public RGBIlluminantSpectrum() { }
-
-        public RGBIlluminantSpectrum(RGBColorSpace cs, RGB rgb)
-        {
-            illuminant = cs.illuminant;
-            Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
-            scale = 2 * m;
-            rsp = cs.ToRGBCoeffs(scale != 0 ? rgb / scale : new RGB(0, 0, 0));
-        }
-
-        public override Float Apply(Float lambda)
-        {
-            if (illuminant == null)
-                return 0;
-            return scale * rsp.Apply(lambda) * illuminant.Apply(lambda);
-        }
 
         public override Float MaxValue()
         {
@@ -870,8 +854,6 @@ namespace pbrt
                 return 0;
             return scale * rsp.MaxValue() * illuminant.MaxValue();
         }
-
-        public DenselySampledSpectrum Illuminant() { return illuminant; }
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
@@ -881,6 +863,24 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
                 s[i] = scale * rsp.Apply(lambda[i]);
             return s * illuminant.Sample(lambda);
+        }
+
+        public override Float Apply(Float lambda)
+        {
+            if (illuminant == null)
+                return 0;
+            return scale * rsp.Apply(lambda) * illuminant.Apply(lambda);
+        }
+        public RGBIlluminantSpectrum() { }
+
+        public DenselySampledSpectrum Illuminant() { return illuminant; }
+
+        public RGBIlluminantSpectrum(RGBColorSpace cs, RGB rgb)
+        {
+            illuminant = cs.illuminant;
+            Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
+            scale = 2 * m;
+            rsp = cs.ToRGBCoeffs(scale != 0 ? rgb / scale : new RGB(0, 0, 0));
         }
 
         public override string ToString()

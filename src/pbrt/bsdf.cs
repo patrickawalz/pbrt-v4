@@ -110,11 +110,6 @@ namespace pbrt
             return specificBxDF.PDF(wo, wi, mode, sampleFlags);
         }
 
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ BSDF bxdf: %s shadingFrame: %s ]", bxdf, shadingFrame);
-        }
-
         public SampledSpectrum rho(pstd.span<Point2f> u1, pstd.span<Float> uc, pstd.span<Point2f> u2)
         {
             return bxdf.rho(u1, uc, u2);
@@ -126,6 +121,11 @@ namespace pbrt
         }
 
         public void Regularize() { bxdf.Regularize(); }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ BSDF bxdf: %s shadingFrame: %s ]", bxdf, shadingFrame);
+        }
 
         // BSDF Private Members
         private BxDF bxdf;

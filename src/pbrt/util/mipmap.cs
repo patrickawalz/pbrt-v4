@@ -128,6 +128,13 @@ namespace pbrt
             0.0021481365f, 0f
         };
 
+        public Point2i LevelResolution(int level)
+        {
+            CHECK(level >= 0 && level < (int)pyramid.size());
+            return pyramid[level].Resolution();
+        }
+        public int Levels() { return (int)pyramid.size(); }
+
         // MIPMap Method Definitions
         public MIPMap(Image image, RGBColorSpace colorSpace, WrapMode wrapMode, Allocator alloc, MIPMapFilterOptions options)
         {
@@ -145,13 +152,6 @@ namespace pbrt
             for (int i = 0; i < (int)pyramid.size(); ++i)
                 imageMapBytes += (long)pyramid[i].BytesUsed();
         }
-
-        public Point2i LevelResolution(int level)
-        {
-            CHECK(level >= 0 && level < (int)pyramid.size());
-            return pyramid[level].Resolution();
-        }
-        public int Levels() { return (int)pyramid.size(); }
         public RGBColorSpace GetRGBColorSpace() { return colorSpace; }
         public Image GetLevel(int level) { return pyramid[level]; }
 
@@ -220,13 +220,41 @@ namespace pbrt
             return LerpT<T>(lod - ilod, EWA<T>(ilod, st, dst0, dst1), EWA<T>(ilod + 1, st, dst0, dst1));
         }
 
-        public override string ToString()
+        public static MIPMap CreateFromFile(string filename, MIPMapFilterOptions options, WrapMode wrapMode,
+                                            ColorEncoding encoding, Allocator alloc)
         {
-            string levels = "";
-            for (int i = 0; i < (int)pyramid.size(); ++i)
-                levels += (i > 0 ? ", " : "") + pyramid[i].ToString();
-            return StringPrintf("[ MIPMap pyramid: [ %s ] colorSpace: %s wrapMode: %s options: %s ]",
-                                levels, colorSpace.ToString(), pbrt.ToString(wrapMode), options.ToString());
+            ImageAndMetadata imageAndMetadata = Image.Read(filename, alloc, encoding);
+
+            Image image = imageAndMetadata.image;
+            if (image.NChannels() != 1)
+            {
+                // Get the channels in a canonical order..
+                ImageChannelDesc rgbaDesc = image.GetChannelDesc(new string[] { "R", "G", "B", "A" });
+                ImageChannelDesc rgbDesc = image.GetChannelDesc(new string[] { "R", "G", "B" });
+                if (rgbaDesc)
+                {
+                    // Is alpha all ones?
+                    bool allOne = true;
+                    for (int y = 0; y < image.Resolution().y; ++y)
+                        for (int x = 0; x < image.Resolution().x; ++x)
+                            if (image.GetChannels(new Point2i(x, y), rgbaDesc)[3] != 1)
+                                allOne = false;
+                    if (allOne)
+                        image = image.SelectChannels(rgbDesc, alloc);
+                    else
+                        image = image.SelectChannels(rgbaDesc, alloc);
+                }
+                else
+                {
+                    if (rgbDesc)
+                        image = image.SelectChannels(rgbDesc, alloc);
+                    else
+                        ErrorExit($"{filename}: image doesn't have R, G, and B channels");
+                }
+            }
+
+            RGBColorSpace colorSpace = imageAndMetadata.metadata.GetColorSpace();
+            return new MIPMap(image, colorSpace, wrapMode, alloc, options);
         }
 
         // MIPMap Private Methods
@@ -394,41 +422,13 @@ namespace pbrt
             return AddT<T>(MulT<T>(1 - t, a), MulT<T>(t, b));
         }
 
-        public static MIPMap CreateFromFile(string filename, MIPMapFilterOptions options, WrapMode wrapMode,
-                                            ColorEncoding encoding, Allocator alloc)
+        public override string ToString()
         {
-            ImageAndMetadata imageAndMetadata = Image.Read(filename, alloc, encoding);
-
-            Image image = imageAndMetadata.image;
-            if (image.NChannels() != 1)
-            {
-                // Get the channels in a canonical order..
-                ImageChannelDesc rgbaDesc = image.GetChannelDesc(new string[] { "R", "G", "B", "A" });
-                ImageChannelDesc rgbDesc = image.GetChannelDesc(new string[] { "R", "G", "B" });
-                if (rgbaDesc)
-                {
-                    // Is alpha all ones?
-                    bool allOne = true;
-                    for (int y = 0; y < image.Resolution().y; ++y)
-                        for (int x = 0; x < image.Resolution().x; ++x)
-                            if (image.GetChannels(new Point2i(x, y), rgbaDesc)[3] != 1)
-                                allOne = false;
-                    if (allOne)
-                        image = image.SelectChannels(rgbDesc, alloc);
-                    else
-                        image = image.SelectChannels(rgbaDesc, alloc);
-                }
-                else
-                {
-                    if (rgbDesc)
-                        image = image.SelectChannels(rgbDesc, alloc);
-                    else
-                        ErrorExit($"{filename}: image doesn't have R, G, and B channels");
-                }
-            }
-
-            RGBColorSpace colorSpace = imageAndMetadata.metadata.GetColorSpace();
-            return new MIPMap(image, colorSpace, wrapMode, alloc, options);
+            string levels = "";
+            for (int i = 0; i < (int)pyramid.size(); ++i)
+                levels += (i > 0 ? ", " : "") + pyramid[i].ToString();
+            return StringPrintf("[ MIPMap pyramid: [ %s ] colorSpace: %s wrapMode: %s options: %s ]",
+                                levels, colorSpace.ToString(), pbrt.ToString(wrapMode), options.ToString());
         }
 
         // MIPMap Private Members

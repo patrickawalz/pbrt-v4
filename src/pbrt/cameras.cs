@@ -12,6 +12,33 @@ namespace pbrt
     // CameraTransform Definition
     public unsafe class CameraTransform
     {
+
+        public Point3f RenderFromCamera(Point3f p, Float time) { return renderFromCamera.Apply(p, time); }
+
+        public Vector3f RenderFromCamera(Vector3f v, Float time) { return renderFromCamera.Apply(v, time); }
+
+        public Normal3f RenderFromCamera(Normal3f n, Float time) { return renderFromCamera.Apply(n, time); }
+
+        public Ray RenderFromCamera(Ray r) { return renderFromCamera.Apply(r); }
+
+        public RayDifferential RenderFromCamera(RayDifferential r) { return renderFromCamera.Apply(r); }
+
+        public AnimatedTransform RenderFromCamera() { return renderFromCamera; }
+        public Point3f CameraFromRender(Point3f p, Float time) { return renderFromCamera.ApplyInverse(p, time); }
+        public Transform CameraFromRender(Float time) { return pbrt.Inverse(renderFromCamera.Interpolate(time)); }
+
+        public Vector3f CameraFromRender(Vector3f v, Float time) { return renderFromCamera.ApplyInverse(v, time); }
+
+        public Normal3f CameraFromRender(Normal3f v, Float time) { return renderFromCamera.ApplyInverse(v, time); }
+        public Point3f RenderFromWorld(Point3f p) { return worldFromRender.ApplyInverse(p); }
+
+        public Transform RenderFromWorld() { return pbrt.Inverse(worldFromRender); }
+        public Transform CameraFromWorld(Float time)
+        {
+            return pbrt.Inverse(worldFromRender * renderFromCamera.Interpolate(time));
+        }
+
+        public bool CameraFromRenderHasScale() { return renderFromCamera.HasScale(); }
         // CameraTransform Public Methods
         public CameraTransform() { }
 
@@ -52,33 +79,6 @@ namespace pbrt
                                 renderFromWorld * worldFromCamera.endTransform };
             renderFromCamera = new AnimatedTransform(rfc[0], worldFromCamera.startTime, rfc[1], worldFromCamera.endTime);
         }
-
-        public Point3f RenderFromCamera(Point3f p, Float time) { return renderFromCamera.Apply(p, time); }
-        public Point3f CameraFromRender(Point3f p, Float time) { return renderFromCamera.ApplyInverse(p, time); }
-        public Point3f RenderFromWorld(Point3f p) { return worldFromRender.ApplyInverse(p); }
-
-        public Transform RenderFromWorld() { return pbrt.Inverse(worldFromRender); }
-        public Transform CameraFromRender(Float time) { return pbrt.Inverse(renderFromCamera.Interpolate(time)); }
-        public Transform CameraFromWorld(Float time)
-        {
-            return pbrt.Inverse(worldFromRender * renderFromCamera.Interpolate(time));
-        }
-
-        public bool CameraFromRenderHasScale() { return renderFromCamera.HasScale(); }
-
-        public Vector3f RenderFromCamera(Vector3f v, Float time) { return renderFromCamera.Apply(v, time); }
-
-        public Normal3f RenderFromCamera(Normal3f n, Float time) { return renderFromCamera.Apply(n, time); }
-
-        public Ray RenderFromCamera(Ray r) { return renderFromCamera.Apply(r); }
-
-        public RayDifferential RenderFromCamera(RayDifferential r) { return renderFromCamera.Apply(r); }
-
-        public Vector3f CameraFromRender(Vector3f v, Float time) { return renderFromCamera.ApplyInverse(v, time); }
-
-        public Normal3f CameraFromRender(Normal3f v, Float time) { return renderFromCamera.ApplyInverse(v, time); }
-
-        public AnimatedTransform RenderFromCamera() { return renderFromCamera; }
 
         public Transform WorldFromRender() { return worldFromRender; }
 
@@ -165,23 +165,6 @@ namespace pbrt
 
         public override Float SampleTime(Float u) { return pbrt.Lerp(u, shutterOpen, shutterClose); }
 
-        // CameraBase Method Definitions
-        public override void InitMetadata(ImageMetadata metadata)
-        {
-            metadata.cameraFromWorld = cameraTransform.CameraFromWorld(shutterOpen).GetMatrix();
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("cameraTransform: %s shutterOpen: %f shutterClose: %f film: %s " +
-                                        "medium: %s minPosDifferentialX: %s minPosDifferentialY: %s " +
-                                        "minDirDifferentialX: %s minDirDifferentialY: %s ",
-                                        cameraTransform, shutterOpen, shutterClose, film,
-                                        medium != null ? medium.ToString() : "(nullptr)",
-                                        minPosDifferentialX, minPosDifferentialY, minDirDifferentialX,
-                                        minDirDifferentialY);
-        }
-
         public override void Approximate_dp_dxy(Point3f p, Normal3f n, Float time, int samplesPerPixel,
                                                 Vector3f* dpdx, Vector3f* dpdy)
         {
@@ -210,6 +193,10 @@ namespace pbrt
             *dpdy = sppScale * RenderFromCamera(DownZFromCamera.ApplyInverse(py - pDownZ), time);
         }
 
+        protected Ray RenderFromCamera(Ray r) { return cameraTransform.RenderFromCamera(r); }
+
+        protected RayDifferential RenderFromCamera(RayDifferential r) { return cameraTransform.RenderFromCamera(r); }
+
         // CameraBase Protected Members
         protected CameraTransform cameraTransform;
         protected Float shutterOpen, shutterClose;
@@ -217,6 +204,18 @@ namespace pbrt
         protected Medium medium;
         protected Vector3f minPosDifferentialX, minPosDifferentialY;
         protected Vector3f minDirDifferentialX, minDirDifferentialY;
+
+        protected Vector3f RenderFromCamera(Vector3f v, Float time) { return cameraTransform.RenderFromCamera(v, time); }
+
+        protected Normal3f RenderFromCamera(Normal3f v, Float time) { return cameraTransform.RenderFromCamera(v, time); }
+
+        protected Point3f RenderFromCamera(Point3f p, Float time) { return cameraTransform.RenderFromCamera(p, time); }
+
+        protected Vector3f CameraFromRender(Vector3f v, Float time) { return cameraTransform.CameraFromRender(v, time); }
+
+        protected Normal3f CameraFromRender(Normal3f v, Float time) { return cameraTransform.CameraFromRender(v, time); }
+
+        protected Point3f CameraFromRender(Point3f p, Float time) { return cameraTransform.CameraFromRender(p, time); }
 
         // CameraBase Protected Methods
         protected CameraBase() { }
@@ -282,22 +281,6 @@ namespace pbrt
             return new CameraRayDifferential(rd, cr.value().weight);
         }
 
-        protected Ray RenderFromCamera(Ray r) { return cameraTransform.RenderFromCamera(r); }
-
-        protected RayDifferential RenderFromCamera(RayDifferential r) { return cameraTransform.RenderFromCamera(r); }
-
-        protected Vector3f RenderFromCamera(Vector3f v, Float time) { return cameraTransform.RenderFromCamera(v, time); }
-
-        protected Normal3f RenderFromCamera(Normal3f v, Float time) { return cameraTransform.RenderFromCamera(v, time); }
-
-        protected Point3f RenderFromCamera(Point3f p, Float time) { return cameraTransform.RenderFromCamera(p, time); }
-
-        protected Vector3f CameraFromRender(Vector3f v, Float time) { return cameraTransform.CameraFromRender(v, time); }
-
-        protected Normal3f CameraFromRender(Normal3f v, Float time) { return cameraTransform.CameraFromRender(v, time); }
-
-        protected Point3f CameraFromRender(Point3f p, Float time) { return cameraTransform.CameraFromRender(p, time); }
-
         protected void FindMinimumDifferentials(Camera camera)
         {
             minPosDifferentialX = minPosDifferentialY = minDirDifferentialX =
@@ -345,6 +328,23 @@ namespace pbrt
             pbrt.LOG_VERBOSE("Camera min pos differentials: %s, %s", minPosDifferentialX, minPosDifferentialY);
             pbrt.LOG_VERBOSE("Camera min dir differentials: %s, %s", minDirDifferentialX, minDirDifferentialY);
         }
+
+        // CameraBase Method Definitions
+        public override void InitMetadata(ImageMetadata metadata)
+        {
+            metadata.cameraFromWorld = cameraTransform.CameraFromWorld(shutterOpen).GetMatrix();
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("cameraTransform: %s shutterOpen: %f shutterClose: %f film: %s " +
+                                        "medium: %s minPosDifferentialX: %s minPosDifferentialY: %s " +
+                                        "minDirDifferentialX: %s minDirDifferentialY: %s ",
+                                        cameraTransform, shutterOpen, shutterClose, film,
+                                        medium != null ? medium.ToString() : "(nullptr)",
+                                        minPosDifferentialX, minPosDifferentialY, minDirDifferentialX,
+                                        minDirDifferentialY);
+        }
     }
 
     // ProjectiveCamera Definition
@@ -352,6 +352,26 @@ namespace pbrt
     {
         // ProjectiveCamera Public Methods
         protected ProjectiveCamera() { }
+
+        protected ProjectiveCamera(CameraBaseParameters baseParameters, Transform screenFromCamera, Bounds2f screenWindow,
+                                   Float lensRadius, Float focalDistance)
+            : base(baseParameters)
+        {
+            this.screenFromCamera = screenFromCamera;
+            this.lensRadius = lensRadius;
+            this.focalDistance = focalDistance;
+            // Compute projective camera transformations
+            // Compute projective camera screen transformations
+            Transform NDCFromScreen =
+                pbrt.Scale(1 / (screenWindow.pMax.x - screenWindow.pMin.x),
+                                1 / (screenWindow.pMax.y - screenWindow.pMin.y), 1) *
+                pbrt.Translate(new Vector3f(-screenWindow.pMin.x, -screenWindow.pMax.y, 0));
+            Transform rasterFromNDC = pbrt.Scale(film.FullResolution().x, -film.FullResolution().y, 1);
+            rasterFromScreen = rasterFromNDC * NDCFromScreen;
+            screenFromRaster = pbrt.Inverse(rasterFromScreen);
+
+            cameraFromRaster = pbrt.Inverse(screenFromCamera) * screenFromRaster;
+        }
 
         public override void InitMetadata(ImageMetadata metadata)
         {
@@ -373,26 +393,6 @@ namespace pbrt
                                         "lensRadius: %f focalDistance: %f",
                                         screenFromCamera, cameraFromRaster, rasterFromScreen, screenFromRaster,
                                         lensRadius, focalDistance);
-        }
-
-        protected ProjectiveCamera(CameraBaseParameters baseParameters, Transform screenFromCamera, Bounds2f screenWindow,
-                                   Float lensRadius, Float focalDistance)
-            : base(baseParameters)
-        {
-            this.screenFromCamera = screenFromCamera;
-            this.lensRadius = lensRadius;
-            this.focalDistance = focalDistance;
-            // Compute projective camera transformations
-            // Compute projective camera screen transformations
-            Transform NDCFromScreen =
-                pbrt.Scale(1 / (screenWindow.pMax.x - screenWindow.pMin.x),
-                                1 / (screenWindow.pMax.y - screenWindow.pMin.y), 1) *
-                pbrt.Translate(new Vector3f(-screenWindow.pMin.x, -screenWindow.pMax.y, 0));
-            Transform rasterFromNDC = pbrt.Scale(film.FullResolution().x, -film.FullResolution().y, 1);
-            rasterFromScreen = rasterFromNDC * NDCFromScreen;
-            screenFromRaster = pbrt.Inverse(rasterFromScreen);
-
-            cameraFromRaster = pbrt.Inverse(screenFromCamera) * screenFromRaster;
         }
 
         // ProjectiveCamera Protected Members
@@ -417,6 +417,23 @@ namespace pbrt
             minDirDifferentialX = minDirDifferentialY = new Vector3f(0, 0, 0);
             minPosDifferentialX = dxCamera;
             minPosDifferentialY = dyCamera;
+        }
+
+        public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
+        {
+            pbrt.LOG_FATAL("We() unimplemented for OrthographicCamera");
+            return default;
+        }
+
+        public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            pbrt.LOG_FATAL("PDF_We() unimplemented for OrthographicCamera");
+        }
+
+        public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
+        {
+            pbrt.LOG_FATAL("SampleWi() unimplemented for OrthographicCamera");
+            return default;
         }
 
         // OrthographicCamera Method Definitions
@@ -550,23 +567,6 @@ namespace pbrt
                 }
             }
             return new OrthographicCamera(cameraBaseParameters, screen, lensradius, focaldistance);
-        }
-
-        public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
-        {
-            pbrt.LOG_FATAL("We() unimplemented for OrthographicCamera");
-            return default;
-        }
-
-        public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            pbrt.LOG_FATAL("PDF_We() unimplemented for OrthographicCamera");
-        }
-
-        public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
-        {
-            pbrt.LOG_FATAL("SampleWi() unimplemented for OrthographicCamera");
-            return default;
         }
 
         // OrthographicCamera Private Members
@@ -996,6 +996,67 @@ namespace pbrt
             }
         }
 
+        public override pstd.optional<CameraRayDifferential> GenerateRayDifferential(CameraSample sample,
+                                                                                     ref SampledWavelengths lambda)
+        {
+            return CameraBase.GenerateRayDifferential(this, sample, ref lambda);
+        }
+
+        public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
+        {
+            pbrt.LOG_FATAL("We() unimplemented for RealisticCamera");
+            return default;
+        }
+
+        public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            pbrt.LOG_FATAL("PDF_We() unimplemented for RealisticCamera");
+        }
+
+        public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
+        {
+            pbrt.LOG_FATAL("SampleWi() unimplemented for RealisticCamera");
+            return default;
+        }
+
+        // RealisticCamera Private Methods
+        Float LensRearZ() { return elementInterfaces.back().thickness; }
+
+        Float LensFrontZ()
+        {
+            Float zSum = 0;
+            for (ulong i = 0; i < elementInterfaces.size(); ++i)
+                zSum += elementInterfaces[i].thickness;
+            return zSum;
+        }
+
+        Float RearElementRadius() { return elementInterfaces.back().apertureRadius; }
+
+        static bool IntersectSphericalElement(Float radius, Float zCenter, Ray ray, Float* t, Normal3f* n)
+        {
+            // Compute _t0_ and _t1_ for ray--element intersection
+            Point3f o = ray.o - new Vector3f(0, 0, zCenter);
+            Float A = ray.d.x * ray.d.x + ray.d.y * ray.d.y + ray.d.z * ray.d.z;
+            Float B = 2 * (ray.d.x * o.x + ray.d.y * o.y + ray.d.z * o.z);
+            Float C = o.x * o.x + o.y * o.y + o.z * o.z - radius * radius;
+            Float t0, t1;
+            if (!pbrt.Quadratic(A, B, C, &t0, &t1))
+                return false;
+
+            // Select intersection $t$ based on ray direction and element curvature
+            bool useCloserT = (ray.d.z > 0) ^ (radius < 0);
+            *t = useCloserT ? std.min(t0, t1) : std.max(t0, t1);
+            if (*t < 0)
+                return false;
+
+            // Compute surface normal of element at ray intersection point
+            Point3f hit = o + *t * ray.d;
+            *n = new Normal3f(hit.x, hit.y, hit.z);
+            *n = pbrt.FaceForward(pbrt.Normalize(*n), -ray.d);
+
+            return true;
+        }
+
         // RealisticCamera Method Definitions
         public RealisticCamera(CameraBaseParameters baseParameters, List<Float> lensParameters, Float focusDistance,
                                Float setApertureDiameter, Image apertureImage, Allocator alloc)
@@ -1056,67 +1117,6 @@ namespace pbrt
 
             // Compute minimum differentials for _RealisticCamera_
             FindMinimumDifferentials(this);
-        }
-
-        public override pstd.optional<CameraRayDifferential> GenerateRayDifferential(CameraSample sample,
-                                                                                     ref SampledWavelengths lambda)
-        {
-            return CameraBase.GenerateRayDifferential(this, sample, ref lambda);
-        }
-
-        public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
-        {
-            pbrt.LOG_FATAL("We() unimplemented for RealisticCamera");
-            return default;
-        }
-
-        public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            pbrt.LOG_FATAL("PDF_We() unimplemented for RealisticCamera");
-        }
-
-        public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
-        {
-            pbrt.LOG_FATAL("SampleWi() unimplemented for RealisticCamera");
-            return default;
-        }
-
-        // RealisticCamera Private Methods
-        Float LensRearZ() { return elementInterfaces.back().thickness; }
-
-        Float LensFrontZ()
-        {
-            Float zSum = 0;
-            for (ulong i = 0; i < elementInterfaces.size(); ++i)
-                zSum += elementInterfaces[i].thickness;
-            return zSum;
-        }
-
-        Float RearElementRadius() { return elementInterfaces.back().apertureRadius; }
-
-        static bool IntersectSphericalElement(Float radius, Float zCenter, Ray ray, Float* t, Normal3f* n)
-        {
-            // Compute _t0_ and _t1_ for ray--element intersection
-            Point3f o = ray.o - new Vector3f(0, 0, zCenter);
-            Float A = ray.d.x * ray.d.x + ray.d.y * ray.d.y + ray.d.z * ray.d.z;
-            Float B = 2 * (ray.d.x * o.x + ray.d.y * o.y + ray.d.z * o.z);
-            Float C = o.x * o.x + o.y * o.y + o.z * o.z - radius * radius;
-            Float t0, t1;
-            if (!pbrt.Quadratic(A, B, C, &t0, &t1))
-                return false;
-
-            // Select intersection $t$ based on ray direction and element curvature
-            bool useCloserT = (ray.d.z > 0) ^ (radius < 0);
-            *t = useCloserT ? std.min(t0, t1) : std.max(t0, t1);
-            if (*t < 0)
-                return false;
-
-            // Compute surface normal of element at ray intersection point
-            Point3f hit = o + *t * ray.d;
-            *n = new Normal3f(hit.x, hit.y, hit.z);
-            *n = pbrt.FaceForward(pbrt.Normalize(*n), -ray.d);
-
-            return true;
         }
 
         Float TraceLensesFromFilm(Ray rCamera, Ray* rOut)
@@ -1192,6 +1192,157 @@ namespace pbrt
             return weight;
         }
 
+        static void ComputeCardinalPoints(Ray rIn, Ray rOut, Float* pz, Float* fz)
+        {
+            Float tf = -rOut.o.x / rOut.d.x;
+            *fz = -rOut.Apply(tf).z;
+            Float tp = (rIn.o.x - rOut.o.x) / rOut.d.x;
+            *pz = -rOut.Apply(tp).z;
+        }
+
+        // (C's printf/fprintf(stderr, ...) for the debugging output below)
+        static void printf(string fmt, params object[] args)
+        {
+            Console.Out.Write(pbrt.StringPrintf(fmt, args));
+        }
+
+        void ComputeThickLensApproximation(Float[] pz, Float[] fz)
+        {
+            // Find height $x$ from optical axis for parallel rays
+            Float x = .001f * film.Diagonal();
+
+            // Compute cardinal points for film side of lens system
+            Ray rScene = new Ray(new Point3f(x, 0, LensFrontZ() + 1), new Vector3f(0, 0, -1));
+            Ray rFilm;
+            if (TraceLensesFromScene(rScene, &rFilm) == 0)
+                pbrt.ErrorExit("Unable to trace ray from scene to film for thick lens " +
+                                  "approximation. Is aperture stop extremely small?");
+            Float p0, f0;
+            ComputeCardinalPoints(rScene, rFilm, &p0, &f0);
+            pz[0] = p0; fz[0] = f0;
+
+            // Compute cardinal points for scene side of lens system
+            rFilm = new Ray(new Point3f(x, 0, LensRearZ() - 1), new Vector3f(0, 0, 1));
+            if (TraceLensesFromFilm(rFilm, &rScene) == 0)
+                pbrt.ErrorExit("Unable to trace ray from film to scene for thick lens " +
+                                  "approximation. Is aperture stop extremely small?");
+            Float p1, f1;
+            ComputeCardinalPoints(rFilm, rScene, &p1, &f1);
+            pz[1] = p1; fz[1] = f1;
+        }
+
+        Float FocusThickLens(Float focusDistance)
+        {
+            Float[] pz = new Float[2], fz = new Float[2];
+            ComputeThickLensApproximation(pz, fz);
+            pbrt.LOG_VERBOSE("Cardinal points: p' = %f f' = %f, p = %f f = %f.\n", pz[0], fz[0], pz[1], fz[1]);
+            pbrt.LOG_VERBOSE("Effective focal length %f\n", fz[0] - pz[0]);
+            // Compute translation of lens, _delta_, to focus at _focusDistance_
+            Float f = fz[0] - pz[0];
+            Float z = -focusDistance;
+            Float c = (pz[1] - z - pz[0]) * (pz[1] - z - 4 * f - pz[0]);
+            if (c <= 0)
+                pbrt.ErrorExit(pbrt.StringPrintf("Coefficient must be positive. It looks focusDistance %f " +
+                                                       " is too short for a given lenses configuration",
+                                                       focusDistance));
+            Float delta = (pz[1] - z + pz[0] - std.sqrt(c)) / 2;
+
+            return elementInterfaces.back().thickness + delta;
+        }
+
+        Bounds2f BoundExitPupil(Float filmX0, Float filmX1)
+        {
+            Bounds2f pupilBounds = new Bounds2f();
+            // Sample a collection of points on the rear lens to find exit pupil
+            const int nSamples = 1024 * 1024;
+            // Compute bounding box of projection of rear element on sampling plane
+            Float rearRadius = RearElementRadius();
+            Bounds2f projRearBounds = new Bounds2f(new Point2f(-1.5f * rearRadius, -1.5f * rearRadius),
+                                                   new Point2f(1.5f * rearRadius, 1.5f * rearRadius));
+
+            for (int i = 0; i < nSamples; ++i)
+            {
+                // Find location of sample points on $x$ segment and rear lens element
+                Point3f pFilm = new Point3f(pbrt.Lerp((i + 0.5f) / nSamples, filmX0, filmX1), 0, 0);
+                Float[] u = { pbrt.RadicalInverse(0, (uint64_t)i), pbrt.RadicalInverse(1, (uint64_t)i) };
+                Point3f pRear = new Point3f(pbrt.Lerp(u[0], projRearBounds.pMin.x, projRearBounds.pMax.x),
+                                            pbrt.Lerp(u[1], projRearBounds.pMin.y, projRearBounds.pMax.y),
+                                            LensRearZ());
+
+                // Expand pupil bounds if ray makes it through the lens system
+                if (!pbrt.Inside(new Point2f(pRear.x, pRear.y), pupilBounds) &&
+                    TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null) != 0)
+                    pupilBounds = pbrt.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
+            }
+
+            // Return degenerate bounds if no rays made it through the lens system
+            if (pupilBounds.IsDegenerate())
+            {
+                pbrt.LOG_VERBOSE("Unable to find exit pupil in x = [%f,%f] on film.", filmX0, filmX1);
+                return pupilBounds;
+            }
+
+            // Expand bounds to account for sample spacing
+            pupilBounds = pbrt.Expand(pupilBounds, 2 * pbrt.Length(projRearBounds.Diagonal()) / std.sqrt((Float)nSamples));
+
+            return pupilBounds;
+        }
+
+        pstd.optional<ExitPupilSample> SampleExitPupil(Point2f pFilm, Point2f uLens)
+        {
+            // Find exit pupil bound for sample distance from film center
+            Float rFilm = std.sqrt(pbrt.Sqr(pFilm.x) + pbrt.Sqr(pFilm.y));
+            int rIndex = (int)(rFilm / (film.Diagonal() / 2) * exitPupilBounds.size());
+            rIndex = std.min((int)exitPupilBounds.size() - 1, rIndex);
+            Bounds2f pupilBounds = exitPupilBounds[(ulong)rIndex];
+            if (pupilBounds.IsDegenerate())
+                return default;
+
+            // Generate sample point inside exit pupil bound
+            Point2f pLens = pupilBounds.Lerp(uLens);
+            Float pdf = 1 / pupilBounds.Area();
+
+            // Return sample point rotated by angle of _pFilm_ with $+x$ axis
+            Float sinTheta = (rFilm != 0) ? pFilm.y / rFilm : 0;
+            Float cosTheta = (rFilm != 0) ? pFilm.x / rFilm : 1;
+            Point3f pPupil = new Point3f(cosTheta * pLens.x - sinTheta * pLens.y,
+                                         sinTheta * pLens.x + cosTheta * pLens.y, LensRearZ());
+            return new ExitPupilSample { pPupil = pPupil, pdf = pdf };
+        }
+
+        public override pstd.optional<CameraRay> GenerateRay(CameraSample sample, ref SampledWavelengths lambda)
+        {
+            // Find point on film, _pFilm_, corresponding to _sample.pFilm_
+            Point2f s = new Point2f(sample.pFilm.x / film.FullResolution().x, sample.pFilm.y / film.FullResolution().y);
+            Point2f pFilm2 = physicalExtent.Lerp(s);
+            Point3f pFilm = new Point3f(-pFilm2.x, pFilm2.y, 0);
+
+            // Trace ray from _pFilm_ through lens system
+            pstd.optional<ExitPupilSample> eps = SampleExitPupil(new Point2f(pFilm.x, pFilm.y), sample.pLens);
+            if (!eps)
+                return default;
+            Ray rFilm = new Ray(pFilm, eps.value().pPupil - pFilm);
+            Ray ray;
+            Float weight = TraceLensesFromFilm(rFilm, &ray);
+            if (weight == 0)
+                return default;
+
+            // Finish initialization of _RealisticCamera_ ray
+            ray.time = SampleTime(sample.time);
+            ray.medium = medium;
+            ray = RenderFromCamera(ray);
+            ray.d = pbrt.Normalize(ray.d);
+
+            // Compute weighting for _RealisticCamera_ ray
+            Float cosTheta = pbrt.Normalize(rFilm.d).z;
+            weight *= pbrt.Pow(4, cosTheta) / (eps.value().pdf * pbrt.Sqr(LensRearZ()));
+
+            return new CameraRay(ray, new SampledSpectrum(weight));
+        }
+
+        // (function-local "static RNG rng" in TestExitPupilBounds)
+        static RNG testExitPupilBoundsRng = new RNG();
+
         Float TraceLensesFromScene(Ray rCamera, Ray* rOut)
         {
             Float elementZ = -LensFrontZ();
@@ -1246,12 +1397,6 @@ namespace pbrt
                 *rOut = new Ray(new Point3f(rLens.o.x, rLens.o.y, -rLens.o.z),
                                 new Vector3f(rLens.d.x, rLens.d.y, -rLens.d.z), rLens.time);
             return 1;
-        }
-
-        // (C's printf/fprintf(stderr, ...) for the debugging output below)
-        static void printf(string fmt, params object[] args)
-        {
-            Console.Out.Write(pbrt.StringPrintf(fmt, args));
         }
 
         public void DrawLensSystem()
@@ -1565,151 +1710,6 @@ namespace pbrt
                 }
             }
             Console.Error.Write(".");
-        }
-
-        // (function-local "static RNG rng" in TestExitPupilBounds)
-        static RNG testExitPupilBoundsRng = new RNG();
-
-        static void ComputeCardinalPoints(Ray rIn, Ray rOut, Float* pz, Float* fz)
-        {
-            Float tf = -rOut.o.x / rOut.d.x;
-            *fz = -rOut.Apply(tf).z;
-            Float tp = (rIn.o.x - rOut.o.x) / rOut.d.x;
-            *pz = -rOut.Apply(tp).z;
-        }
-
-        void ComputeThickLensApproximation(Float[] pz, Float[] fz)
-        {
-            // Find height $x$ from optical axis for parallel rays
-            Float x = .001f * film.Diagonal();
-
-            // Compute cardinal points for film side of lens system
-            Ray rScene = new Ray(new Point3f(x, 0, LensFrontZ() + 1), new Vector3f(0, 0, -1));
-            Ray rFilm;
-            if (TraceLensesFromScene(rScene, &rFilm) == 0)
-                pbrt.ErrorExit("Unable to trace ray from scene to film for thick lens " +
-                                  "approximation. Is aperture stop extremely small?");
-            Float p0, f0;
-            ComputeCardinalPoints(rScene, rFilm, &p0, &f0);
-            pz[0] = p0; fz[0] = f0;
-
-            // Compute cardinal points for scene side of lens system
-            rFilm = new Ray(new Point3f(x, 0, LensRearZ() - 1), new Vector3f(0, 0, 1));
-            if (TraceLensesFromFilm(rFilm, &rScene) == 0)
-                pbrt.ErrorExit("Unable to trace ray from film to scene for thick lens " +
-                                  "approximation. Is aperture stop extremely small?");
-            Float p1, f1;
-            ComputeCardinalPoints(rFilm, rScene, &p1, &f1);
-            pz[1] = p1; fz[1] = f1;
-        }
-
-        Float FocusThickLens(Float focusDistance)
-        {
-            Float[] pz = new Float[2], fz = new Float[2];
-            ComputeThickLensApproximation(pz, fz);
-            pbrt.LOG_VERBOSE("Cardinal points: p' = %f f' = %f, p = %f f = %f.\n", pz[0], fz[0], pz[1], fz[1]);
-            pbrt.LOG_VERBOSE("Effective focal length %f\n", fz[0] - pz[0]);
-            // Compute translation of lens, _delta_, to focus at _focusDistance_
-            Float f = fz[0] - pz[0];
-            Float z = -focusDistance;
-            Float c = (pz[1] - z - pz[0]) * (pz[1] - z - 4 * f - pz[0]);
-            if (c <= 0)
-                pbrt.ErrorExit(pbrt.StringPrintf("Coefficient must be positive. It looks focusDistance %f " +
-                                                       " is too short for a given lenses configuration",
-                                                       focusDistance));
-            Float delta = (pz[1] - z + pz[0] - std.sqrt(c)) / 2;
-
-            return elementInterfaces.back().thickness + delta;
-        }
-
-        Bounds2f BoundExitPupil(Float filmX0, Float filmX1)
-        {
-            Bounds2f pupilBounds = new Bounds2f();
-            // Sample a collection of points on the rear lens to find exit pupil
-            const int nSamples = 1024 * 1024;
-            // Compute bounding box of projection of rear element on sampling plane
-            Float rearRadius = RearElementRadius();
-            Bounds2f projRearBounds = new Bounds2f(new Point2f(-1.5f * rearRadius, -1.5f * rearRadius),
-                                                   new Point2f(1.5f * rearRadius, 1.5f * rearRadius));
-
-            for (int i = 0; i < nSamples; ++i)
-            {
-                // Find location of sample points on $x$ segment and rear lens element
-                Point3f pFilm = new Point3f(pbrt.Lerp((i + 0.5f) / nSamples, filmX0, filmX1), 0, 0);
-                Float[] u = { pbrt.RadicalInverse(0, (uint64_t)i), pbrt.RadicalInverse(1, (uint64_t)i) };
-                Point3f pRear = new Point3f(pbrt.Lerp(u[0], projRearBounds.pMin.x, projRearBounds.pMax.x),
-                                            pbrt.Lerp(u[1], projRearBounds.pMin.y, projRearBounds.pMax.y),
-                                            LensRearZ());
-
-                // Expand pupil bounds if ray makes it through the lens system
-                if (!pbrt.Inside(new Point2f(pRear.x, pRear.y), pupilBounds) &&
-                    TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null) != 0)
-                    pupilBounds = pbrt.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
-            }
-
-            // Return degenerate bounds if no rays made it through the lens system
-            if (pupilBounds.IsDegenerate())
-            {
-                pbrt.LOG_VERBOSE("Unable to find exit pupil in x = [%f,%f] on film.", filmX0, filmX1);
-                return pupilBounds;
-            }
-
-            // Expand bounds to account for sample spacing
-            pupilBounds = pbrt.Expand(pupilBounds, 2 * pbrt.Length(projRearBounds.Diagonal()) / std.sqrt((Float)nSamples));
-
-            return pupilBounds;
-        }
-
-        pstd.optional<ExitPupilSample> SampleExitPupil(Point2f pFilm, Point2f uLens)
-        {
-            // Find exit pupil bound for sample distance from film center
-            Float rFilm = std.sqrt(pbrt.Sqr(pFilm.x) + pbrt.Sqr(pFilm.y));
-            int rIndex = (int)(rFilm / (film.Diagonal() / 2) * exitPupilBounds.size());
-            rIndex = std.min((int)exitPupilBounds.size() - 1, rIndex);
-            Bounds2f pupilBounds = exitPupilBounds[(ulong)rIndex];
-            if (pupilBounds.IsDegenerate())
-                return default;
-
-            // Generate sample point inside exit pupil bound
-            Point2f pLens = pupilBounds.Lerp(uLens);
-            Float pdf = 1 / pupilBounds.Area();
-
-            // Return sample point rotated by angle of _pFilm_ with $+x$ axis
-            Float sinTheta = (rFilm != 0) ? pFilm.y / rFilm : 0;
-            Float cosTheta = (rFilm != 0) ? pFilm.x / rFilm : 1;
-            Point3f pPupil = new Point3f(cosTheta * pLens.x - sinTheta * pLens.y,
-                                         sinTheta * pLens.x + cosTheta * pLens.y, LensRearZ());
-            return new ExitPupilSample { pPupil = pPupil, pdf = pdf };
-        }
-
-        public override pstd.optional<CameraRay> GenerateRay(CameraSample sample, ref SampledWavelengths lambda)
-        {
-            // Find point on film, _pFilm_, corresponding to _sample.pFilm_
-            Point2f s = new Point2f(sample.pFilm.x / film.FullResolution().x, sample.pFilm.y / film.FullResolution().y);
-            Point2f pFilm2 = physicalExtent.Lerp(s);
-            Point3f pFilm = new Point3f(-pFilm2.x, pFilm2.y, 0);
-
-            // Trace ray from _pFilm_ through lens system
-            pstd.optional<ExitPupilSample> eps = SampleExitPupil(new Point2f(pFilm.x, pFilm.y), sample.pLens);
-            if (!eps)
-                return default;
-            Ray rFilm = new Ray(pFilm, eps.value().pPupil - pFilm);
-            Ray ray;
-            Float weight = TraceLensesFromFilm(rFilm, &ray);
-            if (weight == 0)
-                return default;
-
-            // Finish initialization of _RealisticCamera_ ray
-            ray.time = SampleTime(sample.time);
-            ray.medium = medium;
-            ray = RenderFromCamera(ray);
-            ray.d = pbrt.Normalize(ray.d);
-
-            // Compute weighting for _RealisticCamera_ ray
-            Float cosTheta = pbrt.Normalize(rFilm.d).z;
-            weight *= pbrt.Pow(4, cosTheta) / (eps.value().pdf * pbrt.Sqr(LensRearZ()));
-
-            return new CameraRay(ray, new SampledSpectrum(weight));
         }
 
         public override string ToString()

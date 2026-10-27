@@ -366,29 +366,7 @@ namespace pbrt
             CHECK_EQ(totalNodes.load(), offset);
         }
 
-        const int LinearBVHNodeBytes = 32;  // sizeof(LinearBVHNode) in pbrt (alignas(32))
-
-        public static BVHAggregate Create(List<Primitive> prims, ParameterDictionary parameters)
-        {
-            string splitMethodName = parameters.GetOneString("splitmethod", "sah");
-            BVHAggregate.SplitMethod splitMethod;
-            if (splitMethodName == "sah")
-                splitMethod = BVHAggregate.SplitMethod.SAH;
-            else if (splitMethodName == "hlbvh")
-                splitMethod = BVHAggregate.SplitMethod.HLBVH;
-            else if (splitMethodName == "middle")
-                splitMethod = BVHAggregate.SplitMethod.Middle;
-            else if (splitMethodName == "equal")
-                splitMethod = BVHAggregate.SplitMethod.EqualCounts;
-            else
-            {
-                Warning(StringPrintf("BVH split method \"%s\" unknown.  Using \"sah\".", splitMethodName));
-                splitMethod = BVHAggregate.SplitMethod.SAH;
-            }
-
-            int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
-            return new BVHAggregate(prims, maxPrimsInNode, splitMethod);
-        }
+        const int LinearBVHNodeBytes = 32;
 
         BVHBuildNode buildRecursive(pstd.span<BVHPrimitive> bvhPrimitives,
                                     AtomicInt totalNodes, AtomicInt orderedPrimsOffset,
@@ -992,6 +970,28 @@ namespace pbrt
             BVHBuildNode c1 = this.buildUpperSAH(alloc, treeletRoots, mid, end, totalNodes);
             node.InitInterior(dim, c0, c1);
             return node;
+        }  // sizeof(LinearBVHNode) in pbrt (alignas(32))
+
+        public static BVHAggregate Create(List<Primitive> prims, ParameterDictionary parameters)
+        {
+            string splitMethodName = parameters.GetOneString("splitmethod", "sah");
+            BVHAggregate.SplitMethod splitMethod;
+            if (splitMethodName == "sah")
+                splitMethod = BVHAggregate.SplitMethod.SAH;
+            else if (splitMethodName == "hlbvh")
+                splitMethod = BVHAggregate.SplitMethod.HLBVH;
+            else if (splitMethodName == "middle")
+                splitMethod = BVHAggregate.SplitMethod.Middle;
+            else if (splitMethodName == "equal")
+                splitMethod = BVHAggregate.SplitMethod.EqualCounts;
+            else
+            {
+                Warning(StringPrintf("BVH split method \"%s\" unknown.  Using \"sah\".", splitMethodName));
+                splitMethod = BVHAggregate.SplitMethod.SAH;
+            }
+
+            int maxPrimsInNode = parameters.GetOneInt("maxnodeprims", 4);
+            return new BVHAggregate(prims, maxPrimsInNode, splitMethod);
         }
 
         // BVHAggregate Private Members
@@ -1088,6 +1088,8 @@ namespace pbrt
                 kdNodesVisited = 0;
             });
 
+        public override Bounds3f Bounds() { return bounds; }
+
         // KdTreeAggregate Method Definitions
         public KdTreeAggregate(List<Primitive> p, int isectCost = 5, int traversalCost = 1,
                                Float emptyBonus = 0.5f, int maxPrims = 1, int maxDepth = -1)
@@ -1128,19 +1130,6 @@ namespace pbrt
             buildTree(0, bounds, primBounds, new pstd.span<int>(primNums), maxDepth, edges, new pstd.span<int>(prims0),
                       new pstd.span<int>(prims1), 0);
         }
-
-        public static KdTreeAggregate Create(List<Primitive> prims, ParameterDictionary parameters)
-        {
-            int isectCost = parameters.GetOneInt("intersectcost", 5);
-            int travCost = parameters.GetOneInt("traversalcost", 1);
-            Float emptyBonus = parameters.GetOneFloat("emptybonus", 0.5f);
-            int maxPrims = parameters.GetOneInt("maxprims", 1);
-            int maxDepth = parameters.GetOneInt("maxdepth", -1);
-            return new KdTreeAggregate(prims, isectCost, travCost, emptyBonus,
-                                       maxPrims, maxDepth);
-        }
-
-        public override Bounds3f Bounds() { return bounds; }
 
         void buildTree(int nodeNum, Bounds3f nodeBounds,
                        List<Bounds3f> allPrimBounds,
@@ -1483,6 +1472,17 @@ namespace pbrt
             }
             kdNodesVisited += nodesVisited;
             return false;
+        }
+
+        public static KdTreeAggregate Create(List<Primitive> prims, ParameterDictionary parameters)
+        {
+            int isectCost = parameters.GetOneInt("intersectcost", 5);
+            int travCost = parameters.GetOneInt("traversalcost", 1);
+            Float emptyBonus = parameters.GetOneFloat("emptybonus", 0.5f);
+            int maxPrims = parameters.GetOneInt("maxprims", 1);
+            int maxDepth = parameters.GetOneInt("maxdepth", -1);
+            return new KdTreeAggregate(prims, isectCost, travCost, emptyBonus,
+                                       maxPrims, maxDepth);
         }
 
         // KdTreeAggregate Private Members

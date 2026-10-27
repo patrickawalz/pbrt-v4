@@ -209,11 +209,6 @@ namespace pbrt
                 new Vector3f(alpha_x * nh.x, alpha_y * nh.y, std.max<Float>(1e-6f, nh.z)));
         }
 
-        public override string ToString()
-        {
-            return $"[ TrowbridgeReitzDistribution alpha_x: {alpha_x} alpha_y: {alpha_y} ]";
-        }
-
         // Note that this should probably instead be "return Sqr(roughness)" to
         // be more perceptually uniform, though this wasn't noticed until some
         // time after pbrt-v4 shipped: https://github.com/mmp/pbrt-v4/issues/479.
@@ -227,6 +222,11 @@ namespace pbrt
                 alpha_x = Clamp(2 * alpha_x, 0.1f, 0.3f);
             if (alpha_y < 0.3f)
                 alpha_y = Clamp(2 * alpha_y, 0.1f, 0.3f);
+        }
+
+        public override string ToString()
+        {
+            return $"[ TrowbridgeReitzDistribution alpha_x: {alpha_x} alpha_y: {alpha_y} ]";
         }
 
         // TrowbridgeReitzDistribution Private Members

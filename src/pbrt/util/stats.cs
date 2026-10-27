@@ -138,6 +138,15 @@ namespace pbrt
     // StatRegisterer Definition
     public unsafe class StatRegisterer
     {
+
+        public static void CallCallbacks(StatsAccumulator accum)
+        {
+            Action<StatsAccumulator>[] funcs;
+            lock (StatRegistry.statsLock)
+                funcs = StatRegistry.statFuncs.ToArray();
+            foreach (Action<StatsAccumulator> func in funcs)
+                func(accum);
+        }
         // StatRegisterer Public Methods
         public StatRegisterer(Action<StatsAccumulator> func, Action<Point2i, int, PixelStatsAccumulator> pfunc = null)
         {
@@ -148,15 +157,6 @@ namespace pbrt
                 if (pfunc != null)
                     StatRegistry.pixelStatFuncs.Add(pfunc);
             }
-        }
-
-        public static void CallCallbacks(StatsAccumulator accum)
-        {
-            Action<StatsAccumulator>[] funcs;
-            lock (StatRegistry.statsLock)
-                funcs = StatRegistry.statFuncs.ToArray();
-            foreach (Action<StatsAccumulator> func in funcs)
-                func(accum);
         }
 
         public static void CallPixelCallbacks(Point2i p, PixelStatsAccumulator accum)
@@ -307,17 +307,17 @@ namespace pbrt
             public List<Image> pixelRatioImages = new List<Image>();
         }
 
-        // StatsAccumulator Public Methods
-        public StatsAccumulator()
-        {
-            stats = new Stats();
-        }
-
         public void ReportCounter(string name, int64_t val)
         {
             int64_t cur;
             stats.counters.TryGetValue(name, out cur);
             stats.counters[name] = cur + val;
+        }
+
+        // StatsAccumulator Public Methods
+        public StatsAccumulator()
+        {
+            stats = new Stats();
         }
 
         public void ReportMemoryCounter(string name, int64_t val)

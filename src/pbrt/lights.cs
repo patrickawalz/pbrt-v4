@@ -87,13 +87,13 @@ namespace pbrt
             pbrt.CHECK(this.intr.value().n != new Normal3f(0, 0, 0));
         }
 
+        public Float AbsCosTheta(Vector3f w) { return intr ? pbrt.AbsDot(w, intr.value().n) : 1; }
+
         public override string ToString()
         {
             return pbrt.StringPrintf("[ LightLeSample L: %s ray: %s intr: %s pdfPos: %f pdfDir: %f ]", L, ray,
                                         intr ? intr.value().ToString() : "(unset)", pdfPos, pdfDir);
         }
-
-        public Float AbsCosTheta(Vector3f w) { return intr ? pbrt.AbsDot(w, intr.value().n) : 1; }
 
         public SampledSpectrum L;
         public Ray ray;
@@ -131,6 +131,8 @@ namespace pbrt
     // LightBounds Definition
     public unsafe struct LightBounds
     {
+
+        public Point3f Centroid() { return (bounds.pMin + bounds.pMax) / 2; }
         // LightBounds Public Methods
         public LightBounds(Bounds3f b, Vector3f w, Float phi, Float cosTheta_o, Float cosTheta_e, bool twoSided)
         {
@@ -142,7 +144,12 @@ namespace pbrt
             this.twoSided = twoSided;
         }
 
-        public Point3f Centroid() { return (bounds.pMin + bounds.pMax) / 2; }
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ LightBounds bounds: %s w: %s phi: %f " +
+                                        "cosTheta_o: %f cosTheta_e: %f twoSided: %s ]",
+                                        bounds, w, phi, cosTheta_o, cosTheta_e, twoSided);
+        }
 
         public Float Importance(Point3f p, Normal3f n)
         {
@@ -205,13 +212,6 @@ namespace pbrt
             return importance;
         }
 
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ LightBounds bounds: %s w: %s phi: %f " +
-                                        "cosTheta_o: %f cosTheta_e: %f twoSided: %s ]",
-                                        bounds, w, phi, cosTheta_o, cosTheta_e, twoSided);
-        }
-
         public Bounds3f bounds;
         public Float phi;
         public Vector3f w;
@@ -242,6 +242,18 @@ namespace pbrt
             imageBytes = 0;
         });
 
+        public override LightType Type() { return type; }
+
+        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
+        {
+            return new SampledSpectrum(0.0f);
+        }
+
+        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        {
+            return new SampledSpectrum(0.0f);
+        }
+
         // LightBase Public Methods
         public LightBase(LightType type, Transform renderFromLight, MediumInterface mediumInterface)
         {
@@ -251,24 +263,18 @@ namespace pbrt
             ++numLights;
         }
 
-        public override LightType Type() { return type; }
-
-        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
-        {
-            return new SampledSpectrum(0.0f);
-        }
-
-        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
-        {
-            return new SampledSpectrum(0.0f);
-        }
-
         // (C++ repeats these two in every non-area light class.)
         public override void Preprocess(Bounds3f sceneBounds) { }
 
         public override void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
         {
             pbrt.LOG_FATAL("Shouldn't be called for non-area lights");
+        }
+
+        protected string BaseToString()
+        {
+            return pbrt.StringPrintf("type: %s mediumInterface: %s renderFromLight: %s", pbrt.ToString(type),
+                                        mediumInterface, renderFromLight);
         }
 
         protected static DenselySampledSpectrum LookupSpectrum(Spectrum s)
@@ -281,12 +287,6 @@ namespace pbrt
             Func<Allocator, DenselySampledSpectrum, DenselySampledSpectrum> create =
                 (Allocator alloc, DenselySampledSpectrum ds) => new DenselySampledSpectrum(ds, alloc);
             return spectrumCache.Lookup(new DenselySampledSpectrum(s, (Allocator)null), create);
-        }
-
-        protected string BaseToString()
-        {
-            return pbrt.StringPrintf("type: %s mediumInterface: %s renderFromLight: %s", pbrt.ToString(type),
-                                        mediumInterface, renderFromLight);
         }
 
         protected LightType type;
@@ -305,6 +305,46 @@ namespace pbrt
         {
             this.I = LookupSpectrum(I);
             this.scale = scale;
+        }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            *pdfPos = 0;
+            *pdfDir = pbrt.UniformSpherePDF();
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            Vector3f wi = pbrt.Normalize(p - ctx.p());
+            SampledSpectrum Li = scale * I.Sample(lambda) / pbrt.DistanceSquared(p, ctx.p());
+            return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
+        }
+
+        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false) { return 0; }
+
+        public override SampledSpectrum Phi(SampledWavelengths lambda) { return 4 * Pi * scale * I.Sample(lambda); }
+
+        public override pstd.optional<LightBounds> Bounds()
+        {
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            Float phi = 4 * Pi * scale * I.MaxValue();
+            return new LightBounds(new Bounds3f(p, p), new Vector3f(0, 0, 1), phi, std.cos(Pi), std.cos(Pi / 2), false);
+        }
+
+        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
+                                                              Float time)
+        {
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            Ray ray = new Ray(p, pbrt.SampleUniformSphere(u1), time, mediumInterface.outside);
+            return new LightLeSample(scale * I.Sample(lambda), ray, 1, pbrt.UniformSpherePDF());
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ PointLight %s I: %s scale: %f ]", BaseToString(), I, scale);
         }
 
         public static PointLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
@@ -330,46 +370,6 @@ namespace pbrt
             return new PointLight(finalRenderFromLight, new MediumInterface(medium), I, sc);
         }
 
-        public override SampledSpectrum Phi(SampledWavelengths lambda) { return 4 * Pi * scale * I.Sample(lambda); }
-
-        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
-                                                              Float time)
-        {
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Ray ray = new Ray(p, pbrt.SampleUniformSphere(u1), time, mediumInterface.outside);
-            return new LightLeSample(scale * I.Sample(lambda), ray, 1, pbrt.UniformSpherePDF());
-        }
-
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            *pdfPos = 0;
-            *pdfDir = pbrt.UniformSpherePDF();
-        }
-
-        public override pstd.optional<LightBounds> Bounds()
-        {
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Float phi = 4 * Pi * scale * I.MaxValue();
-            return new LightBounds(new Bounds3f(p, p), new Vector3f(0, 0, 1), phi, std.cos(Pi), std.cos(Pi / 2), false);
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ PointLight %s I: %s scale: %f ]", BaseToString(), I, scale);
-        }
-
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Vector3f wi = pbrt.Normalize(p - ctx.p());
-            SampledSpectrum Li = scale * I.Sample(lambda) / pbrt.DistanceSquared(p, ctx.p());
-            return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
-        }
-
-        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false) { return 0; }
-
         // PointLight Private Members
         DenselySampledSpectrum I;
         Float scale;
@@ -384,6 +384,58 @@ namespace pbrt
         {
             this.Lemit = LookupSpectrum(Lemit);
             this.scale = scale;
+        }
+
+        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false) { return 0; }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            *pdfPos = 1 / (Pi * sceneRadius * sceneRadius);
+            *pdfDir = 0;
+        }
+
+        public override pstd.optional<LightBounds> Bounds() { return default; }
+
+        public override void Preprocess(Bounds3f sceneBounds)
+        {
+            Point3f c; Float r;
+            sceneBounds.BoundingSphere(&c, &r);
+            sceneCenter = c;
+            sceneRadius = r;
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            Vector3f wi = pbrt.Normalize(renderFromLight.Apply(new Vector3f(0, 0, 1)));
+            Point3f pOutside = ctx.p() + wi * (2 * sceneRadius);
+            return new LightLiSample(scale * Lemit.Sample(lambda), wi, 1, new Interaction(pOutside, (MediumInterface)null));
+        }
+
+        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        {
+            return scale * Lemit.Sample(lambda) * Pi * pbrt.Sqr(sceneRadius);
+        }
+
+        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
+                                                              Float time)
+        {
+            // Choose point on disk oriented toward infinite light direction
+            Vector3f w = pbrt.Normalize(renderFromLight.Apply(new Vector3f(0, 0, 1)));
+            Frame wFrame = Frame.FromZ(w);
+            Point2f cd = pbrt.SampleUniformDiskConcentric(u1);
+            Point3f pDisk = sceneCenter + sceneRadius * wFrame.FromLocal(new Vector3f(cd.x, cd.y, 0));
+
+            // Compute _DistantLight_ light ray
+            Ray ray = new Ray(pDisk + sceneRadius * w, -w, time);
+
+            return new LightLeSample(scale * Lemit.Sample(lambda), ray, 1 / (Pi * pbrt.Sqr(sceneRadius)), 1);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ DistantLight %s Lemit: %s scale: %f ]", BaseToString(), Lemit, scale);
         }
 
         public static DistantLight Create(Transform renderFromLight, ParameterDictionary parameters,
@@ -414,58 +466,6 @@ namespace pbrt
             return new DistantLight(finalRenderFromLight, L, sc);
         }
 
-        public override SampledSpectrum Phi(SampledWavelengths lambda)
-        {
-            return scale * Lemit.Sample(lambda) * Pi * pbrt.Sqr(sceneRadius);
-        }
-
-        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false) { return 0; }
-
-        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
-                                                              Float time)
-        {
-            // Choose point on disk oriented toward infinite light direction
-            Vector3f w = pbrt.Normalize(renderFromLight.Apply(new Vector3f(0, 0, 1)));
-            Frame wFrame = Frame.FromZ(w);
-            Point2f cd = pbrt.SampleUniformDiskConcentric(u1);
-            Point3f pDisk = sceneCenter + sceneRadius * wFrame.FromLocal(new Vector3f(cd.x, cd.y, 0));
-
-            // Compute _DistantLight_ light ray
-            Ray ray = new Ray(pDisk + sceneRadius * w, -w, time);
-
-            return new LightLeSample(scale * Lemit.Sample(lambda), ray, 1 / (Pi * pbrt.Sqr(sceneRadius)), 1);
-        }
-
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            *pdfPos = 1 / (Pi * sceneRadius * sceneRadius);
-            *pdfDir = 0;
-        }
-
-        public override pstd.optional<LightBounds> Bounds() { return default; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ DistantLight %s Lemit: %s scale: %f ]", BaseToString(), Lemit, scale);
-        }
-
-        public override void Preprocess(Bounds3f sceneBounds)
-        {
-            Point3f c; Float r;
-            sceneBounds.BoundingSphere(&c, &r);
-            sceneCenter = c;
-            sceneRadius = r;
-        }
-
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            Vector3f wi = pbrt.Normalize(renderFromLight.Apply(new Vector3f(0, 0, 1)));
-            Point3f pOutside = ctx.p() + wi * (2 * sceneRadius);
-            return new LightLiSample(scale * Lemit.Sample(lambda), wi, 1, new Interaction(pOutside, (MediumInterface)null));
-        }
-
         // DistantLight Private Members
         DenselySampledSpectrum Lemit;
         Float scale;
@@ -476,6 +476,28 @@ namespace pbrt
     // ProjectionLight Definition
     public sealed unsafe class ProjectionLight : LightBase
     {
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            *pdfPos = 0;
+            // Transform ray direction to light space and reject invalid ones
+            Vector3f w = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
+            if (w.z < hither)
+            {
+                *pdfDir = 0;
+                return;
+            }
+
+            // Compute screen space point _ps_ and check containment
+            Point3f ps = screenFromLight.Apply((Point3f)w);
+            if (!pbrt.Inside(new Point2f(ps.x, ps.y), screenBounds))
+            {
+                *pdfDir = 0;
+                return;
+            }
+
+            *pdfDir = distrib.PDF(new Point2f(ps.x, ps.y)) * screenBounds.Area() / (A * pbrt.Pow(3, pbrt.CosTheta(w)));
+        }
         // ProjectionLight Method Definitions
         public ProjectionLight(Transform renderFromLight, MediumInterface mediumInterface, Image im,
                                RGBColorSpace imageColorSpace, Float scale, Float fov, Allocator alloc)
@@ -514,79 +536,6 @@ namespace pbrt
             Array2D<Float> d = image.GetSamplingDistribution(dwdA, screenBounds);
             distrib = new PiecewiseConstant2D(d, screenBounds);
             imageBytes += (long)(image.BytesUsed() + distrib.BytesUsed());
-        }
-
-        public static ProjectionLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
-                                             FileLoc loc, Allocator alloc)
-        {
-            Float scale = parameters.GetOneFloat("scale", 1);
-            Float power = parameters.GetOneFloat("power", -1);
-            Float fov = parameters.GetOneFloat("fov", 90.0f);
-
-            string texname = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
-            if (texname.Length == 0)
-                pbrt.ErrorExit(loc, "Must provide \"filename\" to \"projection\" light source");
-
-            ImageAndMetadata imageAndMetadata = Image.Read(texname, alloc);
-            if (imageAndMetadata.image.HasAnyInfinitePixels())
-                pbrt.ErrorExit(loc, pbrt.StringPrintf(
-                                           "%s: image has infinite pixel values and so is not suitable as a light.",
-                                           texname));
-            if (imageAndMetadata.image.HasAnyNaNPixels())
-                pbrt.ErrorExit(loc, pbrt.StringPrintf(
-                                           "%s: image has not-a-number pixel values and so is not suitable as a light.",
-                                           texname));
-
-            RGBColorSpace colorSpace = imageAndMetadata.metadata.GetColorSpace();
-            ImageChannelDesc channelDesc = imageAndMetadata.image.GetChannelDesc(new string[] { "R", "G", "B" });
-            if (!channelDesc)
-                pbrt.ErrorExit(loc, "Image provided to \"projection\" light must have R, G, " +
-                                       "and B channels.");
-            Image image = imageAndMetadata.image.SelectChannels(channelDesc, alloc);
-
-            scale /= pbrt.SpectrumToPhotometric(colorSpace.illuminant);
-
-            if (power > 0)
-            {
-                // template: k_e = hemisphere...
-                Bounds2f screenBounds;
-                Float A;
-                Transform lightFromScreen, screenFromLight;
-                Float hither = 1e-3f;
-                Float aspect = (Float)image.Resolution().x / (Float)image.Resolution().y;
-                if (aspect > 1)
-                    screenBounds = new Bounds2f(new Point2f(-aspect, -1), new Point2f(aspect, 1));
-                else
-                    screenBounds = new Bounds2f(new Point2f(-1, -1 / aspect), new Point2f(1, 1 / aspect));
-                screenFromLight = pbrt.Perspective(fov, hither, 1e30f /* yon */);
-                lightFromScreen = pbrt.Inverse(screenFromLight);
-
-                Float opposite = std.tan(pbrt.Radians(fov) / 2);
-                A = 4 * pbrt.Sqr(opposite) * (aspect > 1 ? aspect : (1 / aspect));
-
-                Float sum = 0;
-                RGB luminance = colorSpace.LuminanceVector();
-                for (int y = 0; y < image.Resolution().y; ++y)
-                    for (int x = 0; x < image.Resolution().x; ++x)
-                    {
-                        Point2f ps = screenBounds.Lerp(new Point2f((x + .5f) / image.Resolution().x,
-                                                                   (y + .5f) / image.Resolution().y));
-                        Vector3f w = (Vector3f)lightFromScreen.Apply(new Point3f(ps.x, ps.y, 0));
-                        w = pbrt.Normalize(w);
-                        Float dwdA = pbrt.Pow(3, w.z);
-
-                        for (int c = 0; c < 3; ++c)
-                            sum += image.GetChannel(new Point2i(x, y), c) * luminance[c] * dwdA;
-                    }
-
-                scale *= power / (A * sum / (image.Resolution().x * image.Resolution().y));
-            }
-
-            Transform flip = pbrt.Scale(1, -1, 1);
-            Transform renderFromLightFlipY = renderFromLight * flip;
-
-            return new ProjectionLight(renderFromLightFlipY, new MediumInterface(medium), image, colorSpace, scale,
-                                       fov, alloc);
         }
 
         public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
@@ -701,26 +650,77 @@ namespace pbrt
             return new LightLeSample(L, ray, 1, pdfDir);
         }
 
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        public static ProjectionLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
+                                             FileLoc loc, Allocator alloc)
         {
-            *pdfPos = 0;
-            // Transform ray direction to light space and reject invalid ones
-            Vector3f w = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
-            if (w.z < hither)
+            Float scale = parameters.GetOneFloat("scale", 1);
+            Float power = parameters.GetOneFloat("power", -1);
+            Float fov = parameters.GetOneFloat("fov", 90.0f);
+
+            string texname = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
+            if (texname.Length == 0)
+                pbrt.ErrorExit(loc, "Must provide \"filename\" to \"projection\" light source");
+
+            ImageAndMetadata imageAndMetadata = Image.Read(texname, alloc);
+            if (imageAndMetadata.image.HasAnyInfinitePixels())
+                pbrt.ErrorExit(loc, pbrt.StringPrintf(
+                                           "%s: image has infinite pixel values and so is not suitable as a light.",
+                                           texname));
+            if (imageAndMetadata.image.HasAnyNaNPixels())
+                pbrt.ErrorExit(loc, pbrt.StringPrintf(
+                                           "%s: image has not-a-number pixel values and so is not suitable as a light.",
+                                           texname));
+
+            RGBColorSpace colorSpace = imageAndMetadata.metadata.GetColorSpace();
+            ImageChannelDesc channelDesc = imageAndMetadata.image.GetChannelDesc(new string[] { "R", "G", "B" });
+            if (!channelDesc)
+                pbrt.ErrorExit(loc, "Image provided to \"projection\" light must have R, G, " +
+                                       "and B channels.");
+            Image image = imageAndMetadata.image.SelectChannels(channelDesc, alloc);
+
+            scale /= pbrt.SpectrumToPhotometric(colorSpace.illuminant);
+
+            if (power > 0)
             {
-                *pdfDir = 0;
-                return;
+                // template: k_e = hemisphere...
+                Bounds2f screenBounds;
+                Float A;
+                Transform lightFromScreen, screenFromLight;
+                Float hither = 1e-3f;
+                Float aspect = (Float)image.Resolution().x / (Float)image.Resolution().y;
+                if (aspect > 1)
+                    screenBounds = new Bounds2f(new Point2f(-aspect, -1), new Point2f(aspect, 1));
+                else
+                    screenBounds = new Bounds2f(new Point2f(-1, -1 / aspect), new Point2f(1, 1 / aspect));
+                screenFromLight = pbrt.Perspective(fov, hither, 1e30f /* yon */);
+                lightFromScreen = pbrt.Inverse(screenFromLight);
+
+                Float opposite = std.tan(pbrt.Radians(fov) / 2);
+                A = 4 * pbrt.Sqr(opposite) * (aspect > 1 ? aspect : (1 / aspect));
+
+                Float sum = 0;
+                RGB luminance = colorSpace.LuminanceVector();
+                for (int y = 0; y < image.Resolution().y; ++y)
+                    for (int x = 0; x < image.Resolution().x; ++x)
+                    {
+                        Point2f ps = screenBounds.Lerp(new Point2f((x + .5f) / image.Resolution().x,
+                                                                   (y + .5f) / image.Resolution().y));
+                        Vector3f w = (Vector3f)lightFromScreen.Apply(new Point3f(ps.x, ps.y, 0));
+                        w = pbrt.Normalize(w);
+                        Float dwdA = pbrt.Pow(3, w.z);
+
+                        for (int c = 0; c < 3; ++c)
+                            sum += image.GetChannel(new Point2i(x, y), c) * luminance[c] * dwdA;
+                    }
+
+                scale *= power / (A * sum / (image.Resolution().x * image.Resolution().y));
             }
 
-            // Compute screen space point _ps_ and check containment
-            Point3f ps = screenFromLight.Apply((Point3f)w);
-            if (!pbrt.Inside(new Point2f(ps.x, ps.y), screenBounds))
-            {
-                *pdfDir = 0;
-                return;
-            }
+            Transform flip = pbrt.Scale(1, -1, 1);
+            Transform renderFromLightFlipY = renderFromLight * flip;
 
-            *pdfDir = distrib.PDF(new Point2f(ps.x, ps.y)) * screenBounds.Area() / (A * pbrt.Pow(3, pbrt.CosTheta(w)));
+            return new ProjectionLight(renderFromLightFlipY, new MediumInterface(medium), image, colorSpace, scale,
+                                       fov, alloc);
         }
 
         // ProjectionLight Private Members
@@ -737,6 +737,14 @@ namespace pbrt
     // GoniometricLight Definition
     public sealed unsafe class GoniometricLight : LightBase
     {
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            *pdfPos = 0.0f;
+            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
+            Point2f uv = pbrt.EqualAreaSphereToSquare(wLight);
+            *pdfDir = distrib.PDF(uv) / (4 * Pi);
+        }
         // GoniometricLight Public Methods
         public GoniometricLight(Transform renderFromLight, MediumInterface mediumInterface, Spectrum Iemit, Float scale,
                                 Image im, Allocator alloc)
@@ -751,6 +759,60 @@ namespace pbrt
             Array2D<Float> d = image.GetSamplingDistribution();
             distrib = new PiecewiseConstant2D(d);
             imageBytes += (long)(image.BytesUsed() + distrib.BytesUsed());
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            Vector3f wi = pbrt.Normalize(p - ctx.p());
+            SampledSpectrum L = I(renderFromLight.ApplyInverse(-wi), lambda) / pbrt.DistanceSquared(p, ctx.p());
+            return new LightLiSample(L, wi, 1, new Interaction(p, mediumInterface));
+        }
+
+        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
+        {
+            return 0.0f;
+        }
+
+        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        {
+            Float sumY = 0;
+            for (int y = 0; y < image.Resolution().y; ++y)
+                for (int x = 0; x < image.Resolution().x; ++x)
+                    sumY += image.GetChannel(new Point2i(x, y), 0);
+            return scale * Iemit.Sample(lambda) * 4 * Pi * sumY / (image.Resolution().x * image.Resolution().y);
+        }
+
+        public override pstd.optional<LightBounds> Bounds()
+        {
+            Float sumY = 0;
+            for (int y = 0; y < image.Resolution().y; ++y)
+                for (int x = 0; x < image.Resolution().x; ++x)
+                    sumY += image.GetChannel(new Point2i(x, y), 0);
+            Float phi = scale * Iemit.MaxValue() * 4 * Pi * sumY / (image.Resolution().x * image.Resolution().y);
+
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            return new LightBounds(new Bounds3f(p, p), new Vector3f(0, 0, 1), phi, std.cos(Pi), std.cos(Pi / 2), false);
+        }
+
+        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
+                                                              Float time)
+        {
+            // Sample direction and compute PDF
+            Float pdf;
+            Point2f uv = distrib.Sample(u1, &pdf);
+            Vector3f wLight = pbrt.EqualAreaSquareToSphere(uv);
+            Float pdfDir = pdf / (4 * Pi);
+
+            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
+            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ GoniometricLight %s Iemit: %s scale: %f ]", BaseToString(), Iemit, scale);
         }
 
         public static GoniometricLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
@@ -826,68 +888,6 @@ namespace pbrt
             return new GoniometricLight(finalRenderFromLight, new MediumInterface(medium), I, sc, image, alloc);
         }
 
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Vector3f wi = pbrt.Normalize(p - ctx.p());
-            SampledSpectrum L = I(renderFromLight.ApplyInverse(-wi), lambda) / pbrt.DistanceSquared(p, ctx.p());
-            return new LightLiSample(L, wi, 1, new Interaction(p, mediumInterface));
-        }
-
-        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
-        {
-            return 0.0f;
-        }
-
-        public override SampledSpectrum Phi(SampledWavelengths lambda)
-        {
-            Float sumY = 0;
-            for (int y = 0; y < image.Resolution().y; ++y)
-                for (int x = 0; x < image.Resolution().x; ++x)
-                    sumY += image.GetChannel(new Point2i(x, y), 0);
-            return scale * Iemit.Sample(lambda) * 4 * Pi * sumY / (image.Resolution().x * image.Resolution().y);
-        }
-
-        public override pstd.optional<LightBounds> Bounds()
-        {
-            Float sumY = 0;
-            for (int y = 0; y < image.Resolution().y; ++y)
-                for (int x = 0; x < image.Resolution().x; ++x)
-                    sumY += image.GetChannel(new Point2i(x, y), 0);
-            Float phi = scale * Iemit.MaxValue() * 4 * Pi * sumY / (image.Resolution().x * image.Resolution().y);
-
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            return new LightBounds(new Bounds3f(p, p), new Vector3f(0, 0, 1), phi, std.cos(Pi), std.cos(Pi / 2), false);
-        }
-
-        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
-                                                              Float time)
-        {
-            // Sample direction and compute PDF
-            Float pdf;
-            Point2f uv = distrib.Sample(u1, &pdf);
-            Vector3f wLight = pbrt.EqualAreaSquareToSphere(uv);
-            Float pdfDir = pdf / (4 * Pi);
-
-            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
-            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
-        }
-
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            *pdfPos = 0.0f;
-            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
-            Point2f uv = pbrt.EqualAreaSphereToSquare(wLight);
-            *pdfDir = distrib.PDF(uv) / (4 * Pi);
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ GoniometricLight %s Iemit: %s scale: %f ]", BaseToString(), Iemit, scale);
-        }
-
         public SampledSpectrum I(Vector3f w, SampledWavelengths lambda)
         {
             Point2f uv = pbrt.EqualAreaSphereToSquare(w);
@@ -910,6 +910,31 @@ namespace pbrt
             if (fc != null && fc.Evaluate(new TextureEvalContext()) == 0)
                 return LightType.DeltaPosition;
             return LightType.Area;
+        }
+
+        public override void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
+        {
+            pbrt.CHECK_NE(intr.n, new Normal3f(0, 0, 0));
+            *pdfPos = shape.PDF(intr);
+            *pdfDir = twoSided ? (pbrt.CosineHemispherePDF(pbrt.AbsDot(intr.n, w)) / 2)
+                               : pbrt.CosineHemispherePDF(pbrt.Dot(intr.n, w));
+        }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            pbrt.LOG_FATAL("Shouldn't be called for area lights");
+        }
+
+        bool AlphaMasked(Interaction intr)
+        {
+            if (alpha == null)
+                return false;
+            Float a = new UniversalTextureEvaluator().Apply(alpha, new TextureEvalContext(intr));
+            if (a >= 1)
+                return false;
+            if (a <= 0)
+                return true;
+            return pbrt.HashFloat(intr.p()) > a;
         }
 
         // DiffuseAreaLight Public Methods
@@ -952,6 +977,169 @@ namespace pbrt
                                 "that this transform will have no scale factors in it. " +
                                 "Proceed at your own risk; your image may have errors.");
         }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            // Sample point on shape for _DiffuseAreaLight_
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
+            pstd.optional<ShapeSample> ss = shape.Sample(shapeCtx, u);
+            if (!ss || ss.value().pdf == 0 || pbrt.LengthSquared(ss.value().intr.p() - ctx.p()) == 0)
+                return default;
+            pbrt.DCHECK(!pbrt.IsNaN(ss.value().pdf));
+            ss.value().intr.mediumInterface = mediumInterface;
+
+            // Return _LightLiSample_ for sampled point on shape
+            // Return no light sample if alpha test fails
+            if (AlphaMasked(ss.value().intr))
+                return default;
+
+            // Return _LightLiSample_ for sampled point on shape
+            Vector3f wi = pbrt.Normalize(ss.value().intr.p() - ctx.p());
+            SampledSpectrum Le = L(ss.value().intr.p(), ss.value().intr.n, ss.value().intr.uv, -wi, lambda);
+            if (!Le)
+                return default;
+            return new LightLiSample(Le, wi, ss.value().pdf, ss.value().intr);
+        }
+
+        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
+        {
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
+            return shape.PDF(shapeCtx, wi);
+        }
+
+        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        {
+            SampledSpectrum L = new SampledSpectrum(0.0f);
+            if (image)
+            {
+                // Compute average light image emission
+                for (int y = 0; y < image.Resolution().y; ++y)
+                    for (int x = 0; x < image.Resolution().x; ++x)
+                    {
+                        RGB rgb = default;
+                        for (int c = 0; c < 3; ++c)
+                            rgb[c] = image.GetChannel(new Point2i(x, y), c);
+                        L += new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb)).Sample(lambda);
+                    }
+                L *= scale / (image.Resolution().x * image.Resolution().y);
+            }
+            else
+                L = Lemit.Sample(lambda) * scale;
+            return Pi * (twoSided ? 2 : 1) * area * L;
+        }
+
+        public override pstd.optional<LightBounds> Bounds()
+        {
+            // Compute _phi_ for diffuse area light bounds
+            Float phi = 0;
+            if (image)
+            {
+                // Compute average _DiffuseAreaLight_ image channel value
+                // Assume no distinction between colors for an RGB image
+                for (int y = 0; y < image.Resolution().y; ++y)
+                    for (int x = 0; x < image.Resolution().x; ++x)
+                        for (int c = 0; c < 3; ++c)
+                            phi += image.GetChannel(new Point2i(x, y), c);
+                phi /= 3 * image.Resolution().x * image.Resolution().y;
+            }
+            else
+                phi = Lemit.MaxValue();
+            phi *= scale * area * Pi;
+
+            DirectionCone nb = shape.NormalBounds();
+            return new LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std.cos(Pi / 2), twoSided);
+        }
+
+        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        {
+            // Check for zero emitted radiance from point on area light
+            if (!twoSided && pbrt.Dot(n, w) < 0)
+                return new SampledSpectrum(0.0f);
+            if (AlphaMasked(new Interaction(p, uv)))
+                return new SampledSpectrum(0.0f);
+
+            if (image)
+            {
+                // Return _DiffuseAreaLight_ emission using image
+                RGB rgb = default;
+                uv.y = 1 - uv.y;
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] = image.BilerpChannel(uv, c);
+                RGBIlluminantSpectrum spec = new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb));
+                return scale * spec.Sample(lambda);
+            }
+            else
+                return scale * Lemit.Sample(lambda);
+        }
+
+        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
+                                                              Float time)
+        {
+            // Sample a point on the area light's _Shape_
+            pstd.optional<ShapeSample> ss = shape.Sample(u1);
+            if (!ss)
+                return default;
+            ss.value().intr.time = time;
+            ss.value().intr.mediumInterface = mediumInterface;
+
+            // Return sampled point if alpha masks it
+            if (AlphaMasked(ss.value().intr))
+                return default;
+
+            // Sample a cosine-weighted outgoing direction _w_ for area light
+            Vector3f w;
+            Float pdfDir;
+            if (twoSided)
+            {
+                // Choose side of surface and sample cosine-weighted outgoing direction
+                if (u2[0] < 0.5f)
+                {
+                    u2.x = std.min(u2[0] * 2, (Float)OneMinusEpsilon);
+                    w = pbrt.SampleCosineHemisphere(u2);
+                }
+                else
+                {
+                    u2.x = std.min((u2[0] - 0.5f) * 2, (Float)OneMinusEpsilon);
+                    w = pbrt.SampleCosineHemisphere(u2);
+                    w.z *= -1;
+                }
+                pdfDir = pbrt.CosineHemispherePDF(std.abs(w.z)) / 2;
+            }
+            else
+            {
+                w = pbrt.SampleCosineHemisphere(u2);
+                pdfDir = pbrt.CosineHemispherePDF(w.z);
+            }
+
+            if (pdfDir == 0)
+                return default;
+            // Return _LightLeSample_ for ray leaving area light
+            Interaction intr = ss.value().intr;
+            Frame nFrame = Frame.FromZ(intr.n);
+            w = nFrame.FromLocal(w);
+            SampledSpectrum Le = L(intr.p(), intr.n, intr.uv, w, lambda);
+            return new LightLeSample(Le, new Ray(intr.SpawnRay(w)), intr, ss.value().pdf, pdfDir);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ DiffuseAreaLight %s Lemit: %s scale: %f shape: %s alpha: %s " +
+                                        "twoSided: %s area: %f image: %s ]",
+                                        BaseToString(), Lemit, scale, shape, alpha, twoSided ? "true" : "false", area,
+                                        image);
+        }
+
+        // DiffuseAreaLight Private Members
+        Shape shape;
+        FloatTexture alpha;
+        Float area;
+        bool twoSided;
+        DenselySampledSpectrum Lemit;
+        Float scale;
+        Image image;
+        RGBColorSpace imageColorSpace;
 
         public static DiffuseAreaLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
                                               RGBColorSpace colorSpace, FileLoc loc, Allocator alloc, Shape shape,
@@ -1028,206 +1216,11 @@ namespace pbrt
             return new DiffuseAreaLight(renderFromLight, new MediumInterface(medium), L, scale, shape, alphaTex, image,
                                         imageColorSpace, twoSided);
         }
-
-        public override SampledSpectrum Phi(SampledWavelengths lambda)
-        {
-            SampledSpectrum L = new SampledSpectrum(0.0f);
-            if (image)
-            {
-                // Compute average light image emission
-                for (int y = 0; y < image.Resolution().y; ++y)
-                    for (int x = 0; x < image.Resolution().x; ++x)
-                    {
-                        RGB rgb = default;
-                        for (int c = 0; c < 3; ++c)
-                            rgb[c] = image.GetChannel(new Point2i(x, y), c);
-                        L += new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb)).Sample(lambda);
-                    }
-                L *= scale / (image.Resolution().x * image.Resolution().y);
-            }
-            else
-                L = Lemit.Sample(lambda) * scale;
-            return Pi * (twoSided ? 2 : 1) * area * L;
-        }
-
-        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
-                                                              Float time)
-        {
-            // Sample a point on the area light's _Shape_
-            pstd.optional<ShapeSample> ss = shape.Sample(u1);
-            if (!ss)
-                return default;
-            ss.value().intr.time = time;
-            ss.value().intr.mediumInterface = mediumInterface;
-
-            // Return sampled point if alpha masks it
-            if (AlphaMasked(ss.value().intr))
-                return default;
-
-            // Sample a cosine-weighted outgoing direction _w_ for area light
-            Vector3f w;
-            Float pdfDir;
-            if (twoSided)
-            {
-                // Choose side of surface and sample cosine-weighted outgoing direction
-                if (u2[0] < 0.5f)
-                {
-                    u2.x = std.min(u2[0] * 2, (Float)OneMinusEpsilon);
-                    w = pbrt.SampleCosineHemisphere(u2);
-                }
-                else
-                {
-                    u2.x = std.min((u2[0] - 0.5f) * 2, (Float)OneMinusEpsilon);
-                    w = pbrt.SampleCosineHemisphere(u2);
-                    w.z *= -1;
-                }
-                pdfDir = pbrt.CosineHemispherePDF(std.abs(w.z)) / 2;
-            }
-            else
-            {
-                w = pbrt.SampleCosineHemisphere(u2);
-                pdfDir = pbrt.CosineHemispherePDF(w.z);
-            }
-
-            if (pdfDir == 0)
-                return default;
-            // Return _LightLeSample_ for ray leaving area light
-            Interaction intr = ss.value().intr;
-            Frame nFrame = Frame.FromZ(intr.n);
-            w = nFrame.FromLocal(w);
-            SampledSpectrum Le = L(intr.p(), intr.n, intr.uv, w, lambda);
-            return new LightLeSample(Le, new Ray(intr.SpawnRay(w)), intr, ss.value().pdf, pdfDir);
-        }
-
-        public override void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
-        {
-            pbrt.CHECK_NE(intr.n, new Normal3f(0, 0, 0));
-            *pdfPos = shape.PDF(intr);
-            *pdfDir = twoSided ? (pbrt.CosineHemispherePDF(pbrt.AbsDot(intr.n, w)) / 2)
-                               : pbrt.CosineHemispherePDF(pbrt.Dot(intr.n, w));
-        }
-
-        public override pstd.optional<LightBounds> Bounds()
-        {
-            // Compute _phi_ for diffuse area light bounds
-            Float phi = 0;
-            if (image)
-            {
-                // Compute average _DiffuseAreaLight_ image channel value
-                // Assume no distinction between colors for an RGB image
-                for (int y = 0; y < image.Resolution().y; ++y)
-                    for (int x = 0; x < image.Resolution().x; ++x)
-                        for (int c = 0; c < 3; ++c)
-                            phi += image.GetChannel(new Point2i(x, y), c);
-                phi /= 3 * image.Resolution().x * image.Resolution().y;
-            }
-            else
-                phi = Lemit.MaxValue();
-            phi *= scale * area * Pi;
-
-            DirectionCone nb = shape.NormalBounds();
-            return new LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std.cos(Pi / 2), twoSided);
-        }
-
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            pbrt.LOG_FATAL("Shouldn't be called for area lights");
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ DiffuseAreaLight %s Lemit: %s scale: %f shape: %s alpha: %s " +
-                                        "twoSided: %s area: %f image: %s ]",
-                                        BaseToString(), Lemit, scale, shape, alpha, twoSided ? "true" : "false", area,
-                                        image);
-        }
-
-        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
-        {
-            // Check for zero emitted radiance from point on area light
-            if (!twoSided && pbrt.Dot(n, w) < 0)
-                return new SampledSpectrum(0.0f);
-            if (AlphaMasked(new Interaction(p, uv)))
-                return new SampledSpectrum(0.0f);
-
-            if (image)
-            {
-                // Return _DiffuseAreaLight_ emission using image
-                RGB rgb = default;
-                uv.y = 1 - uv.y;
-                for (int c = 0; c < 3; ++c)
-                    rgb[c] = image.BilerpChannel(uv, c);
-                RGBIlluminantSpectrum spec = new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb));
-                return scale * spec.Sample(lambda);
-            }
-            else
-                return scale * Lemit.Sample(lambda);
-        }
-
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            // Sample point on shape for _DiffuseAreaLight_
-            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
-            pstd.optional<ShapeSample> ss = shape.Sample(shapeCtx, u);
-            if (!ss || ss.value().pdf == 0 || pbrt.LengthSquared(ss.value().intr.p() - ctx.p()) == 0)
-                return default;
-            pbrt.DCHECK(!pbrt.IsNaN(ss.value().pdf));
-            ss.value().intr.mediumInterface = mediumInterface;
-
-            // Return _LightLiSample_ for sampled point on shape
-            // Return no light sample if alpha test fails
-            if (AlphaMasked(ss.value().intr))
-                return default;
-
-            // Return _LightLiSample_ for sampled point on shape
-            Vector3f wi = pbrt.Normalize(ss.value().intr.p() - ctx.p());
-            SampledSpectrum Le = L(ss.value().intr.p(), ss.value().intr.n, ss.value().intr.uv, -wi, lambda);
-            if (!Le)
-                return default;
-            return new LightLiSample(Le, wi, ss.value().pdf, ss.value().intr);
-        }
-
-        public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
-        {
-            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
-            return shape.PDF(shapeCtx, wi);
-        }
-
-        // DiffuseAreaLight Private Members
-        Shape shape;
-        FloatTexture alpha;
-        Float area;
-        bool twoSided;
-        DenselySampledSpectrum Lemit;
-        Float scale;
-        Image image;
-        RGBColorSpace imageColorSpace;
-
-        bool AlphaMasked(Interaction intr)
-        {
-            if (alpha == null)
-                return false;
-            Float a = new UniversalTextureEvaluator().Apply(alpha, new TextureEvalContext(intr));
-            if (a >= 1)
-                return false;
-            if (a <= 0)
-                return true;
-            return pbrt.HashFloat(intr.p()) > a;
-        }
     }
 
     // UniformInfiniteLight Definition
     public sealed unsafe class UniformInfiniteLight : LightBase
     {
-        // UniformInfiniteLight Method Definitions
-        public UniformInfiniteLight(Transform renderFromLight, Spectrum Lemit, Float scale)
-            : base(LightType.Infinite, renderFromLight, new MediumInterface())
-        {
-            this.Lemit = LookupSpectrum(Lemit);
-            this.scale = scale;
-        }
 
         public override void Preprocess(Bounds3f sceneBounds)
         {
@@ -1237,9 +1230,19 @@ namespace pbrt
             sceneRadius = r;
         }
 
-        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
         {
-            return 4 * Pi * Pi * pbrt.Sqr(sceneRadius) * scale * Lemit.Sample(lambda);
+            *pdfDir = pbrt.UniformSpherePDF();
+            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
+        }
+
+        public override pstd.optional<LightBounds> Bounds() { return default; }
+        // UniformInfiniteLight Method Definitions
+        public UniformInfiniteLight(Transform renderFromLight, Spectrum Lemit, Float scale)
+            : base(LightType.Infinite, renderFromLight, new MediumInterface())
+        {
+            this.Lemit = LookupSpectrum(Lemit);
+            this.scale = scale;
         }
 
         public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda) { return scale * Lemit.Sample(lambda); }
@@ -1264,6 +1267,11 @@ namespace pbrt
             return pbrt.UniformSpherePDF();
         }
 
+        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        {
+            return 4 * Pi * Pi * pbrt.Sqr(sceneRadius) * scale * Lemit.Sample(lambda);
+        }
+
         public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
                                                               Float time)
         {
@@ -1281,14 +1289,6 @@ namespace pbrt
             return new LightLeSample(scale * Lemit.Sample(lambda), ray, pdfPos, pdfDir);
         }
 
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            *pdfDir = pbrt.UniformSpherePDF();
-            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
-        }
-
-        public override pstd.optional<LightBounds> Bounds() { return default; }
-
         public override string ToString()
         {
             return pbrt.StringPrintf("[ UniformInfiniteLight %s Lemit: %s ]", BaseToString(), Lemit);
@@ -1304,6 +1304,67 @@ namespace pbrt
     // ImageInfiniteLight Definition
     public sealed unsafe class ImageInfiniteLight : LightBase
     {
+
+        public override void Preprocess(Bounds3f sceneBounds)
+        {
+            Point3f c; Float r;
+            sceneBounds.BoundingSphere(&c, &r);
+            sceneCenter = c;
+            sceneRadius = r;
+        }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            Vector3f wl = -renderFromLight.ApplyInverse(ray.d);
+            Float mapPDF = distribution.PDF(pbrt.EqualAreaSphereToSquare(wl));
+            *pdfDir = mapPDF / (4 * Pi);
+            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
+        }
+
+        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
+        {
+            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
+            Point2f uv = pbrt.EqualAreaSphereToSquare(wLight);
+            return ImageLe(uv, lambda);
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            // Find $(u,v)$ sample coordinates in infinite light texture
+            Float mapPDF = 0;
+            Point2f uv;
+            if (allowIncompletePDF)
+                uv = compensatedDistribution.Sample(u, &mapPDF);
+            else
+                uv = distribution.Sample(u, &mapPDF);
+            if (mapPDF == 0)
+                return default;
+
+            // Convert infinite light sample point to direction
+            Vector3f wLight = pbrt.EqualAreaSquareToSphere(uv);
+            Vector3f wi = renderFromLight.Apply(wLight);
+
+            // Compute PDF for sampled infinite light direction
+            Float pdf = mapPDF / (4 * Pi);
+
+            // Return radiance value for infinite light direction
+            return new LightLiSample(ImageLe(uv, lambda), wi, pdf,
+                                     new Interaction(ctx.p() + wi * (2 * sceneRadius), mediumInterface));
+        }
+
+        public override pstd.optional<LightBounds> Bounds() { return default; }
+
+        // ImageInfiniteLight Private Methods
+        SampledSpectrum ImageLe(Point2f uv, SampledWavelengths lambda)
+        {
+            RGB rgb = default;
+            for (int c = 0; c < 3; ++c)
+                rgb[c] = image.LookupNearestChannel(uv, c, WrapMode.OctahedralSphere);
+            RGBIlluminantSpectrum spec = new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb));
+            return scale * spec.Sample(lambda);
+        }
         // ImageInfiniteLight Method Definitions
         public ImageInfiniteLight(Transform renderFromLight, Image im, RGBColorSpace imageColorSpace, Float scale,
                                   string filename, Allocator alloc)
@@ -1349,14 +1410,6 @@ namespace pbrt
                     for (int x = 0; x < d.XSize(); ++x)
                         d[x, y] = 1;
             compensatedDistribution = new PiecewiseConstant2D(d, domain, alloc);
-        }
-
-        public override void Preprocess(Bounds3f sceneBounds)
-        {
-            Point3f c; Float r;
-            sceneBounds.BoundingSphere(&c, &r);
-            sceneCenter = c;
-            sceneRadius = r;
         }
 
         public override Float PDF_Li(LightSampleContext ctx, Vector3f w, bool allowIncompletePDF = false)
@@ -1414,62 +1467,9 @@ namespace pbrt
             return new LightLeSample(ImageLe(uv, lambda), ray, pdfPos, pdfDir);
         }
 
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            Vector3f wl = -renderFromLight.ApplyInverse(ray.d);
-            Float mapPDF = distribution.PDF(pbrt.EqualAreaSphereToSquare(wl));
-            *pdfDir = mapPDF / (4 * Pi);
-            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
-        }
-
         public override string ToString()
         {
             return pbrt.StringPrintf("[ ImageInfiniteLight %s scale: %f ]", BaseToString(), scale);
-        }
-
-        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
-        {
-            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(ray.d));
-            Point2f uv = pbrt.EqualAreaSphereToSquare(wLight);
-            return ImageLe(uv, lambda);
-        }
-
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            // Find $(u,v)$ sample coordinates in infinite light texture
-            Float mapPDF = 0;
-            Point2f uv;
-            if (allowIncompletePDF)
-                uv = compensatedDistribution.Sample(u, &mapPDF);
-            else
-                uv = distribution.Sample(u, &mapPDF);
-            if (mapPDF == 0)
-                return default;
-
-            // Convert infinite light sample point to direction
-            Vector3f wLight = pbrt.EqualAreaSquareToSphere(uv);
-            Vector3f wi = renderFromLight.Apply(wLight);
-
-            // Compute PDF for sampled infinite light direction
-            Float pdf = mapPDF / (4 * Pi);
-
-            // Return radiance value for infinite light direction
-            return new LightLiSample(ImageLe(uv, lambda), wi, pdf,
-                                     new Interaction(ctx.p() + wi * (2 * sceneRadius), mediumInterface));
-        }
-
-        public override pstd.optional<LightBounds> Bounds() { return default; }
-
-        // ImageInfiniteLight Private Methods
-        SampledSpectrum ImageLe(Point2f uv, SampledWavelengths lambda)
-        {
-            RGB rgb = default;
-            for (int c = 0; c < 3; ++c)
-                rgb[c] = image.LookupNearestChannel(uv, c, WrapMode.OctahedralSphere);
-            RGBIlluminantSpectrum spec = new RGBIlluminantSpectrum(imageColorSpace, pbrt.ClampZero(rgb));
-            return scale * spec.Sample(lambda);
         }
 
         // ImageInfiniteLight Private Members
@@ -1485,6 +1485,75 @@ namespace pbrt
     // PortalImageInfiniteLight Definition
     public sealed unsafe class PortalImageInfiniteLight : LightBase
     {
+
+        public override void Preprocess(Bounds3f sceneBounds)
+        {
+            Point3f c; Float r;
+            sceneBounds.BoundingSphere(&c, &r);
+            sceneCenter = c;
+            sceneRadius = r;
+        }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            Vector3f w = -pbrt.Normalize(ray.d);
+            Float duv_dw;
+            pstd.optional<Point2f> uv = ImageFromRender(w, &duv_dw);
+            if (!uv || duv_dw == 0)
+            {
+                *pdfPos = *pdfDir = 0;
+                return;
+            }
+            Bounds2f b = new Bounds2f(new Point2f(0, 0), new Point2f(1, 1));
+            Float pdf = distribution.PDF(uv.value(), b);
+
+            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
+            *pdfDir = pdf / duv_dw;
+        }
+
+        public override pstd.optional<LightBounds> Bounds() { return default; }
+
+        // PortalImageInfiniteLight Private Methods
+        pstd.optional<Point2f> ImageFromRender(Vector3f wRender, Float* duv_dw = null)
+        {
+            Vector3f w = portalFrame.ToLocal(wRender);
+            if (w.z <= 0)
+                return default;
+            // Compute Jacobian determinant of mapping $\roman{d}(u,v)/\roman{d}\omega$ if needed
+            if (duv_dw != null)
+                *duv_dw = pbrt.Sqr(Pi) * (1 - pbrt.Sqr(w.x)) * (1 - pbrt.Sqr(w.y)) / w.z;
+
+            // Compute image-space coordinates
+            Float alpha = std.atan2(w.x, w.z), beta = std.atan2(w.y, w.z);
+            pbrt.DCHECK(!pbrt.IsNaN(alpha + beta));
+            return new Point2f(pbrt.Clamp((alpha + Pi / 2) / Pi, 0, 1), pbrt.Clamp((beta + Pi / 2) / Pi, 0, 1));
+        }
+
+        Vector3f RenderFromImage(Point2f uv, Float* duv_dw = null)
+        {
+            Float alpha = -Pi / 2 + uv[0] * Pi, beta = -Pi / 2 + uv[1] * Pi;
+            Float x = std.tan(alpha), y = std.tan(beta);
+            pbrt.DCHECK(!pbrt.IsInf(x) && !pbrt.IsInf(y));
+            Vector3f w = pbrt.Normalize(new Vector3f(x, y, 1));
+            // Compute Jacobian determinant of mapping $\roman{d}(u,v)/\roman{d}\omega$ if needed
+            if (duv_dw != null)
+                *duv_dw = pbrt.Sqr(Pi) * (1 - pbrt.Sqr(w.x)) * (1 - pbrt.Sqr(w.y)) / w.z;
+            return portalFrame.FromLocal(w);
+        }
+
+        pstd.optional<Bounds2f> ImageBounds(Point3f p)
+        {
+            pstd.optional<Point2f> p0 = ImageFromRender(pbrt.Normalize(portal[0] - p));
+            pstd.optional<Point2f> p1 = ImageFromRender(pbrt.Normalize(portal[2] - p));
+            if (!p0 || !p1)
+                return default;
+            return new Bounds2f(p0.value(), p1.value());
+        }
+
+        Float Area()
+        {
+            return pbrt.Length(portal[1] - portal[0]) * pbrt.Length(portal[3] - portal[0]);
+        }
         // PortalImageInfiniteLight Method Definitions
         public PortalImageInfiniteLight(Transform renderFromLight, Image equalAreaImage,
                                         RGBColorSpace imageColorSpace, Float scale, string filename,
@@ -1564,14 +1633,6 @@ namespace pbrt
             };
             Array2D<Float> d = image.GetSamplingDistribution(duv_dw, new Bounds2f(new Point2f(0, 0), new Point2f(1, 1)));
             distribution = new WindowedPiecewiseConstant2D(d, alloc);
-        }
-
-        public override void Preprocess(Bounds3f sceneBounds)
-        {
-            Point3f c; Float r;
-            sceneBounds.BoundingSphere(&c, &r);
-            sceneCenter = c;
-            sceneRadius = r;
         }
 
         public override SampledSpectrum Phi(SampledWavelengths lambda)
@@ -1692,73 +1753,12 @@ namespace pbrt
             return new LightLeSample(L, ray, pdfPos, pdfDir);
         }
 
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            Vector3f w = -pbrt.Normalize(ray.d);
-            Float duv_dw;
-            pstd.optional<Point2f> uv = ImageFromRender(w, &duv_dw);
-            if (!uv || duv_dw == 0)
-            {
-                *pdfPos = *pdfDir = 0;
-                return;
-            }
-            Bounds2f b = new Bounds2f(new Point2f(0, 0), new Point2f(1, 1));
-            Float pdf = distribution.PDF(uv.value(), b);
-
-            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
-            *pdfDir = pdf / duv_dw;
-        }
-
-        public override pstd.optional<LightBounds> Bounds() { return default; }
-
         public override string ToString()
         {
             return pbrt.StringPrintf("[ PortalImageInfiniteLight %s filename:%s scale: %f portal: [ %s %s %s %s ] " +
                                         " portalFrame: %s ]",
                                         BaseToString(), filename, scale, portal[0], portal[1], portal[2], portal[3],
                                         portalFrame);
-        }
-
-        // PortalImageInfiniteLight Private Methods
-        pstd.optional<Point2f> ImageFromRender(Vector3f wRender, Float* duv_dw = null)
-        {
-            Vector3f w = portalFrame.ToLocal(wRender);
-            if (w.z <= 0)
-                return default;
-            // Compute Jacobian determinant of mapping $\roman{d}(u,v)/\roman{d}\omega$ if needed
-            if (duv_dw != null)
-                *duv_dw = pbrt.Sqr(Pi) * (1 - pbrt.Sqr(w.x)) * (1 - pbrt.Sqr(w.y)) / w.z;
-
-            // Compute image-space coordinates
-            Float alpha = std.atan2(w.x, w.z), beta = std.atan2(w.y, w.z);
-            pbrt.DCHECK(!pbrt.IsNaN(alpha + beta));
-            return new Point2f(pbrt.Clamp((alpha + Pi / 2) / Pi, 0, 1), pbrt.Clamp((beta + Pi / 2) / Pi, 0, 1));
-        }
-
-        Vector3f RenderFromImage(Point2f uv, Float* duv_dw = null)
-        {
-            Float alpha = -Pi / 2 + uv[0] * Pi, beta = -Pi / 2 + uv[1] * Pi;
-            Float x = std.tan(alpha), y = std.tan(beta);
-            pbrt.DCHECK(!pbrt.IsInf(x) && !pbrt.IsInf(y));
-            Vector3f w = pbrt.Normalize(new Vector3f(x, y, 1));
-            // Compute Jacobian determinant of mapping $\roman{d}(u,v)/\roman{d}\omega$ if needed
-            if (duv_dw != null)
-                *duv_dw = pbrt.Sqr(Pi) * (1 - pbrt.Sqr(w.x)) * (1 - pbrt.Sqr(w.y)) / w.z;
-            return portalFrame.FromLocal(w);
-        }
-
-        pstd.optional<Bounds2f> ImageBounds(Point3f p)
-        {
-            pstd.optional<Point2f> p0 = ImageFromRender(pbrt.Normalize(portal[0] - p));
-            pstd.optional<Point2f> p1 = ImageFromRender(pbrt.Normalize(portal[2] - p));
-            if (!p0 || !p1)
-                return default;
-            return new Bounds2f(p0.value(), p1.value());
-        }
-
-        Float Area()
-        {
-            return pbrt.Length(portal[1] - portal[0]) * pbrt.Length(portal[3] - portal[0]);
         }
 
         // PortalImageInfiniteLight Private Members
@@ -1776,6 +1776,39 @@ namespace pbrt
     // SpotLight Definition
     public sealed unsafe class SpotLight : LightBase
     {
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            Float[] p = { 1 - cosFalloffStart, (cosFalloffStart - cosFalloffEnd) / 2 };
+            *pdfPos = 0;
+            // Find spotlight directional PDF based on $\cos\theta$
+            Float cosTheta = pbrt.CosTheta(renderFromLight.ApplyInverse(ray.d));
+            if (cosTheta >= cosFalloffStart)
+                *pdfDir = pbrt.UniformConePDF(cosFalloffStart) * p[0] / (p[0] + p[1]);
+            else
+                *pdfDir = pbrt.SmoothStepPDF(cosTheta, cosFalloffEnd, cosFalloffStart) * p[1] /
+                          ((p[0] + p[1]) * (2 * Pi));
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
+            Vector3f wi = pbrt.Normalize(p - ctx.p());
+            // Compute incident radiance _Li_ for _SpotLight_
+            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(-wi));
+            SampledSpectrum Li = I(wLight, lambda) / pbrt.DistanceSquared(p, ctx.p());
+
+            if (!Li)
+                return default;
+            return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
+        }
+
+        public SampledSpectrum I(Vector3f w, SampledWavelengths lambda)
+        {
+            return pbrt.SmoothStep(pbrt.CosTheta(w), cosFalloffEnd, cosFalloffStart) * scale * Iemit.Sample(lambda);
+        }
         // SpotLight Method Definitions
         public SpotLight(Transform renderFromLight, MediumInterface mediumInterface, Spectrum Iemit, Float scale,
                          Float totalWidth, Float falloffStart)
@@ -1786,42 +1819,6 @@ namespace pbrt
             this.cosFalloffEnd = std.cos(pbrt.Radians(totalWidth));
             this.cosFalloffStart = std.cos(pbrt.Radians(falloffStart));
             pbrt.CHECK_LE(falloffStart, totalWidth);
-        }
-
-        public static SpotLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
-                                       RGBColorSpace colorSpace, FileLoc loc, Allocator alloc)
-        {
-            Spectrum I = parameters.GetOneSpectrum("I", colorSpace.illuminant, SpectrumType.Illuminant, alloc);
-            Float sc = parameters.GetOneFloat("scale", 1);
-
-            Float coneangle = parameters.GetOneFloat("coneangle", 30.0f);
-            Float conedelta = parameters.GetOneFloat("conedeltaangle", 5.0f);
-            // Compute spotlight world to light transformation
-            Point3f from = parameters.GetOnePoint3f("from", new Point3f(0, 0, 0));
-            Point3f to = parameters.GetOnePoint3f("to", new Point3f(0, 0, 1));
-
-            Transform dirToZ = new Transform(Frame.FromZ(pbrt.Normalize(to - from)));
-            Transform t = pbrt.Translate(new Vector3f(from.x, from.y, from.z)) * pbrt.Inverse(dirToZ);
-            Transform finalRenderFromLight = renderFromLight * t;
-
-            sc /= pbrt.SpectrumToPhotometric(I);
-
-            Float phi_v = parameters.GetOneFloat("power", -1);
-            if (phi_v > 0)
-            {
-                Float cosFalloffEnd = std.cos(pbrt.Radians(coneangle));
-                Float cosFalloffStart = std.cos(pbrt.Radians(coneangle - conedelta));
-                Float k_e = 2 * Pi * ((1 - cosFalloffStart) + (cosFalloffStart - cosFalloffEnd) / 2);
-                sc *= phi_v / k_e;
-            }
-
-            return new SpotLight(finalRenderFromLight, new MediumInterface(medium), I, sc, coneangle,
-                                 coneangle - conedelta);
-        }
-
-        public SampledSpectrum I(Vector3f w, SampledWavelengths lambda)
-        {
-            return pbrt.SmoothStep(pbrt.CosTheta(w), cosFalloffEnd, cosFalloffStart) * scale * Iemit.Sample(lambda);
         }
 
         public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false) { return 0.0f; }
@@ -1877,38 +1874,41 @@ namespace pbrt
             return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
         }
 
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            Float[] p = { 1 - cosFalloffStart, (cosFalloffStart - cosFalloffEnd) / 2 };
-            *pdfPos = 0;
-            // Find spotlight directional PDF based on $\cos\theta$
-            Float cosTheta = pbrt.CosTheta(renderFromLight.ApplyInverse(ray.d));
-            if (cosTheta >= cosFalloffStart)
-                *pdfDir = pbrt.UniformConePDF(cosFalloffStart) * p[0] / (p[0] + p[1]);
-            else
-                *pdfDir = pbrt.SmoothStepPDF(cosTheta, cosFalloffEnd, cosFalloffStart) * p[1] /
-                          ((p[0] + p[1]) * (2 * Pi));
-        }
-
         public override string ToString()
         {
             return pbrt.StringPrintf("[ SpotLight %s Iemit: %s cosFalloffStart: %f cosFalloffEnd: %f ]",
                                         BaseToString(), Iemit, cosFalloffStart, cosFalloffEnd);
         }
 
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
-                                                              SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
+        public static SpotLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
+                                       RGBColorSpace colorSpace, FileLoc loc, Allocator alloc)
         {
-            Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Vector3f wi = pbrt.Normalize(p - ctx.p());
-            // Compute incident radiance _Li_ for _SpotLight_
-            Vector3f wLight = pbrt.Normalize(renderFromLight.ApplyInverse(-wi));
-            SampledSpectrum Li = I(wLight, lambda) / pbrt.DistanceSquared(p, ctx.p());
+            Spectrum I = parameters.GetOneSpectrum("I", colorSpace.illuminant, SpectrumType.Illuminant, alloc);
+            Float sc = parameters.GetOneFloat("scale", 1);
 
-            if (!Li)
-                return default;
-            return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
+            Float coneangle = parameters.GetOneFloat("coneangle", 30.0f);
+            Float conedelta = parameters.GetOneFloat("conedeltaangle", 5.0f);
+            // Compute spotlight world to light transformation
+            Point3f from = parameters.GetOnePoint3f("from", new Point3f(0, 0, 0));
+            Point3f to = parameters.GetOnePoint3f("to", new Point3f(0, 0, 1));
+
+            Transform dirToZ = new Transform(Frame.FromZ(pbrt.Normalize(to - from)));
+            Transform t = pbrt.Translate(new Vector3f(from.x, from.y, from.z)) * pbrt.Inverse(dirToZ);
+            Transform finalRenderFromLight = renderFromLight * t;
+
+            sc /= pbrt.SpectrumToPhotometric(I);
+
+            Float phi_v = parameters.GetOneFloat("power", -1);
+            if (phi_v > 0)
+            {
+                Float cosFalloffEnd = std.cos(pbrt.Radians(coneangle));
+                Float cosFalloffStart = std.cos(pbrt.Radians(coneangle - conedelta));
+                Float k_e = 2 * Pi * ((1 - cosFalloffStart) + (cosFalloffStart - cosFalloffEnd) / 2);
+                sc *= phi_v / k_e;
+            }
+
+            return new SpotLight(finalRenderFromLight, new MediumInterface(medium), I, sc, coneangle,
+                                 coneangle - conedelta);
         }
 
         // SpotLight Private Members

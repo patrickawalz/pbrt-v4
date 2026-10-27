@@ -60,13 +60,6 @@ namespace pbrt
         // Ray Public Methods
         public bool HasNaN() { return (o.HasNaN() || d.HasNaN()); }
 
-        public override string ToString()
-        {
-            return StringPrintf("[ o: %s d: %s time: %f, medium: %s ]", o, d, time, medium);
-        }
-
-        public Point3f Apply(Float t) { return o + d * t; }
-
         public Ray(Point3f o, Vector3f d, Float time = 0f, Medium medium = null)
         {
             this.o = o;
@@ -75,12 +68,19 @@ namespace pbrt
             this.medium = medium;
         }
 
+        public Point3f Apply(Float t) { return o + d * t; }
+
         public Ray(RayDifferential r)
         {
             o = r.o;
             d = r.d;
             time = r.time;
             medium = r.medium;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ o: %s d: %s time: %f, medium: %s ]", o, d, time, medium);
         }
 
         // Ray Public Members

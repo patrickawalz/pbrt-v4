@@ -172,14 +172,22 @@ public static unsafe class pstd
         public ref T this[long i] { [MethodImpl(AI)] get { return ref data_[(int)i]; } }
         public ref T this[ulong i] { [MethodImpl(AI)] get { return ref data_[(int)i]; } }
 
-        public ref T front() { return ref data_[0]; }
-        public ref T back() { return ref data_[count - 1]; }
-        public T[] data() { return data_; }
-
         public void reserve(ulong n)
         {
             if ((int)n > data_.Length) Array.Resize(ref data_, (int)n);
         }
+
+        public ref T front() { return ref data_[0]; }
+        public ref T back() { return ref data_[count - 1]; }
+        public T[] data() { return data_; }
+        public void clear() { Array.Clear(data_, 0, count); count = 0; }
+        public void emplace_back(T v) { push_back(v); }
+        public void push_back(T v)
+        {
+            if (count == data_.Length) Array.Resize(ref data_, data_.Length * 2);
+            data_[count++] = v;
+        }
+        public void pop_back() { --count; data_[count] = default; }
         public void resize(ulong n)
         {
             int nn = (int)n;
@@ -193,14 +201,6 @@ public static unsafe class pstd
             resize(n);
             for (int i = old; i < count; ++i) data_[i] = v;
         }
-        public void clear() { Array.Clear(data_, 0, count); count = 0; }
-        public void push_back(T v)
-        {
-            if (count == data_.Length) Array.Resize(ref data_, data_.Length * 2);
-            data_[count++] = v;
-        }
-        public void emplace_back(T v) { push_back(v); }
-        public void pop_back() { --count; data_[count] = default; }
         public void insert_back(IEnumerable<T> items) { foreach (T t in items) push_back(t); }
         public T[] ToArray() { T[] r = new T[count]; Array.Copy(data_, r, count); return r; }
 

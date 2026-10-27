@@ -27,17 +27,6 @@ namespace pbrt
             this.time = time;
         }
 
-        public Point3f p() { return (Point3f)pi; }
-
-        public bool IsSurfaceInteraction() { return n != new Normal3f(0, 0, 0); }
-        public bool IsMediumInteraction() { return !IsSurfaceInteraction(); }
-
-        public SurfaceInteraction AsSurface()
-        {
-            pbrt.CHECK(IsSurfaceInteraction());
-            return (SurfaceInteraction)this;
-        }
-
         // used by medium ctor
         public Interaction(Point3f p, Vector3f wo, Float time, Medium medium)
         {
@@ -57,6 +46,12 @@ namespace pbrt
         {
             this.pi = new Point3fi(p);
             this.uv = uv;
+        }
+
+        public SurfaceInteraction AsSurface()
+        {
+            pbrt.CHECK(IsSurfaceInteraction());
+            return (SurfaceInteraction)this;
         }
         public Interaction(Point3fi pi, Normal3f n, Float time = 0, Point2f uv = default)
         {
@@ -89,25 +84,21 @@ namespace pbrt
             this.mediumInterface = mediumInterface;
         }
 
+        public Point3f p() { return (Point3f)pi; }
+
+        public bool IsSurfaceInteraction() { return n != new Normal3f(0, 0, 0); }
+        public bool IsMediumInteraction() { return !IsSurfaceInteraction(); }
+
         public MediumInteraction AsMedium()
         {
             pbrt.CHECK(IsMediumInteraction());
             return (MediumInteraction)this;
         }
 
-        public override string ToString()
-        {
-            return pbrt.StringPrintf(
-                "[ Interaction pi: %s n: %s uv: %s wo: %s time: %s " +
-                "medium: %s mediumInterface: %s ]",
-                pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
-                mediumInterface != null ? mediumInterface.ToString() : "(nullptr)");
-        }
+        public Point3f OffsetRayOrigin(Vector3f w) { return pbrt.OffsetRayOrigin(pi, n, w); }
 
         // (C++ copies Interaction objects by value)
         public Interaction Clone() { return (Interaction)MemberwiseClone(); }
-
-        public Point3f OffsetRayOrigin(Vector3f w) { return pbrt.OffsetRayOrigin(pi, n, w); }
 
         public Point3f OffsetRayOrigin(Point3f pt) { return OffsetRayOrigin(pt - p()); }
 
@@ -142,6 +133,15 @@ namespace pbrt
             if (mediumInterface != null)
                 pbrt.DCHECK(mediumInterface.inside == mediumInterface.outside);
             return mediumInterface != null ? mediumInterface.inside : medium;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf(
+                "[ Interaction pi: %s n: %s uv: %s wo: %s time: %s " +
+                "medium: %s mediumInterface: %s ]",
+                pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
+                mediumInterface != null ? mediumInterface.ToString() : "(nullptr)");
         }
 
         // Interaction Public Members
@@ -244,22 +244,6 @@ namespace pbrt
                 shading.dpdu /= 1e8f;
                 shading.dpdv /= 1e8f;
             }
-        }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf(
-                "[ SurfaceInteraction pi: %s n: %s uv: %s wo: %s time: %s " +
-                "medium: %s mediumInterface: %s dpdu: %s dpdv: %s dndu: %s dndv: %s " +
-                "shading.n: %s shading.dpdu: %s shading.dpdv: %s " +
-                "shading.dndu: %s shading.dndv: %s material: %s " +
-                "areaLight: %s dpdx: %s dpdy: %s dudx: %f dvdx: %f " +
-                "dudy: %f dvdy: %f faceIndex: %d ]",
-                pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
-                mediumInterface != null ? mediumInterface.ToString() : "(nullptr)", dpdu, dpdv, dndu, dndv, shading.n,
-                shading.dpdu, shading.dpdv, shading.dndu, shading.dndv,
-                material != null ? material.ToString() : "(nullptr)",
-                areaLight != null ? areaLight.ToString() : "(nullptr)", dpdx, dpdy, dudx, dvdx, dudy, dvdy, faceIndex);
         }
 
         public void SetIntersectionProperties(Material mtl, Light area, MediumInterface primMediumInterface,
@@ -467,6 +451,22 @@ namespace pbrt
         public SampledSpectrum Le(Vector3f w, SampledWavelengths lambda)
         {
             return areaLight != null ? areaLight.L(p(), n, uv, w, lambda) : new SampledSpectrum(0f);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf(
+                "[ SurfaceInteraction pi: %s n: %s uv: %s wo: %s time: %s " +
+                "medium: %s mediumInterface: %s dpdu: %s dpdv: %s dndu: %s dndv: %s " +
+                "shading.n: %s shading.dpdu: %s shading.dpdv: %s " +
+                "shading.dndu: %s shading.dndv: %s material: %s " +
+                "areaLight: %s dpdx: %s dpdy: %s dudx: %f dvdx: %f " +
+                "dudy: %f dvdy: %f faceIndex: %d ]",
+                pi, n, uv, wo, time, medium != null ? medium.ToString() : "(nullptr)",
+                mediumInterface != null ? mediumInterface.ToString() : "(nullptr)", dpdu, dpdv, dndu, dndv, shading.n,
+                shading.dpdu, shading.dpdv, shading.dndu, shading.dndv,
+                material != null ? material.ToString() : "(nullptr)",
+                areaLight != null ? areaLight.ToString() : "(nullptr)", dpdx, dpdy, dudx, dvdx, dudy, dvdy, faceIndex);
         }
 
         // (C++ copies SurfaceInteraction objects by value)

@@ -2562,8 +2562,6 @@ namespace pbrt
 
         public static DirectionCone EntireSphere() { return new DirectionCone(new Vector3f(0, 0, 1), -1); }
 
-        public override string ToString() { return $"[ DirectionCone w: {w} cosTheta: {cosTheta} ]"; }
-
         public Vector3f ClosestVectorInCone(Vector3f wp)
         {
             DCHECK(!IsEmpty());
@@ -2581,6 +2579,8 @@ namespace pbrt
                                     w.y * (wp.x * w.x + wp.z * w.z) - wp.y * (Sqr(w.x) + Sqr(w.z)),
                                     w.z * (wp.x * w.x + wp.y * w.y) - wp.z * (Sqr(w.x) + Sqr(w.y)));
         }
+
+        public override string ToString() { return $"[ DirectionCone w: {w} cosTheta: {cosTheta} ]"; }
 
         // DirectionCone Public Members
         public Vector3f w;
@@ -2619,17 +2619,12 @@ namespace pbrt
             return new Frame(x, y, z);
         }
 
+        public static Frame FromZ(Normal3f z) { return FromZ((Vector3f)z); }
+
         public static Frame FromX(Vector3f x)
         {
             Vector3f y, z;
             CoordinateSystem(x, &y, &z);
-            return new Frame(x, y, z);
-        }
-
-        public static Frame FromY(Vector3f y)
-        {
-            Vector3f x, z;
-            CoordinateSystem(y, &z, &x);
             return new Frame(x, y, z);
         }
 
@@ -2640,14 +2635,19 @@ namespace pbrt
             return new Frame((Vector3f)x, y, z);
         }
 
+        public static Frame FromY(Vector3f y)
+        {
+            Vector3f x, z;
+            CoordinateSystem(y, &z, &x);
+            return new Frame(x, y, z);
+        }
+
         public static Frame FromY(Normal3f y)
         {
             Vector3f x, z;
             CoordinateSystem(y, &z, &x);
             return new Frame(x, (Vector3f)y, z);
         }
-
-        public static Frame FromZ(Normal3f z) { return FromZ((Vector3f)z); }
 
         public Vector3f ToLocal(Vector3f v) { return new Vector3f(Dot(v, x), Dot(v, y), Dot(v, z)); }
 

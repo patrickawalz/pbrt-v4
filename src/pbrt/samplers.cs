@@ -36,61 +36,10 @@ namespace pbrt
     // HaltonSampler Definition
     public sealed unsafe class HaltonSampler : Sampler
     {
-        // HaltonSampler Public Methods
-        public HaltonSampler(int samplesPerPixel, Point2i fullRes,
-                             RandomizeStrategy randomize = RandomizeStrategy.PermuteDigits,
-                             int seed = 0, Allocator alloc = null)
-        {
-            this.samplesPerPixel = samplesPerPixel;
-            this.randomize = randomize;
-            if (randomize == RandomizeStrategy.PermuteDigits)
-                digitPermutations = ComputeRadicalInversePermutations((uint32_t)seed, alloc);
-            // Find radical inverse base scales and exponents that cover sampling area
-            for (int i = 0; i < 2; ++i)
-            {
-                int base_ = (i == 0) ? 2 : 3;
-                int scale = 1, exp = 0;
-                while (scale < std.min(fullRes[i], MaxHaltonResolution))
-                {
-                    scale *= base_;
-                    ++exp;
-                }
-                baseScales[i] = scale;
-                baseExponents[i] = exp;
-            }
-
-            // Compute multiplicative inverses for _baseScales_
-            multInverse0 = (int)multiplicativeInverse(baseScales[1], baseScales[0]);
-            multInverse1 = (int)multiplicativeInverse(baseScales[0], baseScales[1]);
-        }
-
-        public static string Name() { return "HaltonSampler"; }
-        public static HaltonSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
-        {
-            int nsamp = parameters.GetOneInt("pixelsamples", 16);
-            if (Options.pixelSamples)
-                nsamp = Options.pixelSamples.value();
-            int seed = parameters.GetOneInt("seed", Options.seed);
-            if (Options.quickRender)
-                nsamp = 1;
-
-            RandomizeStrategy randomizer = RandomizeStrategy.None;
-            string s = parameters.GetOneString("randomization", "permutedigits");
-            if (s == "none")
-                randomizer = RandomizeStrategy.None;
-            else if (s == "permutedigits")
-                randomizer = RandomizeStrategy.PermuteDigits;
-            else if (s == "fastowen")
-                ErrorExit("\"fastowen\" randomization not supported by Halton sampler.");
-            else if (s == "owen")
-                randomizer = RandomizeStrategy.Owen;
-            else
-                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to HaltonSampler", s));
-
-            return new HaltonSampler(nsamp, fullResolution, randomizer, seed, alloc);
-        }
 
         public override int SamplesPerPixel() { return samplesPerPixel; }
+
+        public static string Name() { return "HaltonSampler"; }
 
         public RandomizeStrategy GetRandomizeStrategy() { return randomize; }
 
@@ -139,21 +88,6 @@ namespace pbrt
                                RadicalInverse(1, (uint64_t)(haltonIndex / baseScales[1])));
         }
 
-        public override Sampler Clone(Allocator alloc = null)
-        {
-            return (Sampler)MemberwiseClone();
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ HaltonSampler randomize: %s digitPermutations: %s " +
-                                "haltonIndex: %d dimension: %d samplesPerPixel: %d " +
-                                "baseScales: %s baseExponents: %s multInverse: [ %d %d ] ]",
-                                randomize, digitPermutations, haltonIndex, dimension,
-                                samplesPerPixel, baseScales, baseExponents, multInverse0,
-                                multInverse1);
-        }
-
         // HaltonSampler Private Methods
         static uint64_t multiplicativeInverse(int64_t a, int64_t n)
         {
@@ -190,6 +124,72 @@ namespace pbrt
                                                    (uint32_t)MixBits((uint64_t)(1 + (dimension << 4))));
             }
         }
+        // HaltonSampler Public Methods
+        public HaltonSampler(int samplesPerPixel, Point2i fullRes,
+                             RandomizeStrategy randomize = RandomizeStrategy.PermuteDigits,
+                             int seed = 0, Allocator alloc = null)
+        {
+            this.samplesPerPixel = samplesPerPixel;
+            this.randomize = randomize;
+            if (randomize == RandomizeStrategy.PermuteDigits)
+                digitPermutations = ComputeRadicalInversePermutations((uint32_t)seed, alloc);
+            // Find radical inverse base scales and exponents that cover sampling area
+            for (int i = 0; i < 2; ++i)
+            {
+                int base_ = (i == 0) ? 2 : 3;
+                int scale = 1, exp = 0;
+                while (scale < std.min(fullRes[i], MaxHaltonResolution))
+                {
+                    scale *= base_;
+                    ++exp;
+                }
+                baseScales[i] = scale;
+                baseExponents[i] = exp;
+            }
+
+            // Compute multiplicative inverses for _baseScales_
+            multInverse0 = (int)multiplicativeInverse(baseScales[1], baseScales[0]);
+            multInverse1 = (int)multiplicativeInverse(baseScales[0], baseScales[1]);
+        }
+
+        public override Sampler Clone(Allocator alloc = null)
+        {
+            return (Sampler)MemberwiseClone();
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ HaltonSampler randomize: %s digitPermutations: %s " +
+                                "haltonIndex: %d dimension: %d samplesPerPixel: %d " +
+                                "baseScales: %s baseExponents: %s multInverse: [ %d %d ] ]",
+                                randomize, digitPermutations, haltonIndex, dimension,
+                                samplesPerPixel, baseScales, baseExponents, multInverse0,
+                                multInverse1);
+        }
+        public static HaltonSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
+        {
+            int nsamp = parameters.GetOneInt("pixelsamples", 16);
+            if (Options.pixelSamples)
+                nsamp = Options.pixelSamples.value();
+            int seed = parameters.GetOneInt("seed", Options.seed);
+            if (Options.quickRender)
+                nsamp = 1;
+
+            RandomizeStrategy randomizer = RandomizeStrategy.None;
+            string s = parameters.GetOneString("randomization", "permutedigits");
+            if (s == "none")
+                randomizer = RandomizeStrategy.None;
+            else if (s == "permutedigits")
+                randomizer = RandomizeStrategy.PermuteDigits;
+            else if (s == "fastowen")
+                ErrorExit("\"fastowen\" randomization not supported by Halton sampler.");
+            else if (s == "owen")
+                randomizer = RandomizeStrategy.Owen;
+            else
+                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to HaltonSampler", s));
+
+            return new HaltonSampler(nsamp, fullResolution, randomizer, seed, alloc);
+        }
 
         // HaltonSampler Private Members
         int samplesPerPixel;
@@ -207,30 +207,6 @@ namespace pbrt
     {
         // PaddedSobolSampler Public Methods
         public static string Name() { return "PaddedSobolSampler"; }
-        public static PaddedSobolSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            int nsamp = parameters.GetOneInt("pixelsamples", 16);
-            if (Options.pixelSamples)
-                nsamp = Options.pixelSamples.value();
-            if (Options.quickRender)
-                nsamp = 1;
-            int seed = parameters.GetOneInt("seed", Options.seed);
-
-            RandomizeStrategy randomizer = RandomizeStrategy.None;
-            string s = parameters.GetOneString("randomization", "fastowen");
-            if (s == "none")
-                randomizer = RandomizeStrategy.None;
-            else if (s == "permutedigits")
-                randomizer = RandomizeStrategy.PermuteDigits;
-            else if (s == "fastowen")
-                randomizer = RandomizeStrategy.FastOwen;
-            else if (s == "owen")
-                randomizer = RandomizeStrategy.Owen;
-            else
-                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to PaddedSobolSampler", s));
-
-            return new PaddedSobolSampler(nsamp, randomizer, seed);
-        }
 
         public PaddedSobolSampler(int samplesPerPixel, RandomizeStrategy randomizer, int seed = 0)
         {
@@ -280,18 +256,6 @@ namespace pbrt
 
         public RandomizeStrategy GetRandomizeStrategy() { return randomize; }
 
-        public override Sampler Clone(Allocator alloc = null)
-        {
-            return (Sampler)MemberwiseClone();
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ PaddedSobolSampler pixel: %s sampleIndex: %d dimension: %d " +
-                                "samplesPerPixel: %d seed: %d randomize: %s ]",
-                                pixel, sampleIndex, dimension, samplesPerPixel, seed, randomize);
-        }
-
         // PaddedSobolSampler Private Methods
         Float SampleDimension(int dimension, uint32_t a, uint32_t hash)
         {
@@ -303,6 +267,42 @@ namespace pbrt
                 return SobolSample(a, dimension, new FastOwenScrambler(hash));
             else
                 return SobolSample(a, dimension, new OwenScrambler(hash));
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ PaddedSobolSampler pixel: %s sampleIndex: %d dimension: %d " +
+                                "samplesPerPixel: %d seed: %d randomize: %s ]",
+                                pixel, sampleIndex, dimension, samplesPerPixel, seed, randomize);
+        }
+
+        public override Sampler Clone(Allocator alloc = null)
+        {
+            return (Sampler)MemberwiseClone();
+        }
+        public static PaddedSobolSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            int nsamp = parameters.GetOneInt("pixelsamples", 16);
+            if (Options.pixelSamples)
+                nsamp = Options.pixelSamples.value();
+            if (Options.quickRender)
+                nsamp = 1;
+            int seed = parameters.GetOneInt("seed", Options.seed);
+
+            RandomizeStrategy randomizer = RandomizeStrategy.None;
+            string s = parameters.GetOneString("randomization", "fastowen");
+            if (s == "none")
+                randomizer = RandomizeStrategy.None;
+            else if (s == "permutedigits")
+                randomizer = RandomizeStrategy.PermuteDigits;
+            else if (s == "fastowen")
+                randomizer = RandomizeStrategy.FastOwen;
+            else if (s == "owen")
+                randomizer = RandomizeStrategy.Owen;
+            else
+                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to PaddedSobolSampler", s));
+
+            return new PaddedSobolSampler(nsamp, randomizer, seed);
         }
 
         // PaddedSobolSampler Private Members
@@ -332,31 +332,6 @@ namespace pbrt
         }
 
         public static string Name() { return "ZSobolSampler"; }
-
-        public static ZSobolSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
-        {
-            int nsamp = parameters.GetOneInt("pixelsamples", 16);
-            if (Options.pixelSamples)
-                nsamp = Options.pixelSamples.value();
-            if (Options.quickRender)
-                nsamp = 1;
-            int seed = parameters.GetOneInt("seed", Options.seed);
-
-            RandomizeStrategy randomizer = RandomizeStrategy.None;
-            string s = parameters.GetOneString("randomization", "fastowen");
-            if (s == "none")
-                randomizer = RandomizeStrategy.None;
-            else if (s == "permutedigits")
-                randomizer = RandomizeStrategy.PermuteDigits;
-            else if (s == "fastowen")
-                randomizer = RandomizeStrategy.FastOwen;
-            else if (s == "owen")
-                randomizer = RandomizeStrategy.Owen;
-            else
-                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to ZSobolSampler", s));
-
-            return new ZSobolSampler(nsamp, fullResolution, randomizer, seed);
-        }
 
         public override int SamplesPerPixel() { return 1 << log2SamplesPerPixel; }
 
@@ -406,6 +381,36 @@ namespace pbrt
 
         public override Point2f GetPixel2D() { return Get2D(); }
 
+        public uint64_t GetSampleIndex()
+        {
+            uint64_t sampleIndex = 0;
+            // Apply random permutations to full base-4 digits
+            bool pow2Samples = (log2SamplesPerPixel & 1) != 0;
+            int lastDigit = pow2Samples ? 1 : 0;
+            for (int i = nBase4Digits - 1; i >= lastDigit; --i)
+            {
+                // Randomly permute $i$th base-4 digit in _mortonIndex_
+                int digitShift = 2 * i - (pow2Samples ? 1 : 0);
+                int digit = (int)((mortonIndex >> digitShift) & 3);
+                // Choose permutation _p_ to use for _digit_
+                uint64_t higherDigits = mortonIndex >> (digitShift + 2);
+                int p = (int)((MixBits(higherDigits ^ (uint64_t)(0x55555555u * (uint32_t)dimension)) >> 24) % 24);
+
+                digit = permutations[p, digit];
+                sampleIndex |= (uint64_t)digit << digitShift;
+            }
+
+            // Handle power-of-2 (but not 4) sample count
+            if (pow2Samples)
+            {
+                int digit = (int)(mortonIndex & 1);
+                sampleIndex |=
+                    (uint64_t)digit ^ (MixBits((mortonIndex >> 1) ^ (uint64_t)(0x55555555u * (uint32_t)dimension)) & 1);
+            }
+
+            return sampleIndex;
+        }
+
         public override Sampler Clone(Allocator alloc = null)
         {
             return (Sampler)MemberwiseClone();
@@ -448,34 +453,29 @@ namespace pbrt
             {3, 0, 1, 2}
         };
 
-        public uint64_t GetSampleIndex()
+        public static ZSobolSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
         {
-            uint64_t sampleIndex = 0;
-            // Apply random permutations to full base-4 digits
-            bool pow2Samples = (log2SamplesPerPixel & 1) != 0;
-            int lastDigit = pow2Samples ? 1 : 0;
-            for (int i = nBase4Digits - 1; i >= lastDigit; --i)
-            {
-                // Randomly permute $i$th base-4 digit in _mortonIndex_
-                int digitShift = 2 * i - (pow2Samples ? 1 : 0);
-                int digit = (int)((mortonIndex >> digitShift) & 3);
-                // Choose permutation _p_ to use for _digit_
-                uint64_t higherDigits = mortonIndex >> (digitShift + 2);
-                int p = (int)((MixBits(higherDigits ^ (uint64_t)(0x55555555u * (uint32_t)dimension)) >> 24) % 24);
+            int nsamp = parameters.GetOneInt("pixelsamples", 16);
+            if (Options.pixelSamples)
+                nsamp = Options.pixelSamples.value();
+            if (Options.quickRender)
+                nsamp = 1;
+            int seed = parameters.GetOneInt("seed", Options.seed);
 
-                digit = permutations[p, digit];
-                sampleIndex |= (uint64_t)digit << digitShift;
-            }
+            RandomizeStrategy randomizer = RandomizeStrategy.None;
+            string s = parameters.GetOneString("randomization", "fastowen");
+            if (s == "none")
+                randomizer = RandomizeStrategy.None;
+            else if (s == "permutedigits")
+                randomizer = RandomizeStrategy.PermuteDigits;
+            else if (s == "fastowen")
+                randomizer = RandomizeStrategy.FastOwen;
+            else if (s == "owen")
+                randomizer = RandomizeStrategy.Owen;
+            else
+                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to ZSobolSampler", s));
 
-            // Handle power-of-2 (but not 4) sample count
-            if (pow2Samples)
-            {
-                int digit = (int)(mortonIndex & 1);
-                sampleIndex |=
-                    (uint64_t)digit ^ (MixBits((mortonIndex >> 1) ^ (uint64_t)(0x55555555u * (uint32_t)dimension)) & 1);
-            }
-
-            return sampleIndex;
+            return new ZSobolSampler(nsamp, fullResolution, randomizer, seed);
         }
 
         // ZSobolSampler Private Members
@@ -488,58 +488,10 @@ namespace pbrt
     // PMJ02BNSampler Definition
     public sealed unsafe class PMJ02BNSampler : Sampler
     {
-        // PMJ02BNSampler Public Methods
-        public PMJ02BNSampler(int samplesPerPixel, int seed = 0, Allocator alloc = null)
-        {
-            this.samplesPerPixel = samplesPerPixel;
-            this.seed = seed;
-            if (!IsPowerOf4(samplesPerPixel))
-                Warning("PMJ02BNSampler results are best with power-of-4 samples per " +
-                        "pixel (1, 4, 16, 64, ...)");
-            // Get sorted pmj02bn samples for pixel samples
-            if (samplesPerPixel > nPMJ02bnSamples)
-                Error(StringPrintf("PMJ02BNSampler only supports up to %d samples per pixel", nPMJ02bnSamples));
-            // Compute _pixelTileSize_ for pmj02bn pixel samples and allocate _pixelSamples_
-            pixelTileSize =
-                1 << (Log4Int(nPMJ02bnSamples) - Log4Int(RoundUpPow4(samplesPerPixel)));
-            int nPixelSamples = pixelTileSize * pixelTileSize * samplesPerPixel;
-            pixelSamples = new pstd.vector<Point2f>((ulong)nPixelSamples);
-
-            // Loop over pmj02bn samples and associate them with their pixels
-            int[] nStored = new int[pixelTileSize * pixelTileSize];
-            for (int i = 0; i < nPMJ02bnSamples; ++i)
-            {
-                Point2f p = GetPMJ02BNSample(0, i);
-                p = p * pixelTileSize;
-                int pixelOffset = (int)p.x + (int)p.y * pixelTileSize;
-                if (nStored[pixelOffset] == samplesPerPixel)
-                {
-                    CHECK(!IsPowerOf4(samplesPerPixel));
-                    continue;
-                }
-                int sampleOffset = pixelOffset * samplesPerPixel + nStored[pixelOffset];
-                CHECK(pixelSamples[sampleOffset] == new Point2f(0, 0));
-                pixelSamples[sampleOffset] = new Point2f(p.x - std.floor(p.x), p.y - std.floor(p.y));
-                ++nStored[pixelOffset];
-            }
-
-            for (int i = 0; i < nStored.Length; ++i)
-                CHECK_EQ(nStored[i], samplesPerPixel);
-        }
-
-        public static string Name() { return "PMJ02BNSampler"; }
-        public static PMJ02BNSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            int nsamp = parameters.GetOneInt("pixelsamples", 16);
-            if (Options.pixelSamples)
-                nsamp = Options.pixelSamples.value();
-            if (Options.quickRender)
-                nsamp = 1;
-            int seed = parameters.GetOneInt("seed", Options.seed);
-            return new PMJ02BNSampler(nsamp, seed, alloc);
-        }
 
         public override int SamplesPerPixel() { return samplesPerPixel; }
+
+        public static string Name() { return "PMJ02BNSampler"; }
 
         public override void StartPixelSample(Point2i p, int index, int dim = 0)
         {
@@ -590,6 +542,54 @@ namespace pbrt
             dimension += 2;
             return new Point2f(std.min(u.x, OneMinusEpsilon), std.min(u.y, OneMinusEpsilon));
         }
+        // PMJ02BNSampler Public Methods
+        public PMJ02BNSampler(int samplesPerPixel, int seed = 0, Allocator alloc = null)
+        {
+            this.samplesPerPixel = samplesPerPixel;
+            this.seed = seed;
+            if (!IsPowerOf4(samplesPerPixel))
+                Warning("PMJ02BNSampler results are best with power-of-4 samples per " +
+                        "pixel (1, 4, 16, 64, ...)");
+            // Get sorted pmj02bn samples for pixel samples
+            if (samplesPerPixel > nPMJ02bnSamples)
+                Error(StringPrintf("PMJ02BNSampler only supports up to %d samples per pixel", nPMJ02bnSamples));
+            // Compute _pixelTileSize_ for pmj02bn pixel samples and allocate _pixelSamples_
+            pixelTileSize =
+                1 << (Log4Int(nPMJ02bnSamples) - Log4Int(RoundUpPow4(samplesPerPixel)));
+            int nPixelSamples = pixelTileSize * pixelTileSize * samplesPerPixel;
+            pixelSamples = new pstd.vector<Point2f>((ulong)nPixelSamples);
+
+            // Loop over pmj02bn samples and associate them with their pixels
+            int[] nStored = new int[pixelTileSize * pixelTileSize];
+            for (int i = 0; i < nPMJ02bnSamples; ++i)
+            {
+                Point2f p = GetPMJ02BNSample(0, i);
+                p = p * pixelTileSize;
+                int pixelOffset = (int)p.x + (int)p.y * pixelTileSize;
+                if (nStored[pixelOffset] == samplesPerPixel)
+                {
+                    CHECK(!IsPowerOf4(samplesPerPixel));
+                    continue;
+                }
+                int sampleOffset = pixelOffset * samplesPerPixel + nStored[pixelOffset];
+                CHECK(pixelSamples[sampleOffset] == new Point2f(0, 0));
+                pixelSamples[sampleOffset] = new Point2f(p.x - std.floor(p.x), p.y - std.floor(p.y));
+                ++nStored[pixelOffset];
+            }
+
+            for (int i = 0; i < nStored.Length; ++i)
+                CHECK_EQ(nStored[i], samplesPerPixel);
+        }
+        public static PMJ02BNSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            int nsamp = parameters.GetOneInt("pixelsamples", 16);
+            if (Options.pixelSamples)
+                nsamp = Options.pixelSamples.value();
+            if (Options.quickRender)
+                nsamp = 1;
+            int seed = parameters.GetOneInt("seed", Options.seed);
+            return new PMJ02BNSampler(nsamp, seed, alloc);
+        }
 
         public override Sampler Clone(Allocator alloc = null)
         {
@@ -622,17 +622,8 @@ namespace pbrt
             this.seed = seed;
         }
 
-        public static IndependentSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            int ns = parameters.GetOneInt("pixelsamples", 4);
-            if (Options.pixelSamples)
-                ns = Options.pixelSamples.value();
-            int seed = parameters.GetOneInt("seed", Options.seed);
-            return new IndependentSampler(ns, seed);
-        }
-        public static string Name() { return "IndependentSampler"; }
-
         public override int SamplesPerPixel() { return samplesPerPixel; }
+        public static string Name() { return "IndependentSampler"; }
 
         public override void StartPixelSample(Point2i p, int sampleIndex, int dimension = 0)
         {
@@ -644,15 +635,24 @@ namespace pbrt
         public override Point2f Get2D() { Float a = rng.Uniform<Float>(); Float b = rng.Uniform<Float>(); return new Point2f(a, b); }
         public override Point2f GetPixel2D() { return Get2D(); }
 
+        public override string ToString()
+        {
+            return StringPrintf("[ IndependentSampler samplesPerPixel: %d seed: %d rng: %s ]",
+                                samplesPerPixel, seed, rng);
+        }
+
         public override Sampler Clone(Allocator alloc = null)
         {
             return (Sampler)MemberwiseClone();
         }
 
-        public override string ToString()
+        public static IndependentSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
-            return StringPrintf("[ IndependentSampler samplesPerPixel: %d seed: %d rng: %s ]",
-                                samplesPerPixel, seed, rng);
+            int ns = parameters.GetOneInt("pixelsamples", 4);
+            if (Options.pixelSamples)
+                ns = Options.pixelSamples.value();
+            int seed = parameters.GetOneInt("seed", Options.seed);
+            return new IndependentSampler(ns, seed);
         }
 
         // IndependentSampler Private Members
@@ -677,31 +677,6 @@ namespace pbrt
         }
 
         public static string Name() { return "SobolSampler"; }
-        public static SobolSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
-        {
-            int nsamp = parameters.GetOneInt("pixelsamples", 16);
-            if (Options.pixelSamples)
-                nsamp = Options.pixelSamples.value();
-            if (Options.quickRender)
-                nsamp = 1;
-
-            RandomizeStrategy randomizer = RandomizeStrategy.None;
-            string s = parameters.GetOneString("randomization", "fastowen");
-            if (s == "none")
-                randomizer = RandomizeStrategy.None;
-            else if (s == "permutedigits")
-                randomizer = RandomizeStrategy.PermuteDigits;
-            else if (s == "fastowen")
-                randomizer = RandomizeStrategy.FastOwen;
-            else if (s == "owen")
-                randomizer = RandomizeStrategy.Owen;
-            else
-                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to SobolSampler", s));
-
-            int seed = parameters.GetOneInt("seed", Options.seed);
-
-            return new SobolSampler(nsamp, fullResolution, randomizer, seed);
-        }
 
         public override int SamplesPerPixel() { return samplesPerPixel; }
 
@@ -742,20 +717,6 @@ namespace pbrt
             return u;
         }
 
-        public override Sampler Clone(Allocator alloc = null)
-        {
-            return (Sampler)MemberwiseClone();
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ SobolSampler pixel: %s dimension: %d " +
-                                "samplesPerPixel: %d scale: %d sobolIndex: %d " +
-                                "seed: %d randomize: %s ]",
-                                pixel, dimension, samplesPerPixel, scale, sobolIndex, seed,
-                                randomize);
-        }
-
         // SobolSampler Private Methods
         Float SampleDimension(int dimension)
         {
@@ -771,6 +732,45 @@ namespace pbrt
                 return SobolSample(sobolIndex, dimension, new FastOwenScrambler(hash));
             else
                 return SobolSample(sobolIndex, dimension, new OwenScrambler(hash));
+        }
+
+        public override Sampler Clone(Allocator alloc = null)
+        {
+            return (Sampler)MemberwiseClone();
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ SobolSampler pixel: %s dimension: %d " +
+                                "samplesPerPixel: %d scale: %d sobolIndex: %d " +
+                                "seed: %d randomize: %s ]",
+                                pixel, dimension, samplesPerPixel, scale, sobolIndex, seed,
+                                randomize);
+        }
+        public static SobolSampler Create(ParameterDictionary parameters, Point2i fullResolution, FileLoc loc, Allocator alloc)
+        {
+            int nsamp = parameters.GetOneInt("pixelsamples", 16);
+            if (Options.pixelSamples)
+                nsamp = Options.pixelSamples.value();
+            if (Options.quickRender)
+                nsamp = 1;
+
+            RandomizeStrategy randomizer = RandomizeStrategy.None;
+            string s = parameters.GetOneString("randomization", "fastowen");
+            if (s == "none")
+                randomizer = RandomizeStrategy.None;
+            else if (s == "permutedigits")
+                randomizer = RandomizeStrategy.PermuteDigits;
+            else if (s == "fastowen")
+                randomizer = RandomizeStrategy.FastOwen;
+            else if (s == "owen")
+                randomizer = RandomizeStrategy.Owen;
+            else
+                ErrorExit(loc, StringPrintf("%s: unknown randomization strategy given to SobolSampler", s));
+
+            int seed = parameters.GetOneInt("seed", Options.seed);
+
+            return new SobolSampler(nsamp, fullResolution, randomizer, seed);
         }
 
         // SobolSampler Private Members
@@ -793,34 +793,8 @@ namespace pbrt
             this.jitter = jitter;
         }
 
-        public static StratifiedSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            bool jitter = parameters.GetOneBool("jitter", true);
-            int xSamples = parameters.GetOneInt("xsamples", 4);
-            int ySamples = parameters.GetOneInt("ysamples", 4);
-            if (Options.pixelSamples)
-            {
-                int nSamples = Options.pixelSamples.value();
-                int div = (int)std.sqrt(nSamples);
-                while ((nSamples % div) != 0)
-                {
-                    CHECK_GT(div, 0);
-                    --div;
-                }
-                xSamples = nSamples / div;
-                ySamples = nSamples / xSamples;
-                CHECK_EQ(nSamples, xSamples * ySamples);
-                LOG_VERBOSE("xSamples %d ySamples %d", xSamples, ySamples);
-            }
-            if (Options.quickRender)
-                xSamples = ySamples = 1;
-            int seed = parameters.GetOneInt("seed", Options.seed);
-
-            return new StratifiedSampler(xSamples, ySamples, jitter, seed);
-        }
-        public static string Name() { return "StratifiedSampler"; }
-
         public override int SamplesPerPixel() { return xPixelSamples * yPixelSamples; }
+        public static string Name() { return "StratifiedSampler"; }
 
         public override void StartPixelSample(Point2i p, int index, int dim = 0)
         {
@@ -857,17 +831,43 @@ namespace pbrt
 
         public override Point2f GetPixel2D() { return Get2D(); }
 
-        public override Sampler Clone(Allocator alloc = null)
-        {
-            return (Sampler)MemberwiseClone();
-        }
-
         public override string ToString()
         {
             return StringPrintf(
                 "[ StratifiedSampler pixel: %s sampleIndex: %d dimension: %d " +
                 "xPixelSamples: %d yPixelSamples: %d jitter: %s seed: %d rng: %s ]",
                 pixel, sampleIndex, dimension, xPixelSamples, yPixelSamples, jitter, seed, rng);
+        }
+
+        public override Sampler Clone(Allocator alloc = null)
+        {
+            return (Sampler)MemberwiseClone();
+        }
+
+        public static StratifiedSampler Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            bool jitter = parameters.GetOneBool("jitter", true);
+            int xSamples = parameters.GetOneInt("xsamples", 4);
+            int ySamples = parameters.GetOneInt("ysamples", 4);
+            if (Options.pixelSamples)
+            {
+                int nSamples = Options.pixelSamples.value();
+                int div = (int)std.sqrt(nSamples);
+                while ((nSamples % div) != 0)
+                {
+                    CHECK_GT(div, 0);
+                    --div;
+                }
+                xSamples = nSamples / div;
+                ySamples = nSamples / xSamples;
+                CHECK_EQ(nSamples, xSamples * ySamples);
+                LOG_VERBOSE("xSamples %d ySamples %d", xSamples, ySamples);
+            }
+            if (Options.quickRender)
+                xSamples = ySamples = 1;
+            int seed = parameters.GetOneInt("seed", Options.seed);
+
+            return new StratifiedSampler(xSamples, ySamples, jitter, seed);
         }
 
         // StratifiedSampler Private Members
@@ -893,30 +893,6 @@ namespace pbrt
             this.X = new pstd.vector<PrimarySample>();
         }
 
-        public void StartIteration()
-        {
-            currentIteration++;
-            largeStep = rng.Uniform<Float>() < largeStepProbability;
-        }
-
-        public void Reject()
-        {
-            for (ulong i = 0; i < X.size(); ++i)
-            {
-                ref PrimarySample X_i = ref X[i];
-                if (X_i.lastModificationIteration == currentIteration)
-                    X_i.Restore();
-            }
-            --currentIteration;
-        }
-
-        public void StartStream(int index)
-        {
-            DCHECK_LT(index, streamCount);
-            streamIndex = index;
-            sampleIndex = 0;
-        }
-
         public int GetNextIndex() { return streamIndex + streamCount * sampleIndex++; }
 
         public override int SamplesPerPixel() { return mutationsPerPixel; }
@@ -925,6 +901,16 @@ namespace pbrt
         {
             rng.SetSequence(Hash(p));
             rng.Advance((long)sampleIndex * 65536 + dim * 8192);
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf(
+                "[ MLTSampler rng: %s sigma: %f largeStepProbability: %f " +
+                "streamCount: %d X: %s currentIteration: %d largeStep: %s " +
+                "lastLargeStepIteration: %d streamIndex: %d sampleIndex: %d ] ",
+                rng, sigma, largeStepProbability, streamCount, X, currentIteration, largeStep,
+                lastLargeStepIteration, streamIndex, sampleIndex);
         }
 
         public override Float Get1D()
@@ -952,58 +938,16 @@ namespace pbrt
             return null;
         }
 
+        public void StartIteration()
+        {
+            currentIteration++;
+            largeStep = rng.Uniform<Float>() < largeStepProbability;
+        }
+
         public void Accept()
         {
             if (largeStep)
                 lastLargeStepIteration = currentIteration;
-        }
-
-        public string DumpState()
-        {
-            string state = "";
-            for (ulong i = 0; i < X.size(); ++i)
-                state += StringPrintf("%f,", X[i].value);
-            state += "0";
-            return state;
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf(
-                "[ MLTSampler rng: %s sigma: %f largeStepProbability: %f " +
-                "streamCount: %d X: %s currentIteration: %d largeStep: %s " +
-                "lastLargeStepIteration: %d streamIndex: %d sampleIndex: %d ] ",
-                rng, sigma, largeStepProbability, streamCount, X, currentIteration, largeStep,
-                lastLargeStepIteration, streamIndex, sampleIndex);
-        }
-
-        // MLTSampler Private Declarations
-        protected struct PrimarySample
-        {
-            public Float value;
-            // PrimarySample Public Methods
-            public void Backup()
-            {
-                valueBackup = value;
-                modifyBackup = lastModificationIteration;
-            }
-            public void Restore()
-            {
-                value = valueBackup;
-                lastModificationIteration = modifyBackup;
-            }
-
-            public override string ToString()
-            {
-                return StringPrintf("[ PrimarySample lastModificationIteration: %d " +
-                                    "valueBackup: %f modifyBackup: %d ]",
-                                    lastModificationIteration, valueBackup, modifyBackup);
-            }
-
-            // PrimarySample Public Members
-            public int64_t lastModificationIteration;
-            public Float valueBackup;
-            public int64_t modifyBackup;
         }
 
         // MLTSampler Private Methods
@@ -1037,6 +981,62 @@ namespace pbrt
             X_i.lastModificationIteration = currentIteration;
         }
 
+        public void Reject()
+        {
+            for (ulong i = 0; i < X.size(); ++i)
+            {
+                ref PrimarySample X_i = ref X[i];
+                if (X_i.lastModificationIteration == currentIteration)
+                    X_i.Restore();
+            }
+            --currentIteration;
+        }
+
+        public void StartStream(int index)
+        {
+            DCHECK_LT(index, streamCount);
+            streamIndex = index;
+            sampleIndex = 0;
+        }
+
+        // MLTSampler Private Declarations
+        protected struct PrimarySample
+        {
+            public Float value;
+            // PrimarySample Public Methods
+            public void Backup()
+            {
+                valueBackup = value;
+                modifyBackup = lastModificationIteration;
+            }
+            public void Restore()
+            {
+                value = valueBackup;
+                lastModificationIteration = modifyBackup;
+            }
+
+            public override string ToString()
+            {
+                return StringPrintf("[ PrimarySample lastModificationIteration: %d " +
+                                    "valueBackup: %f modifyBackup: %d ]",
+                                    lastModificationIteration, valueBackup, modifyBackup);
+            }
+
+            // PrimarySample Public Members
+            public int64_t lastModificationIteration;
+            public Float valueBackup;
+            public int64_t modifyBackup;
+        }
+
+        public string DumpState()
+        {
+            string state = "";
+            for (ulong i = 0; i < X.size(); ++i)
+                state += StringPrintf("%f,", X[i].value);
+            state += "0";
+            return state;
+        }
+
         // MLTSampler Private Members
         protected int mutationsPerPixel;
         protected RNG rng;
@@ -1051,19 +1051,6 @@ namespace pbrt
 
     public sealed unsafe class DebugMLTSampler : MLTSampler
     {
-        public static DebugMLTSampler Create(pstd.span<string> state, int nSampleStreams)
-        {
-            DebugMLTSampler ds = new DebugMLTSampler(nSampleStreams);
-            ds.u.Capacity = (int)state.size();
-            for (ulong i = 0; i < state.size(); ++i)
-            {
-                Float v;
-                if (!Atof(state[(int)i], &v))
-                    ErrorExit(StringPrintf("Invalid value in --debugstate: %s", state[(int)i]));
-                ds.u.Add(v);
-            }
-            return ds;
-        }
 
         public override Float Get1D()
         {
@@ -1079,6 +1066,19 @@ namespace pbrt
         public override string ToString()
         {
             return StringPrintf("[ DebugMLTSampler %s u: %s ]", base.ToString(), u);
+        }
+        public static DebugMLTSampler Create(pstd.span<string> state, int nSampleStreams)
+        {
+            DebugMLTSampler ds = new DebugMLTSampler(nSampleStreams);
+            ds.u.Capacity = (int)state.size();
+            for (ulong i = 0; i < state.size(); ++i)
+            {
+                Float v;
+                if (!Atof(state[(int)i], &v))
+                    ErrorExit(StringPrintf("Invalid value in --debugstate: %s", state[(int)i]));
+                ds.u.Add(v);
+            }
+            return ds;
         }
 
         DebugMLTSampler(int nSampleStreams) : base(1, 0, 0.5f, 0.5f, nSampleStreams) { }

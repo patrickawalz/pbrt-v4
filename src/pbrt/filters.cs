@@ -18,6 +18,14 @@ namespace pbrt
 
     public sealed unsafe class FilterSampler
     {
+
+        public FilterSample Sample(Point2f u)
+        {
+            Float pdf;
+            Point2i pi;
+            Point2f p = distrib.Sample(u, &pdf, &pi);
+            return new FilterSample(p, f[pi.x, pi.y] / pdf);
+        }
         // FilterSampler Public Methods
         public FilterSampler(Filter filter, Allocator alloc = null)
         {
@@ -41,14 +49,6 @@ namespace pbrt
             return pbrt.StringPrintf("[ FilterSampler domain: %s f: %s distrib: %s ]", domain, f, distrib);
         }
 
-        public FilterSample Sample(Point2f u)
-        {
-            Float pdf;
-            Point2i pi;
-            Point2f p = distrib.Sample(u, &pdf, &pi);
-            return new FilterSample(p, f[pi.x, pi.y] / pdf);
-        }
-
         // FilterSampler Private Members
         private Bounds2f domain;
         private Array2D<Float> f;
@@ -62,16 +62,7 @@ namespace pbrt
         public BoxFilter(Vector2f radius) { this.radius = radius; }
         public BoxFilter() : this(new Vector2f(0.5f, 0.5f)) { }
 
-        public static BoxFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            Float xw = parameters.GetOneFloat("xradius", 0.5f);
-            Float yw = parameters.GetOneFloat("yradius", 0.5f);
-            return new BoxFilter(new Vector2f(xw, yw));
-        }
-
         public override Vector2f Radius() { return radius; }
-
-        public override string ToString() { return pbrt.StringPrintf("[ BoxFilter radius: %s ]", radius); }
 
         public override Float Evaluate(Point2f p)
         {
@@ -85,6 +76,15 @@ namespace pbrt
         }
 
         public override Float Integral() { return 2 * radius.x * 2 * radius.y; }
+
+        public override string ToString() { return pbrt.StringPrintf("[ BoxFilter radius: %s ]", radius); }
+
+        public static BoxFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            Float xw = parameters.GetOneFloat("xradius", 0.5f);
+            Float yw = parameters.GetOneFloat("yradius", 0.5f);
+            return new BoxFilter(new Vector2f(xw, yw));
+        }
 
         private Vector2f radius;
     }
@@ -102,22 +102,7 @@ namespace pbrt
             sampler = new FilterSampler(this, alloc);
         }
 
-        public static GaussianFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            // Find common filter parameters
-            Float xw = parameters.GetOneFloat("xradius", 1.5f);
-            Float yw = parameters.GetOneFloat("yradius", 1.5f);
-            Float sigma = parameters.GetOneFloat("sigma", 0.5f);  // equivalent to old alpha = 2
-            return new GaussianFilter(new Vector2f(xw, yw), sigma, alloc);
-        }
-
         public override Vector2f Radius() { return radius; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ GaussianFilter radius: %s sigma: %f expX: %f expY: %f sampler: %s ]", radius,
-                                        sigma, expX, expY, sampler);
-        }
 
         public override Float Evaluate(Point2f p)
         {
@@ -132,6 +117,21 @@ namespace pbrt
         }
 
         public override FilterSample Sample(Point2f u) { return sampler.Sample(u); }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ GaussianFilter radius: %s sigma: %f expX: %f expY: %f sampler: %s ]", radius,
+                                        sigma, expX, expY, sampler);
+        }
+
+        public static GaussianFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            // Find common filter parameters
+            Float xw = parameters.GetOneFloat("xradius", 1.5f);
+            Float yw = parameters.GetOneFloat("yradius", 1.5f);
+            Float sigma = parameters.GetOneFloat("sigma", 0.5f);  // equivalent to old alpha = 2
+            return new GaussianFilter(new Vector2f(xw, yw), sigma, alloc);
+        }
 
         // GaussianFilter Private Members
         private Vector2f radius;
@@ -149,22 +149,7 @@ namespace pbrt
             sampler = new FilterSampler(this, alloc);
         }
 
-        public static MitchellFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            // Find common filter parameters
-            Float xw = parameters.GetOneFloat("xradius", 2f);
-            Float yw = parameters.GetOneFloat("yradius", 2f);
-            Float B = parameters.GetOneFloat("B", 1f / 3f);
-            Float C = parameters.GetOneFloat("C", 1f / 3f);
-            return new MitchellFilter(new Vector2f(xw, yw), B, C, alloc);
-        }
-
         public override Vector2f Radius() { return radius; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ MitchellFilter radius: %s b: %f c: %f sampler: %s ]", radius, b, c, sampler);
-        }
 
         public override Float Evaluate(Point2f p)
         {
@@ -188,6 +173,21 @@ namespace pbrt
                 return 0;
         }
 
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ MitchellFilter radius: %s b: %f c: %f sampler: %s ]", radius, b, c, sampler);
+        }
+
+        public static MitchellFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            // Find common filter parameters
+            Float xw = parameters.GetOneFloat("xradius", 2f);
+            Float yw = parameters.GetOneFloat("yradius", 2f);
+            Float B = parameters.GetOneFloat("B", 1f / 3f);
+            Float C = parameters.GetOneFloat("C", 1f / 3f);
+            return new MitchellFilter(new Vector2f(xw, yw), B, C, alloc);
+        }
+
         // MitchellFilter Private Members
         private Vector2f radius;
         private Float b, c;
@@ -204,20 +204,7 @@ namespace pbrt
             sampler = new FilterSampler(this, alloc);
         }
 
-        public static LanczosSincFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            Float xw = parameters.GetOneFloat("xradius", 4f);
-            Float yw = parameters.GetOneFloat("yradius", 4f);
-            Float tau = parameters.GetOneFloat("tau", 3f);
-            return new LanczosSincFilter(new Vector2f(xw, yw), tau, alloc);
-        }
-
         public override Vector2f Radius() { return radius; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ LanczosSincFilter radius: %s tau: %f sampler: %s ]", radius, tau, sampler);
-        }
 
         public override Float Evaluate(Point2f p)
         {
@@ -246,6 +233,19 @@ namespace pbrt
             return sum / nSamples * area;
         }
 
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ LanczosSincFilter radius: %s tau: %f sampler: %s ]", radius, tau, sampler);
+        }
+
+        public static LanczosSincFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            Float xw = parameters.GetOneFloat("xradius", 4f);
+            Float yw = parameters.GetOneFloat("yradius", 4f);
+            Float tau = parameters.GetOneFloat("tau", 3f);
+            return new LanczosSincFilter(new Vector2f(xw, yw), tau, alloc);
+        }
+
         // LanczosSincFilter Private Members
         private Vector2f radius;
         private Float tau;
@@ -258,17 +258,7 @@ namespace pbrt
         // TriangleFilter Public Methods
         public TriangleFilter(Vector2f radius) { this.radius = radius; }
 
-        public static TriangleFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            // Find common filter parameters
-            Float xw = parameters.GetOneFloat("xradius", 2f);
-            Float yw = parameters.GetOneFloat("yradius", 2f);
-            return new TriangleFilter(new Vector2f(xw, yw));
-        }
-
         public override Vector2f Radius() { return radius; }
-
-        public override string ToString() { return pbrt.StringPrintf("[ TriangleFilter radius: %s ]", radius); }
 
         public override Float Evaluate(Point2f p)
         {
@@ -281,6 +271,16 @@ namespace pbrt
         }
 
         public override Float Integral() { return pbrt.Sqr(radius.x) * pbrt.Sqr(radius.y); }
+
+        public override string ToString() { return pbrt.StringPrintf("[ TriangleFilter radius: %s ]", radius); }
+
+        public static TriangleFilter Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            // Find common filter parameters
+            Float xw = parameters.GetOneFloat("xradius", 2f);
+            Float yw = parameters.GetOneFloat("yradius", 2f);
+            return new TriangleFilter(new Vector2f(xw, yw));
+        }
 
         private Vector2f radius;
     }

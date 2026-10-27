@@ -332,6 +332,98 @@ namespace pbrt
 
     public unsafe class TriQuadMesh
     {
+
+        public TriQuadMesh Displace(Func<Point3f, Point3f, Float> dist, Float maxDist, MeshDisplaceFunc displace,
+                                    FileLoc loc = null)
+        {
+            if (uv.empty())
+                ErrorExit(loc, "Vertex uvs are currently required by Displace(). Sorry.\n");
+
+            // Prepare the output mesh
+            TriQuadMesh outputMesh = Clone();
+            outputMesh.ConvertToOnlyTriangles();
+            if (outputMesh.n.empty())
+                outputMesh.ComputeNormals();
+            pstd.vector<int> oldTriIndices = new pstd.vector<int>(outputMesh.triIndices.ToArray());
+            outputMesh.triIndices.clear();
+
+            // Refine
+            HashMap<(int, int), int> edgeSplit = new HashMap<(int, int), int>();
+            for (int i = 0; i < (int)oldTriIndices.size() / 3; ++i)
+                outputMesh.Refine(dist, maxDist, oldTriIndices[3 * i], oldTriIndices[3 * i + 1], oldTriIndices[3 * i + 2],
+                                  edgeSplit);
+
+            // Displace
+            displace(outputMesh.p.data(), outputMesh.n.data(), outputMesh.uv.data(), (int)outputMesh.p.size());
+
+            outputMesh.ComputeNormals();
+
+            return outputMesh;
+        }
+
+        // TriQuadMesh Private Methods
+        private void Refine(Func<Point3f, Point3f, Float> distance, Float maxDist, int v0, int v1, int v2,
+                            HashMap<(int, int), int> edgeSplit)
+        {
+            Point3f p0 = p[v0], p1 = p[v1], p2 = p[v2];
+            Float d01 = distance(p0, p1), d12 = distance(p1, p2), d20 = distance(p2, p0);
+
+            if (d01 < maxDist && d12 < maxDist && d20 < maxDist)
+            {
+                triIndices.push_back(v0);
+                triIndices.push_back(v1);
+                triIndices.push_back(v2);
+                return;
+            }
+
+            // order so that the first two vertices have the longest edge
+            int[] v;
+            if (d01 > d12)
+            {
+                if (d01 > d20)
+                    v = new int[] { v0, v1, v2 };
+                else
+                    v = new int[] { v2, v0, v1 };
+            }
+            else
+            {
+                if (d12 > d20)
+                    v = new int[] { v1, v2, v0 };
+                else
+                    v = new int[] { v2, v0, v1 };
+            }
+
+            // has the edge been spilt before?
+            (int first, int second) edge = (v[0], v[1]);
+            if (v[0] > v[1])
+            {
+                int t = edge.first; edge.first = edge.second; edge.second = t;
+            }
+
+            int vmid;
+            if (edgeSplit.HasKey(edge))
+            {
+                vmid = edgeSplit[edge];
+            }
+            else
+            {
+                vmid = (int)p.size();
+                edgeSplit.Insert(edge, vmid);
+                p.push_back((p[v[0]] + p[v[1]]) / 2);
+                if (!n.empty())
+                {
+                    Normal3f nn = n[v[0]] + n[v[1]];
+                    if (LengthSquared(nn) > 0)
+                        nn = Normalize(nn);
+                    n.push_back(nn);
+                }
+                if (!uv.empty())
+                    uv.push_back((uv[v[0]] + uv[v[1]]) / 2);
+            }
+
+            Refine(distance, maxDist, v[0], vmid, v[2], edgeSplit);
+            Refine(distance, maxDist, vmid, v[1], v[2], edgeSplit);
+        }
         // TriQuadMesh Public Methods
         public static TriQuadMesh ReadPLY(string filename)
         {
@@ -425,6 +517,13 @@ namespace pbrt
             return mesh;
         }
 
+        private static string Vec<T>(pstd.vector<T> v)
+        {
+            List<string> parts = new List<string>();
+            for (int i = 0; i < (int)v.size(); ++i) parts.Add(v[i].ToString());
+            return "[ " + string.Join(", ", parts) + " ]";
+        }
+
         public void ConvertToOnlyTriangles()
         {
             if (quadIndices.empty())
@@ -444,6 +543,18 @@ namespace pbrt
             }
 
             quadIndices.clear();
+        }
+
+        public TriQuadMesh Clone()
+        {
+            TriQuadMesh m = new TriQuadMesh();
+            m.p = new pstd.vector<Point3f>(p.ToArray());
+            m.n = new pstd.vector<Normal3f>(n.ToArray());
+            m.uv = new pstd.vector<Point2f>(uv.ToArray());
+            m.faceIndices = new pstd.vector<int>(faceIndices.ToArray());
+            m.triIndices = new pstd.vector<int>(triIndices.ToArray());
+            m.quadIndices = new pstd.vector<int>(quadIndices.ToArray());
+            return m;
         }
 
         public void ComputeNormals()
@@ -475,127 +586,16 @@ namespace pbrt
                     n[i] = Normalize(n[i]);
         }
 
-        private static string Vec<T>(pstd.vector<T> v)
-        {
-            List<string> parts = new List<string>();
-            for (int i = 0; i < (int)v.size(); ++i) parts.Add(v[i].ToString());
-            return "[ " + string.Join(", ", parts) + " ]";
-        }
-
-        public override string ToString()
-        {
-            return "[ TriQuadMesh p: " + Vec(p) + " n: " + Vec(n) + " uv: " + Vec(uv) + " faceIndices: " + Vec(faceIndices) +
-                   " triIndices: " + Vec(triIndices) + " quadIndices: " + Vec(quadIndices) + " ]";
-        }
-
-        public TriQuadMesh Clone()
-        {
-            TriQuadMesh m = new TriQuadMesh();
-            m.p = new pstd.vector<Point3f>(p.ToArray());
-            m.n = new pstd.vector<Normal3f>(n.ToArray());
-            m.uv = new pstd.vector<Point2f>(uv.ToArray());
-            m.faceIndices = new pstd.vector<int>(faceIndices.ToArray());
-            m.triIndices = new pstd.vector<int>(triIndices.ToArray());
-            m.quadIndices = new pstd.vector<int>(quadIndices.ToArray());
-            return m;
-        }
-
-        public TriQuadMesh Displace(Func<Point3f, Point3f, Float> dist, Float maxDist, MeshDisplaceFunc displace,
-                                    FileLoc loc = null)
-        {
-            if (uv.empty())
-                ErrorExit(loc, "Vertex uvs are currently required by Displace(). Sorry.\n");
-
-            // Prepare the output mesh
-            TriQuadMesh outputMesh = Clone();
-            outputMesh.ConvertToOnlyTriangles();
-            if (outputMesh.n.empty())
-                outputMesh.ComputeNormals();
-            pstd.vector<int> oldTriIndices = new pstd.vector<int>(outputMesh.triIndices.ToArray());
-            outputMesh.triIndices.clear();
-
-            // Refine
-            HashMap<(int, int), int> edgeSplit = new HashMap<(int, int), int>();
-            for (int i = 0; i < (int)oldTriIndices.size() / 3; ++i)
-                outputMesh.Refine(dist, maxDist, oldTriIndices[3 * i], oldTriIndices[3 * i + 1], oldTriIndices[3 * i + 2],
-                                  edgeSplit);
-
-            // Displace
-            displace(outputMesh.p.data(), outputMesh.n.data(), outputMesh.uv.data(), (int)outputMesh.p.size());
-
-            outputMesh.ComputeNormals();
-
-            return outputMesh;
-        }
-
         public pstd.vector<Point3f> p = new pstd.vector<Point3f>();
         public pstd.vector<Normal3f> n = new pstd.vector<Normal3f>();
         public pstd.vector<Point2f> uv = new pstd.vector<Point2f>();
         public pstd.vector<int> faceIndices = new pstd.vector<int>();
         public pstd.vector<int> triIndices = new pstd.vector<int>(), quadIndices = new pstd.vector<int>();
 
-        // TriQuadMesh Private Methods
-        private void Refine(Func<Point3f, Point3f, Float> distance, Float maxDist, int v0, int v1, int v2,
-                            HashMap<(int, int), int> edgeSplit)
+        public override string ToString()
         {
-            Point3f p0 = p[v0], p1 = p[v1], p2 = p[v2];
-            Float d01 = distance(p0, p1), d12 = distance(p1, p2), d20 = distance(p2, p0);
-
-            if (d01 < maxDist && d12 < maxDist && d20 < maxDist)
-            {
-                triIndices.push_back(v0);
-                triIndices.push_back(v1);
-                triIndices.push_back(v2);
-                return;
-            }
-
-            // order so that the first two vertices have the longest edge
-            int[] v;
-            if (d01 > d12)
-            {
-                if (d01 > d20)
-                    v = new int[] { v0, v1, v2 };
-                else
-                    v = new int[] { v2, v0, v1 };
-            }
-            else
-            {
-                if (d12 > d20)
-                    v = new int[] { v1, v2, v0 };
-                else
-                    v = new int[] { v2, v0, v1 };
-            }
-
-            // has the edge been spilt before?
-            (int first, int second) edge = (v[0], v[1]);
-            if (v[0] > v[1])
-            {
-                int t = edge.first; edge.first = edge.second; edge.second = t;
-            }
-
-            int vmid;
-            if (edgeSplit.HasKey(edge))
-            {
-                vmid = edgeSplit[edge];
-            }
-            else
-            {
-                vmid = (int)p.size();
-                edgeSplit.Insert(edge, vmid);
-                p.push_back((p[v[0]] + p[v[1]]) / 2);
-                if (!n.empty())
-                {
-                    Normal3f nn = n[v[0]] + n[v[1]];
-                    if (LengthSquared(nn) > 0)
-                        nn = Normalize(nn);
-                    n.push_back(nn);
-                }
-                if (!uv.empty())
-                    uv.push_back((uv[v[0]] + uv[v[1]]) / 2);
-            }
-
-            Refine(distance, maxDist, v[0], vmid, v[2], edgeSplit);
-            Refine(distance, maxDist, vmid, v[1], v[2], edgeSplit);
+            return "[ TriQuadMesh p: " + Vec(p) + " n: " + Vec(n) + " uv: " + Vec(uv) + " faceIndices: " + Vec(faceIndices) +
+                   " triIndices: " + Vec(triIndices) + " quadIndices: " + Vec(quadIndices) + " ]";
         }
 
         private class FaceCallbackContext

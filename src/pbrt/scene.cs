@@ -236,8 +236,28 @@ namespace pbrt
     // BasicScene Definition
     public unsafe class BasicScene
     {
-        // BasicScene Public Methods
-        public BasicScene() { }
+
+        public Camera GetCamera()
+        {
+            lock (cameraJobMutex)
+            {
+                if (camera == null)
+                    camera = cameraJob.GetResult();
+            }
+            LOG_VERBOSE("Retrieved Camera from future");
+            return camera;
+        }
+
+        public Sampler GetSampler()
+        {
+            lock (samplerJobMutex)
+            {
+                if (sampler == null)
+                    sampler = samplerJob.GetResult();
+            }
+            LOG_VERBOSE("Retrieved Sampler from future");
+            return sampler;
+        }
 
         public void SetOptions(SceneEntity filter, SceneEntity film, CameraSceneEntity camera,
                                SceneEntity sampler, SceneEntity integ, SceneEntity accel)
@@ -358,28 +378,8 @@ namespace pbrt
             return Integrator.Create(integrator.name, integrator.parameters, camera, sampler,
                                      accel, lights, filmColorSpace, integrator.loc);
         }
-
-        public Camera GetCamera()
-        {
-            lock (cameraJobMutex)
-            {
-                if (camera == null)
-                    camera = cameraJob.GetResult();
-            }
-            LOG_VERBOSE("Retrieved Camera from future");
-            return camera;
-        }
-
-        public Sampler GetSampler()
-        {
-            lock (samplerJobMutex)
-            {
-                if (sampler == null)
-                    sampler = samplerJob.GetResult();
-            }
-            LOG_VERBOSE("Retrieved Sampler from future");
-            return sampler;
-        }
+        // BasicScene Public Methods
+        public BasicScene() { }
 
         public void AddNamedMaterial(string name, SceneEntity material)
         {
@@ -1123,8 +1123,13 @@ namespace pbrt
         // BasicSceneBuilder::GraphicsState Definition
         sealed class GraphicsState
         {
-            // GraphicsState Public Methods
-            public GraphicsState() { currentMaterialIndex = 0; }
+
+            public void ForActiveTransforms(Func<Transform, Transform> func)
+            {
+                for (int i = 0; i < MaxTransforms; ++i)
+                    if ((activeTransformBits & (1 << i)) != 0)
+                        ctm[i] = func(ctm[i]);
+            }
 
             public GraphicsState Clone()
             {
@@ -1137,13 +1142,8 @@ namespace pbrt
                 g.textureAttributes = new List<ParsedParameter>(textureAttributes);
                 return g;
             }
-
-            public void ForActiveTransforms(Func<Transform, Transform> func)
-            {
-                for (int i = 0; i < MaxTransforms; ++i)
-                    if ((activeTransformBits & (1 << i)) != 0)
-                        ctm[i] = func(ctm[i]);
-            }
+            // GraphicsState Public Methods
+            public GraphicsState() { currentMaterialIndex = 0; }
 
             // GraphicsState Public Members
             public string currentInsideMedium = "", currentOutsideMedium = "";
@@ -1210,6 +1210,26 @@ namespace pbrt
             accum.ReportCounter("Scene/Object instances created", nObjectInstancesCreated);
             nObjectInstancesCreated = 0;
         });
+
+        // BasicSceneBuilder Private Methods
+        global::pbrt.Transform RenderFromObject(int index)
+        {
+            return new global::pbrt.Transform((renderFromWorld * graphicsState.ctm[index]).GetMatrix());
+        }
+
+        AnimatedTransform RenderFromObject()
+        {
+            return new AnimatedTransform(RenderFromObject(0), graphicsState.transformStartTime,
+                                         RenderFromObject(1), graphicsState.transformEndTime);
+        }
+
+        bool CTMIsAnimated() { return graphicsState.ctm.IsAnimated(); }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ BasicSceneBuilder camera: %s film: %s sampler: %s integrator: %s " +
+                                "filter: %s accelerator: %s ]", camera, film, sampler, integrator, filter, accelerator);
+        }
 
         // BasicSceneBuilder Method Definitions
         public BasicSceneBuilder(BasicScene scene)
@@ -1883,26 +1903,6 @@ namespace pbrt
                                                                     graphicsState.colorSpace);
             graphicsState.areaLightLoc = loc;
         }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ BasicSceneBuilder camera: %s film: %s sampler: %s integrator: %s " +
-                                "filter: %s accelerator: %s ]", camera, film, sampler, integrator, filter, accelerator);
-        }
-
-        // BasicSceneBuilder Private Methods
-        global::pbrt.Transform RenderFromObject(int index)
-        {
-            return new global::pbrt.Transform((renderFromWorld * graphicsState.ctm[index]).GetMatrix());
-        }
-
-        AnimatedTransform RenderFromObject()
-        {
-            return new AnimatedTransform(RenderFromObject(0), graphicsState.transformStartTime,
-                                         RenderFromObject(1), graphicsState.transformEndTime);
-        }
-
-        bool CTMIsAnimated() { return graphicsState.ctm.IsAnimated(); }
 
         // BasicSceneBuilder Private Members
         BasicScene scene;

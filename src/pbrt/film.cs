@@ -369,6 +369,8 @@ namespace pbrt
     // VisibleSurface Definition
     public sealed unsafe class VisibleSurface
     {
+
+        public static implicit operator bool(VisibleSurface v) { return v != null && v.set; }
         // VisibleSurface Public Methods
         public VisibleSurface(SurfaceInteraction si, SampledSpectrum albedo, SampledWavelengths lambda)
         {
@@ -384,8 +386,6 @@ namespace pbrt
             dpdx = si.dpdx;
             dpdy = si.dpdy;
         }
-
-        public static implicit operator bool(VisibleSurface v) { return v != null && v.set; }
 
         public VisibleSurface() { }
 
@@ -683,6 +683,17 @@ namespace pbrt
             return rgb;
         }
 
+        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
+        {
+            RGB sensorRGB = sensor.ToSensorRGB(L, lambda);
+            return outputRGBFromSensorRGB * sensorRGB;
+        }
+
+        public override void ResetPixel(Point2i p)
+        {
+            pixels[p] = default;
+        }
+
         // RGBFilm Method Definitions
         public RGBFilm(FilmBaseParameters p, RGBColorSpace colorSpace, Float maxComponentValue = Infinity,
                        bool writeFP16 = true, Allocator alloc = null)
@@ -794,17 +805,6 @@ namespace pbrt
             return new RGBFilm(filmBaseParameters, colorSpace, maxComponentValue, writeFP16, alloc);
         }
 
-        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
-        {
-            RGB sensorRGB = sensor.ToSensorRGB(L, lambda);
-            return outputRGBFromSensorRGB * sensorRGB;
-        }
-
-        public override void ResetPixel(Point2i p)
-        {
-            pixels[p] = default;
-        }
-
         // RGBFilm Private Members
         RGBColorSpace colorSpace;
         Float maxComponentValue;
@@ -843,6 +843,38 @@ namespace pbrt
                 if (c == 1) return ref rgbVariance1;
                 return ref rgbVariance2;
             }
+        }
+
+        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
+        {
+            RGB cameraRGB = sensor.ToSensorRGB(L, lambda);
+            return outputRGBFromSensorRGB * cameraRGB;
+        }
+
+        public override bool UsesVisibleSurface() { return true; }
+
+        public override RGB GetPixelRGB(Point2i p, Float splatScale = 1)
+        {
+            ref Pixel pixel = ref pixels[p];
+            RGB rgb = new RGB((Float)pixel.rgbSum[0], (Float)pixel.rgbSum[1], (Float)pixel.rgbSum[2]);
+
+            // Normalize pixel with weight sum
+            Float weightSum = (Float)pixel.weightSum;
+            if (weightSum != 0)
+                rgb /= weightSum;
+
+            // Add splat value at pixel
+            for (int c = 0; c < 3; ++c)
+                rgb[c] += splatScale * (Float)(double)pixel.rgbSplat(c) / filterIntegral;
+
+            rgb = outputRGBFromSensorRGB * rgb;
+
+            return rgb;
+        }
+
+        public override void ResetPixel(Point2i p)
+        {
+            pixels[p] = default;
         }
 
         // GBufferFilm Method Definitions
@@ -932,33 +964,6 @@ namespace pbrt
                         pixel.rgbSplat(i).Add(wt * rgb[i]);
                 }
             }
-        }
-
-        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
-        {
-            RGB cameraRGB = sensor.ToSensorRGB(L, lambda);
-            return outputRGBFromSensorRGB * cameraRGB;
-        }
-
-        public override bool UsesVisibleSurface() { return true; }
-
-        public override RGB GetPixelRGB(Point2i p, Float splatScale = 1)
-        {
-            ref Pixel pixel = ref pixels[p];
-            RGB rgb = new RGB((Float)pixel.rgbSum[0], (Float)pixel.rgbSum[1], (Float)pixel.rgbSum[2]);
-
-            // Normalize pixel with weight sum
-            Float weightSum = (Float)pixel.weightSum;
-            if (weightSum != 0)
-                rgb /= weightSum;
-
-            // Add splat value at pixel
-            for (int c = 0; c < 3; ++c)
-                rgb[c] += splatScale * (Float)(double)pixel.rgbSplat(c) / filterIntegral;
-
-            rgb = outputRGBFromSensorRGB * rgb;
-
-            return rgb;
         }
 
         public override void WriteImage(ImageMetadata metadata, Float splatScale = 1)
@@ -1105,11 +1110,6 @@ namespace pbrt
                                    writeFP16, alloc);
         }
 
-        public override void ResetPixel(Point2i p)
-        {
-            pixels[p] = default;
-        }
-
         // GBufferFilm Private Members
         AnimatedTransform outputFromRender;
         bool applyInverse;
@@ -1196,6 +1196,36 @@ namespace pbrt
                 pixel.bucketSums[b] += L[i];
                 pixel.weightSums[b] += weight;
             }
+        }
+
+        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
+        {
+            pbrt.LOG_FATAL("ToOutputRGB() is unimplemented. But that's ok since it's only used " +
+                              "in the SPPM integrator, which is inherently very much based on " +
+                              "RGB output.");
+            return default;
+        }
+
+        public override void ResetPixel(Point2i p)
+        {
+            ref Pixel pix = ref pixels[p];
+            pix.rgbSum[0] = pix.rgbSum[1] = pix.rgbSum[2] = 0.0;
+            pix.rgbWeightSum = 0.0;
+            pix.rgbSplat0 = pix.rgbSplat1 = pix.rgbSplat2 = new AtomicDouble(0.0);
+            for (int i = 0; i < nBuckets; ++i)
+            {
+                pix.bucketSums[i] = 0;
+                pix.weightSums[i] = 0;
+                pix.bucketSplats[i] = new AtomicDouble(0.0);
+            }
+        }
+
+        // SpectralFilm Private Methods
+        int LambdaToBucket(Float lambda)
+        {
+            pbrt.DCHECK_RARE(1e6f, lambda < lambdaMin || lambda > lambdaMax);
+            int bucket = (int)(nBuckets * (lambda - lambdaMin) / (lambdaMax - lambdaMin));
+            return pbrt.Clamp(bucket, 0, nBuckets - 1);
         }
 
         // SpectralFilm Method Definitions
@@ -1429,36 +1459,6 @@ namespace pbrt
 
             return new SpectralFilm(filmBaseParameters, lambdaMin, lambdaMax, nBuckets, colorSpace, maxComponentValue,
                                     writeFP16, alloc);
-        }
-
-        public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
-        {
-            pbrt.LOG_FATAL("ToOutputRGB() is unimplemented. But that's ok since it's only used " +
-                              "in the SPPM integrator, which is inherently very much based on " +
-                              "RGB output.");
-            return default;
-        }
-
-        public override void ResetPixel(Point2i p)
-        {
-            ref Pixel pix = ref pixels[p];
-            pix.rgbSum[0] = pix.rgbSum[1] = pix.rgbSum[2] = 0.0;
-            pix.rgbWeightSum = 0.0;
-            pix.rgbSplat0 = pix.rgbSplat1 = pix.rgbSplat2 = new AtomicDouble(0.0);
-            for (int i = 0; i < nBuckets; ++i)
-            {
-                pix.bucketSums[i] = 0;
-                pix.weightSums[i] = 0;
-                pix.bucketSplats[i] = new AtomicDouble(0.0);
-            }
-        }
-
-        // SpectralFilm Private Methods
-        int LambdaToBucket(Float lambda)
-        {
-            pbrt.DCHECK_RARE(1e6f, lambda < lambdaMin || lambda > lambdaMax);
-            int bucket = (int)(nBuckets * (lambda - lambdaMin) / (lambdaMax - lambdaMin));
-            return pbrt.Clamp(bucket, 0, nBuckets - 1);
         }
 
         // SpectralFilm Private Members

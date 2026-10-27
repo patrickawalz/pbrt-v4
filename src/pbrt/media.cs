@@ -409,7 +409,7 @@ namespace pbrt
     }
 
     // HomogeneousMedium Definition
-    public sealed unsafe partial class HomogeneousMedium : Medium, IMajorantMedium<HomogeneousMajorantIterator>
+    public sealed unsafe class HomogeneousMedium : Medium, IMajorantMedium<HomogeneousMajorantIterator>
     {
         // HomogeneousMedium Public Methods
         public HomogeneousMedium(Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale, Spectrum Le, Float LeScale, Float g,
@@ -446,20 +446,55 @@ namespace pbrt
         {
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
+    
+        public static HomogeneousMedium Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            Spectrum sig_a = null, sig_s = null;
+            string preset = parameters.GetOneString("preset", "");
+            if (preset.Length != 0)
+            {
+                if (!GetMediumScatteringProperties(preset, ref sig_a, ref sig_s, alloc))
+                    Warning(loc, $"Material preset \"{preset}\" not found.");
+            }
+            if (sig_a == null)
+            {
+                sig_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
+                if (sig_a == null)
+                    sig_a = new ConstantSpectrum(1f);
+            }
+            if (sig_s == null)
+            {
+                sig_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
+                if (sig_s == null)
+                    sig_s = new ConstantSpectrum(1f);
+            }
+
+            Spectrum Le = parameters.GetOneSpectrum("Le", null, SpectrumType.Illuminant, alloc);
+            Float LeScale = parameters.GetOneFloat("Lescale", 1f);
+            if (Le == null || Le.MaxValue() == 0)
+                Le = new ConstantSpectrum(0f);
+            else
+                LeScale /= SpectrumToPhotometric(Le);
+
+            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
+            Float g = parameters.GetOneFloat("g", 0.0f);
+
+            return new HomogeneousMedium(sig_a, sig_s, sigmaScale, Le, LeScale, g, alloc);
+        }
+
+        // HomogeneousMedium Private Data
+        private DenselySampledSpectrum sigma_a_spec, sigma_s_spec, Le_spec;
+        private HGPhaseFunction phase;
 
         public override string ToString()
         {
             return StringPrintf("[ Homogeneous medium sigma_a_spec: %s sigma_s_spec: %s Le_spec: %s phase: %s ]",
                                 sigma_a_spec, sigma_s_spec, Le_spec, phase);
         }
-
-        // HomogeneousMedium Private Data
-        private DenselySampledSpectrum sigma_a_spec, sigma_s_spec, Le_spec;
-        private HGPhaseFunction phase;
     }
 
     // GridMedium Definition
-    public sealed unsafe partial class GridMedium : Medium, IMajorantMedium<DDAMajorantIterator>
+    public sealed unsafe class GridMedium : Medium, IMajorantMedium<DDAMajorantIterator>
     {
         // STAT_MEMORY_COUNTER("Memory/Volume grids", volumeGridBytes);
         [ThreadStatic] internal static long volumeGridBytes;
@@ -468,51 +503,6 @@ namespace pbrt
             accum.ReportMemoryCounter("Memory/Volume grids", volumeGridBytes);
             volumeGridBytes = 0;
         });
-
-        // GridMedium Public Methods
-        public GridMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
-                          Float g, SampledGrid<Float> d, pstd.optional<SampledGrid<Float>> temperature,
-                          Float temperatureScale, Float temperatureOffset, Spectrum Le, SampledGrid<Float> LeGrid,
-                          Allocator alloc)
-        {
-            this.bounds = bounds;
-            this.renderFromMedium = renderFromMedium;
-            sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
-            sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
-            densityGrid = d;
-            phase = new HGPhaseFunction(g);
-            temperatureGrid = temperature;
-            this.temperatureScale = temperatureScale;
-            this.temperatureOffset = temperatureOffset;
-            Le_spec = new DenselySampledSpectrum(Le, alloc);
-            LeScale = LeGrid;
-            majorantGrid = new MajorantGrid(bounds, new Point3i(16, 16, 16), alloc);
-            sigma_a_spec.Scale(sigmaScale);
-            sigma_s_spec.Scale(sigmaScale);
-
-            volumeGridBytes += (long)LeScale.BytesAllocated();
-            volumeGridBytes += (long)densityGrid.BytesAllocated();
-            if (temperatureGrid)
-                volumeGridBytes += (long)temperatureGrid.value().BytesAllocated();
-
-            isEmissive = temperatureGrid ? true : (Le_spec.MaxValue() > 0);
-
-            // Initialize _majorantGrid_ for _GridMedium_
-            for (int z = 0; z < majorantGrid.res.z; ++z)
-                for (int y = 0; y < majorantGrid.res.y; ++y)
-                    for (int x = 0; x < majorantGrid.res.x; ++x)
-                    {
-                        Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
-                        majorantGrid.Set(x, y, z, densityGrid.MaxValue(vb));
-                    }
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ GridMedium bounds: %s renderFromMedium: %s phase: %s " +
-                                "LeScale: %s (grids elided) ]",
-                                bounds, renderFromMedium, phase, LeScale);
-        }
 
         public override bool IsEmissive() { return isEmissive; }
 
@@ -577,6 +567,118 @@ namespace pbrt
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
 
+        // GridMedium Public Methods
+        public GridMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
+                          Float g, SampledGrid<Float> d, pstd.optional<SampledGrid<Float>> temperature,
+                          Float temperatureScale, Float temperatureOffset, Spectrum Le, SampledGrid<Float> LeGrid,
+                          Allocator alloc)
+        {
+            this.bounds = bounds;
+            this.renderFromMedium = renderFromMedium;
+            sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
+            sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
+            densityGrid = d;
+            phase = new HGPhaseFunction(g);
+            temperatureGrid = temperature;
+            this.temperatureScale = temperatureScale;
+            this.temperatureOffset = temperatureOffset;
+            Le_spec = new DenselySampledSpectrum(Le, alloc);
+            LeScale = LeGrid;
+            majorantGrid = new MajorantGrid(bounds, new Point3i(16, 16, 16), alloc);
+            sigma_a_spec.Scale(sigmaScale);
+            sigma_s_spec.Scale(sigmaScale);
+
+            volumeGridBytes += (long)LeScale.BytesAllocated();
+            volumeGridBytes += (long)densityGrid.BytesAllocated();
+            if (temperatureGrid)
+                volumeGridBytes += (long)temperatureGrid.value().BytesAllocated();
+
+            isEmissive = temperatureGrid ? true : (Le_spec.MaxValue() > 0);
+
+            // Initialize _majorantGrid_ for _GridMedium_
+            for (int z = 0; z < majorantGrid.res.z; ++z)
+                for (int y = 0; y < majorantGrid.res.y; ++y)
+                    for (int x = 0; x < majorantGrid.res.x; ++x)
+                    {
+                        Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
+                        majorantGrid.Set(x, y, z, densityGrid.MaxValue(vb));
+                    }
+        }
+    
+        public static GridMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
+                                        Allocator alloc)
+        {
+            List<Float> density = parameters.GetFloatArray("density");
+            List<Float> temperature = parameters.GetFloatArray("temperature");
+
+            size_t nDensity;
+            if (density.Count == 0)
+                ErrorExit(loc, "No \"density\" value provided for grid medium.");
+            nDensity = (size_t)density.Count;
+
+            if (temperature.Count != 0)
+                if (nDensity != (size_t)temperature.Count)
+                    ErrorExit(loc, StringPrintf("Different number of samples (%d vs %d) provided for " +
+                                                "\"density\" and \"temperature\".", nDensity, temperature.Count));
+
+            int nx = parameters.GetOneInt("nx", 1);
+            int ny = parameters.GetOneInt("ny", 1);
+            int nz = parameters.GetOneInt("nz", 1);
+            if (nDensity != (size_t)(nx * ny * nz))
+                ErrorExit(loc, StringPrintf("Grid medium has %d density values; expected nx*ny*nz = %d", nDensity, nx * ny * nz));
+
+            // Create Density Grid
+            SampledGrid<Float> densityGrid = new SampledGrid<Float>(density.ToArray(), nx, ny, nz, alloc);
+
+            pstd.optional<SampledGrid<Float>> temperatureGrid = default;
+            if (temperature.Count != 0)
+                temperatureGrid = new SampledGrid<Float>(temperature.ToArray(), nx, ny, nz, alloc);
+
+            Spectrum Le = parameters.GetOneSpectrum("Le", null, SpectrumType.Illuminant, alloc);
+
+            if (Le != null && temperature.Count != 0)
+                ErrorExit(loc, "Both \"Le\" and \"temperature\" values were provided.");
+
+            Float LeNorm = 1;
+            if (Le == null || Le.MaxValue() == 0)
+                Le = new ConstantSpectrum(0f);
+            else
+                LeNorm = 1 / SpectrumToPhotometric(Le);
+
+            SampledGrid<Float> LeGrid = new SampledGrid<Float>(alloc);
+            List<Float> LeScale = parameters.GetFloatArray("Lescale");
+
+            if (LeScale.Count == 0)
+                LeGrid = new SampledGrid<Float>(new Float[] { LeNorm }, 1, 1, 1, alloc);
+            else
+            {
+                if (LeScale.Count != nx * ny * nz)
+                    ErrorExit(StringPrintf("Expected %d x %d %d = %d values for \"Lescale\" but were " +
+                                           "given %d.", nx, ny, nz, nx * ny * nz, LeScale.Count));
+                for (int i = 0; i < nx * ny * nz; ++i)
+                    LeScale[i] *= LeNorm;
+                LeGrid = new SampledGrid<Float>(LeScale.ToArray(), nx, ny, nz, alloc);
+            }
+
+            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
+            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
+
+            Float g = parameters.GetOneFloat("g", 0f);
+            Spectrum sigma_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
+            if (sigma_a == null)
+                sigma_a = new ConstantSpectrum(1f);
+            Spectrum sigma_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
+            if (sigma_s == null)
+                sigma_s = new ConstantSpectrum(1f);
+            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
+
+            Float temperatureOffset = parameters.GetOneFloat("temperatureoffset", parameters.GetOneFloat("temperaturecutoff", 0f));
+            Float temperatureScale = parameters.GetOneFloat("temperaturescale", 1f);
+
+            return new GridMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g, densityGrid,
+                                  temperatureGrid, temperatureScale, temperatureOffset, Le, LeGrid, alloc);
+        }
+
         // GridMedium Private Members
         private Bounds3f bounds;
         private Transform renderFromMedium;
@@ -589,55 +691,18 @@ namespace pbrt
         private bool isEmissive;
         private Float temperatureScale, temperatureOffset;
         private MajorantGrid majorantGrid;
-    }
-
-    // RGBGridMedium Definition
-    public sealed unsafe partial class RGBGridMedium : Medium, IMajorantMedium<DDAMajorantIterator>
-    {
-        // RGBGridMedium Public Methods
-        public RGBGridMedium(Bounds3f bounds, Transform renderFromMedium, Float g,
-                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbA,
-                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbS, Float sigmaScale,
-                             pstd.optional<SampledGrid<RGBIlluminantSpectrum>> rgbLe, Float LeScale, Allocator alloc)
-        {
-            this.bounds = bounds;
-            this.renderFromMedium = renderFromMedium;
-            phase = new HGPhaseFunction(g);
-            sigma_aGrid = rgbA;
-            sigma_sGrid = rgbS;
-            this.sigmaScale = sigmaScale;
-            majorantGrid = new MajorantGrid(bounds, new Point3i(16, 16, 16), alloc);
-            LeGrid = rgbLe;
-            this.LeScale = LeScale;
-            if (LeGrid)
-                CHECK((bool)sigma_aGrid);
-            if (sigma_aGrid)
-                GridMedium.volumeGridBytes += (long)sigma_aGrid.value().BytesAllocated();
-            if (sigma_sGrid)
-                GridMedium.volumeGridBytes += (long)sigma_sGrid.value().BytesAllocated();
-            if (LeGrid)
-                GridMedium.volumeGridBytes += (long)LeGrid.value().BytesAllocated();
-
-            // Initialize _majorantGrid_ for _RGBGridMedium_
-            for (int z = 0; z < majorantGrid.res.z; ++z)
-                for (int y = 0; y < majorantGrid.res.y; ++y)
-                    for (int x = 0; x < majorantGrid.res.x; ++x)
-                    {
-                        Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
-                        // Initialize _majorantGrid_ voxel for RGB $\sigmaa$ and $\sigmas$
-                        Func<RGBUnboundedSpectrum, Float> max = (RGBUnboundedSpectrum s) => s.MaxValue();
-                        Float maxSigma_t = (sigma_aGrid ? sigma_aGrid.value().MaxValue(vb, max) : 1) +
-                                           (sigma_sGrid ? sigma_sGrid.value().MaxValue(vb, max) : 1);
-                        majorantGrid.Set(x, y, z, sigmaScale * maxSigma_t);
-                    }
-        }
 
         public override string ToString()
         {
-            return StringPrintf("[ RGBGridMedium bounds: %s renderFromMedium: %s phase: %s " +
-                                "sigmaScale: %f LeScale: %f (grids elided) ]",
-                                bounds, renderFromMedium, phase, sigmaScale, LeScale);
+            return StringPrintf("[ GridMedium bounds: %s renderFromMedium: %s phase: %s " +
+                                "LeScale: %s (grids elided) ]",
+                                bounds, renderFromMedium, phase, LeScale);
         }
+    }
+
+    // RGBGridMedium Definition
+    public sealed unsafe class RGBGridMedium : Medium, IMajorantMedium<DDAMajorantIterator>
+    {
 
         public override bool IsEmissive() { return LeGrid && LeScale > 0; }
 
@@ -678,6 +743,114 @@ namespace pbrt
         {
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
+        // RGBGridMedium Public Methods
+        public RGBGridMedium(Bounds3f bounds, Transform renderFromMedium, Float g,
+                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbA,
+                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbS, Float sigmaScale,
+                             pstd.optional<SampledGrid<RGBIlluminantSpectrum>> rgbLe, Float LeScale, Allocator alloc)
+        {
+            this.bounds = bounds;
+            this.renderFromMedium = renderFromMedium;
+            phase = new HGPhaseFunction(g);
+            sigma_aGrid = rgbA;
+            sigma_sGrid = rgbS;
+            this.sigmaScale = sigmaScale;
+            majorantGrid = new MajorantGrid(bounds, new Point3i(16, 16, 16), alloc);
+            LeGrid = rgbLe;
+            this.LeScale = LeScale;
+            if (LeGrid)
+                CHECK((bool)sigma_aGrid);
+            if (sigma_aGrid)
+                GridMedium.volumeGridBytes += (long)sigma_aGrid.value().BytesAllocated();
+            if (sigma_sGrid)
+                GridMedium.volumeGridBytes += (long)sigma_sGrid.value().BytesAllocated();
+            if (LeGrid)
+                GridMedium.volumeGridBytes += (long)LeGrid.value().BytesAllocated();
+
+            // Initialize _majorantGrid_ for _RGBGridMedium_
+            for (int z = 0; z < majorantGrid.res.z; ++z)
+                for (int y = 0; y < majorantGrid.res.y; ++y)
+                    for (int x = 0; x < majorantGrid.res.x; ++x)
+                    {
+                        Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
+                        // Initialize _majorantGrid_ voxel for RGB $\sigmaa$ and $\sigmas$
+                        Func<RGBUnboundedSpectrum, Float> max = (RGBUnboundedSpectrum s) => s.MaxValue();
+                        Float maxSigma_t = (sigma_aGrid ? sigma_aGrid.value().MaxValue(vb, max) : 1) +
+                                           (sigma_sGrid ? sigma_sGrid.value().MaxValue(vb, max) : 1);
+                        majorantGrid.Set(x, y, z, sigmaScale * maxSigma_t);
+                    }
+        }
+    
+        public static RGBGridMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
+                                           Allocator alloc)
+        {
+            List<RGB> sigma_a = parameters.GetRGBArray("sigma_a");
+            List<RGB> sigma_s = parameters.GetRGBArray("sigma_s");
+            List<RGB> Le = parameters.GetRGBArray("Le");
+
+            if (sigma_a.Count == 0 && sigma_s.Count == 0)
+                ErrorExit(loc, "RGB grid requires \"sigma_a\" and/or \"sigma_s\" parameter values.");
+
+            size_t nDensity;
+            if (sigma_a.Count != 0)
+            {
+                nDensity = (size_t)sigma_a.Count;
+                if (sigma_s.Count != 0 && nDensity != (size_t)sigma_s.Count)
+                    ErrorExit(loc, StringPrintf("Different number of samples (%d vs %d) provided for \"sigma_a\" " +
+                                                "and \"sigma_s\".", nDensity, sigma_s.Count));
+            }
+            else
+                nDensity = (size_t)sigma_s.Count;
+
+            if (Le.Count != 0 && sigma_a.Count == 0)
+                ErrorExit(loc, "RGB grid requires \"sigma_a\" if \"Le\" value provided.");
+
+            if (Le.Count != 0 && nDensity != (size_t)Le.Count)
+                ErrorExit(StringPrintf("Expected %d values for \"Le\" parameter but were given %d.", nDensity, Le.Count));
+
+            int nx = parameters.GetOneInt("nx", 1);
+            int ny = parameters.GetOneInt("ny", 1);
+            int nz = parameters.GetOneInt("nz", 1);
+            if (nDensity != (size_t)(nx * ny * nz))
+                ErrorExit(loc, StringPrintf("RGB grid medium has %d density values; expected nx*ny*nz = %d", nDensity, nx * ny * nz));
+
+            pstd.optional<SampledGrid<RGBUnboundedSpectrum>> sigma_aGrid = default, sigma_sGrid = default;
+            pstd.optional<SampledGrid<RGBIlluminantSpectrum>> LeGrid = default;
+
+            if (sigma_a.Count != 0)
+            {
+                RGBColorSpace colorSpace = parameters.ColorSpace();
+                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
+                foreach (RGB rgb in sigma_a)
+                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
+                sigma_aGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+            }
+            if (sigma_s.Count != 0)
+            {
+                RGBColorSpace colorSpace = parameters.ColorSpace();
+                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
+                foreach (RGB rgb in sigma_s)
+                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
+                sigma_sGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+            }
+            if (Le.Count != 0)
+            {
+                RGBColorSpace colorSpace = parameters.ColorSpace();
+                List<RGBIlluminantSpectrum> rgbSpectrumDensity = new List<RGBIlluminantSpectrum>();
+                foreach (RGB rgb in Le)
+                    rgbSpectrumDensity.Add(new RGBIlluminantSpectrum(colorSpace, rgb));
+                LeGrid = new SampledGrid<RGBIlluminantSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+            }
+
+            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
+            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
+            Float LeScale = parameters.GetOneFloat("Lescale", 1f);
+            Float g = parameters.GetOneFloat("g", 0f);
+            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
+
+            return new RGBGridMedium(new Bounds3f(p0, p1), renderFromMedium, g, sigma_aGrid, sigma_sGrid, sigmaScale, LeGrid,
+                                     LeScale, alloc);
+        }
 
         // RGBGridMedium Private Members
         private Bounds3f bounds;
@@ -688,10 +861,17 @@ namespace pbrt
         private pstd.optional<SampledGrid<RGBUnboundedSpectrum>> sigma_aGrid, sigma_sGrid;
         private Float sigmaScale;
         private MajorantGrid majorantGrid;
+
+        public override string ToString()
+        {
+            return StringPrintf("[ RGBGridMedium bounds: %s renderFromMedium: %s phase: %s " +
+                                "sigmaScale: %f LeScale: %f (grids elided) ]",
+                                bounds, renderFromMedium, phase, sigmaScale, LeScale);
+        }
     }
 
     // CloudMedium Definition
-    public sealed unsafe partial class CloudMedium : Medium, IMajorantMedium<HomogeneousMajorantIterator>
+    public sealed unsafe class CloudMedium : Medium, IMajorantMedium<HomogeneousMajorantIterator>
     {
         // CloudMedium Public Methods
         public override string ToString()
@@ -785,6 +965,26 @@ namespace pbrt
         private HGPhaseFunction phase;
         private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
         private Float density, wispiness, frequency;
+    
+        public static CloudMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
+                                         Allocator alloc)
+        {
+            Float density = parameters.GetOneFloat("density", 1);
+            Float g = parameters.GetOneFloat("g", 0f);
+            Float wispiness = parameters.GetOneFloat("wispiness", 1);
+            Float frequency = parameters.GetOneFloat("frequency", 5);
+            Spectrum sigma_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
+            if (sigma_a == null)
+                sigma_a = new ConstantSpectrum(1f);
+            Spectrum sigma_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
+            if (sigma_s == null)
+                sigma_s = new ConstantSpectrum(1f);
+
+            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
+            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
+
+            return new CloudMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, density, wispiness, frequency, alloc);
+        }
     }
 
     // NanoVDBMedium Definition
@@ -870,6 +1070,58 @@ namespace pbrt
             }
 
             return grid;
+        }
+
+        public override bool IsEmissive() { return !temperatureFloatGrid.IsNull && LeScale > 0; }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
+        {
+            // Sample spectra for grid $\sigmaa$ and $\sigmas$
+            SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
+            SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
+
+            // Scale scattering coefficients by medium density at _p_
+            p = renderFromMedium.ApplyInverse(p);
+
+            nanovdb.Vec3<float> pIndex = densityFloatGrid.worldToIndexF(new nanovdb.Vec3<float>((float)p.x, (float)p.y, (float)p.z));
+            Float d = new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(densityFloatGrid.tree()).Apply(pIndex);
+
+            return new MediumProperties { sigma_a = sigma_a * d, sigma_s = sigma_s * d, phase = phase, Le = Le(p, lambda) };
+        }
+
+        public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
+        {
+            // Transform ray to medium's space and compute bounds overlap
+            ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+            Float tMin, tMax;
+            if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
+                return new DDAMajorantIterator();
+            DCHECK_LE(tMax, raytMax);
+
+            // Sample spectra for grid $\sigmaa$ and $\sigmas$
+            SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
+            SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
+
+            SampledSpectrum sigma_t = sigma_a + sigma_s;
+            return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
+        }
+
+        public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return buf.Alloc(SampleRay(ray, tMax, lambda));
+        }
+
+        // NanoVDBMedium Private Methods
+        private SampledSpectrum Le(Point3f p, SampledWavelengths lambda)
+        {
+            if (temperatureFloatGrid.IsNull)
+                return new SampledSpectrum(0f);
+            nanovdb.Vec3<float> pIndex = temperatureFloatGrid.worldToIndexF(new nanovdb.Vec3<float>((float)p.x, (float)p.y, (float)p.z));
+            Float temp = new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(temperatureFloatGrid.tree()).Apply(pIndex);
+            temp = (temp - temperatureOffset) * temperatureScale;
+            if (temp <= 100f)
+                return new SampledSpectrum(0f);
+            return LeScale * new BlackbodySpectrum(temp).Sample(lambda);
         }
 
         public NanoVDBMedium(Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale, Float g,
@@ -970,58 +1222,6 @@ namespace pbrt
                                 bounds, LeScale, temperatureOffset, temperatureScale);
         }
 
-        public override bool IsEmissive() { return !temperatureFloatGrid.IsNull && LeScale > 0; }
-
-        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
-        {
-            // Sample spectra for grid $\sigmaa$ and $\sigmas$
-            SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
-            SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
-
-            // Scale scattering coefficients by medium density at _p_
-            p = renderFromMedium.ApplyInverse(p);
-
-            nanovdb.Vec3<float> pIndex = densityFloatGrid.worldToIndexF(new nanovdb.Vec3<float>((float)p.x, (float)p.y, (float)p.z));
-            Float d = new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(densityFloatGrid.tree()).Apply(pIndex);
-
-            return new MediumProperties { sigma_a = sigma_a * d, sigma_s = sigma_s * d, phase = phase, Le = Le(p, lambda) };
-        }
-
-        public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
-        {
-            // Transform ray to medium's space and compute bounds overlap
-            ray = renderFromMedium.ApplyInverse(ray, &raytMax);
-            Float tMin, tMax;
-            if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
-                return new DDAMajorantIterator();
-            DCHECK_LE(tMax, raytMax);
-
-            // Sample spectra for grid $\sigmaa$ and $\sigmas$
-            SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
-            SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
-
-            SampledSpectrum sigma_t = sigma_a + sigma_s;
-            return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
-        }
-
-        public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return buf.Alloc(SampleRay(ray, tMax, lambda));
-        }
-
-        // NanoVDBMedium Private Methods
-        private SampledSpectrum Le(Point3f p, SampledWavelengths lambda)
-        {
-            if (temperatureFloatGrid.IsNull)
-                return new SampledSpectrum(0f);
-            nanovdb.Vec3<float> pIndex = temperatureFloatGrid.worldToIndexF(new nanovdb.Vec3<float>((float)p.x, (float)p.y, (float)p.z));
-            Float temp = new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(temperatureFloatGrid.tree()).Apply(pIndex);
-            temp = (temp - temperatureOffset) * temperatureScale;
-            if (temp <= 100f)
-                return new SampledSpectrum(0f);
-            return LeScale * new BlackbodySpectrum(temp).Sample(lambda);
-        }
-
         public static NanoVDBMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                            Allocator alloc)
         {
@@ -1104,218 +1304,6 @@ namespace pbrt
 
             parameters.ReportUnused();
             return m;
-        }
-    }
-
-    public sealed unsafe partial class HomogeneousMedium
-    {
-        public static HomogeneousMedium Create(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
-        {
-            Spectrum sig_a = null, sig_s = null;
-            string preset = parameters.GetOneString("preset", "");
-            if (preset.Length != 0)
-            {
-                if (!GetMediumScatteringProperties(preset, ref sig_a, ref sig_s, alloc))
-                    Warning(loc, $"Material preset \"{preset}\" not found.");
-            }
-            if (sig_a == null)
-            {
-                sig_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
-                if (sig_a == null)
-                    sig_a = new ConstantSpectrum(1f);
-            }
-            if (sig_s == null)
-            {
-                sig_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
-                if (sig_s == null)
-                    sig_s = new ConstantSpectrum(1f);
-            }
-
-            Spectrum Le = parameters.GetOneSpectrum("Le", null, SpectrumType.Illuminant, alloc);
-            Float LeScale = parameters.GetOneFloat("Lescale", 1f);
-            if (Le == null || Le.MaxValue() == 0)
-                Le = new ConstantSpectrum(0f);
-            else
-                LeScale /= SpectrumToPhotometric(Le);
-
-            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
-            Float g = parameters.GetOneFloat("g", 0.0f);
-
-            return new HomogeneousMedium(sig_a, sig_s, sigmaScale, Le, LeScale, g, alloc);
-        }
-    }
-
-    public sealed unsafe partial class GridMedium
-    {
-        public static GridMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
-                                        Allocator alloc)
-        {
-            List<Float> density = parameters.GetFloatArray("density");
-            List<Float> temperature = parameters.GetFloatArray("temperature");
-
-            size_t nDensity;
-            if (density.Count == 0)
-                ErrorExit(loc, "No \"density\" value provided for grid medium.");
-            nDensity = (size_t)density.Count;
-
-            if (temperature.Count != 0)
-                if (nDensity != (size_t)temperature.Count)
-                    ErrorExit(loc, StringPrintf("Different number of samples (%d vs %d) provided for " +
-                                                "\"density\" and \"temperature\".", nDensity, temperature.Count));
-
-            int nx = parameters.GetOneInt("nx", 1);
-            int ny = parameters.GetOneInt("ny", 1);
-            int nz = parameters.GetOneInt("nz", 1);
-            if (nDensity != (size_t)(nx * ny * nz))
-                ErrorExit(loc, StringPrintf("Grid medium has %d density values; expected nx*ny*nz = %d", nDensity, nx * ny * nz));
-
-            // Create Density Grid
-            SampledGrid<Float> densityGrid = new SampledGrid<Float>(density.ToArray(), nx, ny, nz, alloc);
-
-            pstd.optional<SampledGrid<Float>> temperatureGrid = default;
-            if (temperature.Count != 0)
-                temperatureGrid = new SampledGrid<Float>(temperature.ToArray(), nx, ny, nz, alloc);
-
-            Spectrum Le = parameters.GetOneSpectrum("Le", null, SpectrumType.Illuminant, alloc);
-
-            if (Le != null && temperature.Count != 0)
-                ErrorExit(loc, "Both \"Le\" and \"temperature\" values were provided.");
-
-            Float LeNorm = 1;
-            if (Le == null || Le.MaxValue() == 0)
-                Le = new ConstantSpectrum(0f);
-            else
-                LeNorm = 1 / SpectrumToPhotometric(Le);
-
-            SampledGrid<Float> LeGrid = new SampledGrid<Float>(alloc);
-            List<Float> LeScale = parameters.GetFloatArray("Lescale");
-
-            if (LeScale.Count == 0)
-                LeGrid = new SampledGrid<Float>(new Float[] { LeNorm }, 1, 1, 1, alloc);
-            else
-            {
-                if (LeScale.Count != nx * ny * nz)
-                    ErrorExit(StringPrintf("Expected %d x %d %d = %d values for \"Lescale\" but were " +
-                                           "given %d.", nx, ny, nz, nx * ny * nz, LeScale.Count));
-                for (int i = 0; i < nx * ny * nz; ++i)
-                    LeScale[i] *= LeNorm;
-                LeGrid = new SampledGrid<Float>(LeScale.ToArray(), nx, ny, nz, alloc);
-            }
-
-            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
-            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
-
-            Float g = parameters.GetOneFloat("g", 0f);
-            Spectrum sigma_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
-            if (sigma_a == null)
-                sigma_a = new ConstantSpectrum(1f);
-            Spectrum sigma_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
-            if (sigma_s == null)
-                sigma_s = new ConstantSpectrum(1f);
-            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
-
-            Float temperatureOffset = parameters.GetOneFloat("temperatureoffset", parameters.GetOneFloat("temperaturecutoff", 0f));
-            Float temperatureScale = parameters.GetOneFloat("temperaturescale", 1f);
-
-            return new GridMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g, densityGrid,
-                                  temperatureGrid, temperatureScale, temperatureOffset, Le, LeGrid, alloc);
-        }
-    }
-
-    public sealed unsafe partial class RGBGridMedium
-    {
-        public static RGBGridMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
-                                           Allocator alloc)
-        {
-            List<RGB> sigma_a = parameters.GetRGBArray("sigma_a");
-            List<RGB> sigma_s = parameters.GetRGBArray("sigma_s");
-            List<RGB> Le = parameters.GetRGBArray("Le");
-
-            if (sigma_a.Count == 0 && sigma_s.Count == 0)
-                ErrorExit(loc, "RGB grid requires \"sigma_a\" and/or \"sigma_s\" parameter values.");
-
-            size_t nDensity;
-            if (sigma_a.Count != 0)
-            {
-                nDensity = (size_t)sigma_a.Count;
-                if (sigma_s.Count != 0 && nDensity != (size_t)sigma_s.Count)
-                    ErrorExit(loc, StringPrintf("Different number of samples (%d vs %d) provided for \"sigma_a\" " +
-                                                "and \"sigma_s\".", nDensity, sigma_s.Count));
-            }
-            else
-                nDensity = (size_t)sigma_s.Count;
-
-            if (Le.Count != 0 && sigma_a.Count == 0)
-                ErrorExit(loc, "RGB grid requires \"sigma_a\" if \"Le\" value provided.");
-
-            if (Le.Count != 0 && nDensity != (size_t)Le.Count)
-                ErrorExit(StringPrintf("Expected %d values for \"Le\" parameter but were given %d.", nDensity, Le.Count));
-
-            int nx = parameters.GetOneInt("nx", 1);
-            int ny = parameters.GetOneInt("ny", 1);
-            int nz = parameters.GetOneInt("nz", 1);
-            if (nDensity != (size_t)(nx * ny * nz))
-                ErrorExit(loc, StringPrintf("RGB grid medium has %d density values; expected nx*ny*nz = %d", nDensity, nx * ny * nz));
-
-            pstd.optional<SampledGrid<RGBUnboundedSpectrum>> sigma_aGrid = default, sigma_sGrid = default;
-            pstd.optional<SampledGrid<RGBIlluminantSpectrum>> LeGrid = default;
-
-            if (sigma_a.Count != 0)
-            {
-                RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
-                foreach (RGB rgb in sigma_a)
-                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
-                sigma_aGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
-            }
-            if (sigma_s.Count != 0)
-            {
-                RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
-                foreach (RGB rgb in sigma_s)
-                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
-                sigma_sGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
-            }
-            if (Le.Count != 0)
-            {
-                RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBIlluminantSpectrum> rgbSpectrumDensity = new List<RGBIlluminantSpectrum>();
-                foreach (RGB rgb in Le)
-                    rgbSpectrumDensity.Add(new RGBIlluminantSpectrum(colorSpace, rgb));
-                LeGrid = new SampledGrid<RGBIlluminantSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
-            }
-
-            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
-            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
-            Float LeScale = parameters.GetOneFloat("Lescale", 1f);
-            Float g = parameters.GetOneFloat("g", 0f);
-            Float sigmaScale = parameters.GetOneFloat("scale", 1f);
-
-            return new RGBGridMedium(new Bounds3f(p0, p1), renderFromMedium, g, sigma_aGrid, sigma_sGrid, sigmaScale, LeGrid,
-                                     LeScale, alloc);
-        }
-    }
-
-    public sealed unsafe partial class CloudMedium
-    {
-        public static CloudMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
-                                         Allocator alloc)
-        {
-            Float density = parameters.GetOneFloat("density", 1);
-            Float g = parameters.GetOneFloat("g", 0f);
-            Float wispiness = parameters.GetOneFloat("wispiness", 1);
-            Float frequency = parameters.GetOneFloat("frequency", 5);
-            Spectrum sigma_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
-            if (sigma_a == null)
-                sigma_a = new ConstantSpectrum(1f);
-            Spectrum sigma_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
-            if (sigma_s == null)
-                sigma_s = new ConstantSpectrum(1f);
-
-            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
-            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
-
-            return new CloudMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, density, wispiness, frequency, alloc);
         }
     }
 

@@ -118,12 +118,12 @@ namespace pbrt
     // HashMap Definition (open-addressing table in C++; a Dictionary here)
     public class HashMap<Key, Value>
     {
-        public HashMap() { }
-        public HashMap(Allocator alloc) { }
 
         public size_t size() { return (size_t)dict.Count; }
         public size_t capacity() { return (size_t)Math.Max(8, dict.EnsureCapacity(0)); }
         public void Clear() { dict.Clear(); }
+        public HashMap() { }
+        public HashMap(Allocator alloc) { }
 
         public void Insert(Key key, Value value)
         {

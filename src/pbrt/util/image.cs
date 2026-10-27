@@ -174,12 +174,13 @@ namespace pbrt
     // ImageMetadata Definition
     public unsafe class ImageMetadata
     {
-        // ImageMetadata Public Methods
-        public RGBColorSpace GetColorSpace()
+
+        public override string ToString()
         {
-            if (colorSpace && colorSpace.value() != null)
-                return colorSpace.value();
-            return RGBColorSpace.sRGB;
+            return "[ ImageMetadata renderTimeSeconds: " + Str(renderTimeSeconds) + " cameraFromWorld: " + Str(cameraFromWorld) +
+                   " NDCFromWorld: " + Str(NDCFromWorld) + " pixelBounds: " + Str(pixelBounds) +
+                   " fullResolution: " + Str(fullResolution) + " samplesPerPixel: " + Str(samplesPerPixel) +
+                   " MSE: " + Str(MSE) + " colorSpace: " + (colorSpace ? colorSpace.value().ToString() : "(unset)") + " ]";
         }
 
         public ImageMetadata Clone()
@@ -189,13 +190,12 @@ namespace pbrt
             m.stringVectors = new SortedDictionary<string, List<string>>(stringVectors, StringComparer.Ordinal);
             return m;
         }
-
-        public override string ToString()
+        // ImageMetadata Public Methods
+        public RGBColorSpace GetColorSpace()
         {
-            return "[ ImageMetadata renderTimeSeconds: " + Str(renderTimeSeconds) + " cameraFromWorld: " + Str(cameraFromWorld) +
-                   " NDCFromWorld: " + Str(NDCFromWorld) + " pixelBounds: " + Str(pixelBounds) +
-                   " fullResolution: " + Str(fullResolution) + " samplesPerPixel: " + Str(samplesPerPixel) +
-                   " MSE: " + Str(MSE) + " colorSpace: " + (colorSpace ? colorSpace.value().ToString() : "(unset)") + " ]";
+            if (colorSpace && colorSpace.value() != null)
+                return colorSpace.value();
+            return RGBColorSpace.sRGB;
         }
 
         private static string Str<T>(pstd.optional<T> o) { return o ? o.value().ToString() : "(unset)"; }

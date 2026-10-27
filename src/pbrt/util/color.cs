@@ -309,17 +309,6 @@ namespace pbrt
         // RGBSigmoidPolynomial Public Methods
         public RGBSigmoidPolynomial(Float c0, Float c1, Float c2) { this.c0 = c0; this.c1 = c1; this.c2 = c2; }
 
-        public override string ToString()
-        {
-            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                                 "[ RGBSigmoidPolynomial c0: {0:F6} c1: {1:F6} c2: {2:F6} ]", c0, c1, c2);
-        }
-
-        public Float Apply(Float lambda)
-        {
-            return s(EvaluatePolynomial(lambda, c2, c1, c0));  // c0 * lambda^2 + c1 * lambda + c2
-        }
-
         public Float MaxValue()
         {
             Float result = std.max(Apply(360), Apply(830));
@@ -329,12 +318,23 @@ namespace pbrt
             return result;
         }
 
+        public Float Apply(Float lambda)
+        {
+            return s(EvaluatePolynomial(lambda, c2, c1, c0));  // c0 * lambda^2 + c1 * lambda + c2
+        }
+
         // RGBSigmoidPolynomial Private Methods
         private static Float s(Float x)
         {
             if (IsInf(x))
                 return x > 0 ? 1 : 0;
             return .5f + x / (2 * std.sqrt(1 + Sqr(x)));
+        }
+
+        public override string ToString()
+        {
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                                 "[ RGBSigmoidPolynomial c0: {0:F6} c1: {1:F6} c2: {2:F6} ]", c0, c1, c2);
         }
 
         // RGBSigmoidPolynomial Private Members
@@ -521,6 +521,8 @@ namespace pbrt
     // sRGBColorEncoding Definition
     public sealed class sRGBColorEncoding : ColorEncoding
     {
+
+        public override string ToString() { return "[ sRGBColorEncoding ]"; }
         public override void FromLinear(pstd.span<Float> vin, pstd.span<byte> vout)
         {
             DCHECK_EQ(vin.size(), vout.size());
@@ -534,12 +536,10 @@ namespace pbrt
             for (size_t i = 0; i < vin.size(); ++i)
                 vout[i] = SRGB8ToLinear(vin[i]);
         }
-
-        public override Float ToFloatLinear(Float v) { return SRGBToLinear(v); }
         public override Float ToLinearByte(byte v) { return SRGB8ToLinear(v); }
         public override byte FromLinearByte(Float v) { return LinearToSRGB8(v); }
 
-        public override string ToString() { return "[ sRGBColorEncoding ]"; }
+        public override Float ToFloatLinear(Float v) { return SRGBToLinear(v); }
     }
 
     // GammaColorEncoding Definition

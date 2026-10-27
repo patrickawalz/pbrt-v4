@@ -1138,20 +1138,6 @@ namespace pbrt
             return (func.capacity() + cdf.capacity()) * sizeof(Float);
         }
 
-        public static void TestCompareDistributions(PiecewiseConstant1D da, PiecewiseConstant1D db, Float eps = 1e-5f)
-        {
-            CHECK_EQ(da.func.size(), db.func.size());
-            CHECK_EQ(da.cdf.size(), db.cdf.size());
-            CHECK_EQ(da.min, db.min);
-            CHECK_EQ(da.max, db.max);
-            for (ulong i = 0; i < da.func.size(); ++i)
-            {
-                Float pdfa = da.func[i] / da.funcInt, pdfb = db.func[i] / db.funcInt;
-                Float err = std.abs(pdfa - pdfb) / ((pdfa + pdfb) / 2);
-                CHECK(err < eps);
-            }
-        }
-
         public override string ToString()
         {
             return $"[ PiecewiseConstant1D min: {min} max: {max} funcInt: {funcInt} ]";
@@ -1230,6 +1216,20 @@ namespace pbrt
             return Lerp(delta, cdf[offset], cdf[offset + 1]);
         }
 
+        public static void TestCompareDistributions(PiecewiseConstant1D da, PiecewiseConstant1D db, Float eps = 1e-5f)
+        {
+            CHECK_EQ(da.func.size(), db.func.size());
+            CHECK_EQ(da.cdf.size(), db.cdf.size());
+            CHECK_EQ(da.min, db.min);
+            CHECK_EQ(da.max, db.max);
+            for (ulong i = 0; i < da.func.size(); ++i)
+            {
+                Float pdfa = da.func[i] / da.funcInt, pdfb = db.func[i] / db.funcInt;
+                Float err = std.abs(pdfa - pdfb) / ((pdfa + pdfb) / 2);
+                CHECK(err < eps);
+            }
+        }
+
         // PiecewiseConstant1D Public Members
         public pstd.vector<Float> func, cdf;
         public Float min, max;
@@ -1253,36 +1253,6 @@ namespace pbrt
         public PiecewiseConstant2D(Array2D<Float> data, Bounds2f domain, Allocator alloc = null)
             : this((pstd.span<Float>)data, data.XSize(), data.YSize(), domain, alloc) { }
 
-        public size_t BytesUsed()
-        {
-            return pConditionalV.size() *
-                       (pConditionalV[0].BytesUsed() + (size_t)sizeof(PiecewiseConstant1D*)) +
-                   pMarginal.BytesUsed();
-        }
-
-        public Bounds2f Domain() { return domain; }
-
-        public Point2i Resolution()
-        {
-            return new Point2i((int)pConditionalV[0].size(), (int)pMarginal.size());
-        }
-
-        public override string ToString()
-        {
-            return $"[ PiecewiseConstant2D domain: {domain} pMarginal: {pMarginal} ]";
-        }
-
-        public static void TestCompareDistributions(PiecewiseConstant2D da, PiecewiseConstant2D db, Float eps = 1e-5f)
-        {
-            PiecewiseConstant1D.TestCompareDistributions(da.pMarginal, db.pMarginal, eps);
-
-            CHECK_EQ(da.pConditionalV.size(), db.pConditionalV.size());
-            CHECK(da.domain == db.domain);
-            for (ulong i = 0; i < da.pConditionalV.size(); ++i)
-                PiecewiseConstant1D.TestCompareDistributions(da.pConditionalV[i],
-                                                             db.pConditionalV[i], eps);
-        }
-
         public PiecewiseConstant2D(pstd.span<Float> func, int nu, int nv, Bounds2f domain, Allocator alloc = null)
         {
             this.domain = domain;
@@ -1303,6 +1273,25 @@ namespace pbrt
                 new PiecewiseConstant1D(marginalFunc, domain.pMin[1], domain.pMax[1], alloc);
         }
 
+        public size_t BytesUsed()
+        {
+            return pConditionalV.size() *
+                       (pConditionalV[0].BytesUsed() + (size_t)sizeof(PiecewiseConstant1D*)) +
+                   pMarginal.BytesUsed();
+        }
+
+        public Bounds2f Domain() { return domain; }
+
+        public Point2i Resolution()
+        {
+            return new Point2i((int)pConditionalV[0].size(), (int)pMarginal.size());
+        }
+
+        public override string ToString()
+        {
+            return $"[ PiecewiseConstant2D domain: {domain} pMarginal: {pMarginal} ]";
+        }
+
         public Float Integral() { return pMarginal.Integral(); }
 
         public Point2f Sample(Point2f u, Float* pdf = null, Point2i* offset = null)
@@ -1318,16 +1307,6 @@ namespace pbrt
             return new Point2f(d0, d1);
         }
 
-        public Float PDF(Point2f pr)
-        {
-            Vector2f po = domain.Offset(pr);
-            Point2f p = new Point2f(po.x, po.y);
-            int iu =
-                Clamp((int)(p[0] * pConditionalV[0].size()), 0, (int)pConditionalV[0].size() - 1);
-            int iv = Clamp((int)(p[1] * pMarginal.size()), 0, (int)pMarginal.size() - 1);
-            return pConditionalV[iv].func[iu] / pMarginal.Integral();
-        }
-
         public pstd.optional<Point2f> Invert(Point2f p)
         {
             pstd.optional<Float> mInv = pMarginal.Invert(p[1]);
@@ -1341,6 +1320,27 @@ namespace pbrt
             if (!cInv)
                 return default;
             return new Point2f(cInv.value(), mInv.value());
+        }
+
+        public Float PDF(Point2f pr)
+        {
+            Vector2f po = domain.Offset(pr);
+            Point2f p = new Point2f(po.x, po.y);
+            int iu =
+                Clamp((int)(p[0] * pConditionalV[0].size()), 0, (int)pConditionalV[0].size() - 1);
+            int iv = Clamp((int)(p[1] * pMarginal.size()), 0, (int)pMarginal.size() - 1);
+            return pConditionalV[iv].func[iu] / pMarginal.Integral();
+        }
+
+        public static void TestCompareDistributions(PiecewiseConstant2D da, PiecewiseConstant2D db, Float eps = 1e-5f)
+        {
+            PiecewiseConstant1D.TestCompareDistributions(da.pMarginal, db.pMarginal, eps);
+
+            CHECK_EQ(da.pConditionalV.size(), db.pConditionalV.size());
+            CHECK(da.domain == db.domain);
+            for (ulong i = 0; i < da.pConditionalV.size(); ++i)
+                PiecewiseConstant1D.TestCompareDistributions(da.pConditionalV[i],
+                                                             db.pConditionalV[i], eps);
         }
 
         // PiecewiseConstant2D Private Members
@@ -1418,6 +1418,8 @@ namespace pbrt
             }
         }
 
+        public size_t size() { return bins.size(); }
+
         public int Sample(Float u, Float* pmf = null, Float* uRemapped = null)
         {
             // Compute alias table _offset_ and remapped random sample _up_
@@ -1456,8 +1458,6 @@ namespace pbrt
                 s += $"[ Bin q: {bins[i].q} p: {bins[i].p} alias: {bins[i].alias} ] ";
             return s + "] ]";
         }
-
-        public size_t size() { return bins.size(); }
         public Float PMF(int index) { return bins[index].p; }
 
         private struct Outcome
@@ -1506,11 +1506,6 @@ namespace pbrt
             return std.max<Float>((Float)(s / (sum.XSize() * sum.YSize())), 0);
         }
 
-        public override string ToString()
-        {
-            return $"[ SummedAreaTable sum: {sum} ]";
-        }
-
         // SummedAreaTable Private Methods
         private Float Lookup(Float x, Float y)
         {
@@ -1537,6 +1532,11 @@ namespace pbrt
             x = std.min(x - 1, sum.XSize() - 1);
             y = std.min(y - 1, sum.YSize() - 1);
             return (Float)sum[x, y];
+        }
+
+        public override string ToString()
+        {
+            return $"[ SummedAreaTable sum: {sum} ]";
         }
 
         // SummedAreaTable Private Members

@@ -162,6 +162,11 @@ namespace pbrt
             shading.dndv = si.shading.dndv;
         }
 
+        public static implicit operator TextureEvalContext(NormalBumpEvalContext c)
+        {
+            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex);
+        }
+
         public override string ToString()
         {
             return pbrt.StringPrintf("[ NormalBumpEvalContext p: %s uv: %s shading.n: %s shading.dpdu: %s " +
@@ -169,11 +174,6 @@ namespace pbrt
                                         "dudy: %f dvdx: %f dvdy: %f dpdx: %s dpdy: %s faceIndex: %d ]",
                                         p, uv, shading.n, shading.dpdu, shading.dpdv, shading.dndu, shading.dndv, dudx,
                                         dudy, dvdx, dvdy, dpdx, dpdy, faceIndex);
-        }
-
-        public static implicit operator TextureEvalContext(NormalBumpEvalContext c)
-        {
-            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex);
         }
 
         // NormalBumpEvalContext Public Members
@@ -216,6 +216,20 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ DielectricMaterial displacement: %s normalMap: %s uRoughness: %s " +
+                                        "vRoughness: %s eta: %s remapRoughness: %s ]",
+                                        displacement, pbrt.NormalMapString(normalMap), uRoughness, vRoughness, eta, remapRoughness);
+        }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
 
         public static DielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
@@ -232,20 +246,6 @@ namespace pbrt
             bool remapRoughness = parameters.GetOneBool("remaproughness", true);
             return new DielectricMaterial(uRoughness, vRoughness, eta, displacement, normalMap, remapRoughness);
         }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ DielectricMaterial displacement: %s normalMap: %s uRoughness: %s " +
-                                        "vRoughness: %s eta: %s remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), uRoughness, vRoughness, eta, remapRoughness);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
 
         public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
                                                        ref SampledWavelengths lambda, ScratchBuffer buf)
@@ -327,6 +327,19 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ThinDielectricMaterial displacement: %s normalMap: %s eta: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap), eta);
+        }
 
         public static ThinDielectricMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
@@ -335,19 +348,6 @@ namespace pbrt
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
 
             return new ThinDielectricMaterial(eta, displacement, normalMap);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ ThinDielectricMaterial displacement: %s normalMap: %s eta: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap), eta);
         }
 
         // ThinDielectricMaterial Private Data
@@ -396,6 +396,19 @@ namespace pbrt
             pbrt.LOG_FATAL("Shouldn't be called");
             return null;
         }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            pbrt.LOG_FATAL("Shouldn't be called");
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ MixMaterial materials: [ %s %s ] amount: %s ]", materials[0], materials[1], amount);
+        }
 
         public static MixMaterial Create(Material[] materials, TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
@@ -410,19 +423,6 @@ namespace pbrt
                                        "for its \"amount\" parameter.");
 
             return new MixMaterial(materials, amount);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            pbrt.LOG_FATAL("Shouldn't be called");
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ MixMaterial materials: [ %s %s ] amount: %s ]", materials[0], materials[1], amount);
         }
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
@@ -499,6 +499,23 @@ namespace pbrt
             return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
         }
 
+        public override FloatTexture GetDisplacement() { return null; }
+        public override bool HasSubsurfaceScattering() { return false; }
+        public override Image GetNormalMap() { return null; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ HairMaterial sigma_a: %s color: %s eumelanin: %s " +
+                                        "pheomelanin: %s eta: %s beta_m: %s beta_n: %s alpha: %s ]",
+                                        sigma_a, color, eumelanin, pheomelanin, eta, beta_m, beta_n, alpha);
+        }
+
         public static HairMaterial Create(TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             SpectrumTexture sigma_a = parameters.GetSpectrumTextureOrNull("sigma_a", SpectrumType.Unbounded, alloc);
@@ -546,23 +563,6 @@ namespace pbrt
             return new HairMaterial(sigma_a, reflectance, eumelanin, pheomelanin, eta, beta_m, beta_n, alpha);
         }
 
-        public override FloatTexture GetDisplacement() { return null; }
-        public override Image GetNormalMap() { return null; }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ HairMaterial sigma_a: %s color: %s eumelanin: %s " +
-                                        "pheomelanin: %s eta: %s beta_m: %s beta_n: %s alpha: %s ]",
-                                        sigma_a, color, eumelanin, pheomelanin, eta, beta_m, beta_n, alpha);
-        }
-
         // HairMaterial Private Data
         private SpectrumTexture sigma_a, color;
         private FloatTexture eumelanin, pheomelanin, eta;
@@ -577,6 +577,24 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public DiffuseMaterial(SpectrumTexture reflectance, FloatTexture displacement, Image normalMap)
+        {
+            this.normalMap = normalMap; this.displacement = displacement; this.reflectance = reflectance;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ DiffuseMaterial displacement: %s normapMap: %s reflectance: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap), reflectance);
+        }
 
         public static DiffuseMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
@@ -587,24 +605,6 @@ namespace pbrt
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
 
             return new DiffuseMaterial(reflectance, displacement, normalMap);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ DiffuseMaterial displacement: %s normapMap: %s reflectance: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap), reflectance);
-        }
-
-        public DiffuseMaterial(SpectrumTexture reflectance, FloatTexture displacement, Image normalMap)
-        {
-            this.normalMap = normalMap; this.displacement = displacement; this.reflectance = reflectance;
         }
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
@@ -687,6 +687,22 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ConductorMaterial displacement: %s normalMap: %s eta: %s " +
+                                        "k: %s reflectance: %s uRoughness: %s vRoughness: %s " +
+                                        "remapRoughness: %s ]",
+                                        displacement, pbrt.NormalMapString(normalMap), eta, k, reflectance, uRoughness,
+                                        vRoughness, remapRoughness);
+        }
 
         public static ConductorMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
@@ -715,22 +731,6 @@ namespace pbrt
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
             bool remapRoughness = parameters.GetOneBool("remaproughness", true);
             return new ConductorMaterial(eta, k, reflectance, uRoughness, vRoughness, displacement, normalMap, remapRoughness);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ ConductorMaterial displacement: %s normalMap: %s eta: %s " +
-                                        "k: %s reflectance: %s uRoughness: %s vRoughness: %s " +
-                                        "remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), eta, k, reflectance, uRoughness,
-                                        vRoughness, remapRoughness);
         }
 
         // ConductorMaterial Private Data
@@ -1118,6 +1118,15 @@ namespace pbrt
 
         public override bool HasSubsurfaceScattering() { return true; }
 
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f " +
+                                        "sigma_a: %s sigma_s: %s reflectance: %s mfp: %s uRoughness: %s " +
+                                        "vRoughness: %s scale: %f eta: %f remapRoughness: %s ]",
+                                        displacement, pbrt.NormalMapString(normalMap), scale, sigma_a, sigma_s, reflectance,
+                                        mfp, uRoughness, vRoughness, scale, eta, remapRoughness);
+        }
+
         public static SubsurfaceMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
             SpectrumTexture sigma_a = null, sigma_s = null, reflectance = null, mfp = null;
@@ -1185,15 +1194,6 @@ namespace pbrt
                                           displacement, normalMap, remapRoughness, alloc);
         }
 
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ SubsurfaceMaterial displacement: %s normalMap: %s scale: %f " +
-                                        "sigma_a: %s sigma_s: %s reflectance: %s mfp: %s uRoughness: %s " +
-                                        "vRoughness: %s scale: %f eta: %f remapRoughness: %s ]",
-                                        displacement, pbrt.NormalMapString(normalMap), scale, sigma_a, sigma_s, reflectance,
-                                        mfp, uRoughness, vRoughness, scale, eta, remapRoughness);
-        }
-
         // SubsurfaceMaterial Private Members
         private FloatTexture displacement;
         private Image normalMap;
@@ -1240,6 +1240,19 @@ namespace pbrt
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ DiffuseTransmissionMaterial displacement: %s reflectance: %s " +
+                                        "transmittance: %s scale: %f ]", displacement, reflectance, transmittance, scale);
+        }
 
         public static DiffuseTransmissionMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc,
                                                          Allocator alloc)
@@ -1256,19 +1269,6 @@ namespace pbrt
             Float scale = parameters.GetOneFloat("scale", 1f);
 
             return new DiffuseTransmissionMaterial(reflectance, transmittance, displacement, normalMap, scale);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ DiffuseTransmissionMaterial displacement: %s reflectance: %s " +
-                                        "transmittance: %s scale: %f ]", displacement, reflectance, transmittance, scale);
         }
 
         // DiffuseTransmissionMaterial Private Data
@@ -1295,6 +1295,14 @@ namespace pbrt
             return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
         }
 
+        public override FloatTexture GetDisplacement() { return displacement; }
+
+        public static string Name() { return "MeasuredMaterial"; }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval) { return true; }
+        public override bool HasSubsurfaceScattering() { return false; }
+        public override Image GetNormalMap() { return normalMap; }
+
         public MeasuredMaterial(string filename, FloatTexture displacement, Image normalMap, Allocator alloc)
         {
             this.displacement = displacement;
@@ -1302,12 +1310,17 @@ namespace pbrt
             brdf = MeasuredBxDF.BRDFDataFromFile(filename, alloc);
         }
 
-        public static string Name() { return "MeasuredMaterial"; }
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
 
-        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval) { return true; }
-
-        public override FloatTexture GetDisplacement() { return displacement; }
-        public override Image GetNormalMap() { return normalMap; }
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ MeasuredMaterial displacement: %s normalMap: %s ]", displacement,
+                                        pbrt.NormalMapString(normalMap));
+        }
 
         public static MeasuredMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
         {
@@ -1319,19 +1332,6 @@ namespace pbrt
             }
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
             return new MeasuredMaterial(filename, displacement, normalMap, alloc);
-        }
-
-        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
-                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
-        {
-            return null;
-        }
-        public override bool HasSubsurfaceScattering() { return false; }
-
-        public override string ToString()
-        {
-            return pbrt.StringPrintf("[ MeasuredMaterial displacement: %s normalMap: %s ]", displacement,
-                                        pbrt.NormalMapString(normalMap));
         }
 
         // MeasuredMaterial Private Members

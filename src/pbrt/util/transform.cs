@@ -244,15 +244,31 @@ namespace pbrt
         public override bool Equals(object o) { return o is Transform t && this == t; }
         public override int GetHashCode() { return m.GetHashCode(); }
 
-        public bool IsIdentity() { return m.IsIdentity(); }
+        public Transform(Frame frame)
+            : this(new SquareMatrix4(frame.x.x, frame.x.y, frame.x.z, 0, frame.y.x, frame.y.y,
+                                     frame.y.z, 0, frame.z.x, frame.z.y, frame.z.z, 0, 0, 0, 0,
+                                     1))
+        { }
 
-        public bool HasScale(Float tolerance = 1e-3f)
+        public Transform(Quaternion q)
         {
-            Float la2 = LengthSquared(Apply(new Vector3f(1, 0, 0)));
-            Float lb2 = LengthSquared(Apply(new Vector3f(0, 1, 0)));
-            Float lc2 = LengthSquared(Apply(new Vector3f(0, 0, 1)));
-            return (std.abs(la2 - 1) > tolerance || std.abs(lb2 - 1) > tolerance ||
-                    std.abs(lc2 - 1) > tolerance);
+            Float xx = q.v.x * q.v.x, yy = q.v.y * q.v.y, zz = q.v.z * q.v.z;
+            Float xy = q.v.x * q.v.y, xz = q.v.x * q.v.z, yz = q.v.y * q.v.z;
+            Float wx = q.v.x * q.w, wy = q.v.y * q.w, wz = q.v.z * q.w;
+
+            mInv = new SquareMatrix4();
+            mInv[0][0] = 1 - 2 * (yy + zz);
+            mInv[0][1] = 2 * (xy + wz);
+            mInv[0][2] = 2 * (xz - wy);
+            mInv[1][0] = 2 * (xy - wz);
+            mInv[1][1] = 1 - 2 * (xx + zz);
+            mInv[1][2] = 2 * (yz + wx);
+            mInv[2][0] = 2 * (xz + wy);
+            mInv[2][1] = 2 * (yz - wx);
+            mInv[2][2] = 1 - 2 * (xx + yy);
+
+            // Transpose since we are left-handed.  Ugh.
+            m = Transpose(mInv);
         }
 
         // Transform::operator()(Point3<T>)
@@ -329,39 +345,33 @@ namespace pbrt
             return new Transform(t1.m * t2.m, t2.mInv * t1.mInv);
         }
 
-        public bool SwapsHandedness()
+        public bool IsIdentity() { return m.IsIdentity(); }
+
+        public bool HasScale(Float tolerance = 1e-3f)
         {
-            SquareMatrix3 s = new SquareMatrix3(m[0][0], m[0][1], m[0][2],
-                                                m[1][0], m[1][1], m[1][2],
-                                                m[2][0], m[2][1], m[2][2]);
-            return Determinant(s) < 0;
+            Float la2 = LengthSquared(Apply(new Vector3f(1, 0, 0)));
+            Float lb2 = LengthSquared(Apply(new Vector3f(0, 1, 0)));
+            Float lc2 = LengthSquared(Apply(new Vector3f(0, 0, 1)));
+            return (std.abs(la2 - 1) > tolerance || std.abs(lb2 - 1) > tolerance ||
+                    std.abs(lc2 - 1) > tolerance);
         }
 
-        public Transform(Frame frame)
-            : this(new SquareMatrix4(frame.x.x, frame.x.y, frame.x.z, 0, frame.y.x, frame.y.y,
-                                     frame.y.z, 0, frame.z.x, frame.z.y, frame.z.z, 0, 0, 0, 0,
-                                     1))
-        { }
-
-        public Transform(Quaternion q)
+        public Interaction ApplyInverse(Interaction @in)
         {
-            Float xx = q.v.x * q.v.x, yy = q.v.y * q.v.y, zz = q.v.z * q.v.z;
-            Float xy = q.v.x * q.v.y, xz = q.v.x * q.v.z, yz = q.v.y * q.v.z;
-            Float wx = q.v.x * q.w, wy = q.v.y * q.w, wz = q.v.z * q.w;
-
-            mInv = new SquareMatrix4();
-            mInv[0][0] = 1 - 2 * (yy + zz);
-            mInv[0][1] = 2 * (xy + wz);
-            mInv[0][2] = 2 * (xz - wy);
-            mInv[1][0] = 2 * (xy - wz);
-            mInv[1][1] = 1 - 2 * (xx + zz);
-            mInv[1][2] = 2 * (yz + wx);
-            mInv[2][0] = 2 * (xz + wy);
-            mInv[2][1] = 2 * (yz - wx);
-            mInv[2][2] = 1 - 2 * (xx + yy);
-
-            // Transpose since we are left-handed.  Ugh.
-            m = Transpose(mInv);
+            Interaction ret = new Interaction();
+            Transform t = Inverse(this);
+            ret.pi = t.Apply(@in.pi);
+            // Transform remaining members of _Interaction_
+            ret.n = t.Apply(@in.n);
+            if (LengthSquared(ret.n) > 0)
+                ret.n = Normalize(ret.n);
+            ret.uv = @in.uv;
+            ret.wo = t.Apply(@in.wo);
+            if (LengthSquared(ret.wo) > 0)
+                ret.wo = Normalize(ret.wo);
+            ret.time = @in.time;
+            ret.mediumInterface = @in.mediumInterface;
+            return ret;
         }
 
         // Transform::operator Quaternion()
@@ -406,45 +416,39 @@ namespace pbrt
             return quat;
         }
 
-        public unsafe void Decompose(Vector3f* T, SquareMatrix4* R, SquareMatrix4* S)
+        public SurfaceInteraction ApplyInverse(SurfaceInteraction si)
         {
-            // Extract translation _T_ from transformation matrix
-            T->x = m[0][3];
-            T->y = m[1][3];
-            T->z = m[2][3];
+            SurfaceInteraction ret = new SurfaceInteraction();
+            // Transform _p_ and _pError_ in _SurfaceInteraction_
+            ret.pi = Apply(si.pi);
 
-            // Compute new transformation matrix _M_ without translation
-            SquareMatrix4 M = m;
-            for (int i = 0; i < 3; ++i)
-                M[i][3] = M[3][i] = 0f;
-            M[3][3] = 1f;
-
-            // Extract rotation _R_ from transformation matrix
-            Float norm;
-            int count = 0;
-            *R = M;
-            do
-            {
-                // Compute next matrix _Rnext_ in series
-                SquareMatrix4 Rit = InvertOrExit(Transpose(*R));
-                SquareMatrix4 Rnext = (*R + Rit) / 2;
-
-                // Compute norm of difference between _R_ and _Rnext_
-                norm = 0;
-                for (int i = 0; i < 3; ++i)
-                {
-                    Float n = std.abs((*R)[i][0] - Rnext[i][0]) +
-                              std.abs((*R)[i][1] - Rnext[i][1]) +
-                              std.abs((*R)[i][2] - Rnext[i][2]);
-                    norm = std.max(norm, n);
-                }
-
-                *R = Rnext;
-            } while (++count < 100 && norm > .0001);
-            // XXX TODO FIXME deal with flip...
-
-            // Compute scale _S_ using rotation and original matrix
-            *S = InvertOrExit(*R) * M;
+            // Transform remaining members of _SurfaceInteraction_
+            Transform t = Inverse(this);
+            ret.n = Normalize(t.Apply(si.n));
+            ret.wo = Normalize(t.Apply(si.wo));
+            ret.time = si.time;
+            ret.mediumInterface = si.mediumInterface;
+            ret.uv = si.uv;
+            ret.dpdu = t.Apply(si.dpdu);
+            ret.dpdv = t.Apply(si.dpdv);
+            ret.dndu = t.Apply(si.dndu);
+            ret.dndv = t.Apply(si.dndv);
+            ret.shading.n = Normalize(t.Apply(si.shading.n));
+            ret.shading.dpdu = t.Apply(si.shading.dpdu);
+            ret.shading.dpdv = t.Apply(si.shading.dpdv);
+            ret.shading.dndu = t.Apply(si.shading.dndu);
+            ret.shading.dndv = t.Apply(si.shading.dndv);
+            ret.dudx = si.dudx;
+            ret.dvdx = si.dvdx;
+            ret.dudy = si.dudy;
+            ret.dvdy = si.dvdy;
+            ret.dpdx = t.Apply(si.dpdx);
+            ret.dpdy = t.Apply(si.dpdy);
+            ret.material = si.material;
+            ret.areaLight = si.areaLight;
+            ret.shading.n = FaceForward(ret.shading.n, ret.n);
+            ret.faceIndex = si.faceIndex;
+            return ret;
         }
 
         public Interaction Apply(Interaction @in)
@@ -464,22 +468,51 @@ namespace pbrt
             return ret;
         }
 
-        public Interaction ApplyInverse(Interaction @in)
+        public Point3fi ApplyInverse(Point3fi p)
         {
-            Interaction ret = new Interaction();
-            Transform t = Inverse(this);
-            ret.pi = t.Apply(@in.pi);
-            // Transform remaining members of _Interaction_
-            ret.n = t.Apply(@in.n);
-            if (LengthSquared(ret.n) > 0)
-                ret.n = Normalize(ret.n);
-            ret.uv = @in.uv;
-            ret.wo = t.Apply(@in.wo);
-            if (LengthSquared(ret.wo) > 0)
-                ret.wo = Normalize(ret.wo);
-            ret.time = @in.time;
-            ret.mediumInterface = @in.mediumInterface;
-            return ret;
+            Float x = (Float)p.x, y = (Float)p.y, z = (Float)p.z;
+            // Transform _Point3fi_ _p_ by _mInv_
+            Float xp = (mInv[0][0] * x + mInv[0][1] * y) + (mInv[0][2] * z + mInv[0][3]);
+            Float yp = (mInv[1][0] * x + mInv[1][1] * y) + (mInv[1][2] * z + mInv[1][3]);
+            Float zp = (mInv[2][0] * x + mInv[2][1] * y) + (mInv[2][2] * z + mInv[2][3]);
+            Float wp = (mInv[3][0] * x + mInv[3][1] * y) + (mInv[3][2] * z + mInv[3][3]);
+
+            // Compute absolute error for transformed point
+            Vector3f pOutError = new Vector3f();
+            if (p.IsExact())
+            {
+                pOutError.x = gamma(3) * (std.abs(mInv[0][0] * x) + std.abs(mInv[0][1] * y) +
+                                          std.abs(mInv[0][2] * z));
+                pOutError.y = gamma(3) * (std.abs(mInv[1][0] * x) + std.abs(mInv[1][1] * y) +
+                                          std.abs(mInv[1][2] * z));
+                pOutError.z = gamma(3) * (std.abs(mInv[2][0] * x) + std.abs(mInv[2][1] * y) +
+                                          std.abs(mInv[2][2] * z));
+            }
+            else
+            {
+                // Compute error for transformed approximate _p_
+                Vector3f pInError = p.Error();
+                pOutError.x = (gamma(3) + 1) * (std.abs(mInv[0][0]) * pInError.x +
+                                                std.abs(mInv[0][1]) * pInError.y +
+                                                std.abs(mInv[0][2]) * pInError.z) +
+                              gamma(3) * (std.abs(mInv[0][0] * x) + std.abs(mInv[0][1] * y) +
+                                          std.abs(mInv[0][2] * z) + std.abs(mInv[0][3]));
+                pOutError.y = (gamma(3) + 1) * (std.abs(mInv[1][0]) * pInError.x +
+                                                std.abs(mInv[1][1]) * pInError.y +
+                                                std.abs(mInv[1][2]) * pInError.z) +
+                              gamma(3) * (std.abs(mInv[1][0] * x) + std.abs(mInv[1][1] * y) +
+                                          std.abs(mInv[1][2] * z) + std.abs(mInv[1][3]));
+                pOutError.z = (gamma(3) + 1) * (std.abs(mInv[2][0]) * pInError.x +
+                                                std.abs(mInv[2][1]) * pInError.y +
+                                                std.abs(mInv[2][2]) * pInError.z) +
+                              gamma(3) * (std.abs(mInv[2][0] * x) + std.abs(mInv[2][1] * y) +
+                                          std.abs(mInv[2][2] * z) + std.abs(mInv[2][3]));
+            }
+
+            if (wp == 1)
+                return new Point3fi(new Point3f(xp, yp, zp), pOutError);
+            else
+                return new Point3fi(new Point3f(xp, yp, zp), pOutError) / wp;
         }
 
         public SurfaceInteraction Apply(SurfaceInteraction si)
@@ -517,39 +550,18 @@ namespace pbrt
             return ret;
         }
 
-        public SurfaceInteraction ApplyInverse(SurfaceInteraction si)
+        public Point3f ApplyInverse(Point3f p)
         {
-            SurfaceInteraction ret = new SurfaceInteraction();
-            // Transform _p_ and _pError_ in _SurfaceInteraction_
-            ret.pi = Apply(si.pi);
-
-            // Transform remaining members of _SurfaceInteraction_
-            Transform t = Inverse(this);
-            ret.n = Normalize(t.Apply(si.n));
-            ret.wo = Normalize(t.Apply(si.wo));
-            ret.time = si.time;
-            ret.mediumInterface = si.mediumInterface;
-            ret.uv = si.uv;
-            ret.dpdu = t.Apply(si.dpdu);
-            ret.dpdv = t.Apply(si.dpdv);
-            ret.dndu = t.Apply(si.dndu);
-            ret.dndv = t.Apply(si.dndv);
-            ret.shading.n = Normalize(t.Apply(si.shading.n));
-            ret.shading.dpdu = t.Apply(si.shading.dpdu);
-            ret.shading.dpdv = t.Apply(si.shading.dpdv);
-            ret.shading.dndu = t.Apply(si.shading.dndu);
-            ret.shading.dndv = t.Apply(si.shading.dndv);
-            ret.dudx = si.dudx;
-            ret.dvdx = si.dvdx;
-            ret.dudy = si.dudy;
-            ret.dvdy = si.dvdy;
-            ret.dpdx = t.Apply(si.dpdx);
-            ret.dpdy = t.Apply(si.dpdy);
-            ret.material = si.material;
-            ret.areaLight = si.areaLight;
-            ret.shading.n = FaceForward(ret.shading.n, ret.n);
-            ret.faceIndex = si.faceIndex;
-            return ret;
+            Float x = p.x, y = p.y, z = p.z;
+            Float xp = (mInv[0][0] * x + mInv[0][1] * y) + (mInv[0][2] * z + mInv[0][3]);
+            Float yp = (mInv[1][0] * x + mInv[1][1] * y) + (mInv[1][2] * z + mInv[1][3]);
+            Float zp = (mInv[2][0] * x + mInv[2][1] * y) + (mInv[2][2] * z + mInv[2][3]);
+            Float wp = (mInv[3][0] * x + mInv[3][1] * y) + (mInv[3][2] * z + mInv[3][3]);
+            CHECK_NE(wp, 0);
+            if (wp == 1)
+                return new Point3f(xp, yp, zp);
+            else
+                return new Point3f(xp, yp, zp) / wp;
         }
 
         public Point3fi Apply(Point3fi p)
@@ -642,67 +654,6 @@ namespace pbrt
             return new Vector3fi(new Vector3f(xp, yp, zp), vOutError);
         }
 
-        public Point3fi ApplyInverse(Point3fi p)
-        {
-            Float x = (Float)p.x, y = (Float)p.y, z = (Float)p.z;
-            // Transform _Point3fi_ _p_ by _mInv_
-            Float xp = (mInv[0][0] * x + mInv[0][1] * y) + (mInv[0][2] * z + mInv[0][3]);
-            Float yp = (mInv[1][0] * x + mInv[1][1] * y) + (mInv[1][2] * z + mInv[1][3]);
-            Float zp = (mInv[2][0] * x + mInv[2][1] * y) + (mInv[2][2] * z + mInv[2][3]);
-            Float wp = (mInv[3][0] * x + mInv[3][1] * y) + (mInv[3][2] * z + mInv[3][3]);
-
-            // Compute absolute error for transformed point
-            Vector3f pOutError = new Vector3f();
-            if (p.IsExact())
-            {
-                pOutError.x = gamma(3) * (std.abs(mInv[0][0] * x) + std.abs(mInv[0][1] * y) +
-                                          std.abs(mInv[0][2] * z));
-                pOutError.y = gamma(3) * (std.abs(mInv[1][0] * x) + std.abs(mInv[1][1] * y) +
-                                          std.abs(mInv[1][2] * z));
-                pOutError.z = gamma(3) * (std.abs(mInv[2][0] * x) + std.abs(mInv[2][1] * y) +
-                                          std.abs(mInv[2][2] * z));
-            }
-            else
-            {
-                // Compute error for transformed approximate _p_
-                Vector3f pInError = p.Error();
-                pOutError.x = (gamma(3) + 1) * (std.abs(mInv[0][0]) * pInError.x +
-                                                std.abs(mInv[0][1]) * pInError.y +
-                                                std.abs(mInv[0][2]) * pInError.z) +
-                              gamma(3) * (std.abs(mInv[0][0] * x) + std.abs(mInv[0][1] * y) +
-                                          std.abs(mInv[0][2] * z) + std.abs(mInv[0][3]));
-                pOutError.y = (gamma(3) + 1) * (std.abs(mInv[1][0]) * pInError.x +
-                                                std.abs(mInv[1][1]) * pInError.y +
-                                                std.abs(mInv[1][2]) * pInError.z) +
-                              gamma(3) * (std.abs(mInv[1][0] * x) + std.abs(mInv[1][1] * y) +
-                                          std.abs(mInv[1][2] * z) + std.abs(mInv[1][3]));
-                pOutError.z = (gamma(3) + 1) * (std.abs(mInv[2][0]) * pInError.x +
-                                                std.abs(mInv[2][1]) * pInError.y +
-                                                std.abs(mInv[2][2]) * pInError.z) +
-                              gamma(3) * (std.abs(mInv[2][0] * x) + std.abs(mInv[2][1] * y) +
-                                          std.abs(mInv[2][2] * z) + std.abs(mInv[2][3]));
-            }
-
-            if (wp == 1)
-                return new Point3fi(new Point3f(xp, yp, zp), pOutError);
-            else
-                return new Point3fi(new Point3f(xp, yp, zp), pOutError) / wp;
-        }
-
-        public Point3f ApplyInverse(Point3f p)
-        {
-            Float x = p.x, y = p.y, z = p.z;
-            Float xp = (mInv[0][0] * x + mInv[0][1] * y) + (mInv[0][2] * z + mInv[0][3]);
-            Float yp = (mInv[1][0] * x + mInv[1][1] * y) + (mInv[1][2] * z + mInv[1][3]);
-            Float zp = (mInv[2][0] * x + mInv[2][1] * y) + (mInv[2][2] * z + mInv[2][3]);
-            Float wp = (mInv[3][0] * x + mInv[3][1] * y) + (mInv[3][2] * z + mInv[3][3]);
-            CHECK_NE(wp, 0);
-            if (wp == 1)
-                return new Point3f(xp, yp, zp);
-            else
-                return new Point3f(xp, yp, zp) / wp;
-        }
-
         public Vector3f ApplyInverse(Vector3f v)
         {
             Float x = v.x, y = v.y, z = v.z;
@@ -746,6 +697,55 @@ namespace pbrt
             ret.rxDirection = ApplyInverse(r.rxDirection);
             ret.ryDirection = ApplyInverse(r.ryDirection);
             return ret;
+        }
+
+        public bool SwapsHandedness()
+        {
+            SquareMatrix3 s = new SquareMatrix3(m[0][0], m[0][1], m[0][2],
+                                                m[1][0], m[1][1], m[1][2],
+                                                m[2][0], m[2][1], m[2][2]);
+            return Determinant(s) < 0;
+        }
+
+        public unsafe void Decompose(Vector3f* T, SquareMatrix4* R, SquareMatrix4* S)
+        {
+            // Extract translation _T_ from transformation matrix
+            T->x = m[0][3];
+            T->y = m[1][3];
+            T->z = m[2][3];
+
+            // Compute new transformation matrix _M_ without translation
+            SquareMatrix4 M = m;
+            for (int i = 0; i < 3; ++i)
+                M[i][3] = M[3][i] = 0f;
+            M[3][3] = 1f;
+
+            // Extract rotation _R_ from transformation matrix
+            Float norm;
+            int count = 0;
+            *R = M;
+            do
+            {
+                // Compute next matrix _Rnext_ in series
+                SquareMatrix4 Rit = InvertOrExit(Transpose(*R));
+                SquareMatrix4 Rnext = (*R + Rit) / 2;
+
+                // Compute norm of difference between _R_ and _Rnext_
+                norm = 0;
+                for (int i = 0; i < 3; ++i)
+                {
+                    Float n = std.abs((*R)[i][0] - Rnext[i][0]) +
+                              std.abs((*R)[i][1] - Rnext[i][1]) +
+                              std.abs((*R)[i][2] - Rnext[i][2]);
+                    norm = std.max(norm, n);
+                }
+
+                *R = Rnext;
+            } while (++count < 100 && norm > .0001);
+            // XXX TODO FIXME deal with flip...
+
+            // Compute scale _S_ using rotation and original matrix
+            *S = InvertOrExit(*R) * M;
         }
 
         public override string ToString()

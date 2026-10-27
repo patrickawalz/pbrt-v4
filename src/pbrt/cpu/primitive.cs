@@ -138,6 +138,8 @@ namespace pbrt
             this.renderFromPrimitive = renderFromPrimitive;
         }
 
+        public override Bounds3f Bounds() { return renderFromPrimitive.Apply(primitive.Bounds()); }
+
         public override pstd.optional<ShapeIntersection> Intersect(Ray r, Float tMax = Infinity)
         {
             // Transform ray to primitive-space and intersect with primitive
@@ -158,8 +160,6 @@ namespace pbrt
             Ray ray = renderFromPrimitive.ApplyInverse(r, &tMax);
             return primitive.IntersectP(ray, tMax);
         }
-
-        public override Bounds3f Bounds() { return renderFromPrimitive.Apply(primitive.Bounds()); }
 
         // TransformedPrimitive Private Members
         Primitive primitive;
