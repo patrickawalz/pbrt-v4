@@ -37,15 +37,6 @@ namespace pbrt
             return f(woRender, wiRender, TransportMode.Radiance);
         }
 
-        public SampledSpectrum f<TBxDF>(Vector3f woRender, Vector3f wiRender, TransportMode mode) where TBxDF : BxDF
-        {
-            Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);
-            if (wo.z == 0)
-                return default;
-            TBxDF specificBxDF = bxdf as TBxDF;
-            return specificBxDF.f(wo, wi, mode);
-        }
-
         public pstd.optional<BSDFSample> Sample_f(Vector3f woRender, Float u, Point2f u2, TransportMode mode,
                                                   BxDFReflTransFlags sampleFlags)
         {
@@ -77,37 +68,6 @@ namespace pbrt
         public Float PDF(Vector3f woRender, Vector3f wiRender)
         {
             return PDF(woRender, wiRender, TransportMode.Radiance, BxDFReflTransFlags.All);
-        }
-
-        public pstd.optional<BSDFSample> Sample_f<TBxDF>(Vector3f woRender, Float u, Point2f u2, TransportMode mode,
-                                                         BxDFReflTransFlags sampleFlags) where TBxDF : BxDF
-        {
-            Vector3f wo = RenderToLocal(woRender);
-            if (wo.z == 0)
-                return default;
-
-            TBxDF specificBxDF = (TBxDF)bxdf;
-            if ((specificBxDF.Flags() & sampleFlags) == 0)
-                return default;
-
-            pstd.optional<BSDFSample> bs = specificBxDF.Sample_f(wo, u, u2, mode, sampleFlags);
-            if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
-                return default;
-            pbrt.DCHECK_GT(bs.value().pdf, 0f);
-
-            BSDFSample s = bs.value();
-            s.wi = LocalToRender(s.wi);
-            return s;
-        }
-
-        public Float PDF<TBxDF>(Vector3f woRender, Vector3f wiRender, TransportMode mode, BxDFReflTransFlags sampleFlags)
-            where TBxDF : BxDF
-        {
-            Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
-            if (wo.z == 0)
-                return 0;
-            TBxDF specificBxDF = (TBxDF)bxdf;
-            return specificBxDF.PDF(wo, wi, mode, sampleFlags);
         }
 
         public SampledSpectrum rho(pstd.span<Point2f> u1, pstd.span<Float> uc, pstd.span<Point2f> u2)
