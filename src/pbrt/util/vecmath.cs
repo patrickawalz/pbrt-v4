@@ -1473,6 +1473,9 @@ namespace pbrt
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static explicit operator Vector3f(Point3f v) { return new Vector3f(v.x, v.y, v.z); }
+        // explicit Vector3(Vector3<U> v) with U = Interval
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Vector3fi v) { return new Vector3f((Float)v.x, (Float)v.y, (Float)v.z); }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static explicit operator Vector3f(Normal3f v) { return new Vector3f(v.x, v.y, v.z); }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

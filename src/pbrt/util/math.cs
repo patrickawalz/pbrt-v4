@@ -510,6 +510,18 @@ namespace pbrt
             return differenceOfProducts + error;
         }
 
+        // (the C++ DifferenceOfProducts template instantiated for vector types: componentwise)
+        public static Vector3f DifferenceOfProducts(Float a, Vector3f b, Float c, Vector3f d)
+        {
+            return new Vector3f(DifferenceOfProducts(a, b.x, c, d.x), DifferenceOfProducts(a, b.y, c, d.y),
+                                DifferenceOfProducts(a, b.z, c, d.z));
+        }
+        public static Normal3f DifferenceOfProducts(Float a, Normal3f b, Float c, Normal3f d)
+        {
+            return new Normal3f(DifferenceOfProducts(a, b.x, c, d.x), DifferenceOfProducts(a, b.y, c, d.y),
+                                DifferenceOfProducts(a, b.z, c, d.z));
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float SumOfProducts(float a, float b, float c, float d)
         {

@@ -285,62 +285,6 @@ namespace pbrt
     }
 
     // Shared helpers for the shape implementations below
-    internal static unsafe class ShapeUtil
-    {
-        public static Vector3f ToVector3f(Vector3fi v) { return new Vector3f((Float)v.x, (Float)v.y, (Float)v.z); }
-        public static Point3f ToPoint3f(Point3fi p) { return new Point3f((Float)p.x, (Float)p.y, (Float)p.z); }
-
-        // DifferenceOfProducts for vector/normal types, componentwise as in pbrt's templates
-        public static Vector3f DifferenceOfProducts(Float a, Vector3f b, Float c, Vector3f d)
-        {
-            return new Vector3f(pbrt.DifferenceOfProducts(a, b.x, c, d.x),
-                                pbrt.DifferenceOfProducts(a, b.y, c, d.y),
-                                pbrt.DifferenceOfProducts(a, b.z, c, d.z));
-        }
-        public static Normal3f DifferenceOfProducts(Float a, Normal3f b, Float c, Normal3f d)
-        {
-            return new Normal3f(pbrt.DifferenceOfProducts(a, b.x, c, d.x),
-                                pbrt.DifferenceOfProducts(a, b.y, c, d.y),
-                                pbrt.DifferenceOfProducts(a, b.z, c, d.z));
-        }
-
-        // Common area-sampling to solid-angle conversion used by several shapes
-        public static pstd.optional<ShapeSample> SampleByArea(Shape shape, ShapeSampleContext ctx, Point2f u)
-        {
-            // Sample shape by area and compute incident direction _wi_
-            pstd.optional<ShapeSample> ss = shape.Sample(u);
-            pbrt.DCHECK(ss);
-            ss.Ref().intr.time = ctx.time;
-            Vector3f wi = ss.value().intr.p() - ctx.p();
-            if (pbrt.LengthSquared(wi) == 0)
-                return default;
-            wi = pbrt.Normalize(wi);
-
-            // Convert area sampling PDF in _ss_ to solid angle measure
-            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) /
-                            pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
-            if (pbrt.IsInf(ss.value().pdf))
-                return default;
-            return ss;
-        }
-
-        public static Float PDFByArea(Shape shape, ShapeSampleContext ctx, Vector3f wi)
-        {
-            // Intersect sample ray with shape geometry
-            Ray ray = ctx.SpawnRay(wi);
-            pstd.optional<ShapeIntersection> isect = shape.Intersect(ray);
-            if (!isect)
-                return 0;
-
-            // Compute PDF in solid angle measure from shape intersection point
-            Float pdf = (1 / shape.Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
-                                              pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
-            if (pbrt.IsInf(pdf))
-                pdf = 0;
-            return pdf;
-        }
-    }
-
     // Sphere Definition
     public sealed unsafe class Sphere : Shape
     {
@@ -421,7 +365,7 @@ namespace pbrt
             }
 
             // Compute sphere hit position and $\phi$
-            pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
+            pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
             // Refine sphere intersection point
             pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
 
@@ -440,7 +384,7 @@ namespace pbrt
                     return default;
                 tShapeHit = t1;
                 // Compute sphere hit position and $\phi$
-                pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
+                pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
                 // Refine sphere intersection point
                 pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
 
@@ -533,7 +477,23 @@ namespace pbrt
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
             if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
-                return ShapeUtil.SampleByArea(this, ctx, u);
+            {
+                // Sample shape by area and compute incident direction _wi_
+                pstd.optional<ShapeSample> ss = Sample(u);
+                pbrt.DCHECK(ss);
+                ss.Ref().intr.time = ctx.time;
+                Vector3f wi = ss.value().intr.p() - ctx.p();
+                if (pbrt.LengthSquared(wi) == 0)
+                    return default;
+                wi = pbrt.Normalize(wi);
+
+                // Convert area sampling PDF in _ss_ to solid angle measure
+                ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+                if (pbrt.IsInf(ss.value().pdf))
+                    return default;
+
+                return ss;
+            }
 
             // Sample sphere uniformly inside subtended cone
             // Compute quantities related to the $\theta_\roman{max}$ for cone
@@ -619,7 +579,22 @@ namespace pbrt
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
             if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
-                return ShapeUtil.PDFByArea(this, ctx, wi);  // Return solid angle PDF for point inside sphere
+            {
+                // Intersect sample ray with shape geometry
+                Ray ray = ctx.SpawnRay(wi);
+                pstd.optional<ShapeIntersection> isect = Intersect(ray);
+                if (!isect)
+                    return 0;
+
+                // Compute PDF in solid angle measure from shape intersection point
+                Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+                                            pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
+                if (pbrt.IsInf(pdf))
+                    pdf = 0;
+
+                return pdf;
+            }
+                // Return solid angle PDF for point inside sphere
 
             // Compute general solid angle sphere PDF
             Float sin2ThetaMax = radius * radius / pbrt.DistanceSquared(ctx.p(), pCenter);
@@ -684,7 +659,7 @@ namespace pbrt
                 return default;
 
             // See if hit point is inside disk radii and $\phimax$
-            Point3f pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
+            Point3f pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
             Float dist2 = pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y);
             if (dist2 > pbrt.Sqr(radius) || dist2 < pbrt.Sqr(innerRadius))
                 return default;
@@ -745,7 +720,21 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            return ShapeUtil.SampleByArea(this, ctx, u);
+            // Sample shape by area and compute incident direction _wi_
+            pstd.optional<ShapeSample> ss = Sample(u);
+            pbrt.DCHECK(ss);
+            ss.Ref().intr.time = ctx.time;
+            Vector3f wi = ss.value().intr.p() - ctx.p();
+            if (pbrt.LengthSquared(wi) == 0)
+                return default;
+            wi = pbrt.Normalize(wi);
+
+            // Convert area sampling PDF in _ss_ to solid angle measure
+            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+            if (pbrt.IsInf(ss.value().pdf))
+                return default;
+
+            return ss;
         }
 
         public override Bounds3f Bounds()
@@ -785,7 +774,22 @@ namespace pbrt
             return new Disk(renderFromObject, objectFromRender, reverseOrientation, height, radius, innerRadius, phimax);
         }
 
-        public override Float PDF(ShapeSampleContext ctx, Vector3f wi) { return ShapeUtil.PDFByArea(this, ctx, wi); }
+        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
+        {
+            // Intersect sample ray with shape geometry
+            Ray ray = ctx.SpawnRay(wi);
+            pstd.optional<ShapeIntersection> isect = Intersect(ray);
+            if (!isect)
+                return 0;
+
+            // Compute PDF in solid angle measure from shape intersection point
+            Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+                                        pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
+            if (pbrt.IsInf(pdf))
+                pdf = 0;
+
+            return pdf;
+        }
 
         // Disk Private Members
         Transform renderFromObject, objectFromRender;
@@ -860,7 +864,7 @@ namespace pbrt
             }
 
             // Compute cylinder hit point and $\phi$
-            pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
+            pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
             // Refine cylinder intersection point
             Float hitRad = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
             pHit.x *= radius / hitRad;
@@ -879,7 +883,7 @@ namespace pbrt
                 if (t1.UpperBound() > tMax)
                     return default;
                 // Compute cylinder hit point and $\phi$
-                pHit = ShapeUtil.ToPoint3f(oi) + (Float)tShapeHit * ShapeUtil.ToVector3f(di);
+                pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
                 // Refine cylinder intersection point
                 Float hitRad2 = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
                 pHit.x *= radius / hitRad2;
@@ -957,7 +961,21 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            return ShapeUtil.SampleByArea(this, ctx, u);
+            // Sample shape by area and compute incident direction _wi_
+            pstd.optional<ShapeSample> ss = Sample(u);
+            pbrt.DCHECK(ss);
+            ss.Ref().intr.time = ctx.time;
+            Vector3f wi = ss.value().intr.p() - ctx.p();
+            if (pbrt.LengthSquared(wi) == 0)
+                return default;
+            wi = pbrt.Normalize(wi);
+
+            // Convert area sampling PDF in _ss_ to solid angle measure
+            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+            if (pbrt.IsInf(ss.value().pdf))
+                return default;
+
+            return ss;
         }
         // Cylinder Public Methods
         public Cylinder(Transform renderFromObj, Transform objFromRender, bool reverseOrientation, Float radius,
@@ -1001,7 +1019,22 @@ namespace pbrt
             return new Cylinder(renderFromObject, objectFromRender, reverseOrientation, radius, zmin, zmax, phimax);
         }
 
-        public override Float PDF(ShapeSampleContext ctx, Vector3f wi) { return ShapeUtil.PDFByArea(this, ctx, wi); }
+        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
+        {
+            // Intersect sample ray with shape geometry
+            Ray ray = ctx.SpawnRay(wi);
+            pstd.optional<ShapeIntersection> isect = Intersect(ray);
+            if (!isect)
+                return 0;
+
+            // Compute PDF in solid angle measure from shape intersection point
+            Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+                                        pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
+            if (pbrt.IsInf(pdf))
+                pdf = 0;
+
+            return pdf;
+        }
 
         // Cylinder Private Members
         Transform renderFromObject, objectFromRender;
@@ -1089,8 +1122,8 @@ namespace pbrt
             {
                 // Compute triangle $\dpdu$ and $\dpdv$ via matrix inversion
                 Float invdet = 1 / determinant;
-                dpdu = ShapeUtil.DifferenceOfProducts(duv12[1], dp02, duv02[1], dp12) * invdet;
-                dpdv = ShapeUtil.DifferenceOfProducts(duv02[0], dp12, duv12[0], dp02) * invdet;
+                dpdu = pbrt.DifferenceOfProducts(duv12[1], dp02, duv02[1], dp12) * invdet;
+                dpdv = pbrt.DifferenceOfProducts(duv02[0], dp12, duv12[0], dp02) * invdet;
             }
             // Handle degenerate triangle $(u,v)$ parameterization or partial derivatives
             if (degenerateUV || pbrt.LengthSquared(pbrt.Cross(dpdu, dpdv)) == 0)
@@ -1202,8 +1235,8 @@ namespace pbrt
                     else
                     {
                         Float invDet = 1 / determinantb;
-                        dndu = ShapeUtil.DifferenceOfProducts(duv12b[1], dn1, duv02b[1], dn2) * invDet;
-                        dndv = ShapeUtil.DifferenceOfProducts(duv02b[0], dn2, duv12b[0], dn1) * invDet;
+                        dndu = pbrt.DifferenceOfProducts(duv12b[1], dn1, duv02b[1], dn2) * invDet;
+                        dndv = pbrt.DifferenceOfProducts(duv02b[0], dn2, duv12b[0], dn1) * invDet;
                     }
                 }
                 else
@@ -1262,7 +1295,23 @@ namespace pbrt
             // Use uniform area sampling for numerically unstable cases
             Float solidAngle = SolidAngle(ctx.p());
             if (solidAngle < MinSphericalSampleArea || solidAngle > MaxSphericalSampleArea)
-                return ShapeUtil.SampleByArea(this, ctx, u);
+            {
+                // Sample shape by area and compute incident direction _wi_
+                pstd.optional<ShapeSample> ss = Sample(u);
+                pbrt.DCHECK(ss);
+                ss.Ref().intr.time = ctx.time;
+                Vector3f wi = ss.value().intr.p() - ctx.p();
+                if (pbrt.LengthSquared(wi) == 0)
+                    return default;
+                wi = pbrt.Normalize(wi);
+
+                // Convert area sampling PDF in _ss_ to solid angle measure
+                ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+                if (pbrt.IsInf(ss.value().pdf))
+                    return default;
+
+                return ss;
+            }
 
             // Sample spherical triangle from reference point
             // Apply warp product sampling for cosine factor at reference point
@@ -1506,7 +1555,21 @@ namespace pbrt
             Float solidAngle = SolidAngle(ctx.p());
             // Return PDF based on uniform area sampling for challenging triangles
             if (solidAngle < MinSphericalSampleArea || solidAngle > MaxSphericalSampleArea)
-                return ShapeUtil.PDFByArea(this, ctx, wi);
+            {
+                // Intersect sample ray with shape geometry
+                Ray ray = ctx.SpawnRay(wi);
+                pstd.optional<ShapeIntersection> isect = Intersect(ray);
+                if (!isect)
+                    return 0;
+
+                // Compute PDF in solid angle measure from shape intersection point
+                Float areaPdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+                                            pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
+                if (pbrt.IsInf(areaPdf))
+                    areaPdf = 0;
+
+                return areaPdf;  // (pdf in pbrt; C# disallows reusing the name of a later local of the enclosing scope)
+            }
 
             Float pdf = 1 / solidAngle;
             // Adjust PDF for warp product sampling of triangle $\cos\theta$ factor
@@ -2631,7 +2694,23 @@ namespace pbrt
             Vector3f v01 = pbrt.Normalize(p01 - ctx.p()), v11 = pbrt.Normalize(p11 - ctx.p());
             if (!IsRectangle(mesh) || mesh.imageDistribution != null ||
                 pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
-                return ShapeUtil.SampleByArea(this, ctx, u);
+            {
+                // Sample shape by area and compute incident direction _wi_
+                pstd.optional<ShapeSample> ss = Sample(u);
+                pbrt.DCHECK(ss);
+                ss.Ref().intr.time = ctx.time;
+                Vector3f wi = ss.value().intr.p() - ctx.p();
+                if (pbrt.LengthSquared(wi) == 0)
+                    return default;
+                wi = pbrt.Normalize(wi);
+
+                // Convert area sampling PDF in _ss_ to solid angle measure
+                ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
+                if (pbrt.IsInf(ss.value().pdf))
+                    return default;
+
+                return ss;
+            }
 
             // Sample spherical rectangle at reference point
             // Warp sample _u_ to account for incident $\cos\theta$ factor

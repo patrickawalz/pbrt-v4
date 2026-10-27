@@ -288,75 +288,13 @@ namespace pbrt
     // Image Definition
     public unsafe class Image
     {
-        // Image Public Methods
-        public Image(Allocator alloc = null)
-        {
-            p8 = new pstd.vector<uint8_t>();
-            p16 = new pstd.vector<Half>();
-            p32 = new pstd.vector<float>();
-            channelNames = new pstd.vector<string>();
-            format = PixelFormat.U256;
-            resolution = new Point2i(0, 0);
-        }
 
-        public Image(pstd.vector<uint8_t> p8c, Point2i resolution, IList<string> channels, ColorEncoding encoding)
-        {
-            format = PixelFormat.U256;
-            this.resolution = resolution;
-            channelNames = new pstd.vector<string>(channels);
-            this.encoding = encoding;
-            p8 = p8c;
-            p16 = new pstd.vector<Half>();
-            p32 = new pstd.vector<float>();
-            CHECK_EQ((size_t)p8.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
-        }
+        public PixelFormat Format() { return format; }
+        public Point2i Resolution() { return resolution; }
+        public int NChannels() { return (int)channelNames.size(); }
+        public ColorEncoding Encoding() { return encoding; }
 
-        public Image(pstd.vector<Half> p16c, Point2i resolution, IList<string> channels)
-        {
-            format = PixelFormat.Half;
-            this.resolution = resolution;
-            channelNames = new pstd.vector<string>(channels);
-            p8 = new pstd.vector<uint8_t>();
-            p16 = p16c;
-            p32 = new pstd.vector<float>();
-            CHECK_EQ((size_t)p16.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
-            CHECK(Is16Bit(format));
-        }
-
-        public Image(pstd.vector<float> p32c, Point2i resolution, IList<string> channels)
-        {
-            format = PixelFormat.Float;
-            this.resolution = resolution;
-            channelNames = new pstd.vector<string>(channels);
-            p8 = new pstd.vector<uint8_t>();
-            p16 = new pstd.vector<Half>();
-            p32 = p32c;
-            CHECK_EQ((size_t)p32.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
-            CHECK(Is32Bit(format));
-        }
-
-        public Image(PixelFormat format, Point2i resolution, IList<string> channels, ColorEncoding encoding = null,
-                     Allocator alloc = null)
-        {
-            this.format = format;
-            this.resolution = resolution;
-            channelNames = new pstd.vector<string>(channels);
-            this.encoding = encoding;
-            p8 = new pstd.vector<uint8_t>();
-            p16 = new pstd.vector<Half>();
-            p32 = new pstd.vector<float>();
-            if (Is8Bit(format))
-            {
-                p8.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
-                CHECK(encoding != null);
-            }
-            else if (Is16Bit(format))
-                p16.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
-            else if (Is32Bit(format))
-                p32.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
-            else
-                LOG_FATAL("Unhandled format in Image::Image()");
-        }
+        public static implicit operator bool(Image im) { return im.resolution.x > 0 && im.resolution.y > 0; }
 
         // C++ copy construction / assignment
         public Image Clone()
@@ -376,17 +314,6 @@ namespace pbrt
             p16 = new pstd.vector<Half>(o.p16.ToArray());
             p32 = new pstd.vector<float>(o.p32.ToArray());
         }
-
-        public PixelFormat Format() { return format; }
-        public Point2i Resolution() { return resolution; }
-        public int NChannels() { return (int)channelNames.size(); }
-        public List<string> ChannelNames()
-        {
-            return new List<string>(channelNames.ToArray());
-        }
-        public ColorEncoding Encoding() { return encoding; }
-
-        public static implicit operator bool(Image im) { return im.resolution.x > 0 && im.resolution.y > 0; }
 
         public size_t PixelOffset(Point2i p)
         {
@@ -436,32 +363,6 @@ namespace pbrt
                     dx * dy * v[3]);
         }
 
-        public void SetChannel(Point2i p, int c, Float value)
-        {
-            // CHECK(!IsNaN(value));
-            if (IsNaN(value))
-            {
-                LOG_ERROR($"NaN at pixel {p.x},{p.y} comp {c}");
-                value = 0;
-            }
-
-            switch (format)
-            {
-                case PixelFormat.U256:
-                    p8[PixelOffset(p) + (size_t)c] = encoding.FromLinearByte(value);
-                    break;
-                case PixelFormat.Half:
-                    p16[PixelOffset(p) + (size_t)c] = new Half(value);
-                    break;
-                case PixelFormat.Float:
-                    p32[PixelOffset(p) + (size_t)c] = value;
-                    break;
-                default:
-                    LOG_FATAL("Unhandled PixelFormat in Image::SetChannel()");
-                    break;
-            }
-        }
-
         public ImageChannelDesc AllChannelsDesc()
         {
             ImageChannelDesc desc = new ImageChannelDesc();
@@ -507,44 +408,29 @@ namespace pbrt
 
         public size_t BytesUsed() { return p8.size() + 2 * p16.size() + 4 * p32.size(); }
 
-        // Image Private Methods
-        private static bool IsAllInBounds(Bounds2i extent, Image image)
+        public void SetChannel(Point2i p, int c, Float value)
         {
-            return Intersect(extent, new Bounds2i(new Point2i(0, 0), image.Resolution())) == extent;
-        }
-
-        private static void ForExtent(Bounds2i extent, WrapMode2D wrapMode, Image image, Action<int> op)
-        {
-            CHECK_LT(extent.pMin.x, extent.pMax.x);
-            CHECK_LT(extent.pMin.y, extent.pMax.y);
-
-            int nx = extent.pMax[0] - extent.pMin[0];
-            int nc = image.NChannels();
-            if (IsAllInBounds(extent, image))
+            // CHECK(!IsNaN(value));
+            if (IsNaN(value))
             {
-                // All in bounds
-                for (int y = extent.pMin[1]; y < extent.pMax[1]; ++y)
-                {
-                    int offset = (int)image.PixelOffset(new Point2i(extent.pMin[0], y));
-                    for (int x = 0; x < nx; ++x)
-                        for (int c = 0; c < nc; ++c)
-                            op(offset++);
-                }
+                LOG_ERROR($"NaN at pixel {p.x},{p.y} comp {c}");
+                value = 0;
             }
-            else
+
+            switch (format)
             {
-                for (int y = extent.pMin[1]; y < extent.pMax[1]; ++y)
-                {
-                    for (int x = 0; x < nx; ++x)
-                    {
-                        Point2i p = new Point2i(extent.pMin[0] + x, y);
-                        // FIXME: this will return false on Black wrap mode
-                        CHECK(RemapPixelCoords(&p, image.Resolution(), wrapMode));
-                        int offset = (int)image.PixelOffset(p);
-                        for (int c = 0; c < nc; ++c)
-                            op(offset++);
-                    }
-                }
+                case PixelFormat.U256:
+                    p8[PixelOffset(p) + (size_t)c] = encoding.FromLinearByte(value);
+                    break;
+                case PixelFormat.Half:
+                    p16[PixelOffset(p) + (size_t)c] = new Half(value);
+                    break;
+                case PixelFormat.Float:
+                    p32[PixelOffset(p) + (size_t)c] = value;
+                    break;
+                default:
+                    LOG_FATAL("Unhandled PixelFormat in Image::SetChannel()");
+                    break;
             }
         }
 
@@ -829,6 +715,116 @@ namespace pbrt
             return pyramid;
         }
 
+        // Image Private Methods
+        private static bool IsAllInBounds(Bounds2i extent, Image image)
+        {
+            return Intersect(extent, new Bounds2i(new Point2i(0, 0), image.Resolution())) == extent;
+        }
+
+        private static void ForExtent(Bounds2i extent, WrapMode2D wrapMode, Image image, Action<int> op)
+        {
+            CHECK_LT(extent.pMin.x, extent.pMax.x);
+            CHECK_LT(extent.pMin.y, extent.pMax.y);
+
+            int nx = extent.pMax[0] - extent.pMin[0];
+            int nc = image.NChannels();
+            if (IsAllInBounds(extent, image))
+            {
+                // All in bounds
+                for (int y = extent.pMin[1]; y < extent.pMax[1]; ++y)
+                {
+                    int offset = (int)image.PixelOffset(new Point2i(extent.pMin[0], y));
+                    for (int x = 0; x < nx; ++x)
+                        for (int c = 0; c < nc; ++c)
+                            op(offset++);
+                }
+            }
+            else
+            {
+                for (int y = extent.pMin[1]; y < extent.pMax[1]; ++y)
+                {
+                    for (int x = 0; x < nx; ++x)
+                    {
+                        Point2i p = new Point2i(extent.pMin[0] + x, y);
+                        // FIXME: this will return false on Black wrap mode
+                        CHECK(RemapPixelCoords(&p, image.Resolution(), wrapMode));
+                        int offset = (int)image.PixelOffset(p);
+                        for (int c = 0; c < nc; ++c)
+                            op(offset++);
+                    }
+                }
+            }
+        }
+        // Image Public Methods
+        public Image(Allocator alloc = null)
+        {
+            p8 = new pstd.vector<uint8_t>();
+            p16 = new pstd.vector<Half>();
+            p32 = new pstd.vector<float>();
+            channelNames = new pstd.vector<string>();
+            format = PixelFormat.U256;
+            resolution = new Point2i(0, 0);
+        }
+
+        public Image(pstd.vector<uint8_t> p8c, Point2i resolution, IList<string> channels, ColorEncoding encoding)
+        {
+            format = PixelFormat.U256;
+            this.resolution = resolution;
+            channelNames = new pstd.vector<string>(channels);
+            this.encoding = encoding;
+            p8 = p8c;
+            p16 = new pstd.vector<Half>();
+            p32 = new pstd.vector<float>();
+            CHECK_EQ((size_t)p8.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
+        }
+
+        public Image(pstd.vector<Half> p16c, Point2i resolution, IList<string> channels)
+        {
+            format = PixelFormat.Half;
+            this.resolution = resolution;
+            channelNames = new pstd.vector<string>(channels);
+            p8 = new pstd.vector<uint8_t>();
+            p16 = p16c;
+            p32 = new pstd.vector<float>();
+            CHECK_EQ((size_t)p16.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
+            CHECK(Is16Bit(format));
+        }
+
+        public Image(pstd.vector<float> p32c, Point2i resolution, IList<string> channels)
+        {
+            format = PixelFormat.Float;
+            this.resolution = resolution;
+            channelNames = new pstd.vector<string>(channels);
+            p8 = new pstd.vector<uint8_t>();
+            p16 = new pstd.vector<Half>();
+            p32 = p32c;
+            CHECK_EQ((size_t)p32.size(), (size_t)(NChannels() * resolution[0] * resolution[1]));
+            CHECK(Is32Bit(format));
+        }
+
+        public Image(PixelFormat format, Point2i resolution, IList<string> channels, ColorEncoding encoding = null,
+                     Allocator alloc = null)
+        {
+            this.format = format;
+            this.resolution = resolution;
+            channelNames = new pstd.vector<string>(channels);
+            this.encoding = encoding;
+            p8 = new pstd.vector<uint8_t>();
+            p16 = new pstd.vector<Half>();
+            p32 = new pstd.vector<float>();
+            if (Is8Bit(format))
+            {
+                p8.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
+                CHECK(encoding != null);
+            }
+            else if (Is16Bit(format))
+                p16.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
+            else if (Is32Bit(format))
+                p32.resize((ulong)NChannels() * (ulong)resolution[0] * (ulong)resolution[1]);
+            else
+                LOG_FATAL("Unhandled format in Image::Image()");
+        }
+
         public ImageChannelDesc GetChannelDesc(IList<string> requestedChannels)
         {
             ImageChannelDesc desc = new ImageChannelDesc();
@@ -885,26 +881,6 @@ namespace pbrt
             return cv;
         }
 
-        public void SetChannels(Point2i p, ImageChannelDesc desc, pstd.span<Float> values)
-        {
-            CHECK_LE((size_t)values.size(), (size_t)NChannels());
-            for (size_t i = 0; i < values.size(); ++i)
-                SetChannel(p, desc.offset[(int)i], values[(int)i]);
-        }
-
-        public Image ConvertToFormat(PixelFormat newFormat, ColorEncoding encoding = null)
-        {
-            if (newFormat == format)
-                return Clone();
-
-            Image newImage = new Image(newFormat, resolution, channelNames.ToArray(), encoding);
-            for (int y = 0; y < resolution.y; ++y)
-                for (int x = 0; x < resolution.x; ++x)
-                    for (int c = 0; c < NChannels(); ++c)
-                        newImage.SetChannel(new Point2i(x, y), c, GetChannel(new Point2i(x, y), c));
-            return newImage;
-        }
-
         public ImageChannelValues GetChannels(Point2i p, WrapMode2D wrapMode = default)
         {
             ImageChannelValues cv = new ImageChannelValues((size_t)NChannels(), (Float)0);
@@ -940,12 +916,42 @@ namespace pbrt
             return cv;
         }
 
-        public List<string> ChannelNames(ImageChannelDesc desc)
+        public void SetChannels(Point2i p, ImageChannelDesc desc, pstd.span<Float> values)
         {
-            List<string> names = new List<string>();
-            for (int i = 0; i < (int)desc.size(); ++i)
-                names.Add(channelNames[desc.offset[i]]);
-            return names;
+            CHECK_LE((size_t)values.size(), (size_t)NChannels());
+            for (size_t i = 0; i < values.size(); ++i)
+                SetChannel(p, desc.offset[(int)i], values[(int)i]);
+        }
+
+        public void SetChannels(Point2i p, ImageChannelValues values)
+        {
+            CHECK_LE(values.Count, NChannels());
+            int i = 0;
+            foreach (Float v in values)
+            {
+                SetChannel(p, i, v);
+                ++i;
+            }
+        }
+
+        public void SetChannels(Point2i p, pstd.span<Float> values)
+        {
+            CHECK_LE((size_t)values.size(), (size_t)NChannels());
+            for (size_t i = 0; i < values.size(); ++i)
+                SetChannel(p, (int)i, values[(int)i]);
+        }
+
+        public Image ConvertToFormat(PixelFormat newFormat, ColorEncoding encoding = null)
+        {
+            if (newFormat == format)
+                return Clone();
+
+            Image newImage = new Image(newFormat, resolution, channelNames.ToArray(), encoding);
+            for (int y = 0; y < resolution.y; ++y)
+                for (int x = 0; x < resolution.x; ++x)
+                    for (int c = 0; c < NChannels(); ++c)
+                        newImage.SetChannel(new Point2i(x, y), c, GetChannel(new Point2i(x, y), c));
+            return newImage;
         }
 
         public ImageChannelValues MAE(ImageChannelDesc desc, Image rref, Image errorImage = null)
@@ -1050,6 +1056,18 @@ namespace pbrt
             for (int c = 0; c < (int)desc.size(); ++c)
                 mrse[c] = (Float)(sumRSE[c] / ((Float)Resolution().x * (Float)Resolution().y));
             return mrse;
+        }
+        public List<string> ChannelNames()
+        {
+            return new List<string>(channelNames.ToArray());
+        }
+
+        public List<string> ChannelNames(ImageChannelDesc desc)
+        {
+            List<string> names = new List<string>();
+            for (int i = 0; i < (int)desc.size(); ++i)
+                names.Add(channelNames[desc.offset[i]]);
+            return names;
         }
 
         public ImageChannelValues Average(ImageChannelDesc desc)
@@ -1216,24 +1234,6 @@ namespace pbrt
             return cv;
         }
 
-        public void SetChannels(Point2i p, ImageChannelValues values)
-        {
-            CHECK_LE(values.Count, NChannels());
-            int i = 0;
-            foreach (Float v in values)
-            {
-                SetChannel(p, i, v);
-                ++i;
-            }
-        }
-
-        public void SetChannels(Point2i p, pstd.span<Float> values)
-        {
-            CHECK_LE((size_t)values.size(), (size_t)NChannels());
-            for (size_t i = 0; i < values.size(); ++i)
-                SetChannel(p, (int)i, values[(int)i]);
-        }
-
         public void FlipY()
         {
             for (int y = 0; y < resolution.y / 2; ++y)
@@ -1313,91 +1313,6 @@ namespace pbrt
             });
 
             return result;
-        }
-
-        public Image SelectChannels(ImageChannelDesc desc, Allocator alloc = null)
-        {
-            List<string> descChannelNames = new List<string>();
-            // TODO: descChannelNames = ChannelNames(desc)
-            for (int i = 0; i < desc.offset.Count; ++i)
-                descChannelNames.Add(channelNames[desc.offset[i]]);
-
-            Image image = new Image(format, resolution, descChannelNames, encoding, alloc);
-            int nSrc = NChannels(), nDst = desc.offset.Count;
-            switch (format)
-            {
-                case PixelFormat.U256:
-                    for (int y = 0; y < resolution.y; ++y)
-                        for (int x = 0; x < resolution.x; ++x)
-                        {
-                            int src = (int)PixelOffset(new Point2i(x, y));
-                            int dst = (int)image.PixelOffset(new Point2i(x, y));
-                            for (int i = 0; i < nDst; ++i)
-                                image.p8[dst + i] = p8[src + desc.offset[i]];
-                        }
-                    break;
-                case PixelFormat.Half:
-                    for (int y = 0; y < resolution.y; ++y)
-                        for (int x = 0; x < resolution.x; ++x)
-                        {
-                            int src = (int)PixelOffset(new Point2i(x, y));
-                            int dst = (int)image.PixelOffset(new Point2i(x, y));
-                            for (int i = 0; i < nDst; ++i)
-                                image.p16[dst + i] = p16[src + desc.offset[i]];
-                        }
-                    break;
-                case PixelFormat.Float:
-                    for (int y = 0; y < resolution.y; ++y)
-                        for (int x = 0; x < resolution.x; ++x)
-                        {
-                            int src = (int)PixelOffset(new Point2i(x, y));
-                            int dst = (int)image.PixelOffset(new Point2i(x, y));
-                            for (int i = 0; i < nDst; ++i)
-                                image.p32[dst + i] = p32[src + desc.offset[i]];
-                        }
-                    break;
-                default:
-                    LOG_FATAL("Unhandled PixelFormat");
-                    break;
-            }
-
-            return image;
-        }
-
-        public Image Crop(Bounds2i bounds, Allocator alloc = null)
-        {
-            CHECK_GT(bounds.Area(), 0);
-            CHECK(bounds.pMin.x >= 0 && bounds.pMin.y >= 0);
-            Image image = new Image(format, new Point2i(bounds.pMax.x - bounds.pMin.x, bounds.pMax.y - bounds.pMin.y), channelNames.ToArray(), encoding,
-                                    alloc);
-            foreach (Point2i p in bounds)
-                for (int c = 0; c < NChannels(); ++c)
-                    image.SetChannel(new Point2i(p.x - bounds.pMin.x, p.y - bounds.pMin.y), c, GetChannel(p, c));
-            return image;
-        }
-
-        public override string ToString()
-        {
-            return "[ Image format: " + pbrt.ToString(format) + " resolution: " + resolution +
-                   " channelNames: [ " + string.Join(", ", channelNames.ToArray()) + " ] encoding: " +
-                   (encoding != null ? encoding.ToString() : "(nullptr)") + " ]";
-        }
-
-        // Quantization for 8-bit output formats
-        private byte[] QuantizePixelsToU256(int* nOutOfGamut)
-        {
-            byte[] u256 = new byte[(size_t)NChannels() * (size_t)resolution.x * (size_t)resolution.y];
-            for (int y = 0; y < resolution.y; ++y)
-                for (int x = 0; x < resolution.x; ++x)
-                    for (int c = 0; c < NChannels(); ++c)
-                    {
-                        Float dither = -.5f + BlueNoise(c, new Point2i(x, y));
-                        Float v = GetChannel(new Point2i(x, y), c);
-                        if (v < 0 || v > 1)
-                            ++(*nOutOfGamut);
-                        u256[NChannels() * (y * resolution.x + x) + c] = LinearToSRGB8(v, dither);
-                    }
-            return u256;
         }
 
         // ImageIO
@@ -1561,6 +1476,166 @@ namespace pbrt
                 Error($"{name}: no support for writing images with this extension");
                 return false;
             }
+        }
+
+        private bool WriteEXR(string name, ImageMetadata metadata)
+        {
+            if (Is8Bit(format))
+                return ConvertToFormat(PixelFormat.Half).WriteEXR(name, metadata);
+            CHECK(Is16Bit(format) || Is32Bit(format));
+
+            try
+            {
+                Imath.Box2i displayWindow, dataWindow;
+                if (metadata.fullResolution)
+                    // Agan, -1 offsets to handle inclusive indexing in OpenEXR...
+                    displayWindow = new Imath.Box2i(new Imath.V2i(0, 0),
+                                                    new Imath.V2i(metadata.fullResolution.value().x - 1,
+                                                                  metadata.fullResolution.value().y - 1));
+                else
+                    displayWindow = new Imath.Box2i(new Imath.V2i(0, 0),
+                                                    new Imath.V2i(resolution.x - 1, resolution.y - 1));
+
+                if (metadata.pixelBounds)
+                    dataWindow = new Imath.Box2i(
+                        new Imath.V2i(metadata.pixelBounds.value().pMin.x, metadata.pixelBounds.value().pMin.y),
+                        new Imath.V2i(metadata.pixelBounds.value().pMax.x - 1,
+                                      metadata.pixelBounds.value().pMax.y - 1));
+                else
+                    dataWindow = new Imath.Box2i(new Imath.V2i(0, 0),
+                                                 new Imath.V2i(resolution.x - 1, resolution.y - 1));
+
+                byte[] bytes = RawBytes();
+                Imf.FrameBuffer fb = imageToFrameBuffer(this, AllChannelsDesc(), dataWindow, bytes);
+
+                Imf.Header header = new Imf.Header(displayWindow, dataWindow);
+                foreach (KeyValuePair<string, Imf.Slice> iter in fb.slices)
+                    header.channels().insert(iter.Key, iter.Value.type);
+
+                if (metadata.renderTimeSeconds)
+                    header.insert("renderTimeSeconds",
+                                  new Imf.FloatAttribute(metadata.renderTimeSeconds.value()));
+                if (metadata.cameraFromWorld)
+                {
+                    float[] m = new float[16];
+                    for (int i = 0; i < 4; ++i)
+                        for (int j = 0; j < 4; ++j)
+                            m[4 * i + j] = (float)metadata.cameraFromWorld.value()[i][j];
+                    header.insert("worldToCamera", new Imf.M44fAttribute(m));
+                }
+                if (metadata.NDCFromWorld)
+                {
+                    float[] m = new float[16];
+                    for (int i = 0; i < 4; ++i)
+                        for (int j = 0; j < 4; ++j)
+                            m[4 * i + j] = (float)metadata.NDCFromWorld.value()[i][j];
+                    header.insert("worldToNDC", new Imf.M44fAttribute(m));
+                }
+                if (metadata.samplesPerPixel)
+                    header.insert("samplesPerPixel",
+                                  new Imf.IntAttribute(metadata.samplesPerPixel.value()));
+                if (metadata.MSE)
+                    header.insert("MSE", new Imf.FloatAttribute(metadata.MSE.value()));
+                foreach (KeyValuePair<string, string> iter in metadata.strings)
+                    header.insert(iter.Key, new Imf.StringAttribute(iter.Value));
+                foreach (KeyValuePair<string, List<string>> iter in metadata.stringVectors)
+                    header.insert(iter.Key, new Imf.StringVectorAttribute(iter.Value));
+
+                // The OpenEXR spec says that the default is sRGB if no
+                // chromaticities are provided.  It should be innocuous to write
+                // the sRGB primaries anyway, but for completely indecipherable
+                // reasons, OSX's Preview.app decides to gamma correct the pixels
+                // in EXR files if it finds primaries.  So, we don't write them in
+                // that case in the interests of nicer looking images on the
+                // screen.
+                if (metadata.GetColorSpace() != RGBColorSpace.sRGB)
+                {
+                    RGBColorSpace cs = metadata.GetColorSpace();
+                    Imf.Chromaticities chromaticities = new Imf.Chromaticities(
+                        new Imath.V2f(cs.r.x, cs.r.y), new Imath.V2f(cs.g.x, cs.g.y),
+                        new Imath.V2f(cs.b.x, cs.b.y), new Imath.V2f(cs.w.x, cs.w.y));
+                    header.insert("chromaticities", new Imf.ChromaticitiesAttribute(chromaticities));
+                }
+
+                Imf.OutputFile file = new Imf.OutputFile(name, header);
+                file.setFrameBuffer(fb);
+                file.writePixels(resolution.y);
+            }
+            catch (Exception exc)
+            {
+                Error($"{name}: error writing EXR: {exc.Message}");
+                return false;
+            }
+
+            return true;
+        }
+
+        public Image SelectChannels(ImageChannelDesc desc, Allocator alloc = null)
+        {
+            List<string> descChannelNames = new List<string>();
+            // TODO: descChannelNames = ChannelNames(desc)
+            for (int i = 0; i < desc.offset.Count; ++i)
+                descChannelNames.Add(channelNames[desc.offset[i]]);
+
+            Image image = new Image(format, resolution, descChannelNames, encoding, alloc);
+            int nSrc = NChannels(), nDst = desc.offset.Count;
+            switch (format)
+            {
+                case PixelFormat.U256:
+                    for (int y = 0; y < resolution.y; ++y)
+                        for (int x = 0; x < resolution.x; ++x)
+                        {
+                            int src = (int)PixelOffset(new Point2i(x, y));
+                            int dst = (int)image.PixelOffset(new Point2i(x, y));
+                            for (int i = 0; i < nDst; ++i)
+                                image.p8[dst + i] = p8[src + desc.offset[i]];
+                        }
+                    break;
+                case PixelFormat.Half:
+                    for (int y = 0; y < resolution.y; ++y)
+                        for (int x = 0; x < resolution.x; ++x)
+                        {
+                            int src = (int)PixelOffset(new Point2i(x, y));
+                            int dst = (int)image.PixelOffset(new Point2i(x, y));
+                            for (int i = 0; i < nDst; ++i)
+                                image.p16[dst + i] = p16[src + desc.offset[i]];
+                        }
+                    break;
+                case PixelFormat.Float:
+                    for (int y = 0; y < resolution.y; ++y)
+                        for (int x = 0; x < resolution.x; ++x)
+                        {
+                            int src = (int)PixelOffset(new Point2i(x, y));
+                            int dst = (int)image.PixelOffset(new Point2i(x, y));
+                            for (int i = 0; i < nDst; ++i)
+                                image.p32[dst + i] = p32[src + desc.offset[i]];
+                        }
+                    break;
+                default:
+                    LOG_FATAL("Unhandled PixelFormat");
+                    break;
+            }
+
+            return image;
+        }
+
+        public Image Crop(Bounds2i bounds, Allocator alloc = null)
+        {
+            CHECK_GT(bounds.Area(), 0);
+            CHECK(bounds.pMin.x >= 0 && bounds.pMin.y >= 0);
+            Image image = new Image(format, new Point2i(bounds.pMax.x - bounds.pMin.x, bounds.pMax.y - bounds.pMin.y), channelNames.ToArray(), encoding,
+                                    alloc);
+            foreach (Point2i p in bounds)
+                for (int c = 0; c < NChannels(); ++c)
+                    image.SetChannel(new Point2i(p.x - bounds.pMin.x, p.y - bounds.pMin.y), c, GetChannel(p, c));
+            return image;
+        }
+
+        public override string ToString()
+        {
+            return "[ Image format: " + pbrt.ToString(format) + " resolution: " + resolution +
+                   " channelNames: [ " + string.Join(", ", channelNames.ToArray()) + " ] encoding: " +
+                   (encoding != null ? encoding.ToString() : "(nullptr)") + " ]";
         }
 
         ///////////////////////////////////////////////////////////////////////////
@@ -1737,96 +1812,21 @@ namespace pbrt
             return default;
         }
 
-        private bool WriteEXR(string name, ImageMetadata metadata)
+        // Quantization for 8-bit output formats
+        private byte[] QuantizePixelsToU256(int* nOutOfGamut)
         {
-            if (Is8Bit(format))
-                return ConvertToFormat(PixelFormat.Half).WriteEXR(name, metadata);
-            CHECK(Is16Bit(format) || Is32Bit(format));
-
-            try
-            {
-                Imath.Box2i displayWindow, dataWindow;
-                if (metadata.fullResolution)
-                    // Agan, -1 offsets to handle inclusive indexing in OpenEXR...
-                    displayWindow = new Imath.Box2i(new Imath.V2i(0, 0),
-                                                    new Imath.V2i(metadata.fullResolution.value().x - 1,
-                                                                  metadata.fullResolution.value().y - 1));
-                else
-                    displayWindow = new Imath.Box2i(new Imath.V2i(0, 0),
-                                                    new Imath.V2i(resolution.x - 1, resolution.y - 1));
-
-                if (metadata.pixelBounds)
-                    dataWindow = new Imath.Box2i(
-                        new Imath.V2i(metadata.pixelBounds.value().pMin.x, metadata.pixelBounds.value().pMin.y),
-                        new Imath.V2i(metadata.pixelBounds.value().pMax.x - 1,
-                                      metadata.pixelBounds.value().pMax.y - 1));
-                else
-                    dataWindow = new Imath.Box2i(new Imath.V2i(0, 0),
-                                                 new Imath.V2i(resolution.x - 1, resolution.y - 1));
-
-                byte[] bytes = RawBytes();
-                Imf.FrameBuffer fb = imageToFrameBuffer(this, AllChannelsDesc(), dataWindow, bytes);
-
-                Imf.Header header = new Imf.Header(displayWindow, dataWindow);
-                foreach (KeyValuePair<string, Imf.Slice> iter in fb.slices)
-                    header.channels().insert(iter.Key, iter.Value.type);
-
-                if (metadata.renderTimeSeconds)
-                    header.insert("renderTimeSeconds",
-                                  new Imf.FloatAttribute(metadata.renderTimeSeconds.value()));
-                if (metadata.cameraFromWorld)
-                {
-                    float[] m = new float[16];
-                    for (int i = 0; i < 4; ++i)
-                        for (int j = 0; j < 4; ++j)
-                            m[4 * i + j] = (float)metadata.cameraFromWorld.value()[i][j];
-                    header.insert("worldToCamera", new Imf.M44fAttribute(m));
-                }
-                if (metadata.NDCFromWorld)
-                {
-                    float[] m = new float[16];
-                    for (int i = 0; i < 4; ++i)
-                        for (int j = 0; j < 4; ++j)
-                            m[4 * i + j] = (float)metadata.NDCFromWorld.value()[i][j];
-                    header.insert("worldToNDC", new Imf.M44fAttribute(m));
-                }
-                if (metadata.samplesPerPixel)
-                    header.insert("samplesPerPixel",
-                                  new Imf.IntAttribute(metadata.samplesPerPixel.value()));
-                if (metadata.MSE)
-                    header.insert("MSE", new Imf.FloatAttribute(metadata.MSE.value()));
-                foreach (KeyValuePair<string, string> iter in metadata.strings)
-                    header.insert(iter.Key, new Imf.StringAttribute(iter.Value));
-                foreach (KeyValuePair<string, List<string>> iter in metadata.stringVectors)
-                    header.insert(iter.Key, new Imf.StringVectorAttribute(iter.Value));
-
-                // The OpenEXR spec says that the default is sRGB if no
-                // chromaticities are provided.  It should be innocuous to write
-                // the sRGB primaries anyway, but for completely indecipherable
-                // reasons, OSX's Preview.app decides to gamma correct the pixels
-                // in EXR files if it finds primaries.  So, we don't write them in
-                // that case in the interests of nicer looking images on the
-                // screen.
-                if (metadata.GetColorSpace() != RGBColorSpace.sRGB)
-                {
-                    RGBColorSpace cs = metadata.GetColorSpace();
-                    Imf.Chromaticities chromaticities = new Imf.Chromaticities(
-                        new Imath.V2f(cs.r.x, cs.r.y), new Imath.V2f(cs.g.x, cs.g.y),
-                        new Imath.V2f(cs.b.x, cs.b.y), new Imath.V2f(cs.w.x, cs.w.y));
-                    header.insert("chromaticities", new Imf.ChromaticitiesAttribute(chromaticities));
-                }
-
-                Imf.OutputFile file = new Imf.OutputFile(name, header);
-                file.setFrameBuffer(fb);
-                file.writePixels(resolution.y);
-            }
-            catch (Exception exc)
-            {
-                Error($"{name}: error writing EXR: {exc.Message}");
-                return false;
-            }
-
-            return true;
+            byte[] u256 = new byte[(size_t)NChannels() * (size_t)resolution.x * (size_t)resolution.y];
+            for (int y = 0; y < resolution.y; ++y)
+                for (int x = 0; x < resolution.x; ++x)
+                    for (int c = 0; c < NChannels(); ++c)
+                    {
+                        Float dither = -.5f + BlueNoise(c, new Point2i(x, y));
+                        Float v = GetChannel(new Point2i(x, y), c);
+                        if (v < 0 || v > 1)
+                            ++(*nOutOfGamut);
+                        u256[NChannels() * (y * resolution.x + x) + c] = LinearToSRGB8(v, dither);
+                    }
+            return u256;
         }
 
         ///////////////////////////////////////////////////////////////////////////
