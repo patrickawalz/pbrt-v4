@@ -6,7 +6,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-public static class std
+public static partial class std
 {
     private const MethodImplOptions AI = MethodImplOptions.AggressiveInlining;
 

@@ -1,36 +1,108 @@
 // pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
+
 // util/parallel.h, util/parallel.cpp
 //
-// pbrt's hand-written ThreadPool / ParallelJob machinery is replaced by System.Threading.Tasks;
-// the public API (ParallelFor, ParallelFor2D, ThreadLocal, AtomicFloat, AsyncJob, RunAsync, ...)
-// and pbrt's 2D tiling heuristic are kept.
+// std::mutex / std::unique_lock / std::condition_variable are provided as std.mutex, std.unique_lock
+// and std.condition_variable (System.Threading.Monitor underneath).
 
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
+
+public static partial class std
+{
+    public sealed class mutex
+    {
+        public void @lock() { Monitor.Enter(sync); }
+        public bool try_lock() { return Monitor.TryEnter(sync); }
+        public void unlock() { Monitor.Exit(sync); }
+        internal readonly object sync = new object();
+    }
+
+    public sealed class unique_lock
+    {
+        public unique_lock() { }
+        public unique_lock(mutex m)
+        {
+            this.m = m;
+            @lock();
+        }
+        public void @lock()
+        {
+            m.@lock();
+            owns = true;
+        }
+        public void unlock()
+        {
+            m.unlock();
+            owns = false;
+        }
+        public bool owns_lock() { return owns; }
+        // (std::unique_lock's move assignment)
+        public void Assign(unique_lock o)
+        {
+            m = o.m;
+            owns = o.owns;
+            o.owns = false;
+        }
+        // (the destructor)
+        public void Dispose()
+        {
+            if (owns)
+                unlock();
+        }
+        internal mutex m;
+        private bool owns = false;
+    }
+
+    public sealed class condition_variable
+    {
+        public void notify_all() { Monitor.PulseAll(m.sync); }
+        public void wait(unique_lock lk)
+        {
+            m = lk.m;
+            Monitor.Wait(lk.m.sync);
+        }
+        public void wait(unique_lock lk, Func<bool> pred)
+        {
+            while (!pred())
+                wait(lk);
+        }
+        private mutex m;
+    }
+
+    public sealed class lock_guard
+    {
+        public lock_guard(mutex m)
+        {
+            this.m = m;
+            m.@lock();
+        }
+        public void Dispose() { m.unlock(); }
+        private mutex m;
+    }
+}
 
 namespace pbrt
 {
 
     public static partial class pbrt
     {
-        // Parallel Declarations
-        private static int g_nThreads = 0;  // 0: ParallelInit not called
-
+        // Parallel Function Declarations
         public static void ParallelInit(int nThreads = -1)
         {
-            CHECK(g_nThreads == 0);
+            CHECK(ParallelJob.threadPool == null);
             if (nThreads <= 0)
                 nThreads = AvailableCores();
-            g_nThreads = nThreads;
+            ParallelJob.threadPool = new ThreadPool(nThreads);
         }
 
         public static void ParallelCleanup()
         {
-            g_nThreads = 0;
+            ParallelJob.threadPool.Dispose();
+            ParallelJob.threadPool = null;
         }
 
         public static int AvailableCores()
@@ -40,31 +112,65 @@ namespace pbrt
 
         public static int RunningThreads()
         {
-            return g_nThreads > 0 ? g_nThreads : 1;
+            return ParallelJob.threadPool != null ? (int)(1 + ParallelJob.threadPool.size()) : 1;
         }
 
-        // Parallel for-loops
+        public static bool DoParallelWork()
+        {
+            CHECK(ParallelJob.threadPool != null);
+            // lock should be held when this is called...
+            return ParallelJob.threadPool.WorkOrReturn();
+        }
+
+        // Parallel Function Definitions
         public static void ParallelFor(long start, long end, Action<long, long> func)
         {
-            if (start >= end)
+            CHECK(ParallelJob.threadPool != null);
+            if (start == end)
                 return;
-            long nItems = end - start;
             // Compute chunk size for parallel loop
-            long chunkSize = Math.Max(1L, nItems / (8 * RunningThreads()));
-            long nChunks = (nItems + chunkSize - 1) / chunkSize;
-            ParallelOptions opts = new ParallelOptions();
-            opts.MaxDegreeOfParallelism = RunningThreads();
-            // (localFinally runs on each worker thread when it is done: pbrt's worker threads
-            // call ReportThreadStats() when they exit)
-            Parallel.For<int>(0L, nChunks, opts, () => 0, (long chunk, ParallelLoopState st, int local) =>
-            {
-                long idx0 = start + chunk * chunkSize;
-                long idx1 = std.min(idx0 + chunkSize, end);
-                func(idx0, idx1);
-                return 0;
-            }, (int local) => ReportThreadStats());
+            long chunkSize = std.max<long>(1, (end - start) / (8 * RunningThreads()));
+
+            // Create and enqueue _ParallelForLoop1D_ for this loop
+            ParallelForLoop1D loop = new ParallelForLoop1D(start, end, (int)chunkSize, func);
+            std.unique_lock lk = ParallelJob.threadPool.AddToJobList(loop);
+
+            // Help out with parallel loop iterations in the current thread
+            while (!loop.Finished())
+                ParallelJob.threadPool.WorkOrWait(lk, true);
+            lk.Dispose();
         }
 
+        public static void ParallelFor2D(Bounds2i extent, Action<Bounds2i> func)
+        {
+            CHECK(ParallelJob.threadPool != null);
+
+            if (extent.IsEmpty())
+                return;
+            if (extent.Area() == 1)
+            {
+                func(extent);
+                return;
+            }
+
+            // Want at least 8 tiles per thread, subject to not too big and not too
+            // small.
+            // TODO: should we do non-square?
+            int tileSize = Clamp((int)std.sqrt(extent.Diagonal().x * extent.Diagonal().y /
+                                               (8 * RunningThreads())),
+                                 1, 32);
+
+            ParallelForLoop2D loop = new ParallelForLoop2D(extent, tileSize, func);
+            std.unique_lock lk = ParallelJob.threadPool.AddToJobList(loop);
+
+            // Help out with parallel loop iterations in the current thread
+            while (!loop.Finished())
+                ParallelJob.threadPool.WorkOrWait(lk, true);
+            lk.Dispose();
+        }
+
+        // Parallel Inline Functions
+        // (ParallelFor with a per-index function; the Action<int> overload keeps int-typed loop bodies working)
         public static void ParallelFor(long start, long end, Action<long> func)
         {
             ParallelFor(start, end, (long s, long e) =>
@@ -83,35 +189,6 @@ namespace pbrt
             });
         }
 
-        public static void ParallelFor2D(Bounds2i extent, Action<Bounds2i> func)
-        {
-            if (extent.IsEmpty())
-                return;
-            if (extent.Area() == 1)
-            {
-                func(extent);
-                return;
-            }
-
-            // Compute tile size for 2D parallel loop
-            int tileSize = Clamp((int)std.sqrt((Float)(extent.Diagonal().x * extent.Diagonal().y) /
-                                               (8 * RunningThreads())),
-                                 1, 32);
-            Point2i nTiles = new Point2i((extent.pMax.x - extent.pMin.x + tileSize - 1) / tileSize,
-                                         (extent.pMax.y - extent.pMin.y + tileSize - 1) / tileSize);
-            ParallelOptions opts = new ParallelOptions();
-            opts.MaxDegreeOfParallelism = RunningThreads();
-            Parallel.For<int>(0, nTiles.x * nTiles.y, opts, () => 0, (int index, ParallelLoopState st, int local) =>
-            {
-                int x0 = extent.pMin.x + (index % nTiles.x) * tileSize;
-                int x1 = std.min(x0 + tileSize, extent.pMax.x);
-                int y0 = extent.pMin.y + (index / nTiles.x) * tileSize;
-                int y1 = std.min(y0 + tileSize, extent.pMax.y);
-                func(new Bounds2i(new Point2i(x0, y0), new Point2i(x1, y1)));
-                return 0;
-            }, (int local) => ReportThreadStats());
-        }
-
         public static void ParallelFor2D(Bounds2i extent, Action<Point2i> func)
         {
             ParallelFor2D(extent, (Bounds2i b) =>
@@ -123,30 +200,36 @@ namespace pbrt
 
         public static void ForEachThread(Action func)
         {
-            int n = RunningThreads();
-            using (System.Threading.Barrier barrier = new System.Threading.Barrier(n))
-            {
-                Task[] tasks = new Task[n];
-                for (int i = 0; i < n; ++i)
-                    tasks[i] = Task.Factory.StartNew(() => { barrier.SignalAndWait(); func(); },
-                                                     TaskCreationOptions.LongRunning);
-                Task.WaitAll(tasks);
-            }
+            if (ParallelJob.threadPool != null)
+                ParallelJob.threadPool.ForEachThread(func);
         }
 
-        public static void DisableThreadPool() { }
-        public static void ReenableThreadPool() { }
+        public static void DisableThreadPool()
+        {
+            CHECK(ParallelJob.threadPool != null);
+            ParallelJob.threadPool.Disable();
+        }
 
-        public static bool DoParallelWork() { return false; }
+        public static void ReenableThreadPool()
+        {
+            CHECK(ParallelJob.threadPool != null);
+            ParallelJob.threadPool.Reenable();
+        }
 
-        // RunAsync(func, args...) -> AsyncJob<R>*
+        // Asynchronous Task Launch Function Definitions
+        // (the std::bind of func and args is a closure)
         public static AsyncJob<R> RunAsync<R>(Func<R> func)
         {
+            // Create _AsyncJob_ for _func_ and _args_
             AsyncJob<R> job = new AsyncJob<R>(func);
+
+            // Enqueue _job_ or run it immediately
+            std.unique_lock lk = new std.unique_lock();
             if (RunningThreads() == 1)
                 job.DoWork();
             else
-                job.Start();
+                lk = ParallelJob.threadPool.AddToJobList(job);
+            lk.Dispose();
             return job;
         }
 
@@ -165,27 +248,90 @@ namespace pbrt
     public class ThreadLocal<T>
     {
         // ThreadLocal Public Methods
-        public ThreadLocal() : this(() => Activator.CreateInstance<T>()) { }
-
+        public ThreadLocal()
+        {
+            hashTable = new Entry[4 * pbrt.RunningThreads()];
+            create = () => Activator.CreateInstance<T>();
+        }
         public ThreadLocal(Func<T> c)
         {
-            holder = new System.Threading.ThreadLocal<Holder>(() => new Holder { value = c() }, trackAllValues: true);
+            hashTable = new Entry[4 * pbrt.RunningThreads()];
+            create = c;
         }
 
         public ref T Get()
         {
-            // Return the thread-local value (stored in a box so ref semantics work for structs)
-            return ref holder.Value.value;
+            int tid = Thread.CurrentThread.ManagedThreadId;
+            uint hash = (uint)tid.GetHashCode();
+            hash %= (uint)hashTable.Length;
+            int step = 1;
+            int tries = 0;
+            mutex.EnterReadLock();
+            while (true)
+            {
+                pbrt.CHECK_LT(++tries, hashTable.Length);  // full hash table
+                if (hashTable[hash] != null && hashTable[hash].tid == tid)
+                {
+                    // Found it
+                    Entry e = hashTable[hash];
+                    mutex.ExitReadLock();
+                    return ref e.value;
+                }
+                else if (hashTable[hash] == null)
+                {
+                    mutex.ExitReadLock();
+                    // Get reader-writer lock before calling the callback so that the user
+                    // doesn't have to worry about writing a thread-safe callback.
+                    mutex.EnterWriteLock();
+                    T newItem = create();
+                    if (hashTable[hash] != null)
+                    {
+                        // someone else got there first--keep looking, but now
+                        // with a writer lock.
+                        while (true)
+                        {
+                            hash += (uint)step;
+                            ++step;
+                            if (hash >= hashTable.Length)
+                                hash %= (uint)hashTable.Length;
+                            if (hashTable[hash] == null)
+                                break;
+                        }
+                    }
+                    Entry ne = new Entry();
+                    ne.tid = tid;
+                    ne.value = newItem;
+                    hashTable[hash] = ne;
+                    mutex.ExitWriteLock();
+                    return ref ne.value;
+                }
+                hash += (uint)step;
+                ++step;
+                if (hash >= hashTable.Length)
+                    hash %= (uint)hashTable.Length;
+            }
         }
 
         public void ForAll(Action<T> func)
         {
-            foreach (Holder h in holder.Values)
-                func(h.value);
+            mutex.EnterWriteLock();
+            foreach (Entry entry in hashTable)
+            {
+                if (entry != null)
+                    func(entry.value);
+            }
+            mutex.ExitWriteLock();
         }
 
-        private sealed class Holder { public T value; }
-        private readonly System.Threading.ThreadLocal<Holder> holder;
+        // ThreadLocal Private Members
+        private sealed class Entry
+        {
+            public int tid;
+            public T value;
+        }
+        private ReaderWriterLockSlim mutex = new ReaderWriterLockSlim();
+        private Entry[] hashTable;
+        private Func<T> create;
     }
 
     // AtomicFloat Definition
@@ -262,100 +408,424 @@ namespace pbrt
         // Barrier Public Methods
         public Barrier(int n) { numToBlock = n; numToExit = n; }
 
-        // Returns true to exactly one thread (the last one to leave)
+        // All block. Returns true to only one thread (which should delete the
+        // barrier).
         public bool Block()
         {
-            lock (sync)
-            {
-                CHECK_GT(numToBlock, 0);
-                --numToBlock;
-                if (numToBlock > 0)
-                {
-                    while (numToBlock > 0)
-                        Monitor.Wait(sync);
-                }
-                else
-                    Monitor.PulseAll(sync);
+            std.unique_lock lk = new std.unique_lock(mutex);
 
-                // All threads are ready; the last to leave returns true
-                return --numToExit == 0;
-            }
+            --numToBlock;
+            pbrt.CHECK_GE(numToBlock, 0);
+
+            if (numToBlock > 0)
+                cv.wait(lk, () => numToBlock == 0);
+            else
+                cv.notify_all();
+
+            bool r = --numToExit == 0;
+            lk.Dispose();
+            return r;
         }
 
-        private readonly object sync = new object();
+        private std.mutex mutex = new std.mutex();
+        private std.condition_variable cv = new std.condition_variable();
         private int numToBlock, numToExit;
     }
 
+    // ParallelJob Definition
+    public abstract class ParallelJob
+    {
+        // ParallelJob Public Methods
+        // (virtual ~ParallelJob() { DCHECK(removed); } has no C# equivalent)
+        public abstract bool HaveWork();
+        public abstract void RunStep(std.unique_lock lk);
+        public bool Finished() { return !HaveWork() && activeWorkers == 0; }
+        public abstract override string ToString();
+
+        // ParallelJob Public Members
+        public static ThreadPool threadPool;
+
+        protected string BaseToString()
+        {
+            return pbrt.StringPrintf("activeWorkers: %d removed: %s", activeWorkers, removed);
+        }
+
+        // ParallelJob Private Members
+        // (private with friend class ThreadPool in C++)
+        internal int activeWorkers = 0;
+        internal ParallelJob prev = null, next = null;
+        internal bool removed = false;
+    }
+
+    // ThreadPool Definition
+    public class ThreadPool
+    {
+        // ThreadPool Method Definitions
+        public ThreadPool(int nThreads)
+        {
+            for (int i = 0; i < nThreads - 1; ++i)
+            {
+                Thread t = new Thread(Worker);
+                t.IsBackground = true;
+                t.Start();
+                threads.Add(t);
+            }
+        }
+
+        public long size() { return threads.Count; }
+
+        private void Worker()
+        {
+            pbrt.LOG_VERBOSE("Started execution in worker thread");
+
+            std.unique_lock lk = new std.unique_lock(mutex);
+            while (!shutdownThreads)
+                WorkOrWait(lk, false);
+
+            lk.Dispose();
+            pbrt.LOG_VERBOSE("Exiting worker thread");
+        }
+
+        public std.unique_lock AddToJobList(ParallelJob job)
+        {
+            std.unique_lock lk = new std.unique_lock(mutex);
+            // Add _job_ to head of _jobList_
+            if (jobList != null)
+                jobList.prev = job;
+            job.next = jobList;
+            jobList = job;
+
+            jobListCondition.notify_all();
+            return lk;
+        }
+
+        public void WorkOrWait(std.unique_lock lk, bool isEnqueuingThread)
+        {
+            pbrt.DCHECK(lk.owns_lock());
+            // Return if this is a worker thread and the thread pool is disabled
+            if (!isEnqueuingThread && disabled)
+            {
+                jobListCondition.wait(lk);
+                return;
+            }
+
+            ParallelJob job = jobList;
+            while (job != null && !job.HaveWork())
+                job = job.next;
+            if (job != null)
+            {
+                // Execute work for _job_
+                job.activeWorkers++;
+                job.RunStep(lk);
+                // Handle post-job-execution details
+                pbrt.DCHECK(!lk.owns_lock());
+                lk.@lock();
+                job.activeWorkers--;
+                if (job.Finished())
+                    jobListCondition.notify_all();
+            }
+            else
+                // Wait for new work to arrive or the job to finish
+                jobListCondition.wait(lk);
+        }
+
+        public void RemoveFromJobList(ParallelJob job)
+        {
+            pbrt.DCHECK(!job.removed);
+
+            if (job.prev != null)
+                job.prev.next = job.next;
+            else
+            {
+                pbrt.DCHECK(jobList == job);
+                jobList = job.next;
+            }
+            if (job.next != null)
+                job.next.prev = job.prev;
+
+            job.removed = true;
+        }
+
+        public bool WorkOrReturn()
+        {
+            std.unique_lock lk = new std.unique_lock(mutex);
+
+            ParallelJob job = jobList;
+            while (job != null && !job.HaveWork())
+                job = job.next;
+            if (job == null)
+            {
+                lk.Dispose();
+                return false;
+            }
+
+            // Execute work for _job_
+            job.activeWorkers++;
+            job.RunStep(lk);
+            pbrt.DCHECK(!lk.owns_lock());
+            lk.@lock();
+            job.activeWorkers--;
+            if (job.Finished())
+                jobListCondition.notify_all();
+
+            lk.Dispose();
+            return true;
+        }
+
+        public void ForEachThread(Action func)
+        {
+            Barrier barrier = new Barrier((int)(threads.Count + 1));
+
+            pbrt.ParallelFor(0, threads.Count + 1, (long i) =>
+            {
+                func();
+                if (barrier.Block())
+                    barrier = null;  // delete barrier;
+            });
+        }
+
+        public void Disable()
+        {
+            pbrt.CHECK(!disabled);
+            disabled = true;
+            pbrt.CHECK(jobList == null);  // Nothing should be running when Disable() is called.
+        }
+
+        public void Reenable()
+        {
+            pbrt.CHECK(disabled);
+            disabled = false;
+        }
+
+        // ~ThreadPool()
+        public void Dispose()
+        {
+            if (threads.Count == 0)
+                return;
+
+            {
+                std.lock_guard lg = new std.lock_guard(mutex);
+                shutdownThreads = true;
+                jobListCondition.notify_all();
+                lg.Dispose();
+            }
+
+            foreach (Thread thread in threads)
+                thread.Join();
+        }
+
+        public override string ToString()
+        {
+            string s = pbrt.StringPrintf("[ ThreadPool threads.size(): %d shutdownThreads: %s ",
+                                         threads.Count, shutdownThreads);
+            if (mutex.try_lock())
+            {
+                s += "jobList: [ ";
+                ParallelJob job = jobList;
+                while (job != null)
+                {
+                    s += job.ToString() + " ";
+                    job = job.next;
+                }
+                s += "] ";
+                mutex.unlock();
+            }
+            else
+                s += "(job list mutex locked) ";
+            return s + "]";
+        }
+
+        // ThreadPool Private Members
+        private List<Thread> threads = new List<Thread>();
+        private std.mutex mutex = new std.mutex();
+        private bool shutdownThreads = false;
+        private bool disabled = false;
+        private ParallelJob jobList = null;
+        private std.condition_variable jobListCondition = new std.condition_variable();
+    }
+
+    // ParallelForLoop1D Definition
+    public class ParallelForLoop1D : ParallelJob
+    {
+        // ParallelForLoop1D Public Methods
+        public ParallelForLoop1D(long startIndex, long endIndex, int chunkSize, Action<long, long> func)
+        {
+            this.func = func;
+            this.nextIndex = startIndex;
+            this.endIndex = endIndex;
+            this.chunkSize = chunkSize;
+        }
+
+        public override bool HaveWork() { return nextIndex < endIndex; }
+
+        public override void RunStep(std.unique_lock lk)
+        {
+            // Determine the range of loop iterations to run in this step
+            long indexStart = nextIndex;
+            long indexEnd = std.min(indexStart + chunkSize, endIndex);
+            nextIndex = indexEnd;
+
+            // Remove job from list if all work has been started
+            if (!HaveWork())
+                threadPool.RemoveFromJobList(this);
+
+            // Release lock and execute loop iterations in _[indexStart, indexEnd)_
+            lk.unlock();
+            func(indexStart, indexEnd);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ParallelForLoop1D nextIndex: %d endIndex: %d " +
+                                     "chunkSize: %d ]",
+                                     nextIndex, endIndex, chunkSize);
+        }
+
+        // ParallelForLoop1D Private Members
+        private Action<long, long> func;
+        private long nextIndex, endIndex;
+        private int chunkSize;
+    }
+
+    // ParallelForLoop2D Definition
+    public class ParallelForLoop2D : ParallelJob
+    {
+        public ParallelForLoop2D(Bounds2i extent, int chunkSize, Action<Bounds2i> func)
+        {
+            this.func = func;
+            this.extent = extent;
+            this.nextStart = extent.pMin;
+            this.chunkSize = chunkSize;
+        }
+
+        public override bool HaveWork() { return nextStart.y < extent.pMax.y; }
+
+        public override void RunStep(std.unique_lock lk)
+        {
+            // Compute extent for this step
+            Point2i end = nextStart + new Vector2i(chunkSize, chunkSize);
+            Bounds2i b = pbrt.Intersect(new Bounds2i(nextStart, end), extent);
+            pbrt.CHECK(!b.IsEmpty());
+
+            // Advance to be ready for the next extent.
+            nextStart.x += chunkSize;
+            if (nextStart.x >= extent.pMax.x)
+            {
+                nextStart.x = extent.pMin.x;
+                nextStart.y += chunkSize;
+            }
+
+            if (!HaveWork())
+                threadPool.RemoveFromJobList(this);
+
+            lk.unlock();
+
+            // Run the loop iteration
+            func(b);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ParallelForLoop2D extent: %s nextStart: %s " +
+                                     "chunkSize: %d ]",
+                                     extent, nextStart, chunkSize);
+        }
+
+        private Action<Bounds2i> func;
+        private readonly Bounds2i extent;
+        private Point2i nextStart;
+        private int chunkSize;
+    }
+
     // AsyncJob Definition
-    public class AsyncJob<T>
+    public class AsyncJob<T> : ParallelJob
     {
         // AsyncJob Public Methods
         public AsyncJob(Func<T> w) { func = w; }
 
-        internal void Start()
-        {
-            task = Task.Run(() => { DoWorkInternal(); });
-        }
+        public override bool HaveWork() { return !started; }
 
-        public bool HaveWork() { return !started; }
+        public override void RunStep(std.unique_lock lk)
+        {
+            threadPool.RemoveFromJobList(this);
+            started = true;
+
+            lk.unlock();
+
+            // Execute asynchronous work and notify waiting threads of its completion
+            T r = func();
+            std.unique_lock ul = new std.unique_lock(mutex);
+            result = new pstd.optional<T>(r);
+            cv.notify_all();
+            ul.Dispose();
+        }
 
         public bool IsReady()
         {
-            lock (mutex) { return resultSet; }
+            std.lock_guard lg = new std.lock_guard(mutex);
+            bool r = result.has_value();
+            lg.Dispose();
+            return r;
         }
 
         public T GetResult()
         {
             Wait();
-            lock (mutex) { return result; }
+            std.lock_guard lg = new std.lock_guard(mutex);
+            T r = result.value();
+            lg.Dispose();
+            return r;
         }
 
-        public pstd.optional<T> TryGetResult(object extMutex)
+        public pstd.optional<T> TryGetResult(std.mutex extMutex)
         {
-            lock (mutex)
             {
-                if (resultSet)
-                    return new pstd.optional<T>(result);
+                std.lock_guard lg = new std.lock_guard(mutex);
+                if (result.has_value())
+                {
+                    pstd.optional<T> r = result;
+                    lg.Dispose();
+                    return r;
+                }
+                lg.Dispose();
             }
-            return default;
+
+            extMutex.unlock();
+            pbrt.DoParallelWork();
+            extMutex.@lock();
+            return new pstd.optional<T>();
         }
 
         public void Wait()
         {
-            lock (mutex)
-            {
-                while (!resultSet)
-                    Monitor.Wait(mutex);
-            }
+            while (!IsReady() && pbrt.DoParallelWork())
+                ;
+            std.unique_lock lk = new std.unique_lock(mutex);
+            if (!result.has_value())
+                cv.wait(lk, () => result.has_value());
+            lk.Dispose();
         }
 
         public void DoWork()
         {
             T r = func();
-            lock (mutex)
-            {
-                CHECK(!resultSet);
-                result = r;
-                resultSet = true;
-                Monitor.PulseAll(mutex);
-            }
+            std.unique_lock l = new std.unique_lock(mutex);
+            pbrt.CHECK(!result.has_value());
+            result = new pstd.optional<T>(r);
+            cv.notify_all();
+            l.Dispose();
         }
 
-        private void DoWorkInternal()
+        public override string ToString()
         {
-            started = true;
-            DoWork();
+            return pbrt.StringPrintf("[ AsyncJob started: %s ]", started);
         }
-
-        public override string ToString() { return $"[ AsyncJob started: {(started ? "true" : "false")} ]"; }
 
         // AsyncJob Private Members
         private Func<T> func;
-        private volatile bool started = false;
-        private T result;
-        private bool resultSet = false;
-        private readonly object mutex = new object();
-        private Task task;
+        private bool started = false;
+        private pstd.optional<T> result;
+        private std.mutex mutex = new std.mutex();
+        private std.condition_variable cv = new std.condition_variable();
     }
-
-}  // namespace pbrt
+}
