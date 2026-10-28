@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/vecmath.h, util/vecmath.cpp
@@ -1332,9 +1332,12 @@ namespace pbrt
     // Vector2f Definition
     public unsafe struct Vector2f : IEquatable<Vector2f>
     {
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple2<Vector2, Float>
+        // ═══════════════════════════════════════════════════════════════════
+        
         public const int nDimensions = 2;
 
-        // Vector2f Public Methods
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector2f(Float x, Float y)
         {
@@ -1342,127 +1345,447 @@ namespace pbrt
             this.y = y;
             DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector2f(Point2f v) { return new Vector2f(v.x, v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector2f(Vector2i v) { return new Vector2f((Float)v.x, (Float)v.y); }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y); }
-
-        public Float this[int i]
+        public bool HasNaN()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return IsNaN(x) || IsNaN(y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator +(Vector2f v1, Vector2f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector2f(v1.x + v2.x, v1.y + v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator +(Vector2f v1, Vector2i v2)
+        {
+            return new Vector2f(v1.x + v2.x, v1.y + v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2i v)
+        {
+            x += v.x;
+            y += v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Vector2f v1, Vector2f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector2f(v1.x - v2.x, v1.y - v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Vector2f v1, Vector2i v2)
+        {
+            return new Vector2f(v1.x - v2.x, v1.y - v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2i v)
+        {
+            x -= v.x;
+            y -= v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector2f v1, Vector2f v2)
+        {
+            return v1.x == v2.x && v1.y == v2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector2f v1, Vector2f v2)
+        {
+            return v1.x != v2.x || v1.y != v2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(Vector2f v, Float s)
+        {
+            return new Vector2f(s * v.x, s * v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(Vector2f v, int s)
+        {
+            return new Vector2f(s * v.x, s * v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN(s));
+            x *= s;
+            y *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator /(Vector2f v, Float d)
+        {
+            DCHECK(d != 0 && !IsNaN(d));
+            return new Vector2f(v.x / d, v.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator /(Vector2f v, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector2f(v.x / d, v.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE(d, 0);
+            DCHECK(!IsNaN(d));
+            x /= d;
+            y /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Vector2f v)
+        {
+            return new Vector2f(-v.x, -v.y);
+        }
+
+        public unsafe ref Float this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 1);
-                return (i == 0) ? x : y;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 1);
-                if (i == 0) x = value; else y = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Vector2f, Float>(ref this), i);
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator +(Vector2f a, Vector2f b) { return new Vector2f(a.x + b.x, a.y + b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator -(Vector2f a, Vector2f b) { return new Vector2f(a.x - b.x, a.y - b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator *(Vector2f a, Float s_) { return new Vector2f(s_ * a.x, s_ * a.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator *(Float s_, Vector2f a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator /(Vector2f a, Float dd)
+        public override string ToString()
         {
-            DCHECK(dd != 0 && !IsNaN(dd));
-            return new Vector2f(a.x / dd, a.y / dd);
+            return $"[ {x}, {y} ]";
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator -(Vector2f a) { return new Vector2f(-a.x, -a.y); }
-        public static bool operator ==(Vector2f a, Vector2f b) { return a.x == b.x && a.y == b.y; }
-        public static bool operator !=(Vector2f a, Vector2f b) { return a.x != b.x || a.y != b.y; }
+
         public bool Equals(Vector2f b) { return this == b; }
         public override bool Equals(object o) { return o is Vector2f b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y); }
-        public override string ToString() { return $"[ {x}, {y} ]"; }
 
-        // Vector2f Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector2<Float>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2f(Point2f p)
+        {
+            x = p.x;
+            y = p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2f(Point2f p)
+        {
+            return new Vector2f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2f(Point2i p)
+        {
+            x = p.x;
+            y = p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2f(Point2i p)
+        {
+            return new Vector2f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2f(Vector2i v)
+        {
+            x = v.x;
+            y = v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2f(Vector2i v)
+        {
+            return new Vector2f(v);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Float x, y;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(Float s, Vector2f v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(int s, Vector2f v)
+        {
+            return v * s;
+        }
     }
 
     // Vector2i Definition
     public unsafe struct Vector2i : IEquatable<Vector2i>
     {
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple2<Vector2, int>
+        // ═══════════════════════════════════════════════════════════════════
+        
         public const int nDimensions = 2;
 
-        // Vector2i Public Methods
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector2i(int x, int y)
         {
             this.x = x;
             this.y = y;
-            DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector2i(Point2i v) { return new Vector2i(v.x, v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector2i(Vector2f v) { return new Vector2i((int)v.x, (int)v.y); }
+
+        //public bool HasNaN();  // int types don't have HasNaN
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y); }
-
-        public int this[int i]
+        public static Vector2i operator +(Vector2i v1, Vector2i v2)
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return new Vector2i(v1.x + v2.x, v1.y + v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator +(Vector2i v1, Vector2f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector2f(v1.x + v2.x, v1.y + v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2i v)
+        {
+            x += v.x;
+            y += v.y;
+        }
+
+        //public void operator +=(Vector2f v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator -(Vector2i v1, Vector2i v2)
+        {
+            return new Vector2i(v1.x - v2.x, v1.y - v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Vector2i v1, Vector2f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector2f(v1.x - v2.x, v1.y - v2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2i v)
+        {
+            x -= v.x;
+            y -= v.y;
+        }
+
+        //public void operator -=(Vector2f v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector2i v1, Vector2i v2)
+        {
+            return v1.x == v2.x && v1.y == v2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector2i v1, Vector2i v2)
+        {
+            return v1.x != v2.x || v1.y != v2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator *(Vector2i v, int s)
+        {
+            return new Vector2i(s * v.x, s * v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(Vector2i v, Float s)
+        {
+            return new Vector2f(s * v.x, s * v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+        }
+
+        //public void operator *=(Float s);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator /(Vector2i v, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector2i(v.x / d, v.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator /(Vector2i v, Float d)
+        {
+            DCHECK(d != 0 && !IsNaN(d));
+            return new Vector2f(v.x / d, v.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+        }
+
+        //public void operator /=(Float d);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator -(Vector2i v)
+        {
+            return new Vector2i(-v.x, -v.y);
+        }
+
+        public unsafe ref int this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 1);
-                return (i == 0) ? x : y;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 1);
-                if (i == 0) x = value; else y = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Vector2i, int>(ref this), i);
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator +(Vector2i a, Vector2i b) { return new Vector2i(a.x + b.x, a.y + b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator -(Vector2i a, Vector2i b) { return new Vector2i(a.x - b.x, a.y - b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator *(Vector2i a, int s_) { return new Vector2i(s_ * a.x, s_ * a.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator *(int s_, Vector2i a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator /(Vector2i a, int dd)
+        public override string ToString()
         {
-            DCHECK(dd != 0);
-            return new Vector2i(a.x / dd, a.y / dd);
+            return $"[ {x}, {y} ]";
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator -(Vector2i a) { return new Vector2i(-a.x, -a.y); }
-        public static bool operator ==(Vector2i a, Vector2i b) { return a.x == b.x && a.y == b.y; }
-        public static bool operator !=(Vector2i a, Vector2i b) { return a.x != b.x || a.y != b.y; }
+
         public bool Equals(Vector2i b) { return this == b; }
         public override bool Equals(object o) { return o is Vector2i b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y); }
-        public override string ToString() { return $"[ {x}, {y} ]"; }
 
-        // Vector2i Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector2<int>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2i(Point2i p)
+        {
+            x = p.x;
+            y = p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2i(Point2i p)
+        {
+            return new Vector2i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2i(Point2f p)
+        {
+            x = (int)p.x;
+            y = (int)p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2i(Point2f p)
+        {
+            return new Vector2i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector2i(Vector2f v)
+        {
+            x = (int)v.x;
+            y = (int)v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector2i(Vector2f v)
+        {
+            return new Vector2i(v);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
         public int x, y;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator *(int s, Vector2i v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator *(Float s, Vector2i v)
+        {
+            return v * s;
+        }
     }
 
     // Vector3f Definition
     public unsafe struct Vector3f : IEquatable<Vector3f>
     {
-        public const int nDimensions = 3;
-
-        // Vector3f Public Methods
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Vector3, Float>
+        // ═══════════════════════════════════════════════════════════════════
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector3f(Float x, Float y, Float z)
         {
@@ -1471,275 +1794,1119 @@ namespace pbrt
             this.z = z;
             DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3f(Point3f v) { return new Vector3f(v.x, v.y, v.z); }
-        // explicit Vector3(Vector3<U> v) with U = Interval
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3f(Vector3fi v) { return new Vector3f((Float)v.x, (Float)v.y, (Float)v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3f(Normal3f v) { return new Vector3f(v.x, v.y, v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3f(Vector3i v) { return new Vector3f((Float)v.x, (Float)v.y, (Float)v.z); }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y) || IsNaN(z); }
-
-        public Float this[int i]
+        public bool HasNaN()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return IsNaN(x) || IsNaN(y) || IsNaN(z);
+        }
+
+        public unsafe ref Float this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 2);
-                if (i == 0) return x;
-                if (i == 1) return y;
-                return z;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 2);
-                if (i == 0) x = value; else if (i == 1) y = value; else z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Vector3f, Float>(ref this), i);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator +(Vector3f a, Vector3f b) { return new Vector3f(a.x + b.x, a.y + b.y, a.z + b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator -(Vector3f a, Vector3f b) { return new Vector3f(a.x - b.x, a.y - b.y, a.z - b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator *(Vector3f a, Float s_) { return new Vector3f(s_ * a.x, s_ * a.y, s_ * a.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator *(Float s_, Vector3f a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator /(Vector3f a, Float dd)
+        public static Vector3f operator +(Vector3f v1, Vector3f v2)
         {
-            DCHECK(dd != 0 && !IsNaN(dd));
-            return new Vector3f(a.x / dd, a.y / dd, a.z / dd);
+            DCHECK(!v2.HasNaN());
+            return new Vector3f(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator -(Vector3f a) { return new Vector3f(-a.x, -a.y, -a.z); }
-        public static bool operator ==(Vector3f a, Vector3f b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-        public static bool operator !=(Vector3f a, Vector3f b) { return a.x != b.x || a.y != b.y || a.z != b.z; }
+        public static Vector3f operator +(Vector3f v1, Vector3i v2)
+        {
+            return new Vector3f(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator +(Vector3f v1, Vector3fi v2)
+        {
+            return new Vector3fi(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        //public void operator +=(Vector3fi v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Vector3f v1, Vector3f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3f(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Vector3f v1, Vector3i v2)
+        {
+            return new Vector3f(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3f v1, Vector3fi v2)
+        {
+            return new Vector3fi(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        //public void operator -=(Vector3fi v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector3f v1, Vector3f v2)
+        {
+            return v1.x == v2.x && v1.y == v2.y && v1.z == v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector3f v1, Vector3f v2)
+        {
+            return v1.x != v2.x || v1.y != v2.y || v1.z != v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(Vector3f v, Float s)
+        {
+            return new Vector3f(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(Vector3f v, int s)
+        {
+            return new Vector3f(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Vector3f v, Interval i)
+        {
+            return new Vector3fi(i * v.x, i * v.y, i * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN(s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        //public void operator *=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator /(Vector3f v, Float d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector3f(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator /(Vector3f v, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector3f(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Vector3f v, Interval i)
+        {
+            return new Vector3fi(v.x / i, v.y / i, v.z / i);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        //public void operator /=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Vector3f v)
+        {
+            return new Vector3f(-v.x, -v.y, -v.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x}, {y}, {z} ]";
+        }
+
         public bool Equals(Vector3f b) { return this == b; }
         public override bool Equals(object o) { return o is Vector3f b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y, z); }
-        public override string ToString() { return $"[ {x}, {y}, {z} ]"; }
 
-        // Vector3f Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector3<Float>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f(Vector3i v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Vector3i v)
+        {
+            return new Vector3f(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f(Point3f p)
+        {
+            x = p.x;
+            y = p.y;
+            z = p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Point3f p)
+        {
+            return new Vector3f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f(Point3i p)
+        {
+            x = p.x;
+            y = p.y;
+            z = p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Point3i p)
+        {
+            return new Vector3f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f(Normal3f n)
+        {
+            x = n.x;
+            y = n.y;
+            z = n.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Normal3f n)
+        {
+            return new Vector3f(n);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f(Vector3fi v)
+        {
+            x = (Float)v.x;
+            y = (Float)v.y;
+            z = (Float)v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3f(Vector3fi v)
+        {
+            return new Vector3f(v);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Float x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(Float s, Vector3f v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(int s, Vector3f v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Interval i, Vector3f v)
+        {
+            return v * i;
+        }
     }
 
     // Vector3i Definition
     public unsafe struct Vector3i : IEquatable<Vector3i>
     {
-        public const int nDimensions = 3;
-
-        // Vector3i Public Methods
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Vector3, int>
+        // ═══════════════════════════════════════════════════════════════════
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector3i(int x, int y, int z)
         {
             this.x = x;
             this.y = y;
             this.z = z;
-            DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3i(Point3i v) { return new Vector3i(v.x, v.y, v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Vector3i(Vector3f v) { return new Vector3i((int)v.x, (int)v.y, (int)v.z); }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y) || IsNaN(z); }
+        //public bool HasNaN();  // int types don't have HasNaN
 
-        public int this[int i]
+        public unsafe ref int this[int i]
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 DCHECK(i >= 0 && i <= 2);
-                if (i == 0) return x;
-                if (i == 1) return y;
-                return z;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 2);
-                if (i == 0) x = value; else if (i == 1) y = value; else z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Vector3i, int>(ref this), i);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator +(Vector3i a, Vector3i b) { return new Vector3i(a.x + b.x, a.y + b.y, a.z + b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator -(Vector3i a, Vector3i b) { return new Vector3i(a.x - b.x, a.y - b.y, a.z - b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator *(Vector3i a, int s_) { return new Vector3i(s_ * a.x, s_ * a.y, s_ * a.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator *(int s_, Vector3i a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator /(Vector3i a, int dd)
+        public static Vector3i operator +(Vector3i v1, Vector3i v2)
         {
-            DCHECK(dd != 0);
-            return new Vector3i(a.x / dd, a.y / dd, a.z / dd);
+            return new Vector3i(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator -(Vector3i a) { return new Vector3i(-a.x, -a.y, -a.z); }
-        public static bool operator ==(Vector3i a, Vector3i b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-        public static bool operator !=(Vector3i a, Vector3i b) { return a.x != b.x || a.y != b.y || a.z != b.z; }
+        public static Vector3f operator +(Vector3i v1, Vector3f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3f(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator +(Vector3i v1, Vector3fi v2)
+        {
+            return new Vector3fi(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        //public void operator +=(Vector3f v);  // Would change type
+        //public void operator +=(Vector3fi v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator -(Vector3i v1, Vector3i v2)
+        {
+            return new Vector3i(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Vector3i v1, Vector3f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3f(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3i v1, Vector3fi v2)
+        {
+            return new Vector3fi(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        //public void operator -=(Vector3f v);  // Would change type
+        //public void operator -=(Vector3fi v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector3i v1, Vector3i v2)
+        {
+            return v1.x == v2.x && v1.y == v2.y && v1.z == v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector3i v1, Vector3i v2)
+        {
+            return v1.x != v2.x || v1.y != v2.y || v1.z != v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator *(Vector3i v, int s)
+        {
+            return new Vector3i(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(Vector3i v, Float s)
+        {
+            return new Vector3f(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Vector3i v, Interval i)
+        {
+            return new Vector3fi(i * v.x, i * v.y, i * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        //public void operator *=(Float s);  // Would change type
+        //public void operator *=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator /(Vector3i v, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector3i(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator /(Vector3i v, Float d)
+        {
+            DCHECK_NE(d, 0);
+            return new Vector3f(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Vector3i v, Interval i)
+        {
+            return new Vector3fi(v.x / i, v.y / i, v.z / i);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        //public void operator /=(Float d);  // Would change type
+        //public void operator /=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator -(Vector3i v)
+        {
+            return new Vector3i(-v.x, -v.y, -v.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x}, {y}, {z} ]";
+        }
+
         public bool Equals(Vector3i b) { return this == b; }
         public override bool Equals(object o) { return o is Vector3i b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y, z); }
-        public override string ToString() { return $"[ {x}, {y}, {z} ]"; }
 
-        // Vector3i Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector3<int>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3i(Vector3f v)
+        {
+            x = (int)v.x;
+            y = (int)v.y;
+            z = (int)v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3i(Vector3f v)
+        {
+            return new Vector3i(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3i(Point3i p)
+        {
+            x = p.x;
+            y = p.y;
+            z = p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3i(Point3i p)
+        {
+            return new Vector3i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3i(Point3f p)
+        {
+            x = (int)p.x;
+            y = (int)p.y;
+            z = (int)p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3i(Point3f p)
+        {
+            return new Vector3i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3i(Normal3f n)
+        {
+            x = (int)n.x;
+            y = (int)n.y;
+            z = (int)n.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3i(Normal3f n)
+        {
+            return new Vector3i(n);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public int x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator *(int s, Vector3i v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator *(Float s, Vector3i v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Interval i, Vector3i v)
+        {
+            return v * i;
+        }
     }
 
     // Point2f Definition
     public unsafe struct Point2f : IEquatable<Point2f>
     {
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple2<Point2, Float>
+        // ═══════════════════════════════════════════════════════════════════
+        
         public const int nDimensions = 2;
 
-        // Point2f Public Methods
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Point2f(Vector2f v) { x = v.x; y = v.y; }
         public Point2f(Float x, Float y)
         {
             this.x = x;
             this.y = y;
             DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point2f(Vector2f v) { return new Point2f(v.x, v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point2f(Point2i v) { return new Point2f((Float)v.x, (Float)v.y); }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y); }
-
-        public Float this[int i]
+        public bool HasNaN()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return IsNaN(x) || IsNaN(y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2f p1, Point2f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Point2f(p1.x + p2.x, p1.y + p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2f p1, Point2i p2)
+        {
+            return new Point2f(p1.x + p2.x, p1.y + p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point2f p)
+        {
+            DCHECK(!p.HasNaN());
+            x += p.x;
+            y += p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point2i p)
+        {
+            x += p.x;
+            y += p.y;
+        }
+
+        //public static Point2f operator -(Point2f p1, Point2f p2);  // Hidden by Point2's version
+        //public static Point2f operator -(Point2f p1, Point2i p2);
+
+        //public void operator -=(Point2f p);  // Hidden by Point2's version
+        //public void operator -=(Point2i p);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Point2f p1, Point2f p2)
+        {
+            return p1.x == p2.x && p1.y == p2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Point2f p1, Point2f p2)
+        {
+            return p1.x != p2.x || p1.y != p2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(Point2f p, Float s)
+        {
+            return new Point2f(s * p.x, s * p.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(Point2f p, int s)
+        {
+            return new Point2f(s * p.x, s * p.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN(s));
+            x *= s;
+            y *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator /(Point2f p, Float d)
+        {
+            DCHECK(d != 0 && !IsNaN(d));
+            return new Point2f(p.x / d, p.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator /(Point2f p, int d)
+        {
+            DCHECK(d != 0);
+            return new Point2f(p.x / d, p.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE(d, 0);
+            DCHECK(!IsNaN(d));
+            x /= d;
+            y /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator -(Point2f p)
+        {
+            return new Point2f(-p.x, -p.y);
+        }
+
+        public unsafe ref Float this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 1);
-                return (i == 0) ? x : y;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 1);
-                if (i == 0) x = value; else y = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Point2f, Float>(ref this), i);
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator +(Point2f a, Point2f b) { return new Point2f(a.x + b.x, a.y + b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator +(Point2f a, Vector2f v) { return new Point2f(a.x + v.x, a.y + v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2f operator -(Point2f a, Point2f p) { return new Vector2f(a.x - p.x, a.y - p.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator -(Point2f a, Vector2f v) { return new Point2f(a.x - v.x, a.y - v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator *(Point2f a, Float s_) { return new Point2f(s_ * a.x, s_ * a.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator *(Float s_, Point2f a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator /(Point2f a, Float dd)
+        public override string ToString()
         {
-            DCHECK(dd != 0 && !IsNaN(dd));
-            return new Point2f(a.x / dd, a.y / dd);
+            return $"[ {x}, {y} ]";
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2f operator -(Point2f a) { return new Point2f(-a.x, -a.y); }
-        public static bool operator ==(Point2f a, Point2f b) { return a.x == b.x && a.y == b.y; }
-        public static bool operator !=(Point2f a, Point2f b) { return a.x != b.x || a.y != b.y; }
+
         public bool Equals(Point2f b) { return this == b; }
         public override bool Equals(object o) { return o is Point2f b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y); }
-        public override string ToString() { return $"[ {x}, {y} ]"; }
 
-        // Point2f Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point2<Float>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2f(Point2i p)
+        {
+            x = p.x;
+            y = p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2f(Point2i p)
+        {
+            return new Point2f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2f(Vector2f v)
+        {
+            x = v.x;
+            y = v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2f(Vector2f v)
+        {
+            return new Point2f(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2f(Vector2i v)
+        {
+            x = v.x;
+            y = v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2f(Vector2i v)
+        {
+            return new Point2f(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2f p, Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point2f(p.x + v.x, p.y + v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2f p, Vector2i v)
+        {
+            return new Point2f(p.x + v.x, p.y + v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2i v)
+        {
+            x += v.x;
+            y += v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Point2f p1, Point2f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector2f(p1.x - p2.x, p1.y - p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Point2f p1, Point2i p2)
+        {
+            return new Vector2f(p1.x - p2.x, p1.y - p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator -(Point2f p, Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point2f(p.x - v.x, p.y - v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator -(Point2f p, Vector2i v)
+        {
+            return new Point2f(p.x - v.x, p.y - v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2i v)
+        {
+            x -= v.x;
+            y -= v.y;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Float x, y;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(Float s, Point2f p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(int s, Point2f p)
+        {
+            return p * s;
+        }
     }
 
     // Point2i Definition
     public unsafe struct Point2i : IEquatable<Point2i>
     {
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple2<Point2, int>
+        // ═══════════════════════════════════════════════════════════════════
+        
         public const int nDimensions = 2;
 
-        // Point2i Public Methods
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Point2i(Vector2i v) { x = v.x; y = v.y; }
         public Point2i(int x, int y)
         {
             this.x = x;
             this.y = y;
-            DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point2i(Vector2i v) { return new Point2i(v.x, v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point2i(Point2f v) { return new Point2i((int)v.x, (int)v.y); }
+
+        //public bool HasNaN();  // int types don't have HasNaN
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y); }
-
-        public int this[int i]
+        public static Point2i operator +(Point2i p1, Point2i p2)
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return new Point2i(p1.x + p2.x, p1.y + p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2i p1, Point2f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Point2f(p1.x + p2.x, p1.y + p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point2i p)
+        {
+            x += p.x;
+            y += p.y;
+        }
+
+        //public void operator +=(Point2f p);  // Would change type
+
+        //public static Point2i operator -(Point2i p1, Point2i p2);  // Hidden by Point2's version
+        //public static Point2f operator -(Point2i p1, Point2f p2);
+
+        //public void operator -=(Point2i p);  // Hidden by Point2's version
+        //public void operator -=(Point2f p);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Point2i p1, Point2i p2)
+        {
+            return p1.x == p2.x && p1.y == p2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Point2i p1, Point2i p2)
+        {
+            return p1.x != p2.x || p1.y != p2.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator *(Point2i p, int s)
+        {
+            return new Point2i(s * p.x, s * p.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(Point2i p, Float s)
+        {
+            return new Point2f(s * p.x, s * p.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+        }
+
+        //public void operator *=(Float s);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator /(Point2i p, int d)
+        {
+            DCHECK(d != 0);
+            return new Point2i(p.x / d, p.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator /(Point2i p, Float d)
+        {
+            DCHECK(d != 0 && !IsNaN(d));
+            return new Point2f(p.x / d, p.y / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+        }
+
+        //public void operator /=(Float d);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator -(Point2i p)
+        {
+            return new Point2i(-p.x, -p.y);
+        }
+
+        public unsafe ref int this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 1);
-                return (i == 0) ? x : y;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 1);
-                if (i == 0) x = value; else y = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Point2i, int>(ref this), i);
             }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator +(Point2i a, Point2i b) { return new Point2i(a.x + b.x, a.y + b.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator +(Point2i a, Vector2i v) { return new Point2i(a.x + v.x, a.y + v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector2i operator -(Point2i a, Point2i p) { return new Vector2i(a.x - p.x, a.y - p.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator -(Point2i a, Vector2i v) { return new Point2i(a.x - v.x, a.y - v.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator *(Point2i a, int s_) { return new Point2i(s_ * a.x, s_ * a.y); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator *(int s_, Point2i a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator /(Point2i a, int dd)
+        public override string ToString()
         {
-            DCHECK(dd != 0);
-            return new Point2i(a.x / dd, a.y / dd);
+            return $"[ {x}, {y} ]";
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point2i operator -(Point2i a) { return new Point2i(-a.x, -a.y); }
-        public static bool operator ==(Point2i a, Point2i b) { return a.x == b.x && a.y == b.y; }
-        public static bool operator !=(Point2i a, Point2i b) { return a.x != b.x || a.y != b.y; }
+
         public bool Equals(Point2i b) { return this == b; }
         public override bool Equals(object o) { return o is Point2i b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y); }
-        public override string ToString() { return $"[ {x}, {y} ]"; }
 
-        // Point2i Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point2<int>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2i(Point2f p)
+        {
+            x = (int)p.x;
+            y = (int)p.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2i(Point2f p)
+        {
+            return new Point2i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2i(Vector2i v)
+        {
+            x = v.x;
+            y = v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2i(Vector2i v)
+        {
+            return new Point2i(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point2i(Vector2f v)
+        {
+            x = (int)v.x;
+            y = (int)v.y;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point2i(Vector2f v)
+        {
+            return new Point2i(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator +(Point2i p, Vector2i v)
+        {
+            return new Point2i(p.x + v.x, p.y + v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator +(Point2i p, Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point2f(p.x + v.x, p.y + v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector2i v)
+        {
+            x += v.x;
+            y += v.y;
+        }
+
+        //public void operator +=(Vector2f v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2i operator -(Point2i p1, Point2i p2)
+        {
+            return new Vector2i(p1.x - p2.x, p1.y - p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2f operator -(Point2i p1, Point2f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector2f(p1.x - p2.x, p1.y - p2.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator -(Point2i p, Vector2i v)
+        {
+            return new Point2i(p.x - v.x, p.y - v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator -(Point2i p, Vector2f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point2f(p.x - v.x, p.y - v.y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector2i v)
+        {
+            x -= v.x;
+            y -= v.y;
+        }
+
+        //public void operator -=(Vector2f v);  // Would change type
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
         public int x, y;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple2)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2i operator *(int s, Point2i p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point2f operator *(Float s, Point2i p)
+        {
+            return p * s;
+        }
     }
 
     // Point3f Definition
     public unsafe struct Point3f : IEquatable<Point3f>
     {
-        public const int nDimensions = 3;
-
-        // Point3f Public Methods
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Point3, Float>
+        // ═══════════════════════════════════════════════════════════════════
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Point3f(Float x, Float y, Float z)
         {
@@ -1748,140 +2915,667 @@ namespace pbrt
             this.z = z;
             DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point3f(Vector3f v) { return new Point3f(v.x, v.y, v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point3f(Point3i v) { return new Point3f((Float)v.x, (Float)v.y, (Float)v.z); }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y) || IsNaN(z); }
-
-        public Float this[int i]
+        public bool HasNaN()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return IsNaN(x) || IsNaN(y) || IsNaN(z);
+        }
+
+        public unsafe ref Float this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 2);
-                if (i == 0) return x;
-                if (i == 1) return y;
-                return z;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 2);
-                if (i == 0) x = value; else if (i == 1) y = value; else z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Point3f, Float>(ref this), i);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator +(Point3f a, Point3f b) { return new Point3f(a.x + b.x, a.y + b.y, a.z + b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator +(Point3f a, Vector3f v) { return new Point3f(a.x + v.x, a.y + v.y, a.z + v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3f operator -(Point3f a, Point3f p) { return new Vector3f(a.x - p.x, a.y - p.y, a.z - p.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator -(Point3f a, Vector3f v) { return new Point3f(a.x - v.x, a.y - v.y, a.z - v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator *(Point3f a, Float s_) { return new Point3f(s_ * a.x, s_ * a.y, s_ * a.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator *(Float s_, Point3f a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator /(Point3f a, Float dd)
+        public static Point3f operator +(Point3f p1, Point3f p2)
         {
-            DCHECK(dd != 0 && !IsNaN(dd));
-            return new Point3f(a.x / dd, a.y / dd, a.z / dd);
+            DCHECK(!p2.HasNaN());
+            return new Point3f(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3f operator -(Point3f a) { return new Point3f(-a.x, -a.y, -a.z); }
-        public static bool operator ==(Point3f a, Point3f b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-        public static bool operator !=(Point3f a, Point3f b) { return a.x != b.x || a.y != b.y || a.z != b.z; }
+        public static Point3f operator +(Point3f p1, Point3i p2)
+        {
+            return new Point3f(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3f p1, Point3fi p2)
+        {
+            return new Point3fi(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
+
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3f p)
+        {
+            DCHECK(!p.HasNaN());
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3i p)
+        {
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        //public void operator +=(Point3fi p);  // Would change type
+
+        //public static Point3f operator -(Point3f p1, Point3f p2);  // Hidden by Point3's version
+        //public static Point3f operator -(Point3f p1, Point3i p2);
+        //public static Point3fi operator -(Point3f p1, Point3fi p2);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3f p)
+        {
+            DCHECK(!p.HasNaN());
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3i p)
+        {
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        //public void operator -=(Point3fi p);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Point3f p1, Point3f p2)
+        {
+            return p1.x == p2.x && p1.y == p2.y && p1.z == p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Point3f p1, Point3f p2)
+        {
+            return p1.x != p2.x || p1.y != p2.y || p1.z != p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(Point3f p, Float s)
+        {
+            return new Point3f(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(Point3f p, int s)
+        {
+            return new Point3f(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Point3f p, Interval i)
+        {
+            return new Point3fi(i * p.x, i * p.y, i * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN(s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        //public void operator *=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator /(Point3f p, Float d)
+        {
+            DCHECK_NE(d, 0);
+            return new Point3f(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator /(Point3f p, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Point3f(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator /(Point3f p, Interval i)
+        {
+            return new Point3fi(p.x / i, p.y / i, p.z / i);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        //public void operator /=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator -(Point3f p)
+        {
+            return new Point3f(-p.x, -p.y, -p.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x}, {y}, {z} ]";
+        }
+
         public bool Equals(Point3f b) { return this == b; }
         public override bool Equals(object o) { return o is Point3f b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y, z); }
-        public override string ToString() { return $"[ {x}, {y}, {z} ]"; }
 
-        // Point3f Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point3<Float>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3f(Point3i p)
+        {
+            x = p.x;
+            y = p.y;
+            z = p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3f(Point3i p)
+        {
+            return new Point3f(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3f(Vector3f v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3f(Vector3f v)
+        {
+            return new Point3f(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3f(Vector3i v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3f(Vector3i v)
+        {
+            return new Point3f(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator +(Point3f p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3f(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator +(Point3f p, Vector3i v)
+        {
+            return new Point3f(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator -(Point3f p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3f(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator -(Point3f p, Vector3i v)
+        {
+            return new Point3f(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Point3f p1, Point3f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector3f(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Point3f p1, Point3i p2)
+        {
+            return new Vector3f(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Point3f p1, Point3fi p2)
+        {
+            return new Vector3fi(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3f(Point3fi p)
+        {
+            x = (Float)p.x;
+            y = (Float)p.y;
+            z = (Float)p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3f(Point3fi p)
+        {
+            return new Point3f(p);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Float x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(Float s, Point3f p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(int s, Point3f p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Interval i, Point3f p)
+        {
+            return p * i;
+        }
     }
 
     // Point3i Definition
     public unsafe struct Point3i : IEquatable<Point3i>
     {
-        public const int nDimensions = 3;
-
-        // Point3i Public Methods
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Point3, int>
+        // ═══════════════════════════════════════════════════════════════════
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Point3i(int x, int y, int z)
         {
             this.x = x;
             this.y = y;
             this.z = z;
-            DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point3i(Vector3i v) { return new Point3i(v.x, v.y, v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Point3i(Point3f v) { return new Point3i((int)v.x, (int)v.y, (int)v.z); }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y) || IsNaN(z); }
+        //public bool HasNaN();  // int types don't have HasNaN
 
-        public int this[int i]
+        public unsafe ref int this[int i]
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 DCHECK(i >= 0 && i <= 2);
-                if (i == 0) return x;
-                if (i == 1) return y;
-                return z;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 2);
-                if (i == 0) x = value; else if (i == 1) y = value; else z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Point3i, int>(ref this), i);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator +(Point3i a, Point3i b) { return new Point3i(a.x + b.x, a.y + b.y, a.z + b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator +(Point3i a, Vector3i v) { return new Point3i(a.x + v.x, a.y + v.y, a.z + v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Vector3i operator -(Point3i a, Point3i p) { return new Vector3i(a.x - p.x, a.y - p.y, a.z - p.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator -(Point3i a, Vector3i v) { return new Point3i(a.x - v.x, a.y - v.y, a.z - v.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator *(Point3i a, int s_) { return new Point3i(s_ * a.x, s_ * a.y, s_ * a.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator *(int s_, Point3i a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator /(Point3i a, int dd)
+        public static Point3i operator +(Point3i p1, Point3i p2)
         {
-            DCHECK(dd != 0);
-            return new Point3i(a.x / dd, a.y / dd, a.z / dd);
+            return new Point3i(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Point3i operator -(Point3i a) { return new Point3i(-a.x, -a.y, -a.z); }
-        public static bool operator ==(Point3i a, Point3i b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-        public static bool operator !=(Point3i a, Point3i b) { return a.x != b.x || a.y != b.y || a.z != b.z; }
+        public static Point3f operator +(Point3i p1, Point3f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Point3f(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3i p1, Point3fi p2)
+        {
+            return new Point3fi(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
+
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3i p)
+        {
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        //public void operator +=(Point3f p);  // Would change type
+        //public void operator +=(Point3fi p);  // Would change type
+
+        //public static Point3i operator -(Point3i p1, Point3i p2);  // Hidden by Point3's version
+        //public static Point3f operator -(Point3i p1, Point3f p2);
+        //public static Point3fi operator -(Point3i p1, Point3fi p2);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3i p)
+        {
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        //public void operator -=(Point3f p);  // Would change type
+        //public void operator -=(Point3fi p);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Point3i p1, Point3i p2)
+        {
+            return p1.x == p2.x && p1.y == p2.y && p1.z == p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Point3i p1, Point3i p2)
+        {
+            return p1.x != p2.x || p1.y != p2.y || p1.z != p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator *(Point3i p, int s)
+        {
+            return new Point3i(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(Point3i p, Float s)
+        {
+            return new Point3f(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Point3i p, Interval i)
+        {
+            return new Point3fi(i * p.x, i * p.y, i * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        //public void operator *=(Float s);  // Would change type
+        //public void operator *=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator /(Point3i p, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Point3i(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator /(Point3i p, Float d)
+        {
+            DCHECK_NE(d, 0);
+            return new Point3f(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator /(Point3i p, Interval i)
+        {
+            return new Point3fi(p.x / i, p.y / i, p.z / i);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        //public void operator /=(Float d);  // Would change type
+        //public void operator /=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator -(Point3i p)
+        {
+            return new Point3i(-p.x, -p.y, -p.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x}, {y}, {z} ]";
+        }
+
         public bool Equals(Point3i b) { return this == b; }
         public override bool Equals(object o) { return o is Point3i b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y, z); }
-        public override string ToString() { return $"[ {x}, {y}, {z} ]"; }
 
-        // Point3i Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point3<int>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3i(Point3f p)
+        {
+            x = (int)p.x;
+            y = (int)p.y;
+            z = (int)p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3i(Point3f p)
+        {
+            return new Point3i(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3i(Vector3i v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3i(Vector3i v)
+        {
+            return new Point3i(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3i(Vector3f v)
+        {
+            x = (int)v.x;
+            y = (int)v.y;
+            z = (int)v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3i(Vector3f v)
+        {
+            return new Point3i(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator +(Point3i p, Vector3i v)
+        {
+            return new Point3i(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator +(Point3i p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3f(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        //public void operator +=(Vector3f v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator -(Point3i p, Vector3i v)
+        {
+            return new Point3i(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator -(Point3i p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3f(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        //public void operator -=(Vector3f v);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3i operator -(Point3i p1, Point3i p2)
+        {
+            return new Vector3i(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3f operator -(Point3i p1, Point3f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector3f(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Point3i p1, Point3fi p2)
+        {
+            return new Vector3fi(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public int x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3i operator *(int s, Point3i p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3f operator *(Float s, Point3i p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Interval i, Point3i p)
+        {
+            return p * i;
+        }
     }
 
     // Normal3f Definition
     public unsafe struct Normal3f : IEquatable<Normal3f>
     {
-        public const int nDimensions = 3;
-
-        // Normal3f Public Methods
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Normal3, Float>
+        // ═══════════════════════════════════════════════════════════════════
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Normal3f(Float x, Float y, Float z)
         {
@@ -1890,143 +3584,1071 @@ namespace pbrt
             this.z = z;
             DCHECK(!HasNaN());
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static explicit operator Normal3f(Vector3f v) { return new Normal3f(v.x, v.y, v.z); }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool HasNaN() { return IsNaN(x) || IsNaN(y) || IsNaN(z); }
-
-        public Float this[int i]
+        public bool HasNaN()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            return IsNaN(x) || IsNaN(y) || IsNaN(z);
+        }
+
+        public unsafe ref Float this[int i]
+        {
             get
             {
                 DCHECK(i >= 0 && i <= 2);
-                if (i == 0) return x;
-                if (i == 1) return y;
-                return z;
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set
-            {
-                DCHECK(i >= 0 && i <= 2);
-                if (i == 0) x = value; else if (i == 1) y = value; else z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Normal3f, Float>(ref this), i);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator +(Normal3f a, Normal3f b) { return new Normal3f(a.x + b.x, a.y + b.y, a.z + b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator -(Normal3f a, Normal3f b) { return new Normal3f(a.x - b.x, a.y - b.y, a.z - b.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator *(Normal3f a, Float s_) { return new Normal3f(s_ * a.x, s_ * a.y, s_ * a.z); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator *(Float s_, Normal3f a) { return a * s_; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator /(Normal3f a, Float dd)
+        public static Normal3f operator +(Normal3f n1, Normal3f n2)
         {
-            DCHECK(dd != 0 && !IsNaN(dd));
-            return new Normal3f(a.x / dd, a.y / dd, a.z / dd);
+            DCHECK(!n2.HasNaN());
+            return new Normal3f(n1.x + n2.x, n1.y + n2.y, n1.z + n2.z);
         }
+
+        public const int nDimensions = 3;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Normal3f operator -(Normal3f a) { return new Normal3f(-a.x, -a.y, -a.z); }
-        public static bool operator ==(Normal3f a, Normal3f b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-        public static bool operator !=(Normal3f a, Normal3f b) { return a.x != b.x || a.y != b.y || a.z != b.z; }
+        public void operator +=(Normal3f n)
+        {
+            DCHECK(!n.HasNaN());
+            x += n.x;
+            y += n.y;
+            z += n.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator -(Normal3f n1, Normal3f n2)
+        {
+            DCHECK(!n2.HasNaN());
+            return new Normal3f(n1.x - n2.x, n1.y - n2.y, n1.z - n2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Normal3f n)
+        {
+            DCHECK(!n.HasNaN());
+            x -= n.x;
+            y -= n.y;
+            z -= n.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Normal3f n1, Normal3f n2)
+        {
+            return n1.x == n2.x && n1.y == n2.y && n1.z == n2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Normal3f n1, Normal3f n2)
+        {
+            return n1.x != n2.x || n1.y != n2.y || n1.z != n2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator *(Normal3f n, Float s)
+        {
+            return new Normal3f(s * n.x, s * n.y, s * n.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator *(Normal3f n, int s)
+        {
+            return new Normal3f(s * n.x, s * n.y, s * n.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Normal3f n, Interval i)
+        {
+            // IMPORTANT: Normal * Interval returns Vector3fi, NOT Normal3fi!
+            return new Vector3fi(i * n.x, i * n.y, i * n.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN(s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        //public void operator *=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator /(Normal3f n, Float d)
+        {
+            DCHECK_NE(d, 0);
+            return new Normal3f(n.x / d, n.y / d, n.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator /(Normal3f n, int d)
+        {
+            DCHECK_NE(d, 0);
+            return new Normal3f(n.x / d, n.y / d, n.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Normal3f n, Interval i)
+        {
+            // IMPORTANT: Normal / Interval returns Vector3fi, NOT Normal3fi!
+            return new Vector3fi(n.x / i, n.y / i, n.z / i);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE(d, 0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        //public void operator /=(Interval i);  // Would change type
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator -(Normal3f n)
+        {
+            return new Normal3f(-n.x, -n.y, -n.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x}, {y}, {z} ]";
+        }
+
         public bool Equals(Normal3f b) { return this == b; }
         public override bool Equals(object o) { return o is Normal3f b && this == b; }
         public override int GetHashCode() { return HashCode.Combine(x, y, z); }
-        public override string ToString() { return $"[ {x}, {y}, {z} ]"; }
 
-        // Normal3f Public Members
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Normal3<Float>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Normal3f(Vector3f v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Normal3f(Vector3f v)
+        {
+            return new Normal3f(v);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Float x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator *(Float s, Normal3f n)
+        {
+            return n * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Normal3f operator *(int s, Normal3f n)
+        {
+            return n * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Interval i, Normal3f n)
+        {
+            // IMPORTANT: Interval * Normal returns Vector3fi, NOT Normal3fi!
+            return n * i;
+        }
     }
 
     // Vector3fi Definition
     public unsafe struct Vector3fi
     {
-        // Vector3fi Public Methods
-        public Vector3fi(Float x, Float y, Float z) { this.x = new Interval(x); this.y = new Interval(y); this.z = new Interval(z); }
-        public Vector3fi(Interval x, Interval y, Interval z) { this.x = x; this.y = y; this.z = z; }
-        public Vector3fi(Vector3f p) { x = new Interval(p.x); y = new Interval(p.y); z = new Interval(p.z); }
-        public Vector3fi(Point3f p) { x = new Interval(p.x); y = new Interval(p.y); z = new Interval(p.z); }
-        public Vector3fi(Vector3f v, Vector3f e)
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Vector3, Interval>
+        // ═══════════════════════════════════════════════════════════════════
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Interval x, Interval y, Interval z)
         {
-            x = Interval.FromValueAndError(v.x, e.x);
-            y = Interval.FromValueAndError(v.y, e.y);
-            z = Interval.FromValueAndError(v.z, e.z);
-        }
-        public static implicit operator Vector3fi(Vector3f v) { return new Vector3fi(v); }
-
-        public bool HasNaN() { return IsNaN(x.LowerBound()) || IsNaN(x.UpperBound()) || IsNaN(y.LowerBound()) || IsNaN(y.UpperBound()) || IsNaN(z.LowerBound()) || IsNaN(z.UpperBound()); }
-        public Interval this[int i]
-        {
-            get { DCHECK(i >= 0 && i <= 2); if (i == 0) return x; if (i == 1) return y; return z; }
-            set { DCHECK(i >= 0 && i <= 2); if (i == 0) x = value; else if (i == 1) y = value; else z = value; }
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            DCHECK(!HasNaN());
         }
 
-        public Vector3f Error() { return new Vector3f(x.Width() / 2, y.Width() / 2, z.Width() / 2); }
-        public bool IsExact() { return x.Width() == 0 && y.Width() == 0 && z.Width() == 0; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasNaN()
+        {
+            return IsNaN((Float)x) || IsNaN((Float)y) || IsNaN((Float)z);
+        }
 
-        public static Vector3fi operator +(Vector3fi a, Vector3fi c) { return new Vector3fi(a.x + c.x, a.y + c.y, a.z + c.z); }
-        public static Vector3fi operator -(Vector3fi a, Vector3fi c) { return new Vector3fi(a.x - c.x, a.y - c.y, a.z - c.z); }
-        public static Vector3fi operator *(Vector3fi a, Float s) { return new Vector3fi(s * a.x, s * a.y, s * a.z); }
-        public static Vector3fi operator *(Float s, Vector3fi a) { return a * s; }
-        public static Vector3fi operator /(Vector3fi a, Float d) { return new Vector3fi(a.x / d, a.y / d, a.z / d); }
-        public static Vector3fi operator -(Vector3fi a) { return new Vector3fi(-a.x, -a.y, -a.z); }
-        public static Vector3fi operator *(Interval s, Vector3fi a) { return new Vector3fi(s * a.x, s * a.y, s * a.z); }
-        public static Vector3fi operator *(Vector3fi a, Interval s) { return s * a; }
+        public unsafe ref Interval this[int i]
+        {
+            get
+            {
+                DCHECK(i >= 0 && i <= 2);
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Vector3fi, Interval>(ref this), i);
+            }
+        }
 
-        public override string ToString() { return $"[ {x} {y} {z} ]"; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator +(Vector3fi v1, Vector3fi v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3fi(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
 
-        // Vector3fi Public Members
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator +(Vector3fi v1, Vector3f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3fi(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator +(Vector3fi v1, Vector3i v2)
+        {
+            return new Vector3fi(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
+        }
+
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3fi v1, Vector3fi v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3fi(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3fi v1, Vector3f v2)
+        {
+            DCHECK(!v2.HasNaN());
+            return new Vector3fi(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3fi v1, Vector3i v2)
+        {
+            return new Vector3fi(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Vector3fi v1, Vector3fi v2)
+        {
+            return v1.x == v2.x && v1.y == v2.y && v1.z == v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Vector3fi v1, Vector3fi v2)
+        {
+            return v1.x != v2.x || v1.y != v2.y || v1.z != v2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Vector3fi v, Interval s)
+        {
+            return new Vector3fi(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Vector3fi v, Float s)
+        {
+            return new Vector3fi(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Vector3fi v, int s)
+        {
+            return new Vector3fi(s * v.x, s * v.y, s * v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Interval s)
+        {
+            DCHECK(!IsNaN((Float)s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN((Float)s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Vector3fi v, Interval d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Vector3fi(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Vector3fi v, Float d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Vector3fi(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator /(Vector3fi v, int d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Vector3fi(v.x / d, v.y / d, v.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Interval d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Vector3fi v)
+        {
+            return new Vector3fi(-v.x, -v.y, -v.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x} {y} {z} ]";
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector3<Interval>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Vector3f v)
+        {
+            x = new Interval(v.x);
+            y = new Interval(v.y);
+            z = new Interval(v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static implicit operator Vector3fi(Vector3f v)
+        {
+            return new Vector3fi(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Vector3i v)
+        {
+            x = new Interval(v.x);
+            y = new Interval(v.y);
+            z = new Interval(v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3fi(Vector3i v)
+        {
+            return new Vector3fi(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Point3fi p)
+        {
+            x = p.x;
+            y = p.y;
+            z = p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3fi(Point3fi p)
+        {
+            return new Vector3fi(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Point3f p)
+        {
+            x = new Interval(p.x);
+            y = new Interval(p.y);
+            z = new Interval(p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3fi(Point3f p)
+        {
+            return new Vector3fi(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Point3i p)
+        {
+            x = new Interval(p.x);
+            y = new Interval(p.y);
+            z = new Interval(p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3fi(Point3i p)
+        {
+            return new Vector3fi(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Normal3f n)
+        {
+            x = new Interval(n.x);
+            y = new Interval(n.y);
+            z = new Interval(n.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Vector3fi(Normal3f n)
+        {
+            return new Vector3fi(n);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Vector3fi (specific to this type)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Float x, Float y, Float z)
+        {
+            this.x = new Interval(x);
+            this.y = new Interval(y);
+            this.z = new Interval(z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3fi(Vector3f v, Vector3f error)
+        {
+            x = Interval.FromValueAndError(v.x, error.x);
+            y = Interval.FromValueAndError(v.y, error.y);
+            z = Interval.FromValueAndError(v.z, error.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f Error()
+        {
+            return new Vector3f(x.Width() / 2, y.Width() / 2, z.Width() / 2);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsExact()
+        {
+            return x.Width() == 0 && y.Width() == 0 && z.Width() == 0;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Interval x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Interval s, Vector3fi v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(Float s, Vector3fi v)
+        {
+            return v * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator *(int s, Vector3fi v)
+        {
+            return v * s;
+        }
     }
 
     // Point3fi Definition
     public unsafe struct Point3fi
     {
-        // Point3fi Public Methods
-        public Point3fi(Interval x, Interval y, Interval z) { this.x = x; this.y = y; this.z = z; }
-        public Point3fi(Float x, Float y, Float z) { this.x = new Interval(x); this.y = new Interval(y); this.z = new Interval(z); }
-        public Point3fi(Point3f p) { x = new Interval(p.x); y = new Interval(p.y); z = new Interval(p.z); }
-        public static implicit operator Point3fi(Point3f p) { return new Point3fi(p); }
-        public Point3fi(Point3f p, Vector3f e)
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Tuple3<Point3, Interval>
+        // ═══════════════════════════════════════════════════════════════════
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Interval x, Interval y, Interval z)
         {
-            x = Interval.FromValueAndError(p.x, e.x);
-            y = Interval.FromValueAndError(p.y, e.y);
-            z = Interval.FromValueAndError(p.z, e.z);
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            DCHECK(!HasNaN());
         }
 
-        public bool HasNaN() { return IsNaN(x.LowerBound()) || IsNaN(x.UpperBound()) || IsNaN(y.LowerBound()) || IsNaN(y.UpperBound()) || IsNaN(z.LowerBound()) || IsNaN(z.UpperBound()); }
-        public Interval this[int i]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasNaN()
         {
-            get { DCHECK(i >= 0 && i <= 2); if (i == 0) return x; if (i == 1) return y; return z; }
-            set { DCHECK(i >= 0 && i <= 2); if (i == 0) x = value; else if (i == 1) y = value; else z = value; }
+            return IsNaN((Float)x) || IsNaN((Float)y) || IsNaN((Float)z);
         }
 
-        public Vector3f Error() { return new Vector3f(x.Width() / 2, y.Width() / 2, z.Width() / 2); }
-        public bool IsExact() { return x.Width() == 0 && y.Width() == 0 && z.Width() == 0; }
+        public unsafe ref Interval this[int i]
+        {
+            get
+            {
+                DCHECK(i >= 0 && i <= 2);
+                return ref Unsafe.Add(
+                    ref Unsafe.As<Point3fi, Interval>(ref this), i);
+            }
+        }
 
-        // Point3fi + Vector3f / Vector3fi, etc.
-        public static Point3fi operator +(Point3fi a, Vector3f v) { return new Point3fi(a.x + v.x, a.y + v.y, a.z + v.z); }
-        public static Point3fi operator +(Point3fi a, Vector3fi v) { return new Point3fi(a.x + v.x, a.y + v.y, a.z + v.z); }
-        public static Point3fi operator +(Point3fi a, Point3fi p) { return new Point3fi(a.x + p.x, a.y + p.y, a.z + p.z); }
-        public static Point3fi operator -(Point3fi a) { return new Point3fi(-a.x, -a.y, -a.z); }
-        public static Point3fi operator -(Point3fi a, Point3fi p) { return new Point3fi(a.x - p.x, a.y - p.y, a.z - p.z); }
-        public static Point3fi operator -(Point3fi a, Point3f p) { return new Point3fi(a.x - p.x, a.y - p.y, a.z - p.z); }
-        public static Point3fi operator -(Point3fi a, Vector3f v) { return new Point3fi(a.x - v.x, a.y - v.y, a.z - v.z); }
-        public static Point3fi operator -(Point3fi a, Vector3fi v) { return new Point3fi(a.x - v.x, a.y - v.y, a.z - v.z); }
-        public static Point3fi operator *(Point3fi a, Float s) { return new Point3fi(s * a.x, s * a.y, s * a.z); }
-        public static Point3fi operator *(Float s, Point3fi a) { return a * s; }
-        public static Point3fi operator /(Point3fi a, Float d) { return new Point3fi(a.x / d, a.y / d, a.z / d); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p1, Point3fi p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Point3fi(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
 
-        public static explicit operator Point3f(Point3fi p) { return new Point3f((Float)p.x, (Float)p.y, (Float)p.z); }
-        public static explicit operator Vector3fi(Point3fi p) { return new Vector3fi(p.x, p.y, p.z); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p1, Point3f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Point3fi(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
 
-        public override string ToString() { return $"[ {x} {y} {z} ]"; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p1, Point3i p2)
+        {
+            return new Point3fi(p1.x + p2.x, p1.y + p2.y, p1.z + p2.z);
+        }
 
-        // Point3fi Public Members
+        public const int nDimensions = 3;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3fi p)
+        {
+            DCHECK(!p.HasNaN());
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3f p)
+        {
+            DCHECK(!p.HasNaN());
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Point3i p)
+        {
+            x += p.x;
+            y += p.y;
+            z += p.z;
+        }
+
+        //public static Point3fi operator -(Point3fi p1, Point3fi p2);  // Hidden by Point3's version
+        //public static Point3fi operator -(Point3fi p1, Point3f p2);
+        //public static Point3fi operator -(Point3fi p1, Point3i p2);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3fi p)
+        {
+            DCHECK(!p.HasNaN());
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3f p)
+        {
+            DCHECK(!p.HasNaN());
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Point3i p)
+        {
+            x -= p.x;
+            y -= p.y;
+            z -= p.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator ==(Point3fi p1, Point3fi p2)
+        {
+            return p1.x == p2.x && p1.y == p2.y && p1.z == p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator !=(Point3fi p1, Point3fi p2)
+        {
+            return p1.x != p2.x || p1.y != p2.y || p1.z != p2.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Point3fi p, Interval s)
+        {
+            return new Point3fi(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Point3fi p, Float s)
+        {
+            return new Point3fi(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Point3fi p, int s)
+        {
+            return new Point3fi(s * p.x, s * p.y, s * p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Interval s)
+        {
+            DCHECK(!IsNaN((Float)s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(Float s)
+        {
+            DCHECK(!IsNaN((Float)s));
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator *=(int s)
+        {
+            x *= s;
+            y *= s;
+            z *= s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator /(Point3fi p, Interval d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Point3fi(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator /(Point3fi p, Float d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Point3fi(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator /(Point3fi p, int d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            return new Point3fi(p.x / d, p.y / d, p.z / d);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Interval d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(Float d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator /=(int d)
+        {
+            DCHECK_NE((Float)d, (Float)0);
+            x /= d;
+            y /= d;
+            z /= d;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator -(Point3fi p)
+        {
+            return new Point3fi(-p.x, -p.y, -p.z);
+        }
+
+        public override string ToString()
+        {
+            return $"[ {x} {y} {z} ]";
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point3<Interval>
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Point3f p)
+        {
+            x = new Interval(p.x);
+            y = new Interval(p.y);
+            z = new Interval(p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static implicit operator Point3fi(Point3f p)
+        {
+            return new Point3fi(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Point3i p)
+        {
+            x = new Interval(p.x);
+            y = new Interval(p.y);
+            z = new Interval(p.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3fi(Point3i p)
+        {
+            return new Point3fi(p);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Vector3fi v)
+        {
+            x = v.x;
+            y = v.y;
+            z = v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3fi(Vector3fi v)
+        {
+            return new Point3fi(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Vector3f v)
+        {
+            x = new Interval(v.x);
+            y = new Interval(v.y);
+            z = new Interval(v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3fi(Vector3f v)
+        {
+            return new Point3fi(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Vector3i v)
+        {
+            x = new Interval(v.x);
+            y = new Interval(v.y);
+            z = new Interval(v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static explicit operator Point3fi(Vector3i v)
+        {
+            return new Point3fi(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p, Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3fi(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3fi(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator +(Point3fi p, Vector3i v)
+        {
+            return new Point3fi(p.x + v.x, p.y + v.y, p.z + v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator +=(Vector3i v)
+        {
+            x += v.x;
+            y += v.y;
+            z += v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator -(Point3fi p, Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3fi(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator -(Point3fi p, Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            return new Point3fi(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator -(Point3fi p, Vector3i v)
+        {
+            return new Point3fi(p.x - v.x, p.y - v.y, p.z - v.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3fi v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3f v)
+        {
+            DCHECK(!v.HasNaN());
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void operator -=(Vector3i v)
+        {
+            x -= v.x;
+            y -= v.y;
+            z -= v.z;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Point3fi p1, Point3fi p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector3fi(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Point3fi p1, Point3f p2)
+        {
+            DCHECK(!p2.HasNaN());
+            return new Vector3fi(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector3fi operator -(Point3fi p1, Point3i p2)
+        {
+            return new Vector3fi(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // FROM: Point3fi (specific to this type)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Float x, Float y, Float z)
+        {
+            this.x = new Interval(x);
+            this.y = new Interval(y);
+            this.z = new Interval(z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Point3fi(Point3f p, Vector3f error)
+        {
+            x = Interval.FromValueAndError(p.x, error.x);
+            y = Interval.FromValueAndError(p.y, error.y);
+            z = Interval.FromValueAndError(p.z, error.z);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector3f Error()
+        {
+            return new Vector3f(x.Width() / 2, y.Width() / 2, z.Width() / 2);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsExact()
+        {
+            return x.Width() == 0 && y.Width() == 0 && z.Width() == 0;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Data members (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
         public Interval x, y, z;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Global operators (from Tuple3)
+        // ═══════════════════════════════════════════════════════════════════
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Interval s, Point3fi p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(Float s, Point3fi p)
+        {
+            return p * s;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Point3fi operator *(int s, Point3fi p)
+        {
+            return p * s;
+        }
     }
 
     // Quaternion Definition
