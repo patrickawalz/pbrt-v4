@@ -4,7 +4,6 @@
 // util/check.h
 
 using System;
-using System.Numerics;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -40,13 +39,13 @@ namespace pbrt
         { if (!(a == b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} == {b}"); }
         public static void CHECK_NE(Normal3f a, Normal3f b, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
         { if (!(a != b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} != {b}"); }
-        // Catch-all for any type exposing ==/!= through IEqualityOperators.
+        // Catch-all for any type implementing IEquatable<T>.
         public static void CHECK_EQ<T>(T a, T b, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
-            where T : IEqualityOperators<T, T, bool>
-        { if (!(a == b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} == {b}"); }
+            where T : IEquatable<T>
+        { if (!a.Equals(b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} == {b}"); }
         public static void CHECK_NE<T>(T a, T b, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
-            where T : IEqualityOperators<T, T, bool>
-        { if (!(a != b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} != {b}"); }
+            where T : IEquatable<T>
+        { if (a.Equals(b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} != {b}"); }
         public static void CHECK_GT<T>(T a, T b, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
             where T : IComparable<T>
         { if (!(a.CompareTo(b) > 0)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} > {b}"); }
@@ -76,9 +75,9 @@ namespace pbrt
         [Conditional("PBRT_DEBUG_BUILD")]
         public static void DCHECK_NE(Vector3f a, Vector3f b) { CHECK_NE(a, b); }
         [Conditional("PBRT_DEBUG_BUILD")]
-        public static void DCHECK_EQ<T>(T a, T b) where T : IEqualityOperators<T, T, bool> { CHECK_EQ(a, b); }
+        public static void DCHECK_EQ<T>(T a, T b) where T : IEquatable<T> { CHECK_EQ(a, b); }
         [Conditional("PBRT_DEBUG_BUILD")]
-        public static void DCHECK_NE<T>(T a, T b) where T : IEqualityOperators<T, T, bool> { CHECK_NE(a, b); }
+        public static void DCHECK_NE<T>(T a, T b) where T : IEquatable<T> { CHECK_NE(a, b); }
         [Conditional("PBRT_DEBUG_BUILD")]
         public static void DCHECK_GT<T>(T a, T b) where T : IComparable<T> { CHECK_GT(a, b); }
         [Conditional("PBRT_DEBUG_BUILD")]
