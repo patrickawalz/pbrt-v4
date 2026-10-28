@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/math.h, util/math.cpp
@@ -1652,13 +1652,8 @@ namespace pbrt
         private Float low, high;
     }
 
-    // SquareMatrix: C# has no integer template parameters, so SquareMatrix<3> and
-    // SquareMatrix<4> are expanded by hand as SquareMatrix3 / SquareMatrix4.
-    [InlineArray(9)]
-    public unsafe struct SquareMatrix3Storage { private Float _e; }
-    [InlineArray(16)]
-    public unsafe struct SquareMatrix4Storage { private Float _e; }
-
+    // SquareMatrix: C# has no integer template parameters, so SquareMatrix<2>, SquareMatrix<3> and
+    // SquareMatrix<4> are expanded by hand as SquareMatrix2 / SquareMatrix3 / SquareMatrix4.
     public unsafe ref struct MatrixRow
     {
         private ref Float r;
@@ -1670,115 +1665,113 @@ namespace pbrt
         }
     }
 
-    [InlineArray(4)]
-    public unsafe struct SquareMatrix2Storage { private Float _e; }
-
     public unsafe struct SquareMatrix2
     {
         // SquareMatrix Public Methods
         public static SquareMatrix2 Zero()
         {
-            SquareMatrix2 m = new SquareMatrix2();
-            for (int i = 0; i < 4; ++i)
-                m.m[i] = 0;
-            return m;
+            return default;
         }
 
-        public SquareMatrix2() : this(Identity: true) { }
-        private SquareMatrix2(bool Identity)
+        public SquareMatrix2()
         {
-            m = default;
-            for (int i = 0; i < 2; ++i)
-                for (int j = 0; j < 2; ++j)
-                    m[i * 2 + j] = (i == j) ? 1 : 0;
+            m00 = m11 = 1;
         }
+
         public SquareMatrix2(Float* mat)
         {
-            m = default;
-            for (int i = 0; i < 4; ++i)
-                m[i] = mat[i];
+            m00 = mat[0];
+            m01 = mat[1];
+            m10 = mat[2];
+            m11 = mat[3];
         }
+
         public SquareMatrix2(pstd.span<Float> t)
         {
             CHECK_EQ(4, (int)t.size());
-            m = default;
-            for (int i = 0; i < 4; ++i)
-                m[i] = t[i];
+            m00 = t[0];
+            m01 = t[1];
+            m10 = t[2];
+            m11 = t[3];
         }
-        public SquareMatrix2(Float v0, Float v1, Float v2, Float v3)
+
+        public SquareMatrix2(Float m00, Float m01,
+                             Float m10, Float m11)
         {
-            m = default;
-            m[0] = v0; m[1] = v1; m[2] = v2; m[3] = v3;
+            this.m00 = m00;
+            this.m01 = m01;
+            this.m10 = m10;
+            this.m11 = m11;
         }
-        public static SquareMatrix2 Diag(Float v0, Float v1)
+
+        public static SquareMatrix2 Diag(Float v1, Float v2)
         {
-            SquareMatrix2 r = new SquareMatrix2();
-            r.m[0] = v0; r.m[3] = v1;
+            SquareMatrix2 ret = default;
+            ret.m00 = v1;
+            ret.m11 = v2;
+            return ret;
+        }
+
+        public static SquareMatrix2 operator +(SquareMatrix2 m1, SquareMatrix2 m2)
+        {
+            SquareMatrix2 r = m1;
+            r.m00 += m2.m00;
+            r.m01 += m2.m01;
+            r.m10 += m2.m10;
+            r.m11 += m2.m11;
             return r;
         }
 
-        public static SquareMatrix2 operator +(SquareMatrix2 a, SquareMatrix2 mm)
+        public static SquareMatrix2 operator *(SquareMatrix2 m, Float s)
         {
-            SquareMatrix2 r = a;
-            for (int i = 0; i < 4; ++i)
-                r.m[i] += mm.m[i];
+            SquareMatrix2 r = m;
+            r.m00 *= s;
+            r.m01 *= s;
+            r.m10 *= s;
+            r.m11 *= s;
             return r;
         }
-        public static SquareMatrix2 operator *(SquareMatrix2 a, Float s)
-        {
-            SquareMatrix2 r = a;
-            for (int i = 0; i < 4; ++i)
-                r.m[i] *= s;
-            return r;
-        }
-        public static SquareMatrix2 operator *(Float s, SquareMatrix2 a) { return a * s; }
-        public static SquareMatrix2 operator /(SquareMatrix2 a, Float s)
+
+        public static SquareMatrix2 operator /(SquareMatrix2 m, Float s)
         {
             DCHECK_NE(s, (Float)0);
-            SquareMatrix2 r = a;
-            for (int i = 0; i < 4; ++i)
-                r.m[i] /= s;
+            SquareMatrix2 r = m;
+            r.m00 /= s;
+            r.m01 /= s;
+            r.m10 /= s;
+            r.m11 /= s;
             return r;
         }
 
-        public static bool operator ==(SquareMatrix2 a, SquareMatrix2 m2)
+        public static bool operator ==(SquareMatrix2 m1, SquareMatrix2 m2)
         {
-            for (int i = 0; i < 4; ++i)
-                if (a.m[i] != m2.m[i])
-                    return false;
-            return true;
+            return (m1.m00 == m2.m00 && m1.m11 == m2.m11 && // Check diagonal element first for early out.
+                    m1.m01 == m2.m01 && m1.m10 == m2.m10);
         }
-        public static bool operator !=(SquareMatrix2 a, SquareMatrix2 m2) { return !(a == m2); }
-        public override bool Equals(object o) { return o is SquareMatrix2 mm && this == mm; }
-        public override int GetHashCode() { return m[0].GetHashCode(); }
 
-        public static bool operator <(SquareMatrix2 a, SquareMatrix2 m2)
+        public static bool operator !=(SquareMatrix2 m1, SquareMatrix2 m2)
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                if (a.m[i] < m2.m[i])
-                    return true;
-                if (a.m[i] > m2.m[i])
-                    return false;
-            }
+            return (m1.m00 != m2.m00 || m1.m01 != m2.m01 ||
+                    m1.m10 != m2.m10 || m1.m11 != m2.m11);
+        }
+
+        public static bool operator <(SquareMatrix2 m1, SquareMatrix2 m2)
+        {
+            for (int i = 0; i < 2; ++i)
+                for (int j = 0; j < 2; ++j) {
+                    if (m1[i][j] < m2[i][j])
+                        return true;
+                    if (m1[i][j] > m2[i][j])
+                        return false;
+                }
             return false;
         }
-        public static bool operator >(SquareMatrix2 a, SquareMatrix2 m2) { return m2 < a; }
 
         public bool IsIdentity()
         {
-            for (int i = 0; i < 2; ++i)
-                for (int j = 0; j < 2; ++j)
-                {
-                    if (i == j)
-                    {
-                        if (m[i * 2 + j] != 1)
-                            return false;
-                    }
-                    else if (m[i * 2 + j] != 0)
-                        return false;
-                }
-            return true;
+            return m00 == 1f && m11 == 1f && // Check diagonal element first for early out.
+                   m01 == 0f &&
+                   m10 == 0f;
         }
 
         public override string ToString()
@@ -1788,7 +1781,7 @@ namespace pbrt
             {
                 for (int j = 0; j < 2; ++j)
                 {
-                    s += StringPrintf(" %f", m[i * 2 + j]);
+                    s += StringPrintf(" %f", this[i][j]);
                     if (j < 2 - 1) s += ','; else s += " ]";
                 }
                 if (i < 2 - 1) s += ", [";
@@ -1801,7 +1794,30 @@ namespace pbrt
         public MatrixRow this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref m[i * 2]); }
+            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 2)); }
+        }
+
+        // SquareMatrix Private Members
+        internal Float m00;
+        internal Float m01;
+        internal Float m10;
+        internal Float m11;
+
+        public static bool operator >(SquareMatrix2 m1, SquareMatrix2 m2)
+        {
+            for (int i = 0; i < 2; ++i)
+                for (int j = 0; j < 2; ++j) {
+                    if (m1[i][j] > m2[i][j])
+                        return true;
+                    if (m1[i][j] < m2[i][j])
+                        return false;
+                }
+            return false;
+        }
+
+        public static SquareMatrix2 operator *(Float s, SquareMatrix2 m)
+        {
+            return m * s;
         }
 
         // Matrix * vector (Mul<Tresult>)
@@ -1812,7 +1828,7 @@ namespace pbrt
             {
                 result[i] = 0;
                 for (int j = 0; j < 2; ++j)
-                    result[i] += mm.m[i * 2 + j] * v[j];
+                    result[i] += mm[i][j] * v[j];
             }
             return result;
         }
@@ -1823,27 +1839,20 @@ namespace pbrt
             {
                 result[i] = 0;
                 for (int j = 0; j < 2; ++j)
-                    result[i] += mm.m[i * 2 + j] * v[j];
+                    result[i] += mm[i][j] * v[j];
             }
             return result;
         }
 
-        // Generic-N operator*: r[i][j] = FMA(m1[i][k], m2[k][j], r[i][j])
         public static SquareMatrix2 operator *(SquareMatrix2 m1, SquareMatrix2 m2)
         {
-            SquareMatrix2 r = new SquareMatrix2();
-            for (int i = 0; i < 2; ++i)
-                for (int j = 0; j < 2; ++j)
-                {
-                    r[i][j] = 0;
-                    for (int k = 0; k < 2; ++k)
-                        r[i][j] = FMA(m1[i][k], m2[k][j], r[i][j]);
-                }
+            SquareMatrix2 r;
+            r.m00 = FMA(m1.m01, m2.m10, FMA(m1.m00, m2.m00, 0f));
+            r.m01 = FMA(m1.m01, m2.m11, FMA(m1.m00, m2.m01, 0f));
+            r.m10 = FMA(m1.m11, m2.m10, FMA(m1.m10, m2.m00, 0f));
+            r.m11 = FMA(m1.m11, m2.m11, FMA(m1.m10, m2.m01, 0f));
             return r;
         }
-
-        // SquareMatrix Private Members
-        private SquareMatrix2Storage m;
     }
 
     public unsafe struct SquareMatrix3
@@ -1851,115 +1860,143 @@ namespace pbrt
         // SquareMatrix Public Methods
         public static SquareMatrix3 Zero()
         {
-            SquareMatrix3 m = new SquareMatrix3();
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    m.m[i * 3 + j] = 0;
-            return m;
+            return default;
         }
 
-        // C# structs cannot have parameterless constructors that run for default(T),
-        // so SquareMatrix3() yields the identity only via the explicit constructor below.
-        public SquareMatrix3() : this(Identity: true) { }
-        private SquareMatrix3(bool Identity)
+        public SquareMatrix3()
         {
-            m = default;
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    m[i * 3 + j] = (i == j) ? 1 : 0;
+            m00 = m11 = m22 = 1;
         }
+
         public SquareMatrix3(Float* mat)
         {
-            m = default;
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    m[i * 3 + j] = mat[i * 3 + j];
+            m00 = mat[0];
+            m01 = mat[1];
+            m02 = mat[2];
+            m10 = mat[3];
+            m11 = mat[4];
+            m12 = mat[5];
+            m20 = mat[6];
+            m21 = mat[7];
+            m22 = mat[8];
         }
+
         public SquareMatrix3(pstd.span<Float> t)
         {
             CHECK_EQ(9, (int)t.size());
-            m = default;
-            for (int i = 0; i < 9; ++i)
-                m[i] = t[i];
+            m00 = t[0];
+            m01 = t[1];
+            m02 = t[2];
+            m10 = t[3];
+            m11 = t[4];
+            m12 = t[5];
+            m20 = t[6];
+            m21 = t[7];
+            m22 = t[8];
         }
-        public SquareMatrix3(Float v0, Float v1, Float v2, Float v3, Float v4, Float v5, Float v6, Float v7, Float v8)
+
+        public SquareMatrix3(Float m00, Float m01, Float m02,
+                             Float m10, Float m11, Float m12,
+                             Float m20, Float m21, Float m22)
         {
-            m = default;
-            m[0] = v0; m[1] = v1; m[2] = v2; m[3] = v3; m[4] = v4; m[5] = v5; m[6] = v6; m[7] = v7; m[8] = v8;
+            this.m00 = m00;
+            this.m01 = m01;
+            this.m02 = m02;
+            this.m10 = m10;
+            this.m11 = m11;
+            this.m12 = m12;
+            this.m20 = m20;
+            this.m21 = m21;
+            this.m22 = m22;
         }
-        public static SquareMatrix3 Diag(Float v0, Float v1, Float v2)
+
+        public static SquareMatrix3 Diag(Float v1, Float v2, Float v3)
         {
-            SquareMatrix3 r = new SquareMatrix3();
-            r.m[0] = v0; r.m[4] = v1; r.m[8] = v2;
+            SquareMatrix3 ret = default;
+            ret.m00 = v1;
+            ret.m11 = v2;
+            ret.m22 = v3;
+            return ret;
+        }
+
+        public static SquareMatrix3 operator +(SquareMatrix3 m1, SquareMatrix3 m2)
+        {
+            SquareMatrix3 r = m1;
+            r.m00 += m2.m00;
+            r.m01 += m2.m01;
+            r.m02 += m2.m02;
+            r.m10 += m2.m10;
+            r.m11 += m2.m11;
+            r.m12 += m2.m12;
+            r.m20 += m2.m20;
+            r.m21 += m2.m21;
+            r.m22 += m2.m22;
             return r;
         }
 
-        public static SquareMatrix3 operator +(SquareMatrix3 a, SquareMatrix3 mm)
+        public static SquareMatrix3 operator *(SquareMatrix3 m, Float s)
         {
-            SquareMatrix3 r = a;
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    r.m[i * 3 + j] += mm.m[i * 3 + j];
+            SquareMatrix3 r = m;
+            r.m00 *= s;
+            r.m01 *= s;
+            r.m02 *= s;
+            r.m10 *= s;
+            r.m11 *= s;
+            r.m12 *= s;
+            r.m20 *= s;
+            r.m21 *= s;
+            r.m22 *= s;
             return r;
         }
 
-        public static SquareMatrix3 operator *(SquareMatrix3 a, Float s)
-        {
-            SquareMatrix3 r = a;
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    r.m[i * 3 + j] *= s;
-            return r;
-        }
-        public static SquareMatrix3 operator *(Float s, SquareMatrix3 a) { return a * s; }
-        public static SquareMatrix3 operator /(SquareMatrix3 a, Float s)
+        public static SquareMatrix3 operator /(SquareMatrix3 m, Float s)
         {
             DCHECK_NE(s, (Float)0);
-            SquareMatrix3 r = a;
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    r.m[i * 3 + j] /= s;
+            SquareMatrix3 r = m;
+            r.m00 /= s;
+            r.m01 /= s;
+            r.m02 /= s;
+            r.m10 /= s;
+            r.m11 /= s;
+            r.m12 /= s;
+            r.m20 /= s;
+            r.m21 /= s;
+            r.m22 /= s;
             return r;
         }
 
-        public static bool operator ==(SquareMatrix3 a, SquareMatrix3 m2)
+        public static bool operator ==(SquareMatrix3 m1, SquareMatrix3 m2)
         {
-            for (int i = 0; i < 9; ++i)
-                if (a.m[i] != m2.m[i])
-                    return false;
-            return true;
+            return (m1.m00 == m2.m00 && m1.m11 == m2.m11 && m1.m22 == m2.m22 && // Check diagonal element first for early out.
+                    m1.m01 == m2.m01 && m1.m02 == m2.m02 && m1.m10 == m2.m10 &&
+                    m1.m12 == m2.m12 && m1.m20 == m2.m20 && m1.m21 == m2.m21);
         }
-        public static bool operator !=(SquareMatrix3 a, SquareMatrix3 m2) { return !(a == m2); }
-        public override bool Equals(object o) { return o is SquareMatrix3 mm && this == mm; }
-        public override int GetHashCode() { return m[0].GetHashCode(); }
 
-        public static bool operator <(SquareMatrix3 a, SquareMatrix3 m2)
+        public static bool operator !=(SquareMatrix3 m1, SquareMatrix3 m2)
         {
-            for (int i = 0; i < 9; ++i)
-            {
-                if (a.m[i] < m2.m[i])
-                    return true;
-                if (a.m[i] > m2.m[i])
-                    return false;
-            }
+            return (m1.m00 != m2.m00 || m1.m01 != m2.m01 || m1.m02 != m2.m02 ||
+                    m1.m10 != m2.m10 || m1.m11 != m2.m11 || m1.m12 != m2.m12 ||
+                    m1.m20 != m2.m20 || m1.m21 != m2.m21 || m1.m22 != m2.m22);
+        }
+
+        public static bool operator <(SquareMatrix3 m1, SquareMatrix3 m2)
+        {
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j) {
+                    if (m1[i][j] < m2[i][j])
+                        return true;
+                    if (m1[i][j] > m2[i][j])
+                        return false;
+                }
             return false;
         }
-        public static bool operator >(SquareMatrix3 a, SquareMatrix3 m2) { return m2 < a; }
 
         public bool IsIdentity()
         {
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                {
-                    if (i == j)
-                    {
-                        if (m[i * 3 + j] != 1)
-                            return false;
-                    }
-                    else if (m[i * 3 + j] != 0)
-                        return false;
-                }
-            return true;
+            return m00 == 1f && m11 == 1f && m22 == 1f && // Check diagonal element first for early out.
+                   m01 == 0f && m02 == 0f &&
+                   m10 == 0f && m12 == 0f &&
+                   m20 == 0f && m21 == 0f;
         }
 
         public override string ToString()
@@ -1969,7 +2006,7 @@ namespace pbrt
             {
                 for (int j = 0; j < 3; ++j)
                 {
-                    s += $" {m[i * 3 + j]}";
+                    s += $" {this[i][j]}";
                     if (j < 3 - 1) s += ','; else s += " ]";
                 }
                 if (i < 3 - 1) s += ", [";
@@ -1982,7 +2019,35 @@ namespace pbrt
         public MatrixRow this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref m[i * 3]); }
+            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 3)); }
+        }
+
+        // SquareMatrix Private Members
+        internal Float m00;
+        internal Float m01;
+        internal Float m02;
+        internal Float m10;
+        internal Float m11;
+        internal Float m12;
+        internal Float m20;
+        internal Float m21;
+        internal Float m22;
+
+        public static bool operator >(SquareMatrix3 m1, SquareMatrix3 m2)
+        {
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j) {
+                    if (m1[i][j] > m2[i][j])
+                        return true;
+                    if (m1[i][j] < m2[i][j])
+                        return false;
+                }
+            return false;
+        }
+
+        public static SquareMatrix3 operator *(Float s, SquareMatrix3 m)
+        {
+            return m * s;
         }
 
         // Matrix * vector (Mul<Tresult>)
@@ -1993,7 +2058,7 @@ namespace pbrt
             {
                 result[i] = 0;
                 for (int j = 0; j < 3; ++j)
-                    result[i] += mm.m[i * 3 + j] * v[j];
+                    result[i] += mm[i][j] * v[j];
             }
             return result;
         }
@@ -2005,22 +2070,25 @@ namespace pbrt
             {
                 result[i] = 0;
                 for (int j = 0; j < 3; ++j)
-                    result[i] += mm.m[i * 3 + j] * v[j];
+                    result[i] += mm[i][j] * v[j];
             }
             return result;
         }
 
         public static SquareMatrix3 operator *(SquareMatrix3 m1, SquareMatrix3 m2)
         {
-            SquareMatrix3 r = new SquareMatrix3();
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j)
-                    r[i][j] = InnerProduct(m1[i][0], m2[0][j], m1[i][1], m2[1][j], m1[i][2], m2[2][j]);
+            SquareMatrix3 r;
+            r.m00 = InnerProduct(m1.m00, m2.m00, m1.m01, m2.m10, m1.m02, m2.m20);
+            r.m01 = InnerProduct(m1.m00, m2.m01, m1.m01, m2.m11, m1.m02, m2.m21);
+            r.m02 = InnerProduct(m1.m00, m2.m02, m1.m01, m2.m12, m1.m02, m2.m22);
+            r.m10 = InnerProduct(m1.m10, m2.m00, m1.m11, m2.m10, m1.m12, m2.m20);
+            r.m11 = InnerProduct(m1.m10, m2.m01, m1.m11, m2.m11, m1.m12, m2.m21);
+            r.m12 = InnerProduct(m1.m10, m2.m02, m1.m11, m2.m12, m1.m12, m2.m22);
+            r.m20 = InnerProduct(m1.m20, m2.m00, m1.m21, m2.m10, m1.m22, m2.m20);
+            r.m21 = InnerProduct(m1.m20, m2.m01, m1.m21, m2.m11, m1.m22, m2.m21);
+            r.m22 = InnerProduct(m1.m20, m2.m02, m1.m21, m2.m12, m1.m22, m2.m22);
             return r;
         }
-
-        // SquareMatrix Private Members
-        private SquareMatrix3Storage m;
     }
 
     public unsafe struct SquareMatrix4
@@ -2028,112 +2096,190 @@ namespace pbrt
         // SquareMatrix Public Methods
         public static SquareMatrix4 Zero()
         {
-            SquareMatrix4 m = new SquareMatrix4();
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    m.m[i * 4 + j] = 0;
-            return m;
+            return default;
         }
 
-        public SquareMatrix4() : this(Identity: true) { }
-        private SquareMatrix4(bool Identity)
+        public SquareMatrix4()
         {
-            m = default;
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    m[i * 4 + j] = (i == j) ? 1 : 0;
+            m00 = m11 = m22 = m33 = 1;
         }
+
         public SquareMatrix4(Float* mat)
         {
-            m = default;
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    m[i * 4 + j] = mat[i * 4 + j];
+            m00 = mat[0];
+            m01 = mat[1];
+            m02 = mat[2];
+            m03 = mat[3];
+            m10 = mat[4];
+            m11 = mat[5];
+            m12 = mat[6];
+            m13 = mat[7];
+            m20 = mat[8];
+            m21 = mat[9];
+            m22 = mat[10];
+            m23 = mat[11];
+            m30 = mat[12];
+            m31 = mat[13];
+            m32 = mat[14];
+            m33 = mat[15];
         }
+
         public SquareMatrix4(pstd.span<Float> t)
         {
             CHECK_EQ(16, (int)t.size());
-            m = default;
-            for (int i = 0; i < 16; ++i)
-                m[i] = t[i];
+            m00 = t[0];
+            m01 = t[1];
+            m02 = t[2];
+            m03 = t[3];
+            m10 = t[4];
+            m11 = t[5];
+            m12 = t[6];
+            m13 = t[7];
+            m20 = t[8];
+            m21 = t[9];
+            m22 = t[10];
+            m23 = t[11];
+            m30 = t[12];
+            m31 = t[13];
+            m32 = t[14];
+            m33 = t[15];
         }
-        public SquareMatrix4(Float v0, Float v1, Float v2, Float v3, Float v4, Float v5, Float v6, Float v7,
-                             Float v8, Float v9, Float v10, Float v11, Float v12, Float v13, Float v14, Float v15)
+
+        public SquareMatrix4(Float m00, Float m01, Float m02, Float m03,
+                             Float m10, Float m11, Float m12, Float m13,
+                             Float m20, Float m21, Float m22, Float m23,
+                             Float m30, Float m31, Float m32, Float m33)
         {
-            m = default;
-            m[0] = v0; m[1] = v1; m[2] = v2; m[3] = v3; m[4] = v4; m[5] = v5; m[6] = v6; m[7] = v7;
-            m[8] = v8; m[9] = v9; m[10] = v10; m[11] = v11; m[12] = v12; m[13] = v13; m[14] = v14; m[15] = v15;
+            this.m00 = m00;
+            this.m01 = m01;
+            this.m02 = m02;
+            this.m03 = m03;
+            this.m10 = m10;
+            this.m11 = m11;
+            this.m12 = m12;
+            this.m13 = m13;
+            this.m20 = m20;
+            this.m21 = m21;
+            this.m22 = m22;
+            this.m23 = m23;
+            this.m30 = m30;
+            this.m31 = m31;
+            this.m32 = m32;
+            this.m33 = m33;
         }
-        public static SquareMatrix4 Diag(Float v0, Float v1, Float v2, Float v3)
+
+        public static SquareMatrix4 Diag(Float v1, Float v2, Float v3, Float v4)
         {
-            SquareMatrix4 r = new SquareMatrix4();
-            r.m[0] = v0; r.m[5] = v1; r.m[10] = v2; r.m[15] = v3;
+            SquareMatrix4 ret = default;
+            ret.m00 = v1;
+            ret.m11 = v2;
+            ret.m22 = v3;
+            ret.m33 = v4;
+            return ret;
+        }
+
+        public static SquareMatrix4 operator +(SquareMatrix4 m1, SquareMatrix4 m2)
+        {
+            SquareMatrix4 r = m1;
+            r.m00 += m2.m00;
+            r.m01 += m2.m01;
+            r.m02 += m2.m02;
+            r.m03 += m2.m03;
+            r.m10 += m2.m10;
+            r.m11 += m2.m11;
+            r.m12 += m2.m12;
+            r.m13 += m2.m13;
+            r.m20 += m2.m20;
+            r.m21 += m2.m21;
+            r.m22 += m2.m22;
+            r.m23 += m2.m23;
+            r.m30 += m2.m30;
+            r.m31 += m2.m31;
+            r.m32 += m2.m32;
+            r.m33 += m2.m33;
             return r;
         }
 
-        public static SquareMatrix4 operator +(SquareMatrix4 a, SquareMatrix4 mm)
+        public static SquareMatrix4 operator *(SquareMatrix4 m, Float s)
         {
-            SquareMatrix4 r = a;
-            for (int i = 0; i < 16; ++i)
-                r.m[i] += mm.m[i];
+            SquareMatrix4 r = m;
+            r.m00 *= s;
+            r.m01 *= s;
+            r.m02 *= s;
+            r.m03 *= s;
+            r.m10 *= s;
+            r.m11 *= s;
+            r.m12 *= s;
+            r.m13 *= s;
+            r.m20 *= s;
+            r.m21 *= s;
+            r.m22 *= s;
+            r.m23 *= s;
+            r.m30 *= s;
+            r.m31 *= s;
+            r.m32 *= s;
+            r.m33 *= s;
             return r;
         }
 
-        public static SquareMatrix4 operator *(SquareMatrix4 a, Float s)
-        {
-            SquareMatrix4 r = a;
-            for (int i = 0; i < 16; ++i)
-                r.m[i] *= s;
-            return r;
-        }
-        public static SquareMatrix4 operator *(Float s, SquareMatrix4 a) { return a * s; }
-        public static SquareMatrix4 operator /(SquareMatrix4 a, Float s)
+        public static SquareMatrix4 operator /(SquareMatrix4 m, Float s)
         {
             DCHECK_NE(s, (Float)0);
-            SquareMatrix4 r = a;
-            for (int i = 0; i < 16; ++i)
-                r.m[i] /= s;
+            SquareMatrix4 r = m;
+            r.m00 /= s;
+            r.m01 /= s;
+            r.m02 /= s;
+            r.m03 /= s;
+            r.m10 /= s;
+            r.m11 /= s;
+            r.m12 /= s;
+            r.m13 /= s;
+            r.m20 /= s;
+            r.m21 /= s;
+            r.m22 /= s;
+            r.m23 /= s;
+            r.m30 /= s;
+            r.m31 /= s;
+            r.m32 /= s;
+            r.m33 /= s;
             return r;
         }
 
-        public static bool operator ==(SquareMatrix4 a, SquareMatrix4 m2)
+        public static bool operator ==(SquareMatrix4 m1, SquareMatrix4 m2)
         {
-            for (int i = 0; i < 16; ++i)
-                if (a.m[i] != m2.m[i])
-                    return false;
-            return true;
+            return (m1.m00 == m2.m00 && m1.m11 == m2.m11 && m1.m22 == m2.m22 && m1.m33 == m2.m33 && // Check diagonal element first for early out.
+                    m1.m01 == m2.m01 && m1.m02 == m2.m02 && m1.m03 == m2.m03 && m1.m10 == m2.m10 &&
+                    m1.m12 == m2.m12 && m1.m13 == m2.m13 && m1.m20 == m2.m20 && m1.m21 == m2.m21 &&
+                    m1.m23 == m2.m23 && m1.m30 == m2.m30 && m1.m31 == m2.m31 && m1.m32 == m2.m32);
         }
-        public static bool operator !=(SquareMatrix4 a, SquareMatrix4 m2) { return !(a == m2); }
-        public override bool Equals(object o) { return o is SquareMatrix4 mm && this == mm; }
-        public override int GetHashCode() { return m[0].GetHashCode(); }
 
-        public static bool operator <(SquareMatrix4 a, SquareMatrix4 m2)
+        public static bool operator !=(SquareMatrix4 m1, SquareMatrix4 m2)
         {
-            for (int i = 0; i < 16; ++i)
-            {
-                if (a.m[i] < m2.m[i])
-                    return true;
-                if (a.m[i] > m2.m[i])
-                    return false;
-            }
+            return (m1.m00 != m2.m00 || m1.m01 != m2.m01 || m1.m02 != m2.m02 || m1.m03 != m2.m03 ||
+                    m1.m10 != m2.m10 || m1.m11 != m2.m11 || m1.m12 != m2.m12 || m1.m13 != m2.m13 ||
+                    m1.m20 != m2.m20 || m1.m21 != m2.m21 || m1.m22 != m2.m22 || m1.m23 != m2.m23 ||
+                    m1.m30 != m2.m30 || m1.m31 != m2.m31 || m1.m32 != m2.m32 || m1.m33 != m2.m33);
+        }
+
+        public static bool operator <(SquareMatrix4 m1, SquareMatrix4 m2)
+        {
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j) {
+                    if (m1[i][j] < m2[i][j])
+                        return true;
+                    if (m1[i][j] > m2[i][j])
+                        return false;
+                }
             return false;
         }
-        public static bool operator >(SquareMatrix4 a, SquareMatrix4 m2) { return m2 < a; }
 
         public bool IsIdentity()
         {
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                {
-                    if (i == j)
-                    {
-                        if (m[i * 4 + j] != 1)
-                            return false;
-                    }
-                    else if (m[i * 4 + j] != 0)
-                        return false;
-                }
-            return true;
+            return m00 == 1f && m11 == 1f && m22 == 1f && m33 == 1f && // Check diagonal element first for early out.
+                   m01 == 0f && m02 == 0f && m03 == 0f &&
+                   m10 == 0f && m12 == 0f && m13 == 0f &&
+                   m20 == 0f && m21 == 0f && m23 == 0f &&
+                   m30 == 0f && m31 == 0f && m32 == 0f;
         }
 
         public override string ToString()
@@ -2143,7 +2289,7 @@ namespace pbrt
             {
                 for (int j = 0; j < 4; ++j)
                 {
-                    s += $" {m[i * 4 + j]}";
+                    s += $" {this[i][j]}";
                     if (j < 4 - 1) s += ','; else s += " ]";
                 }
                 if (i < 4 - 1) s += ", [";
@@ -2156,20 +2302,64 @@ namespace pbrt
         public MatrixRow this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref m[i * 4]); }
+            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 4)); }
+        }
+
+        // SquareMatrix Private Members
+        internal Float m00;
+        internal Float m01;
+        internal Float m02;
+        internal Float m03;
+        internal Float m10;
+        internal Float m11;
+        internal Float m12;
+        internal Float m13;
+        internal Float m20;
+        internal Float m21;
+        internal Float m22;
+        internal Float m23;
+        internal Float m30;
+        internal Float m31;
+        internal Float m32;
+        internal Float m33;
+
+        public static bool operator >(SquareMatrix4 m1, SquareMatrix4 m2)
+        {
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j) {
+                    if (m1[i][j] > m2[i][j])
+                        return true;
+                    if (m1[i][j] < m2[i][j])
+                        return false;
+                }
+            return false;
+        }
+
+        public static SquareMatrix4 operator *(Float s, SquareMatrix4 m)
+        {
+            return m * s;
         }
 
         public static SquareMatrix4 operator *(SquareMatrix4 m1, SquareMatrix4 m2)
         {
-            SquareMatrix4 r = new SquareMatrix4();
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    r[i][j] = InnerProduct(m1[i][0], m2[0][j], m1[i][1], m2[1][j], m1[i][2],
-                                           m2[2][j], m1[i][3], m2[3][j]);
+            SquareMatrix4 r;
+            r.m00 = InnerProduct(m1.m00, m2.m00, m1.m01, m2.m10, m1.m02, m2.m20, m1.m03, m2.m30);
+            r.m01 = InnerProduct(m1.m00, m2.m01, m1.m01, m2.m11, m1.m02, m2.m21, m1.m03, m2.m31);
+            r.m02 = InnerProduct(m1.m00, m2.m02, m1.m01, m2.m12, m1.m02, m2.m22, m1.m03, m2.m32);
+            r.m03 = InnerProduct(m1.m00, m2.m03, m1.m01, m2.m13, m1.m02, m2.m23, m1.m03, m2.m33);
+            r.m10 = InnerProduct(m1.m10, m2.m00, m1.m11, m2.m10, m1.m12, m2.m20, m1.m13, m2.m30);
+            r.m11 = InnerProduct(m1.m10, m2.m01, m1.m11, m2.m11, m1.m12, m2.m21, m1.m13, m2.m31);
+            r.m12 = InnerProduct(m1.m10, m2.m02, m1.m11, m2.m12, m1.m12, m2.m22, m1.m13, m2.m32);
+            r.m13 = InnerProduct(m1.m10, m2.m03, m1.m11, m2.m13, m1.m12, m2.m23, m1.m13, m2.m33);
+            r.m20 = InnerProduct(m1.m20, m2.m00, m1.m21, m2.m10, m1.m22, m2.m20, m1.m23, m2.m30);
+            r.m21 = InnerProduct(m1.m20, m2.m01, m1.m21, m2.m11, m1.m22, m2.m21, m1.m23, m2.m31);
+            r.m22 = InnerProduct(m1.m20, m2.m02, m1.m21, m2.m12, m1.m22, m2.m22, m1.m23, m2.m32);
+            r.m23 = InnerProduct(m1.m20, m2.m03, m1.m21, m2.m13, m1.m22, m2.m23, m1.m23, m2.m33);
+            r.m30 = InnerProduct(m1.m30, m2.m00, m1.m31, m2.m10, m1.m32, m2.m20, m1.m33, m2.m30);
+            r.m31 = InnerProduct(m1.m30, m2.m01, m1.m31, m2.m11, m1.m32, m2.m21, m1.m33, m2.m31);
+            r.m32 = InnerProduct(m1.m30, m2.m02, m1.m31, m2.m12, m1.m32, m2.m22, m1.m33, m2.m32);
+            r.m33 = InnerProduct(m1.m30, m2.m03, m1.m31, m2.m13, m1.m32, m2.m23, m1.m33, m2.m33);
             return r;
         }
-
-        // SquareMatrix Private Members
-        private SquareMatrix4Storage m;
     }
 }
