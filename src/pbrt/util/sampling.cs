@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 
@@ -37,7 +37,7 @@ namespace pbrt
 
             // Compute sum of _weights_
             Float sumWeights = 0;
-            for (int i = 0; i < weights.length; ++i)
+            for (int i = 0; i < (int)weights.size(); ++i)
                 sumWeights += weights[i];
 
             // Compute rescaled $u'$ sample
@@ -51,7 +51,7 @@ namespace pbrt
             while (sum + weights[offset] <= up)
             {
                 sum += weights[offset++];
-                DCHECK_LT(offset, weights.length);
+                DCHECK_LT(offset, (int)weights.size());
             }
 
             // Compute PMF and remapped _u_ value, if necessary
@@ -87,7 +87,7 @@ namespace pbrt
 
         public static Float BilinearPDF(Point2f p, pstd.span<Float> w)
         {
-            DCHECK_EQ(4, w.length);
+            DCHECK_EQ(4, (int)w.size());
             if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1)
                 return 0;
             if (w[0] + w[1] + w[2] + w[3] == 0)
@@ -100,7 +100,7 @@ namespace pbrt
 
         public static Point2f SampleBilinear(Point2f u, pstd.span<Float> w)
         {
-            DCHECK_EQ(4, w.length);
+            DCHECK_EQ(4, (int)w.size());
             Point2f p = new Point2f();
             // Sample $y$ for bilinear marginal distribution
             p.y = SampleLinear(u[1], w[0] + w[1], w[2] + w[3]);
@@ -861,7 +861,7 @@ namespace pbrt
             CHECK_EQ(f.size(), F.size());
             // Map _u_ to a spline interval by inverting _F_
             u *= F.back();
-            int i = (int)FindInterval(F.size(), (int ii) => F[ii] <= u);
+            int i = (int)FindInterval(F.size(), F, (pstd.span<Float> FF, int ii) => FF[ii] <= u);
 
             // Look up $x_i$ and function values of spline segment _i_
             Float x0 = nodes[i], x1 = nodes[i + 1];
@@ -900,11 +900,12 @@ namespace pbrt
         {
             // Determine offset and coefficients for the _alpha_ parameter
             int offsetOut;
-            pstd.span<Float> weightsSpan = new pstd.span<Float>(new Float[4]);
+            Float[] w = new Float[4];
+            pstd.span<Float> weightsSpan = new pstd.span<Float>(w);
             if (!CatmullRomWeights(nodes1, alpha, &offsetOut, weightsSpan))
                 return 0;
             int offset = offsetOut;
-            Float[] w = weightsSpan.arr;
+            int nNodes2 = (int)nodes2.size();
 
             // Define a lambda function to interpolate table entries
             Func<pstd.span<Float>, int, Float> interpolate = (pstd.span<Float> array, int idx) =>
@@ -912,14 +913,14 @@ namespace pbrt
                 Float v = 0;
                 for (int i = 0; i < 4; ++i)
                     if (w[i] != 0)
-                        v += array[(offset + i) * (int)nodes2.size() + idx] * w[i];
+                        v += array[(offset + i) * nNodes2 + idx] * w[i];
                 return v;
             };
 
             // Map _u_ to a spline interval by inverting the interpolated _cdf_
             Float maximum = interpolate(cdf, (int)nodes2.size() - 1);
             u *= maximum;
-            int idx0 = (int)FindInterval(nodes2.size(), (int i) => interpolate(cdf, i) <= u);
+            int idx0 = (int)FindInterval(nodes2.size(), cdf, (pstd.span<Float> c, int i) => interpolate(c, i) <= u);
 
             // Look up node positions and interpolated function values
             Float f0 = interpolate(values, idx0), f1 = interpolate(values, idx0 + 1);
@@ -1362,7 +1363,7 @@ namespace pbrt
             bins = new pstd.vector<Bin>(weights.size());
             // Normalize _weights_ to compute alias table PDF
             double dsum = 0.0;
-            for (int i = 0; i < weights.length; ++i)
+            for (int i = 0; i < (int)weights.size(); ++i)
                 dsum += weights[i];
             Float sum = (Float)dsum;
             CHECK_GT(sum, 0);

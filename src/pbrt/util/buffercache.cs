@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 //
@@ -57,7 +57,8 @@ namespace pbrt
         {
             ++nBufferCacheLookups;
             // Return pointer to data if _buf_ contents are already in the cache
-            Buffer lookupBuffer = new Buffer(buf.arr, buf.offset, (int)buf.size());
+            T[] lookupArray = buf.ToArray();
+            Buffer lookupBuffer = new Buffer(lookupArray, 0, lookupArray.Length);
             int shardIndex = (int)((uint)lookupBuffer.hash >> (32 - logShards));
             DCHECK(shardIndex >= 0 && shardIndex < nShards);
             lock (mutex[shardIndex])
@@ -72,7 +73,7 @@ namespace pbrt
 
                 // Add _buf_ contents to cache and return pointer to cached copy
                 T[] ptr = new T[buf.size()];
-                Array.Copy(buf.arr, buf.offset, ptr, 0, (int)buf.size());
+                buf.AsSpan().CopyTo(ptr);
                 Interlocked.Add(ref bytesUsed, (long)(buf.size() * (size_t)sizeof(T)));
                 Buffer cached = new Buffer(ptr, 0, ptr.Length);
                 cache[shardIndex][cached] = cached;

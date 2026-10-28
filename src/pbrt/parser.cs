@@ -813,7 +813,7 @@ namespace pbrt
             else
             {
                 // Parse scene from input files
-                for (int i = 0; i < filenames.length; ++i)
+                for (int i = 0; i < (int)filenames.size(); ++i)
                 {
                     string fn = filenames[i];
                     if (fn != "-")

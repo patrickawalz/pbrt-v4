@@ -436,6 +436,23 @@ namespace pbrt
             return (size_t)Clamp((long)first - 1, 0L, (long)sz - 2);
         }
 
+        // FindInterval variant that passes a state value (e.g. a pstd.span, which a lambda cannot
+        // capture since it is a ref struct) through to the predicate.
+        public static size_t FindInterval<TState>(size_t sz, TState state, Func<TState, int, bool> pred)
+            where TState : allows ref struct
+        {
+            long size = (long)sz - 2, first = 1;
+            while (size > 0)
+            {
+                // Evaluate predicate at midpoint and update _first_ and _size_
+                size_t half = (size_t)size >> 1, middle = (size_t)first + half;
+                bool predResult = pred(state, (int)middle);
+                first = predResult ? (long)middle + 1 : first;
+                size = predResult ? size - (long)(half + 1) : (long)half;
+            }
+            return (size_t)Clamp((long)first - 1, 0L, (long)sz - 2);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsPowerOf2(int v) { return v != 0 && (v & (v - 1)) == 0; }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1003,7 +1020,7 @@ namespace pbrt
                 return false;
 
             // Search for the interval _idx_ containing _x_
-            int idx = (int)FindInterval(nodes.size(), (int i) => nodes[i] <= x);
+            int idx = (int)FindInterval(nodes.size(), nodes, (pstd.span<Float> n, int i) => n[i] <= x);
             *offset = idx - 1;
             Float x0 = nodes[idx], x1 = nodes[idx + 1];
 
@@ -1052,7 +1069,7 @@ namespace pbrt
             CHECK_EQ((int)nodes.size(), (int)f.size());
             if (!(x >= nodes.front() && x <= nodes.back()))
                 return 0;
-            int idx = (int)FindInterval(nodes.size(), (int i) => nodes[i] <= x);
+            int idx = (int)FindInterval(nodes.size(), nodes, (pstd.span<Float> n, int i) => n[i] <= x);
             Float x0 = nodes[idx], x1 = nodes[idx + 1];
             Float f0 = f[idx], f1 = f[idx + 1];
             Float width = x1 - x0;
@@ -1081,7 +1098,7 @@ namespace pbrt
                 return nodes.back();
 
             // Map _u_ to a spline interval by inverting _values_
-            int i = (int)FindInterval(f.size(), (int j) => f[j] <= u);
+            int i = (int)FindInterval(f.size(), f, (pstd.span<Float> ff, int j) => ff[j] <= u);
 
             // Look up $x_i$ and function values of spline segment _i_
             Float x0 = nodes[i], x1 = nodes[i + 1];
@@ -1654,17 +1671,6 @@ namespace pbrt
 
     // SquareMatrix: C# has no integer template parameters, so SquareMatrix<2>, SquareMatrix<3> and
     // SquareMatrix<4> are expanded by hand as SquareMatrix2 / SquareMatrix3 / SquareMatrix4.
-    public unsafe ref struct MatrixRow
-    {
-        private ref Float r;
-        public MatrixRow(ref Float r) { this.r = ref r; }
-        public ref Float this[int j]
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return ref Unsafe.Add(ref r, j); }
-        }
-    }
-
     public unsafe struct SquareMatrix2
     {
         // SquareMatrix Public Methods
@@ -1791,10 +1797,13 @@ namespace pbrt
         }
 
         [System.Diagnostics.CodeAnalysis.UnscopedRef]
-        public MatrixRow this[int i]
+        public pstd.span<Float> this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 2)); }
+            get
+            {
+                return new pstd.span<Float>(ref Unsafe.Add(ref m00, i * 2), 2);
+            }
         }
 
         // SquareMatrix Private Members
@@ -2016,10 +2025,13 @@ namespace pbrt
         }
 
         [System.Diagnostics.CodeAnalysis.UnscopedRef]
-        public MatrixRow this[int i]
+        public pstd.span<Float> this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 3)); }
+            get
+            {
+                return new pstd.span<Float>(ref Unsafe.Add(ref m00, i * 3), 3);
+            }
         }
 
         // SquareMatrix Private Members
@@ -2299,10 +2311,13 @@ namespace pbrt
         }
 
         [System.Diagnostics.CodeAnalysis.UnscopedRef]
-        public MatrixRow this[int i]
+        public pstd.span<Float> this[int i]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get { return new MatrixRow(ref Unsafe.Add(ref m00, i * 4)); }
+            get
+            {
+                return new pstd.span<Float>(ref Unsafe.Add(ref m00, i * 4), 4);
+            }
         }
 
         // SquareMatrix Private Members

@@ -43,7 +43,7 @@ namespace pbrt
             EXPECT_EQ(StringPrintf("%s", (object)a), "[ foo, bar, bat ]");
 
             pstd.span<string> span = new pstd.span<string>(a);
-            EXPECT_EQ(StringPrintf("%s", span), "[ foo, bar, bat ]");
+            EXPECT_EQ(StringPrintf("%s", span.ToString()), "[ foo, bar, bat ]");
 
             pstd.optional<float> pi = 3.125f;
             EXPECT_EQ(StringPrintf("[ pstd::optional<%s> set: true value: 3.125 ]",

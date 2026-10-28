@@ -1,4 +1,4 @@
-// std.cs -- C++ <cmath>/<algorithm> emulation for the Magi port.
+﻿// std.cs -- C++ <cmath>/<algorithm> emulation for the Magi port.
 // pbrt:   std::sqrt(x)      Magi: std.sqrt(x)
 // Every function has float and double overloads (plus int/long where C++ has them),
 // so call sites are line-for-line identical to pbrt-v4 regardless of the Float alias.
@@ -269,8 +269,9 @@ public static partial class std
     }
 
 
-        public static int partition<T>(T[] arr, int first, int last, Func<T, bool> pred)
+        public static int partition<T>(Span<T> arr, Func<T, bool> pred)
         {
+            int first = 0, last = arr.Length;
             while (true)
             {
                 while (true)
@@ -291,10 +292,21 @@ public static partial class std
             }
         }
 
+        public static int partition<T>(T[] arr, int first, int last, Func<T, bool> pred)
+        {
+            return first + partition(new Span<T>(arr, first, last - first), pred);
+        }
+
+        public static int partition<T>(pstd.span<T> s, Func<T, bool> pred)
+        {
+            return partition(s.AsSpan(), pred);
+        }
+
         // std::nth_element, following libstdc++'s introselect on an array range [first, last).
         // (If the depth limit is exhausted, the range is fully sorted instead of heap-selected.)
-        public static void nth_element<T>(T[] a, int first, int nth, int last, Func<T, T, bool> comp)
+        public static void nth_element<T>(Span<T> a, int nth, Func<T, T, bool> comp)
         {
+            int first = 0, last = a.Length;
             if (first == last || nth == last)
                 return;
             int depthLimit = (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)(last - first))) * 2;
@@ -302,7 +314,7 @@ public static partial class std
             {
                 if (depthLimit == 0)
                 {
-                    Array.Sort(a, first, last - first, System.Collections.Generic.Comparer<T>.Create((x, y) => comp(x, y) ? -1 : (comp(y, x) ? 1 : 0)));
+                    a.Slice(first, last - first).Sort((x, y) => comp(x, y) ? -1 : (comp(y, x) ? 1 : 0));
                     return;
                 }
                 --depthLimit;
@@ -345,5 +357,15 @@ public static partial class std
                 }
                 a[j] = val;
             }
+        }
+
+        public static void nth_element<T>(T[] a, int first, int nth, int last, Func<T, T, bool> comp)
+        {
+            nth_element(new Span<T>(a, first, last - first), nth - first, comp);
+        }
+
+        public static void nth_element<T>(pstd.span<T> s, int nth, Func<T, T, bool> comp)
+        {
+            nth_element(s.AsSpan(), nth, comp);
         }
 }

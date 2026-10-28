@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/pstd.h, util/pstd.cpp
@@ -10,6 +10,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 public static unsafe class pstd
 {
@@ -80,57 +81,157 @@ public static unsafe class pstd
         }
     }
 
-    // pstd::span: a view onto an array (T[]) with offset/length.
-    public unsafe struct span<T>
+    // pstd::span: a non-owning view onto contiguous memory (managed array storage or a raw pointer).
+    public readonly unsafe ref struct span<T>
     {
-        public T[] arr;
-        public int offset;
-        public int length;
-
-        public span(T[] a) { arr = a; offset = 0; length = a == null ? 0 : a.Length; }
-        public span(T[] a, int offset, int length) { arr = a; this.offset = offset; this.length = length; }
-        public span(T[] a, ulong offset, ulong length) { arr = a; this.offset = (int)offset; this.length = (int)length; }
-
-        public static implicit operator span<T>(T[] a) { return new span<T>(a); }
-
-        public ulong size() { return (ulong)length; }
-        public bool empty() { return length == 0; }
-        public ulong size_bytes() { return (ulong)length * (ulong)Unsafe.SizeOf<T>(); }
-
-        public ref T this[int i]
+        public span(void* ptr, size_t n)
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + i]; }
+            _reference = ref Unsafe.AsRef<T>(ptr);
+            _length = n;
         }
+
+        public ref T this[size_t i]
+        {
+            get
+            {
+                return ref Unsafe.Add(ref _reference, (nuint)i);
+            }
+        }
+
+        public size_t size()
+        {
+            return _length;
+        }
+
+        public bool empty()
+        {
+            return size() == 0;
+        }
+
+        private readonly ref T _reference;
+        private readonly size_t _length;
+
+        public span(void* pointer, int length)
+        {
+            _reference = ref Unsafe.AsRef<T>(pointer);
+            _length = (size_t)length;
+        }
+
+        public span(ref T reference, int length)
+        {
+            _reference = ref reference;
+            _length = (size_t)length;
+        }
+
+        public ref T this[int index]
+        {
+            get
+            {
+                return ref Unsafe.Add(
+                    ref _reference, (nint)(uint)index /* force zero-extension */);
+            }
+        }
+
+        public span(void* pointer)
+        {
+            _reference = ref Unsafe.AsRef<T>(pointer);
+            _length = 1;
+        }
+
+        // Views onto managed arrays (the C++ code passes pointers/containers).
+        public span(T[] a)
+        {
+            if (a == null)
+            {
+                _reference = ref Unsafe.NullRef<T>();
+                _length = 0;
+            }
+            else
+            {
+                _reference = ref MemoryMarshal.GetArrayDataReference(a);
+                _length = (size_t)a.Length;
+            }
+        }
+
+        public span(T[] a, int offset, int length)
+        {
+            _reference = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(a), offset);
+            _length = (size_t)length;
+        }
+
+        public static implicit operator span<T>(T[] a)
+        {
+            return new span<T>(a);
+        }
+
+        public static implicit operator span<T>(vector<T> v)
+        {
+            return new span<T>(v.data_, 0, v.count);
+        }
+
+        public size_t size_bytes()
+        {
+            return _length * (size_t)Unsafe.SizeOf<T>();
+        }
+
         public ref T this[long i]
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + (int)i]; }
+            get
+            {
+                return ref Unsafe.Add(ref _reference, (nint)i);
+            }
         }
-        public ref T this[ulong i]
+
+        public ref T front()
         {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)] get { return ref arr[offset + (int)i]; }
+            return ref _reference;
         }
 
-        public ref T front() { return ref arr[offset]; }
-        public ref T back() { return ref arr[offset + length - 1]; }
+        public ref T back()
+        {
+            return ref Unsafe.Add(ref _reference, (nint)_length - 1);
+        }
 
-        public span<T> subspan(ulong pos, ulong count) { return new span<T>(arr, offset + (int)pos, (int)count); }
-        public span<T> subspan(ulong pos) { return new span<T>(arr, offset + (int)pos, length - (int)pos); }
-        public span<T> first(ulong count) { return new span<T>(arr, offset, (int)count); }
-        public span<T> last(ulong count) { return new span<T>(arr, offset + length - (int)count, (int)count); }
+        public span<T> subspan(size_t pos, size_t count)
+        {
+            return new span<T>(ref Unsafe.Add(ref _reference, (nint)pos), (int)count);
+        }
+
+        public span<T> subspan(size_t pos)
+        {
+            return new span<T>(ref Unsafe.Add(ref _reference, (nint)pos), (int)(_length - pos));
+        }
+
+        public span<T> first(size_t count)
+        {
+            return new span<T>(ref _reference, (int)count);
+        }
+
+        public span<T> last(size_t count)
+        {
+            return new span<T>(ref Unsafe.Add(ref _reference, (nint)(_length - count)), (int)count);
+        }
+
+        public Span<T> AsSpan()
+        {
+            return MemoryMarshal.CreateSpan(ref _reference, (int)_length);
+        }
+
+        public T[] ToArray()
+        {
+            return AsSpan().ToArray();
+        }
 
         public override string ToString()
         {
             System.Text.StringBuilder sb = new System.Text.StringBuilder("[ ");
-            for (int i = 0; i < length; ++i)
+            for (int i = 0; i < (int)_length; ++i)
             {
-                sb.Append(global::pbrt.pbrt.PrintObject(arr[offset + i]));
-                if (i < length - 1) sb.Append(", ");
+                sb.Append(global::pbrt.pbrt.PrintObject(this[i]));
+                if (i < (int)_length - 1) sb.Append(", ");
             }
             return sb.Append(" ]").ToString();
         }
-
-        public Span<T> AsSpan() { return new Span<T>(arr, offset, length); }
-        public T[] ToArray() { T[] r = new T[length]; Array.Copy(arr, offset, r, 0, length); return r; }
     }
 
     public static span<T> MakeSpan<T>(T[] a) { return new span<T>(a); }
@@ -203,7 +304,6 @@ public static unsafe class pstd
         public void insert_back(IEnumerable<T> items) { foreach (T t in items) push_back(t); }
         public T[] ToArray() { T[] r = new T[count]; Array.Copy(data_, r, count); return r; }
 
-        public static implicit operator span<T>(vector<T> v) { return new span<T>(v.data_, 0, v.count); }
     }
 
     // pstd::array<T, N> for the sizes pbrt uses

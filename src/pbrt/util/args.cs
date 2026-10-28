@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/args.h, util/args.cpp
@@ -109,7 +109,7 @@ namespace pbrt
             if ((size_t)v.Count != o.size())
                 return false;
             for (int i = 0; i < v.Count; ++i)
-                o.arr[o.offset + i] = v[i];
+                o[i] = v[i];
             return true;
         }
 
@@ -119,7 +119,7 @@ namespace pbrt
             if ((size_t)v.Count != o.size())
                 return false;
             for (int i = 0; i < v.Count; ++i)
-                o.arr[o.offset + i] = v[i];
+                o[i] = v[i];
             return true;
         }
 
@@ -129,7 +129,7 @@ namespace pbrt
             if ((size_t)v.Count != o.size())
                 return false;
             for (int i = 0; i < v.Count; ++i)
-                o.arr[o.offset + i] = v[i];
+                o[i] = v[i];
             return true;
         }
 
@@ -322,15 +322,33 @@ namespace pbrt
         }
         public static bool ParseArg(List<string> args, ref int iter, int end, string name, pstd.span<float> o, Action<string> onError)
         {
-            return ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, o), null, onError);
+            // (spans are ref structs and cannot be captured, so parse into a temporary and copy out)
+            float[] tmp = new float[o.size()];
+            bool r = ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, tmp), null, onError);
+            if (r)
+                for (int i = 0; i < tmp.Length; ++i)
+                    o[i] = tmp[i];
+            return r;
         }
         public static bool ParseArg(List<string> args, ref int iter, int end, string name, pstd.span<double> o, Action<string> onError)
         {
-            return ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, o), null, onError);
+            // (spans are ref structs and cannot be captured, so parse into a temporary and copy out)
+            double[] tmp = new double[o.size()];
+            bool r = ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, tmp), null, onError);
+            if (r)
+                for (int i = 0; i < tmp.Length; ++i)
+                    o[i] = tmp[i];
+            return r;
         }
         public static bool ParseArg(List<string> args, ref int iter, int end, string name, pstd.span<int> o, Action<string> onError)
         {
-            return ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, o), null, onError);
+            // (spans are ref structs and cannot be captured, so parse into a temporary and copy out)
+            int[] tmp = new int[o.size()];
+            bool r = ParseArgImpl(args, ref iter, end, name, (string s) => initArg(s, tmp), null, onError);
+            if (r)
+                for (int i = 0; i < tmp.Length; ++i)
+                    o[i] = tmp[i];
+            return r;
         }
 
         // Command-line Argument Utility Functions

@@ -1,10 +1,11 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // cpu/aggregates.h / cpu/aggregates.cpp
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace pbrt
@@ -217,7 +218,8 @@ namespace pbrt
             CHECK(primitives.Length != 0);
             // Build BVH from _primitives_
             // Initialize _bvhPrimitives_ array for primitives
-            BVHPrimitive[] bvhPrimitives = new BVHPrimitive[primitives.Length];
+            // Pinned so that the (ref struct) spans used by buildRecursive can be re-created on worker threads.
+            BVHPrimitive[] bvhPrimitives = GC.AllocateArray<BVHPrimitive>(primitives.Length, pinned: true);
             for (int i = 0; i < primitives.Length; ++i)
                 bvhPrimitives[i] = new BVHPrimitive((size_t)i, primitives[i].Bounds());
 
@@ -266,14 +268,14 @@ namespace pbrt
             Interlocked.Increment(ref totalNodes.v);
             // Compute bounds of all primitives in BVH node
             Bounds3f bounds = new Bounds3f();
-            for (int i = 0; i < bvhPrimitives.length; ++i)
+            for (int i = 0; i < (int)bvhPrimitives.size(); ++i)
                 bounds = Union(bounds, bvhPrimitives[i].bounds);
 
             if (bounds.SurfaceArea() == 0 || bvhPrimitives.size() == 1)
             {
                 // Create leaf _BVHBuildNode_
                 int firstPrimOffset = orderedPrimsOffset.fetch_add((int)bvhPrimitives.size());
-                for (int i = 0; i < bvhPrimitives.length; ++i)
+                for (int i = 0; i < (int)bvhPrimitives.size(); ++i)
                 {
                     int index = (int)bvhPrimitives[i].primitiveIndex;
                     orderedPrims[firstPrimOffset + i] = primitives[index];
@@ -285,7 +287,7 @@ namespace pbrt
             {
                 // Compute bound of primitive centroids and choose split dimension _dim_
                 Bounds3f centroidBounds = new Bounds3f();
-                for (int i = 0; i < bvhPrimitives.length; ++i)
+                for (int i = 0; i < (int)bvhPrimitives.size(); ++i)
                     centroidBounds = Union(centroidBounds, bvhPrimitives[i].Centroid());
                 int dim = centroidBounds.MaxDimension();
 
@@ -294,7 +296,7 @@ namespace pbrt
                 {
                     // Create leaf _BVHBuildNode_
                     int firstPrimOffset = orderedPrimsOffset.fetch_add((int)bvhPrimitives.size());
-                    for (int i = 0; i < bvhPrimitives.length; ++i)
+                    for (int i = 0; i < (int)bvhPrimitives.size(); ++i)
                     {
                         int index = (int)bvhPrimitives[i].primitiveIndex;
                         orderedPrims[firstPrimOffset + i] = primitives[index];
@@ -305,8 +307,6 @@ namespace pbrt
                 else
                 {
                     int mid = (int)bvhPrimitives.size() / 2;
-                    BVHPrimitive[] arr = bvhPrimitives.arr;
-                    int begin = bvhPrimitives.offset, end = bvhPrimitives.offset + bvhPrimitives.length;
                     // Partition primitives based on _splitMethod_
                     switch (splitMethod)
                     {
@@ -314,12 +314,12 @@ namespace pbrt
                             {
                                 // Partition primitives through node's midpoint
                                 Float pmid = (centroidBounds.pMin[dim] + centroidBounds.pMax[dim]) / 2;
-                                int midIter = std.partition(arr, begin, end, (BVHPrimitive pi) => pi.Centroid()[dim] < pmid);
-                                mid = midIter - begin;
+                                int midIter = std.partition(bvhPrimitives, (BVHPrimitive pi) => pi.Centroid()[dim] < pmid);
+                                mid = midIter;
                                 // For lots of prims with large overlapping bounding boxes, this
                                 // may fail to partition; in that case do not break and fall through
                                 // to EqualCounts.
-                                if (midIter != begin && midIter != end)
+                                if (midIter != 0 && midIter != (int)bvhPrimitives.size())
                                     break;
                                 goto case SplitMethod.EqualCounts;
                             }
@@ -327,7 +327,7 @@ namespace pbrt
                             {
                                 // Partition primitives into equally sized subsets
                                 mid = (int)bvhPrimitives.size() / 2;
-                                std.nth_element(arr, begin, begin + mid, end,
+                                std.nth_element(bvhPrimitives, mid,
                                             (BVHPrimitive a, BVHPrimitive b) => a.Centroid()[dim] < b.Centroid()[dim]);
 
                                 break;
@@ -340,7 +340,7 @@ namespace pbrt
                                 {
                                     // Partition primitives into equally sized subsets
                                     mid = (int)bvhPrimitives.size() / 2;
-                                    std.nth_element(arr, begin, begin + mid, end,
+                                    std.nth_element(bvhPrimitives, mid,
                                                 (BVHPrimitive a, BVHPrimitive b) => a.Centroid()[dim] < b.Centroid()[dim]);
                                 }
                                 else
@@ -352,7 +352,7 @@ namespace pbrt
                                         buckets[i].bounds = new Bounds3f();
 
                                     // Initialize _BVHSplitBucket_ for SAH partition buckets
-                                    for (int pi = 0; pi < bvhPrimitives.length; ++pi)
+                                    for (int pi = 0; pi < (int)bvhPrimitives.size(); ++pi)
                                     {
                                         BVHPrimitive prim = bvhPrimitives[pi];
                                         int b = (int)(nBuckets * centroidBounds.Offset(prim.Centroid())[dim]);
@@ -409,21 +409,21 @@ namespace pbrt
                                     {
                                         int splitBucket = minCostSplitBucket;
                                         Bounds3f cb = centroidBounds;
-                                        int midIter = std.partition(arr, begin, end, (BVHPrimitive bp) =>
+                                        int midIter = std.partition(bvhPrimitives, (BVHPrimitive bp) =>
                                         {
                                             int b = (int)(nBuckets * cb.Offset(bp.Centroid())[dim]);
                                             if (b == nBuckets)
                                                 b = nBuckets - 1;
                                             return b <= splitBucket;
                                         });
-                                        mid = midIter - begin;
+                                        mid = midIter;
                                     }
                                     else
                                     {
                                         // Create leaf _BVHBuildNode_
                                         int firstPrimOffset =
                                             orderedPrimsOffset.fetch_add((int)bvhPrimitives.size());
-                                        for (int i = 0; i < bvhPrimitives.length; ++i)
+                                        for (int i = 0; i < (int)bvhPrimitives.size(); ++i)
                                         {
                                             int index = (int)bvhPrimitives[i].primitiveIndex;
                                             orderedPrims[firstPrimOffset + i] = primitives[index];
@@ -443,9 +443,11 @@ namespace pbrt
                     {
                         // Recursively build child BVHs in parallel
                         int midCopy = mid;
-                        pstd.span<BVHPrimitive> bvhCopy = bvhPrimitives;
+                        IntPtr bvhPtr = (IntPtr)Unsafe.AsPointer(ref bvhPrimitives.front());
+                        int bvhCount = (int)bvhPrimitives.size();
                         ParallelFor(0, 2, (int i) =>
                         {
+                            pstd.span<BVHPrimitive> bvhCopy = new pstd.span<BVHPrimitive>((void*)bvhPtr, bvhCount);
                             if (i == 0)
                                 children[0] = buildRecursive(
                                     bvhCopy.subspan(0, (ulong)midCopy), totalNodes,
@@ -914,7 +916,7 @@ namespace pbrt
                 else
                 {
                     primitiveIndicesOffset = primitiveIndices.Count;
-                    for (int i = 0; i < primNums.length; ++i)
+                    for (int i = 0; i < (int)primNums.size(); ++i)
                         primitiveIndices.Add(primNums[i]);
                 }
             }

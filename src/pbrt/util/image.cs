@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 //
@@ -721,7 +721,11 @@ namespace pbrt
             return Intersect(extent, new Bounds2i(new Point2i(0, 0), image.Resolution())) == extent;
         }
 
-        private static void ForExtent(Bounds2i extent, WrapMode2D wrapMode, Image image, Action<int> op)
+        // ForExtent variant that passes a state value (e.g. a pstd.span, which a lambda cannot capture
+        // since it is a ref struct) through to the operation.
+        private static void ForExtent<TState>(Bounds2i extent, WrapMode2D wrapMode, Image image,
+                                              TState state, Action<TState, int> op)
+            where TState : allows ref struct
         {
             CHECK_LT(extent.pMin.x, extent.pMax.x);
             CHECK_LT(extent.pMin.y, extent.pMax.y);
@@ -736,7 +740,7 @@ namespace pbrt
                     int offset = (int)image.PixelOffset(new Point2i(extent.pMin[0], y));
                     for (int x = 0; x < nx; ++x)
                         for (int c = 0; c < nc; ++c)
-                            op(offset++);
+                            op(state, offset++);
                 }
             }
             else
@@ -750,11 +754,12 @@ namespace pbrt
                         CHECK(RemapPixelCoords(&p, image.Resolution(), wrapMode));
                         int offset = (int)image.PixelOffset(p);
                         for (int c = 0; c < nc; ++c)
-                            op(offset++);
+                            op(state, offset++);
                     }
                 }
             }
         }
+
         // Image Public Methods
         public Image(Allocator alloc = null)
         {
@@ -1109,7 +1114,7 @@ namespace pbrt
                                 buf[bufIter++] = (float)encoding.ToLinearByte(p8[offset + i]);
 #else
                             encoding.ToLinear(new pstd.span<byte>(p8.data(), offset, count),
-                                              new pstd.span<Float>(buf.arr, buf.offset + bufIter, count));
+                                              buf.subspan((size_t)bufIter, (size_t)count));
                             bufIter += count;
 #endif
                         }
@@ -1117,9 +1122,9 @@ namespace pbrt
                     else
                     {
                         int bi = bufIter;
-                        ForExtent(extent, wrapMode, this, (int offset) =>
+                        ForExtent(extent, wrapMode, this, buf, (pstd.span<float> b, int offset) =>
                         {
-                            buf[bi] = (float)encoding.ToLinearByte(p8[offset]);
+                            b[bi] = (float)encoding.ToLinearByte(p8[offset]);
                             ++bi;
                         });
                     }
@@ -1128,14 +1133,14 @@ namespace pbrt
                 case PixelFormat.Half:
                     {
                         int bi = bufIter;
-                        ForExtent(extent, wrapMode, this, (int offset) => { buf[bi++] = (float)p16[offset]; });
+                        ForExtent(extent, wrapMode, this, buf, (pstd.span<float> b, int offset) => { b[bi++] = (float)p16[offset]; });
                     }
                     break;
 
                 case PixelFormat.Float:
                     {
                         int bi = bufIter;
-                        ForExtent(extent, wrapMode, this, (int offset) => { buf[bi++] = p32[offset]; });
+                        ForExtent(extent, wrapMode, this, buf, (pstd.span<float> b, int offset) => { b[bi++] = p32[offset]; });
                     }
                     break;
 
@@ -1165,7 +1170,7 @@ namespace pbrt
                             for (int i = 0; i < count; ++i)
                                 p8[offset + i] = encoding.FromLinearByte(buf[bufIter++]);
 #else
-                            encoding.FromLinear(new pstd.span<Float>(buf.arr, buf.offset + bufIter, count),
+                            encoding.FromLinear(buf.subspan((size_t)bufIter, (size_t)count),
                                                 new pstd.span<byte>(p8.data(), offset, count));
                             bufIter += count;
 #endif
@@ -1174,9 +1179,9 @@ namespace pbrt
                     else
                     {
                         int bi = bufIter;
-                        ForExtent(extent, WrapMode.Clamp, this, (int offset) =>
+                        ForExtent(extent, WrapMode.Clamp, this, buf, (pstd.span<float> b, int offset) =>
                         {
-                            Float v = buf[bi++];
+                            Float v = b[bi++];
                             p8[offset] = encoding.FromLinearByte(v);
                         });
                     }
@@ -1185,14 +1190,14 @@ namespace pbrt
                 case PixelFormat.Half:
                     {
                         int bi = bufIter;
-                        ForExtent(extent, WrapMode.Clamp, this, (int offset) => { p16[offset] = new Half(buf[bi++]); });
+                        ForExtent(extent, WrapMode.Clamp, this, buf, (pstd.span<float> b, int offset) => { p16[offset] = new Half(b[bi++]); });
                     }
                     break;
 
                 case PixelFormat.Float:
                     {
                         int bi = bufIter;
-                        ForExtent(extent, WrapMode.Clamp, this, (int offset) => { p32[offset] = buf[bi++]; });
+                        ForExtent(extent, WrapMode.Clamp, this, buf, (pstd.span<float> b, int offset) => { p32[offset] = b[bi++]; });
                     }
                     break;
 
