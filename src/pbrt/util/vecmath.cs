@@ -1330,7 +1330,7 @@ namespace pbrt
 
 
     // Vector2f Definition
-    public unsafe struct Vector2f : IEquatable<Vector2f>
+    public unsafe struct Vector2f
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple2<Vector2, Float>
@@ -1499,9 +1499,6 @@ namespace pbrt
             return $"[ {x}, {y} ]";
         }
 
-        public bool Equals(Vector2f b) { return this == b; }
-        public override bool Equals(object o) { return o is Vector2f b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Vector2<Float>
@@ -1570,7 +1567,7 @@ namespace pbrt
     }
 
     // Vector2i Definition
-    public unsafe struct Vector2i : IEquatable<Vector2i>
+    public unsafe struct Vector2i
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple2<Vector2, int>
@@ -1709,9 +1706,6 @@ namespace pbrt
             return $"[ {x}, {y} ]";
         }
 
-        public bool Equals(Vector2i b) { return this == b; }
-        public override bool Equals(object o) { return o is Vector2i b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Vector2<int>
@@ -1780,7 +1774,7 @@ namespace pbrt
     }
 
     // Vector3f Definition
-    public unsafe struct Vector3f : IEquatable<Vector3f>
+    public unsafe struct Vector3f
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple3<Vector3, Float>
@@ -1989,9 +1983,6 @@ namespace pbrt
             return $"[ {x}, {y}, {z} ]";
         }
 
-        public bool Equals(Vector3f b) { return this == b; }
-        public override bool Equals(object o) { return o is Vector3f b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y, z); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Vector3<Float>
@@ -2097,7 +2088,7 @@ namespace pbrt
     }
 
     // Vector3i Definition
-    public unsafe struct Vector3i : IEquatable<Vector3i>
+    public unsafe struct Vector3i
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple3<Vector3, int>
@@ -2269,9 +2260,6 @@ namespace pbrt
             return $"[ {x}, {y}, {z} ]";
         }
 
-        public bool Equals(Vector3i b) { return this == b; }
-        public override bool Equals(object o) { return o is Vector3i b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y, z); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Vector3<int>
@@ -2363,7 +2351,7 @@ namespace pbrt
     }
 
     // Point2f Definition
-    public unsafe struct Point2f : IEquatable<Point2f>
+    public unsafe struct Point2f
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple2<Point2, Float>
@@ -2510,9 +2498,6 @@ namespace pbrt
             return $"[ {x}, {y} ]";
         }
 
-        public bool Equals(Point2f b) { return this == b; }
-        public override bool Equals(object o) { return o is Point2f b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Point2<Float>
@@ -2650,7 +2635,7 @@ namespace pbrt
     }
 
     // Point2i Definition
-    public unsafe struct Point2i : IEquatable<Point2i>
+    public unsafe struct Point2i
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple2<Point2, int>
@@ -2773,9 +2758,6 @@ namespace pbrt
             return $"[ {x}, {y} ]";
         }
 
-        public bool Equals(Point2i b) { return this == b; }
-        public override bool Equals(object o) { return o is Point2i b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Point2<int>
@@ -2901,7 +2883,7 @@ namespace pbrt
     }
 
     // Point3f Definition
-    public unsafe struct Point3f : IEquatable<Point3f>
+    public unsafe struct Point3f
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple3<Point3, Float>
@@ -3095,9 +3077,6 @@ namespace pbrt
             return $"[ {x}, {y}, {z} ]";
         }
 
-        public bool Equals(Point3f b) { return this == b; }
-        public override bool Equals(object o) { return o is Point3f b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y, z); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Point3<Float>
@@ -3268,7 +3247,7 @@ namespace pbrt
     }
 
     // Point3i Definition
-    public unsafe struct Point3i : IEquatable<Point3i>
+    public unsafe struct Point3i
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple3<Point3, int>
@@ -3425,9 +3404,6 @@ namespace pbrt
             return $"[ {x}, {y}, {z} ]";
         }
 
-        public bool Equals(Point3i b) { return this == b; }
-        public override bool Equals(object o) { return o is Point3i b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y, z); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Point3<int>
@@ -3570,7 +3546,7 @@ namespace pbrt
     }
 
     // Normal3f Definition
-    public unsafe struct Normal3f : IEquatable<Normal3f>
+    public unsafe struct Normal3f
     {
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Tuple3<Normal3, Float>
@@ -3737,9 +3713,6 @@ namespace pbrt
             return $"[ {x}, {y}, {z} ]";
         }
 
-        public bool Equals(Normal3f b) { return this == b; }
-        public override bool Equals(object o) { return o is Normal3f b && this == b; }
-        public override int GetHashCode() { return HashCode.Combine(x, y, z); }
 
         // ═══════════════════════════════════════════════════════════════════
         // FROM: Normal3<Float>
