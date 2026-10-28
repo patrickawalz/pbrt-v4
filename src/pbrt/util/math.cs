@@ -1268,6 +1268,12 @@ namespace pbrt
             }
         }
 
+        public static Float InnerProduct(Float a, Float b, Float c, Float d)
+        {
+            CompensatedFloat ip = @internal.InnerProduct(a, b, c, d);
+            return (Float)ip;
+        }
+
         public static Float InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f)
         {
             CompensatedFloat ip = @internal.InnerProduct(a, b, c, d, e, f);
@@ -2084,84 +2090,21 @@ namespace pbrt
                     r[i][j] = m[j][i];
             return r;
         }
-        // General-case Inverse() from math.cpp, instantiated for N = 2
         public static pstd.optional<SquareMatrix2> Inverse(SquareMatrix2 m)
         {
-            const int N = 2;
-            int* indxc = stackalloc int[N];
-            int* indxr = stackalloc int[N];
-            int* ipiv = stackalloc int[N];
-            Float* minv = stackalloc Float[N * N];
-            for (int i = 0; i < N; ++i)
-                ipiv[i] = 0;
-            for (int i = 0; i < N; ++i)
-                for (int j = 0; j < N; ++j)
-                    minv[i * N + j] = m[i][j];
-            for (int i = 0; i < N; i++)
-            {
-                int irow = 0, icol = 0;
-                Float big = 0.0f;
-                // Choose pivot
-                for (int j = 0; j < N; j++)
-                {
-                    if (ipiv[j] != 1)
-                    {
-                        for (int k = 0; k < N; k++)
-                        {
-                            if (ipiv[k] == 0)
-                            {
-                                if (std.abs(minv[j * N + k]) >= big)
-                                {
-                                    big = std.abs(minv[j * N + k]);
-                                    irow = j;
-                                    icol = k;
-                                }
-                            }
-                            else if (ipiv[k] > 1)
-                                return default;  // singular
-                        }
-                    }
-                }
-                ++ipiv[icol];
-                // Swap rows _irow_ and _icol_ for pivot
-                if (irow != icol)
-                {
-                    for (int k = 0; k < N; ++k)
-                        pstd.swap(ref minv[irow * N + k], ref minv[icol * N + k]);
-                }
-                indxr[i] = irow;
-                indxc[i] = icol;
-                if (minv[icol * N + icol] == 0.0f)
-                    return default;  // singular
+            Float det = Determinant(m);
+            if (det == 0)
+                return default;
+            Float invDet = 1 / det;
 
-                // Set $m[icol][icol]$ to one by scaling row _icol_ appropriately
-                Float pivinv = (Float)(1.0 / minv[icol * N + icol]);
-                minv[icol * N + icol] = 1;
-                for (int j = 0; j < N; j++)
-                    minv[icol * N + j] *= pivinv;
+            SquareMatrix2 r;
 
-                // Subtract this row from others to zero out their columns
-                for (int j = 0; j < N; j++)
-                {
-                    if (j != icol)
-                    {
-                        Float save = minv[j * N + icol];
-                        minv[j * N + icol] = 0;
-                        for (int k = 0; k < N; k++)
-                            minv[j * N + k] = FMA(-minv[icol * N + k], save, minv[j * N + k]);
-                    }
-                }
-            }
-            // Swap columns to reflect permutation
-            for (int j = N - 1; j >= 0; j--)
-            {
-                if (indxr[j] != indxc[j])
-                {
-                    for (int k = 0; k < N; k++)
-                        pstd.swap(ref minv[k * N + indxr[j]], ref minv[k * N + indxc[j]]);
-                }
-            }
-            return new SquareMatrix2(minv);
+            r.m00 = invDet * m.m11;
+            r.m01 = invDet * -m.m01;
+            r.m10 = invDet * -m.m10;
+            r.m11 = invDet * m.m00;
+
+            return r;
         }
 
         public static Float Determinant(SquareMatrix3 m)
@@ -2772,10 +2715,10 @@ namespace pbrt
         public static SquareMatrix2 operator *(SquareMatrix2 m1, SquareMatrix2 m2)
         {
             SquareMatrix2 r;
-            r.m00 = FMA(m1.m01, m2.m10, FMA(m1.m00, m2.m00, 0f));
-            r.m01 = FMA(m1.m01, m2.m11, FMA(m1.m00, m2.m01, 0f));
-            r.m10 = FMA(m1.m11, m2.m10, FMA(m1.m10, m2.m00, 0f));
-            r.m11 = FMA(m1.m11, m2.m11, FMA(m1.m10, m2.m01, 0f));
+            r.m00 = InnerProduct(m1.m00, m2.m00, m1.m01, m2.m10);
+            r.m01 = InnerProduct(m1.m00, m2.m01, m1.m01, m2.m11);
+            r.m10 = InnerProduct(m1.m10, m2.m00, m1.m11, m2.m10);
+            r.m11 = InnerProduct(m1.m10, m2.m01, m1.m11, m2.m11);
             return r;
         }
     }
