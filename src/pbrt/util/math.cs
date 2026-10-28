@@ -132,13 +132,28 @@ namespace pbrt
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int FMA(int a, int b, int c) { return a * b + c; }
+        public static int FMA(int a, int b, int c)
+        {
+            return a * b + c;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static long FMA(long a, long b, long c) { return a * b + c; }
+        public static long FMA(long a, long b, long c)
+        {
+            return a * b + c;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint FMA(uint a, uint b, uint c) { return a * b + c; }
+        public static uint FMA(uint a, uint b, uint c)
+        {
+            return a * b + c;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ulong FMA(ulong a, ulong b, ulong c) { return a * b + c; }
+        public static ulong FMA(ulong a, ulong b, ulong c)
+        {
+            return a * b + c;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Float WindowedSinc(Float x, Float radius, Float tau)
@@ -149,55 +164,166 @@ namespace pbrt
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float Sinc(Float x) { return SinXOverX(Pi * x); }
+        public static Float Sinc(Float x)
+        {
+            return SinXOverX(Pi * x);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float Clamp(float val, float low, float high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static double Clamp(double val, double low, double high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int Clamp(int val, int low, int high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint Clamp(uint val, uint low, uint high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long Clamp(long val, long low, long high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ulong Clamp(ulong val, ulong low, ulong high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
         // mixed-type forms used by pbrt (T val, U low, V high) -> T
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int Clamp(int val, int low, uint high)
-        { if (val < low) return low; else if (val > high) return (int)high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return (int)high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int Clamp(int val, int low, ulong high)
-        { if (val < low) return low; else if (val > (long)high) return (int)high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > (long)high)
+                return (int)high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long Clamp(long val, long low, ulong high)
-        { if (val < low) return low; else if (val > (long)high) return (long)high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > (long)high)
+                return (long)high;
+            else
+                return val;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Float Clamp(Float val, int low, Float high)
-        { if (val < low) return low; else if (val > high) return high; else return val; }
+        {
+            if (val < low)
+                return low;
+            else if (val > high)
+                return high;
+            else
+                return val;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int Mod(int a, int b) { int result = a - (a / b) * b; return (int)((result < 0) ? result + b : result); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint Mod(uint a, uint b) { uint result = a - (a / b) * b; return result; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static long Mod(long a, long b) { long result = a - (a / b) * b; return (long)((result < 0) ? result + b : result); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ulong Mod(ulong a, ulong b) { ulong result = a - (a / b) * b; return result; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float Mod(Float a, Float b) { return std.fmod(a, b); }
+        public static int Mod(int a, int b)
+        {
+            int result = a - (a / b) * b;
+            return (int)((result < 0) ? result + b : result);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float Radians(Float deg) { return (Pi / 180) * deg; }
+        public static uint Mod(uint a, uint b)
+        {
+            uint result = a - (a / b) * b;
+            return result;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float Degrees(Float rad) { return (180 / Pi) * rad; }
+        public static long Mod(long a, long b)
+        {
+            long result = a - (a / b) * b;
+            return (long)((result < 0) ? result + b : result);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static ulong Mod(ulong a, ulong b)
+        {
+            ulong result = a - (a / b) * b;
+            return result;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Float Mod(Float a, Float b)
+        {
+            return std.fmod(a, b);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Float Radians(Float deg)
+        {
+            return (Pi / 180) * deg;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Float Degrees(Float rad)
+        {
+            return (180 / Pi) * rad;
+        }
 
         public static Float SmoothStep(Float x, Float a, Float b)
         {
@@ -222,13 +348,47 @@ namespace pbrt
             return std.sqrt(std.max(0.0, x));
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static float Sqr(float v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static double Sqr(double v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static int Sqr(int v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static uint Sqr(uint v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static pstd.complex Sqr(pstd.complex v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static long Sqr(long v) { return v * v; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static ulong Sqr(ulong v) { return v * v; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Sqr(float v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Sqr(double v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Sqr(int v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static uint Sqr(uint v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static pstd.complex Sqr(pstd.complex v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long Sqr(long v)
+        {
+            return v * v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static ulong Sqr(ulong v)
+        {
+            return v * v;
+        }
 
         // Pow<n>(v): unrolled per exponent (C++ template recursion: Pow<n>(v) = Pow<n/2>^2 * Pow<n&1>)
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -663,45 +823,61 @@ namespace pbrt
 
         // EvaluatePolynomial overloads (variadic template in pbrt)
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0) { return c0; }
+        public static Float EvaluatePolynomial(Float t, Float c)
+        {
+            return c;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1) { return FMA(t, EvaluatePolynomial(t, c1), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1), c0);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2) { return FMA(t, EvaluatePolynomial(t, c1, c2), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1, c2), c0);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1, c2, c3), c0);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4), c0);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5), c0);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14, Float c15) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14, Float c15, Float c16) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14, Float c15, Float c16, Float c17) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14, Float c15, Float c16, Float c17, Float c18) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18), c0); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6, Float c7, Float c8, Float c9, Float c10, Float c11, Float c12, Float c13, Float c14, Float c15, Float c16, Float c17, Float c18, Float c19) { return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19), c0); }
+        public static Float EvaluatePolynomial(Float t, Float c0, Float c1, Float c2, Float c3, Float c4, Float c5, Float c6)
+        {
+            return FMA(t, EvaluatePolynomial(t, c1, c2, c3, c4, c5, c6), c0);
+        }
+
+        public static Float EvaluatePolynomial(Float t, Float c, params Span<Float> cRemaining)
+        {
+            Float ret = c;
+
+            if (cRemaining.Length > 0)
+            {
+                ret = cRemaining[cRemaining.Length - 1];
+                for (int i = cRemaining.Length - 2; i >= 0; i--)
+                    ret = FMA(t, ret, cRemaining[i]);
+                ret = FMA(t, ret, c);
+            }
+
+            return ret;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Float SinXOverX(Float x)
@@ -717,6 +893,7 @@ namespace pbrt
             DCHECK(x >= -1.0001 && x <= 1.0001);
             return std.asin(Clamp(x, -1, 1));
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float SafeACos(float x)
         {
@@ -771,18 +948,52 @@ namespace pbrt
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int Log2Int(uint32_t v) { return 31 - BitOperations.LeadingZeroCount(v); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int Log2Int(int32_t v) { return Log2Int((uint32_t)v); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int Log2Int(uint64_t v) { return 63 - BitOperations.LeadingZeroCount(v); }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int Log2Int(int64_t v) { return Log2Int((uint64_t)v); }
+        public static int Log2Int(uint32_t v)
+        {
+            return 31 - BitOperations.LeadingZeroCount(v);
+        }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static int Log4Int(uint32_t v) { return Log2Int(v) / 2; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static int Log4Int(int32_t v) { return Log2Int(v) / 2; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static int Log4Int(uint64_t v) { return Log2Int(v) / 2; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] public static int Log4Int(int64_t v) { return Log2Int(v) / 2; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log2Int(int32_t v)
+        {
+            return Log2Int((uint32_t)v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log2Int(uint64_t v)
+        {
+            return 63 - BitOperations.LeadingZeroCount(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log2Int(int64_t v)
+        {
+            return Log2Int((uint64_t)v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log4Int(uint32_t v)
+        {
+            return Log2Int(v) / 2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log4Int(int32_t v)
+        {
+            return Log2Int(v) / 2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log4Int(uint64_t v)
+        {
+            return Log2Int(v) / 2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Log4Int(int64_t v)
+        {
+            return Log2Int(v) / 2;
+        }
 
         public static float FastExp(float x)
         {
@@ -827,7 +1038,10 @@ namespace pbrt
             return std.exp(-x / s) / (s * Sqr(1 + std.exp(-x / s)));
         }
 
-        public static Float LogisticCDF(Float x, Float s) { return 1 / (1 + std.exp(-x / s)); }
+        public static Float LogisticCDF(Float x, Float s)
+        {
+            return 1 / (1 + std.exp(-x / s));
+        }
 
         public static Float TrimmedLogistic(Float x, Float s, Float a, Float b)
         {
@@ -868,20 +1082,46 @@ namespace pbrt
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf2(int v) { return v != 0 && (v & (v - 1)) == 0; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf2(uint v) { return v != 0 && (v & (v - 1)) == 0; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf2(long v) { return v != 0 && (v & (v - 1)) == 0; }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf2(ulong v) { return v != 0 && (v & (v - 1)) == 0; }
+        public static bool IsPowerOf2(int v)
+        {
+            return v != 0 && (v & (v - 1)) == 0;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf4(int v) { return v == 1 << (2 * Log4Int(v)); }
+        public static bool IsPowerOf2(uint v)
+        {
+            return v != 0 && (v & (v - 1)) == 0;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf4(uint v) { return v == 1u << (2 * Log4Int(v)); }
+        public static bool IsPowerOf2(long v)
+        {
+            return v != 0 && (v & (v - 1)) == 0;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsPowerOf4(long v) { return v == 1L << (2 * Log4Int(v)); }
+        public static bool IsPowerOf2(ulong v)
+        {
+            return v != 0 && (v & (v - 1)) == 0;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsPowerOf4(int v)
+        {
+            return v == 1 << (2 * Log4Int(v));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsPowerOf4(uint v)
+        {
+            return v == 1u << (2 * Log4Int(v));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsPowerOf4(long v)
+        {
+            return v == 1L << (2 * Log4Int(v));
+        }
 
         public static int32_t RoundUpPow2(int32_t v)
         {
@@ -906,8 +1146,15 @@ namespace pbrt
             return v + 1;
         }
 
-        public static int RoundUpPow4(int v) { return IsPowerOf4(v) ? v : (1 << (2 * (1 + Log4Int(v)))); }
-        public static long RoundUpPow4(long v) { return IsPowerOf4(v) ? v : (1L << (2 * (1 + Log4Int(v)))); }
+        public static int RoundUpPow4(int v)
+        {
+            return IsPowerOf4(v) ? v : (1 << (2 * (1 + Log4Int(v))));
+        }
+
+        public static long RoundUpPow4(long v)
+        {
+            return IsPowerOf4(v) ? v : (1L << (2 * (1 + Log4Int(v))));
+        }
 
         // CompensatedFloat helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -932,6 +1179,7 @@ namespace pbrt
             float error = FMA(-c, d, cd);
             return differenceOfProducts + error;
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static double DifferenceOfProducts(double a, double b, double c, double d)
         {
@@ -947,6 +1195,7 @@ namespace pbrt
             return new Vector3f(DifferenceOfProducts(a, b.x, c, d.x), DifferenceOfProducts(a, b.y, c, d.y),
                                 DifferenceOfProducts(a, b.z, c, d.z));
         }
+
         public static Normal3f DifferenceOfProducts(Float a, Normal3f b, Float c, Normal3f d)
         {
             return new Normal3f(DifferenceOfProducts(a, b.x, c, d.x), DifferenceOfProducts(a, b.y, c, d.y),
@@ -961,6 +1210,7 @@ namespace pbrt
             float error = FMA(c, d, -cd);
             return sumOfProducts + error;
         }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static double SumOfProducts(double a, double b, double c, double d)
         {
@@ -970,57 +1220,71 @@ namespace pbrt
             return sumOfProducts + error;
         }
 
-        // InnerProduct overloads (variadic template in pbrt)
-        public static Float InnerProduct(Float a0, Float b0) { return (Float)(CompensatedFloat_InnerProduct(a0, b0)); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a, Float b) { return TwoProd(a, b); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1)
+        internal static class @internal
         {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
+            public static CompensatedFloat InnerProduct(Float a, Float b)
+            {
+                return TwoProd(a, b);
+            }
+
+            public static CompensatedFloat InnerProduct(Float a, Float b, Float c, Float d)
+            {
+                CompensatedFloat ab = TwoProd(a, b);
+                CompensatedFloat tp = InnerProduct(c, d);
+                CompensatedFloat sum = TwoSum(ab.v, tp.v);
+                return new(sum.v, ab.err + (tp.err + sum.err));
+            }
+
+            public static CompensatedFloat InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f)
+            {
+                CompensatedFloat ab = TwoProd(a, b);
+                CompensatedFloat tp = InnerProduct(c, d, e, f);
+                CompensatedFloat sum = TwoSum(ab.v, tp.v);
+                return new(sum.v, ab.err + (tp.err + sum.err));
+            }
+
+            public static CompensatedFloat InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f, Float g, Float h)
+            {
+                CompensatedFloat ab = TwoProd(a, b);
+                CompensatedFloat tp = InnerProduct(c, d, e, f, g, h);
+                CompensatedFloat sum = TwoSum(ab.v, tp.v);
+                return new(sum.v, ab.err + (tp.err + sum.err));
+            }
+
+            public static CompensatedFloat InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f, Float g, Float h, Float i, Float j)
+            {
+                CompensatedFloat ab = TwoProd(a, b);
+                CompensatedFloat tp = InnerProduct(c, d, e, f, g, h, i, j);
+                CompensatedFloat sum = TwoSum(ab.v, tp.v);
+                return new(sum.v, ab.err + (tp.err + sum.err));
+            }
+
+            public static CompensatedFloat InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f, Float g, Float h, Float i, Float j, Float k, Float l)
+            {
+                CompensatedFloat ab = TwoProd(a, b);
+                CompensatedFloat tp = InnerProduct(c, d, e, f, g, h, i, j, k, l);
+                CompensatedFloat sum = TwoSum(ab.v, tp.v);
+                return new(sum.v, ab.err + (tp.err + sum.err));
+            }
         }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2)
+
+        public static Float InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f)
         {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1, a2, b2);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
+            CompensatedFloat ip = @internal.InnerProduct(a, b, c, d, e, f);
+            return (Float)ip;
         }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1, a2, b2); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3)
+
+        public static Float InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f, Float g, Float h)
         {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1, a2, b2, a3, b3);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
+            CompensatedFloat ip = @internal.InnerProduct(a, b, c, d, e, f, g, h);
+            return (Float)ip;
         }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1, a2, b2, a3, b3); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4)
+
+        public static Float InnerProduct(Float a, Float b, Float c, Float d, Float e, Float f, Float g, Float h, Float i, Float j, Float k, Float l)
         {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1, a2, b2, a3, b3, a4, b4);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
+            CompensatedFloat ip = @internal.InnerProduct(a, b, c, d, e, f, g, h, i, j, k, l);
+            return (Float)ip;
         }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1, a2, b2, a3, b3, a4, b4); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4, Float a5, Float b5)
-        {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1, a2, b2, a3, b3, a4, b4, a5, b5);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
-        }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4, Float a5, Float b5) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5); }
-        internal static CompensatedFloat CompensatedFloat_InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4, Float a5, Float b5, Float a6, Float b6)
-        {
-            CompensatedFloat ab = TwoProd(a0, b0);
-            CompensatedFloat tp = CompensatedFloat_InnerProduct(a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6);
-            CompensatedFloat sum = TwoSum(ab.v, tp.v);
-            return new CompensatedFloat(sum.v, ab.err + (tp.err + sum.err));
-        }
-        public static Float InnerProduct(Float a0, Float b0, Float a1, Float b1, Float a2, Float b2, Float a3, Float b3, Float a4, Float b4, Float a5, Float b5, Float a6, Float b6) { return (Float)CompensatedFloat_InnerProduct(a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6); }
 
         public static bool Quadratic(float a, float b, float c, float* t0, float* t1)
         {
@@ -1255,8 +1519,15 @@ namespace pbrt
         }
 
         // Interval Function Declarations
-        public static bool InRange(Float v, Interval i) { return v >= i.LowerBound() && v <= i.UpperBound(); }
-        public static bool InRange(Interval a, Interval b) { return a.LowerBound() <= b.UpperBound() && a.UpperBound() >= b.LowerBound(); }
+        public static bool InRange(Float v, Interval i)
+        {
+            return v >= i.LowerBound() && v <= i.UpperBound();
+        }
+
+        public static bool InRange(Interval a, Interval b)
+        {
+            return a.LowerBound() <= b.UpperBound() && a.UpperBound() >= b.LowerBound();
+        }
 
         public static Interval Sqr(Interval i)
         {
@@ -1268,17 +1539,55 @@ namespace pbrt
             return new Interval(MulRoundDown(alow, alow), MulRoundUp(ahigh, ahigh));
         }
 
-        public static Float Floor(Interval i) { return pstd.floor(i.LowerBound()); }
-        public static Float Ceil(Interval i) { return pstd.ceil(i.UpperBound()); }
-        public static Float floor(Interval i) { return Floor(i); }
-        public static Float ceil(Interval i) { return Ceil(i); }
-        public static Float Min(Interval a, Interval b) { return std.min(a.LowerBound(), b.LowerBound()); }
-        public static Float Max(Interval a, Interval b) { return std.max(a.UpperBound(), b.UpperBound()); }
-        public static Float min(Interval a, Interval b) { return Min(a, b); }
-        public static Float max(Interval a, Interval b) { return Max(a, b); }
+        public static Float Floor(Interval i)
+        {
+            return pstd.floor(i.LowerBound());
+        }
 
-        public static Interval Sqrt(Interval i) { return new Interval(SqrtRoundDown(i.LowerBound()), SqrtRoundUp(i.UpperBound())); }
-        public static Interval sqrt(Interval i) { return Sqrt(i); }
+        public static Float Ceil(Interval i)
+        {
+            return pstd.ceil(i.UpperBound());
+        }
+
+        public static Float floor(Interval i)
+        {
+            return Floor(i);
+        }
+
+        public static Float ceil(Interval i)
+        {
+            return Ceil(i);
+        }
+
+        public static Float Min(Interval a, Interval b)
+        {
+            return std.min(a.LowerBound(), b.LowerBound());
+        }
+
+        public static Float Max(Interval a, Interval b)
+        {
+            return std.max(a.UpperBound(), b.UpperBound());
+        }
+
+        public static Float min(Interval a, Interval b)
+        {
+            return Min(a, b);
+        }
+
+        public static Float max(Interval a, Interval b)
+        {
+            return Max(a, b);
+        }
+
+        public static Interval Sqrt(Interval i)
+        {
+            return new Interval(SqrtRoundDown(i.LowerBound()), SqrtRoundUp(i.UpperBound()));
+        }
+
+        public static Interval sqrt(Interval i)
+        {
+            return Sqrt(i);
+        }
 
         public static Interval FMA(Interval a, Interval b, Interval c)
         {
@@ -1325,7 +1634,10 @@ namespace pbrt
             return DifferenceOfProducts(a, b, -c, d);
         }
 
-        public static Interval MulPow2(Float s, Interval i) { return MulPow2(i, s); }
+        public static Interval MulPow2(Float s, Interval i)
+        {
+            return MulPow2(i, s);
+        }
 
         public static Interval MulPow2(Interval i, Float s)
         {
@@ -1348,7 +1660,10 @@ namespace pbrt
                 return new Interval(0, std.max(-i.LowerBound(), i.UpperBound()));
         }
 
-        public static Interval abs(Interval i) { return Abs(i); }
+        public static Interval abs(Interval i)
+        {
+            return Abs(i);
+        }
 
         public static Interval ACos(Interval i)
         {
@@ -1413,17 +1728,36 @@ namespace pbrt
             return true;
         }
 
-        public static Interval SumSquares(Interval i) { return Sqr(i); }
-        public static Interval SumSquares(Interval i, Interval a) { return SumSquares2(i, SumSquares(a)); }
-        public static Interval SumSquares(Interval i, Interval a, Interval b) { return SumSquares2(i, SumSquares(a, b)); }
-        public static Interval SumSquares(Interval i, Interval a, Interval b, Interval c) { return SumSquares2(i, SumSquares(a, b, c)); }
+        public static Interval SumSquares(Interval i)
+        {
+            return Sqr(i);
+        }
+
+        public static Interval SumSquares(Interval i, Interval a)
+        {
+            return SumSquares2(i, SumSquares(a));
+        }
+
+        public static Interval SumSquares(Interval i, Interval a, Interval b)
+        {
+            return SumSquares2(i, SumSquares(a, b));
+        }
+
+        public static Interval SumSquares(Interval i, Interval a, Interval b, Interval c)
+        {
+            return SumSquares2(i, SumSquares(a, b, c));
+        }
+
         private static Interval SumSquares2(Interval i, Interval rest)
         {
             Interval ss = FMA(i, i, rest);
             return new Interval(std.max<Float>(0, ss.LowerBound()), ss.UpperBound());
         }
 
-        public static Interval operator_mul(Float f, Interval i) { return i * f; }
+        public static Interval operator_mul(Float f, Interval i)
+        {
+            return i * f;
+        }
 
         // Catmull-Rom
         public static bool CatmullRomWeights(pstd.span<Float> nodes, Float x, int* offset, pstd.span<Float> weights)
@@ -1741,6 +2075,7 @@ namespace pbrt
         {
             return DifferenceOfProducts(m[0][0], m[1][1], m[0][1], m[1][0]);
         }
+
         public static SquareMatrix2 Transpose(SquareMatrix2 m)
         {
             SquareMatrix2 r = new SquareMatrix2();
@@ -1967,16 +2302,27 @@ namespace pbrt
             return new SquareMatrix4(inv);
         }
 
-        public static SquareMatrix3 operator_mul(SquareMatrix3 m1, SquareMatrix3 m2) { return m1 * m2; }
+        public static SquareMatrix3 operator_mul(SquareMatrix3 m1, SquareMatrix3 m2)
+        {
+            return m1 * m2;
+        }
     }
 
     // CompensatedSum Definition (template <typename Float> class CompensatedSum)
     public unsafe struct CompensatedSum<T> where T : unmanaged, System.Numerics.IFloatingPointIeee754<T>
     {
         // CompensatedSum Public Methods
-        public CompensatedSum(T v) { sum = v; c = T.Zero; }
+        public CompensatedSum(T v)
+        {
+            sum = v;
+            c = T.Zero;
+        }
 
-        public void Assign(T v) { sum = v; c = T.Zero; }
+        public void Assign(T v)
+        {
+            sum = v;
+            c = T.Zero;
+        }
 
         public static CompensatedSum<T> operator +(CompensatedSum<T> s, T v)
         {
@@ -1988,9 +2334,15 @@ namespace pbrt
             return s;
         }
 
-        public static explicit operator T(CompensatedSum<T> s) { return s.sum; }
+        public static explicit operator T(CompensatedSum<T> s)
+        {
+            return s.sum;
+        }
 
-        public override string ToString() { return StringPrintf("[ CompensatedSum sum: %s c: %s ]", sum, c); }
+        public override string ToString()
+        {
+            return StringPrintf("[ CompensatedSum sum: %s c: %s ]", sum, c);
+        }
 
         // CompensatedSum Private Members
         private T sum, c;
@@ -2000,10 +2352,26 @@ namespace pbrt
     public unsafe struct CompensatedFloat
     {
         // CompensatedFloat Public Methods
-        public CompensatedFloat(Float v, Float err = 0) { this.v = v; this.err = err; }
-        public static explicit operator float(CompensatedFloat c) { return (float)(c.v + c.err); }
-        public static explicit operator double(CompensatedFloat c) { return (double)c.v + (double)c.err; }
-        public override string ToString() { return $"[ CompensatedFloat v: {v} err: {err} ]"; }
+        public CompensatedFloat(Float v, Float err = 0)
+        {
+            this.v = v;
+            this.err = err;
+        }
+
+        public static explicit operator float(CompensatedFloat c)
+        {
+            return (float)(c.v + c.err);
+        }
+
+        public static explicit operator double(CompensatedFloat c)
+        {
+            return (double)c.v + (double)c.err;
+        }
+
+        public override string ToString()
+        {
+            return $"[ CompensatedFloat v: {v} err: {err} ]";
+        }
 
         public Float v, err;
     }
@@ -2012,7 +2380,12 @@ namespace pbrt
     public unsafe struct Interval
     {
         // Interval Public Methods
-        public Interval(Float v) { low = v; high = v; }
+        public Interval(Float v)
+        {
+            low = v;
+            high = v;
+        }
+
         public Interval(Float low, Float high)
         {
             this.low = std.min(low, high);
@@ -2036,12 +2409,30 @@ namespace pbrt
             return i;
         }
 
-        public void Assign(Float v) { low = high = v; }
+        public void Assign(Float v)
+        {
+            low = high = v;
+        }
 
-        public Float UpperBound() { return high; }
-        public Float LowerBound() { return low; }
-        public Float Midpoint() { return (low + high) / 2; }
-        public Float Width() { return high - low; }
+        public Float UpperBound()
+        {
+            return high;
+        }
+
+        public Float LowerBound()
+        {
+            return low;
+        }
+
+        public Float Midpoint()
+        {
+            return (low + high) / 2;
+        }
+
+        public Float Width()
+        {
+            return high - low;
+        }
 
         public Float this[int i]
         {
@@ -2052,14 +2443,30 @@ namespace pbrt
             }
         }
 
-        public static explicit operator Float(Interval i) { return i.Midpoint(); }
+        public static explicit operator Float(Interval i)
+        {
+            return i.Midpoint();
+        }
 
-        public bool Exactly(Float v) { return low == v && high == v; }
+        public bool Exactly(Float v)
+        {
+            return low == v && high == v;
+        }
 
-        public static bool operator ==(Interval a, Float v) { return a.Exactly(v); }
-        public static bool operator !=(Interval a, Float f) { return f < a.low || f > a.high; }
+        public static bool operator ==(Interval a, Float v)
+        {
+            return a.Exactly(v);
+        }
 
-        public static Interval operator -(Interval i) { return new Interval(-i.high, -i.low); }
+        public static bool operator !=(Interval a, Float f)
+        {
+            return f < a.low || f > a.high;
+        }
+
+        public static Interval operator -(Interval i)
+        {
+            return new Interval(-i.high, -i.low);
+        }
 
         public static Interval operator +(Interval a, Interval i)
         {
@@ -2096,15 +2503,41 @@ namespace pbrt
                                 std.max(std.max(highQuot[0], highQuot[1]), std.max(highQuot[2], highQuot[3])));
         }
 
-        public static bool operator ==(Interval a, Interval i) { return a.low == i.low && a.high == i.high; }
-        public static bool operator !=(Interval a, Interval i) { return !(a == i); }
-        public override bool Equals(object o) { return o is Interval i && this == i; }
-        public override int GetHashCode() { return HashCode.Combine(low, high); }
+        public static bool operator ==(Interval a, Interval i)
+        {
+            return a.low == i.low && a.high == i.high;
+        }
 
-        public override string ToString() { return $"[ Interval [{low}, {high}] ]"; }
+        public static bool operator !=(Interval a, Interval i)
+        {
+            return !(a == i);
+        }
 
-        public static Interval operator +(Float f, Interval i) { return new Interval(f) + i; }
-        public static Interval operator -(Float f, Interval i) { return new Interval(f) - i; }
+        public override bool Equals(object o)
+        {
+            return o is Interval i && this == i;
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(low, high);
+        }
+
+        public override string ToString()
+        {
+            return $"[ Interval [{low}, {high}] ]";
+        }
+
+        public static Interval operator +(Float f, Interval i)
+        {
+            return new Interval(f) + i;
+        }
+
+        public static Interval operator -(Float f, Interval i)
+        {
+            return new Interval(f) - i;
+        }
+
         public static Interval operator *(Float f, Interval i)
         {
             if (f > 0)
@@ -2112,6 +2545,7 @@ namespace pbrt
             else
                 return new Interval(MulRoundDown(f, i.UpperBound()), MulRoundUp(f, i.LowerBound()));
         }
+
         public static Interval operator /(Float f, Interval i)
         {
             if (InRange(0, i))
@@ -2124,8 +2558,17 @@ namespace pbrt
             else
                 return new Interval(DivRoundDown(f, i.LowerBound()), DivRoundUp(f, i.UpperBound()));
         }
-        public static Interval operator +(Interval i, Float f) { return i + new Interval(f); }
-        public static Interval operator -(Interval i, Float f) { return i - new Interval(f); }
+
+        public static Interval operator +(Interval i, Float f)
+        {
+            return i + new Interval(f);
+        }
+
+        public static Interval operator -(Interval i, Float f)
+        {
+            return i - new Interval(f);
+        }
+
         public static Interval operator *(Interval i, Float f)
         {
             if (f > 0)
@@ -2133,6 +2576,7 @@ namespace pbrt
             else
                 return new Interval(MulRoundDown(f, i.UpperBound()), MulRoundUp(f, i.LowerBound()));
         }
+
         public static Interval operator /(Interval i, Float f)
         {
             if (f == 0)
