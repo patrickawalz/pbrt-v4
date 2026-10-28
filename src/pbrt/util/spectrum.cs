@@ -190,9 +190,6 @@ namespace pbrt
     }
 
     // SampledSpectrum Definition
-    [InlineArray(4)]
-    public struct SampledSpectrumValues { private Float _e0; }
-
     public unsafe struct SampledSpectrum : IAdditionOperators<SampledSpectrum, SampledSpectrum, SampledSpectrum>,
                                            IMultiplyOperators<SampledSpectrum, Float, SampledSpectrum>
     {
@@ -358,12 +355,6 @@ namespace pbrt
                 values[i] = v[i];
         }
 
-        public SampledSpectrum(SampledSpectrumValues v)
-        {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] = v[i];
-        }
-
         public ref Float this[int i]
         {
             [UnscopedRef]
@@ -411,18 +402,35 @@ namespace pbrt
     }
 
     // SampledWavelengths Definition
-    public struct SampledWavelengths
+    public unsafe struct SampledWavelengths
     {
         // SampledWavelengths Public Methods
-        public static bool operator ==(SampledWavelengths a, SampledWavelengths swl)
+        public static bool operator ==(SampledWavelengths swl1, SampledWavelengths swl2)
         {
             for (int i = 0; i < NSpectrumSamples; ++i)
-                if (a.lambda[i] != swl.lambda[i] || a.pdf[i] != swl.pdf[i]) return false;
+            {
+                if (swl1.lambda[i] != swl2.lambda[i] || swl1.pdf[i] != swl2.pdf[i])
+                    return false;
+            }
             return true;
         }
-        public static bool operator !=(SampledWavelengths a, SampledWavelengths swl) { return !(a == swl); }
-        public override bool Equals(object o) { return o is SampledWavelengths s && this == s; }
-        public override int GetHashCode() { return HashCode.Combine(lambda[0], lambda[1], pdf[0], pdf[1]); }
+
+        public static bool operator !=(SampledWavelengths swl1, SampledWavelengths swl2)
+        {
+            return !(swl1 == swl2);
+        }
+
+        public override string ToString()
+        {
+            string r = "[ SampledWavelengths lambda: [";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                r += $" {lambda[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+            r += "] pdf: [";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                r += $" {pdf[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+            r += "] ]";
+            return r;
+        }
 
         public static SampledWavelengths SampleUniform(Float u, Float lambda_min = Lambda_min,
                                                        Float lambda_max = Lambda_max)
@@ -447,6 +455,23 @@ namespace pbrt
             return swl;
         }
 
+        public ref Float this[int i]
+        {
+            [UnscopedRef]
+            get
+            {
+                return ref lambda[i];
+            }
+        }
+
+        public SampledSpectrum PDF()
+        {
+            fixed (Float* pdfPtr = pdf)
+            {
+                return new SampledSpectrum(new pstd.span<Float>(pdfPtr, NSpectrumSamples));
+            }
+        }
+
         public void TerminateSecondary()
         {
             if (SecondaryTerminated())
@@ -457,19 +482,13 @@ namespace pbrt
             pdf[0] /= NSpectrumSamples;
         }
 
-        public Float this[int i]
-        {
-            get { return lambda[i]; }
-            set { lambda[i] = value; }
-        }
-
-        public SampledSpectrum PDF() { return new SampledSpectrum(pdf); }
-
         public bool SecondaryTerminated()
         {
             for (int i = 1; i < NSpectrumSamples; ++i)
+            {
                 if (pdf[i] != 0)
                     return false;
+            }
             return true;
         }
 
@@ -489,20 +508,9 @@ namespace pbrt
             return swl;
         }
 
-        public override string ToString()
-        {
-            string r = "[ SampledWavelengths lambda: [";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {lambda[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
-            r += "] pdf: [";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {pdf[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
-            r += "] ]";
-            return r;
-        }
-
         // SampledWavelengths Private Members
-        private SampledSpectrumValues lambda, pdf;
+        private fixed Float lambda[NSpectrumSamples];
+        private fixed Float pdf[NSpectrumSamples];
     }
 
     // ConstantSpectrum Definition
