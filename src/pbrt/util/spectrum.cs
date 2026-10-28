@@ -193,24 +193,24 @@ namespace pbrt
     [InlineArray(4)]
     public struct SampledSpectrumValues { private Float _e0; }
 
-    public struct SampledSpectrum : IAdditionOperators<SampledSpectrum, SampledSpectrum, SampledSpectrum>,
-                                    IMultiplyOperators<SampledSpectrum, Float, SampledSpectrum>
+    public unsafe struct SampledSpectrum : IAdditionOperators<SampledSpectrum, SampledSpectrum, SampledSpectrum>,
+                                           IMultiplyOperators<SampledSpectrum, Float, SampledSpectrum>
     {
         // SampledSpectrum Public Methods
         // (C++ operator+=, -=, *=, /= map onto C#'s compound assignment via these binary operators)
-        public static SampledSpectrum operator +(SampledSpectrum a, SampledSpectrum s)
+        public static SampledSpectrum operator +(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = a;
+            SampledSpectrum ret = s1;
             for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] += s.values[i];
+                ret.values[i] += s2.values[i];
             return ret;
         }
 
-        public static SampledSpectrum operator -(SampledSpectrum a, SampledSpectrum s)
+        public static SampledSpectrum operator -(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = a;
+            SampledSpectrum ret = s1;
             for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] -= s.values[i];
+                ret.values[i] -= s2.values[i];
             return ret;
         }
 
@@ -223,11 +223,11 @@ namespace pbrt
             return ret;
         }
 
-        public static SampledSpectrum operator *(SampledSpectrum a, SampledSpectrum s)
+        public static SampledSpectrum operator *(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = a;
+            SampledSpectrum ret = s1;
             for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] *= s.values[i];
+                ret.values[i] *= s2.values[i];
             return ret;
         }
 
@@ -240,46 +240,66 @@ namespace pbrt
             return ret;
         }
 
-        public static SampledSpectrum operator *(Float a, SampledSpectrum s) { return s * a; }
-
-        public static SampledSpectrum operator /(SampledSpectrum a, SampledSpectrum s)
+        public static SampledSpectrum operator *(Float a, SampledSpectrum s)
         {
-            SampledSpectrum ret = a;
+            return s * a;
+        }
+
+        public static SampledSpectrum operator /(SampledSpectrum s1, SampledSpectrum s2)
+        {
+            SampledSpectrum ret = s1;
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                DCHECK_NE(0, s.values[i]);
-                ret.values[i] /= s.values[i];
+                DCHECK_NE(0, s2.values[i]);
+                ret.values[i] /= s2.values[i];
             }
             return ret;
         }
 
-        public static SampledSpectrum operator /(SampledSpectrum a, Float d)
+        public static SampledSpectrum operator /(SampledSpectrum s, Float a)
         {
-            DCHECK_NE(d, 0);
-            DCHECK(!IsNaN(d));
-            SampledSpectrum ret = a;
+            DCHECK_NE(a, 0);
+            DCHECK(!IsNaN(a));
+            SampledSpectrum ret = s;
             for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] /= d;
+            {
+                ret.values[i] /= a;
+            }
             return ret;
         }
 
-        public static SampledSpectrum operator -(SampledSpectrum a)
+        public static SampledSpectrum operator -(SampledSpectrum s)
         {
             SampledSpectrum ret = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] = -a.values[i];
+                ret.values[i] = -s.values[i];
             return ret;
         }
 
-        public static bool operator ==(SampledSpectrum a, SampledSpectrum s)
+        public static bool operator ==(SampledSpectrum s1, SampledSpectrum s2)
         {
             for (int i = 0; i < NSpectrumSamples; ++i)
-                if (a.values[i] != s.values[i]) return false;
+                if (s1.values[i] != s2.values[i]) return false;
             return true;
         }
-        public static bool operator !=(SampledSpectrum a, SampledSpectrum s) { return !(a == s); }
-        public override bool Equals(object o) { return o is SampledSpectrum s && this == s; }
-        public override int GetHashCode() { return HashCode.Combine(values[0], values[1], values[2], values[3]); }
+
+        public static bool operator !=(SampledSpectrum s1, SampledSpectrum s2)
+        {
+            return !(s1 == s2);
+        }
+
+        public override string ToString()
+        {
+            string str = "[ ";
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values[i]);
+                if (i + 1 < NSpectrumSamples)
+                    str += ", ";
+            }
+            str += " ]";
+            return str;
+        }
 
         public bool HasNaNs()
         {
@@ -289,24 +309,72 @@ namespace pbrt
             return false;
         }
 
+        public XYZ ToXYZ(SampledWavelengths lambda)
+        {
+            // Sample the $X$, $Y$, and $Z$ matching curves at _lambda_
+            SampledSpectrum X = Spectra.X().Sample(lambda);
+            SampledSpectrum Y = Spectra.Y().Sample(lambda);
+            SampledSpectrum Z = Spectra.Z().Sample(lambda);
+
+            // Evaluate estimator to compute $(x,y,z)$ coefficients
+            SampledSpectrum pdf = lambda.PDF();
+            return new XYZ(SafeDiv(X * this, pdf).Average(), SafeDiv(Y * this, pdf).Average(),
+                           SafeDiv(Z * this, pdf).Average()) /
+                   CIE_Y_integral;
+        }
+
+        public RGB ToRGB(SampledWavelengths lambda, RGBColorSpace cs)
+        {
+            XYZ xyz = ToXYZ(lambda);
+            return cs.ToRGB(xyz);
+        }
+
+        public Float y(SampledWavelengths lambda)
+        {
+            SampledSpectrum Ys = Spectra.Y().Sample(lambda);
+            SampledSpectrum pdf = lambda.PDF();
+            return SafeDiv(Ys * this, pdf).Average() / CIE_Y_integral;
+        }
+
+        public SampledSpectrum()
+        {
+        }
+
         public SampledSpectrum(Float c)
         {
-            values = default;
             for (int i = 0; i < NSpectrumSamples; ++i)
                 values[i] = c;
         }
 
-        public SampledSpectrum(SampledSpectrumValues v) { values = v; }
+        public static explicit operator SampledSpectrum(Float c)
+        {
+            return new SampledSpectrum(c);
+        }
 
         public SampledSpectrum(pstd.span<Float> v)
         {
             DCHECK_EQ(NSpectrumSamples, (int)v.size());
-            values = default;
             for (int i = 0; i < NSpectrumSamples; ++i)
                 values[i] = v[i];
         }
 
-        public static explicit operator bool(SampledSpectrum s)
+        public SampledSpectrum(SampledSpectrumValues v)
+        {
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] = v[i];
+        }
+
+        public ref Float this[int i]
+        {
+            [UnscopedRef]
+            get
+            {
+                DCHECK(i >= 0 && i < NSpectrumSamples);
+                return ref values[i];
+            }
+        }
+
+        public static implicit operator bool(SampledSpectrum s)
         {
             for (int i = 0; i < NSpectrumSamples; ++i)
                 if (s.values[i] != 0)
@@ -338,60 +406,8 @@ namespace pbrt
             return sum / NSpectrumSamples;
         }
 
-        public ref Float this[int i]
-        {
-            [UnscopedRef]
-            get
-            {
-                DCHECK(i >= 0 && i < NSpectrumSamples);
-                return ref values[i];
-            }
-        }
-
-        public static bool operator !(SampledSpectrum s) { return !(bool)s; }
-
-        public override string ToString()
-        {
-            string str = "[ ";
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values[i]);
-                if (i + 1 < NSpectrumSamples)
-                    str += ", ";
-            }
-            str += " ]";
-            return str;
-        }
-
-        public XYZ ToXYZ(SampledWavelengths lambda)
-        {
-            // Sample the $X$, $Y$, and $Z$ matching curves at _lambda_
-            SampledSpectrum X = Spectra.X().Sample(lambda);
-            SampledSpectrum Y = Spectra.Y().Sample(lambda);
-            SampledSpectrum Z = Spectra.Z().Sample(lambda);
-
-            // Evaluate estimator to compute $(x,y,z)$ coefficients
-            SampledSpectrum pdf = lambda.PDF();
-            return new XYZ(SafeDiv(X * this, pdf).Average(), SafeDiv(Y * this, pdf).Average(),
-                           SafeDiv(Z * this, pdf).Average()) /
-                   CIE_Y_integral;
-        }
-
-        public Float y(SampledWavelengths lambda)
-        {
-            SampledSpectrum Ys = Spectra.Y().Sample(lambda);
-            SampledSpectrum pdf = lambda.PDF();
-            return SafeDiv(Ys * this, pdf).Average() / CIE_Y_integral;
-        }
-
-        public RGB ToRGB(SampledWavelengths lambda, RGBColorSpace cs)
-        {
-            XYZ xyz = ToXYZ(lambda);
-            return cs.ToRGB(xyz);
-        }
-
         // SampledSpectrum Private Members
-        private SampledSpectrumValues values;
+        private fixed Float values[NSpectrumSamples];
     }
 
     // SampledWavelengths Definition
