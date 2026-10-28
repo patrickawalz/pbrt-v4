@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/colorspace.h, util/colorspace.cpp
@@ -27,27 +27,14 @@ namespace pbrt
             return new RGB(XYZFromRGB[1][0], XYZFromRGB[1][1], XYZFromRGB[1][2]);
         }
 
-        public RGB ToRGB(XYZ xyz)  // Mul<RGB>(RGBFromXYZ, xyz)
+        public RGB ToRGB(XYZ xyz)
         {
-            RGB result = new RGB();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += RGBFromXYZ[i][j] * xyz[j];
-            }
-            return result;
+            return Mul<RGB>(RGBFromXYZ, xyz);
         }
-        public XYZ ToXYZ(RGB rgb)  // Mul<XYZ>(XYZFromRGB, rgb)
+
+        public XYZ ToXYZ(RGB rgb)
         {
-            XYZ result = new XYZ();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += XYZFromRGB[i][j] * rgb[j];
-            }
-            return result;
+            return Mul<XYZ>(XYZFromRGB, rgb);
         }
 
         // RGBColorSpace Public Members

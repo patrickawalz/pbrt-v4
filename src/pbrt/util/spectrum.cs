@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/spectrum.h, util/spectrum.cpp
@@ -33,7 +33,7 @@ namespace pbrt
             const Float kb = 1.3806488e-23f;
             // Return emitted radiance for blackbody at wavelength _lambda_
             Float l = lambda * 1e-9f;
-            Float Le = (2 * h * c * c) / (Pow(5, l) * (FastExp((h * c) / (l * kb * T)) - 1));
+            Float Le = (2 * h * c * c) / (Pow5(l) * (FastExp((h * c) / (l * kb * T)) - 1));
             CHECK(!IsNaN(Le));
             return Le;
         }
@@ -2651,10 +2651,10 @@ namespace pbrt
             // Convert CCT to xy
             Float x;
             if (cct <= 7000)
-                x = -4.607f * 1e9f / Pow(3, cct) + 2.9678f * 1e6f / Sqr(cct) +
+                x = -4.607f * 1e9f / Pow3(cct) + 2.9678f * 1e6f / Sqr(cct) +
                     0.09911f * 1e3f / cct + 0.244063f;
             else
-                x = -2.0064f * 1e9f / Pow(3, cct) + 1.9018f * 1e6f / Sqr(cct) +
+                x = -2.0064f * 1e9f / Pow3(cct) + 1.9018f * 1e6f / Sqr(cct) +
                     0.24748f * 1e3f / cct + 0.23704f;
             Float y = -3 * x * x + 2.870f * x - 0.275f;
 

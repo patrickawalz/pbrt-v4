@@ -1,7 +1,7 @@
-// math_test.cpp
+﻿// math_test.cpp
 //
 // Differences from the C++ test:
-//  - Pow<N>(x) is the runtime Pow(n, x) in the port.
+//  - Pow<N>(x) is the unrolled PowN(x) in the port.
 //  - CompensatedSum.Basics: the "long double" accumulator is not available in .NET, so the
 //    ldSum comparison (guarded by sizeof(long double) > sizeof(double) in C++) is skipped.
 //  - SquareMatrix<N> is expanded by hand as SquareMatrix2/3/4, so the N-templated
@@ -96,8 +96,36 @@ namespace pbrt
         [TEST("Math", "Pow")]
         public static void Math_Pow()
         {
-            for (int i = 0; i <= 29; ++i)
-                EXPECT_EQ(Pow(i, 2.0f), 1 << i);
+            EXPECT_EQ(Pow0(2.0f), 1 << 0);
+            EXPECT_EQ(Pow1(2.0f), 1 << 1);
+            EXPECT_EQ(Pow2(2.0f), 1 << 2);
+            EXPECT_EQ(Pow3(2.0f), 1 << 3);
+            EXPECT_EQ(Pow4(2.0f), 1 << 4);
+            EXPECT_EQ(Pow5(2.0f), 1 << 5);
+            EXPECT_EQ(Pow6(2.0f), 1 << 6);
+            EXPECT_EQ(Pow7(2.0f), 1 << 7);
+            EXPECT_EQ(Pow8(2.0f), 1 << 8);
+            EXPECT_EQ(Pow9(2.0f), 1 << 9);
+            EXPECT_EQ(Pow10(2.0f), 1 << 10);
+            EXPECT_EQ(Pow11(2.0f), 1 << 11);
+            EXPECT_EQ(Pow12(2.0f), 1 << 12);
+            EXPECT_EQ(Pow13(2.0f), 1 << 13);
+            EXPECT_EQ(Pow14(2.0f), 1 << 14);
+            EXPECT_EQ(Pow15(2.0f), 1 << 15);
+            EXPECT_EQ(Pow16(2.0f), 1 << 16);
+            EXPECT_EQ(Pow17(2.0f), 1 << 17);
+            EXPECT_EQ(Pow18(2.0f), 1 << 18);
+            EXPECT_EQ(Pow19(2.0f), 1 << 19);
+            EXPECT_EQ(Pow20(2.0f), 1 << 20);
+            EXPECT_EQ(Pow21(2.0f), 1 << 21);
+            EXPECT_EQ(Pow22(2.0f), 1 << 22);
+            EXPECT_EQ(Pow23(2.0f), 1 << 23);
+            EXPECT_EQ(Pow24(2.0f), 1 << 24);
+            EXPECT_EQ(Pow25(2.0f), 1 << 25);
+            EXPECT_EQ(Pow26(2.0f), 1 << 26);
+            EXPECT_EQ(Pow27(2.0f), 1 << 27);
+            EXPECT_EQ(Pow28(2.0f), 1 << 28);
+            EXPECT_EQ(Pow29(2.0f), 1 << 29);
         }
 
         [TEST("Math", "NewtonBisection")]
@@ -131,7 +159,7 @@ namespace pbrt
             EXPECT_EQ(4, EvaluatePolynomial(100, 4));
             EXPECT_EQ(10, EvaluatePolynomial(2, 4, 3));
 
-            EXPECT_EQ(1.5 + 2.75 * .5 - 4.25 * Pow(2, .5) + 15.125 * Pow(3, .5),
+            EXPECT_EQ(1.5 + 2.75 * .5 - 4.25 * Pow2(.5) + 15.125 * Pow3(.5),
                       EvaluatePolynomial(.5f, 1.5f, 2.75f, -4.25f, 15.125f));
         }
 

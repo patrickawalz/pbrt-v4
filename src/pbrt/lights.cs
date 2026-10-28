@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // lights.h / lights.cpp
@@ -496,7 +496,7 @@ namespace pbrt
                 return;
             }
 
-            *pdfDir = distrib.PDF(new Point2f(ps.x, ps.y)) * screenBounds.Area() / (A * pbrt.Pow(3, pbrt.CosTheta(w)));
+            *pdfDir = distrib.PDF(new Point2f(ps.x, ps.y)) * screenBounds.Area() / (A * pbrt.Pow3(pbrt.CosTheta(w)));
         }
         // ProjectionLight Method Definitions
         public ProjectionLight(Transform renderFromLight, MediumInterface mediumInterface, Image im,
@@ -531,7 +531,7 @@ namespace pbrt
             Func<Point2f, Float> dwdA = (Point2f p) =>
             {
                 Vector3f w = (Vector3f)lfs.Apply(new Point3f(p.x, p.y, 0));
-                return pbrt.Pow(3, pbrt.CosTheta(pbrt.Normalize(w)));
+                return pbrt.Pow3(pbrt.CosTheta(pbrt.Normalize(w)));
             };
             Array2D<Float> d = image.GetSamplingDistribution(dwdA, screenBounds);
             distrib = new PiecewiseConstant2D(d, screenBounds);
@@ -594,7 +594,7 @@ namespace pbrt
                                                                (y + 0.5f) / image.Resolution().y));
                     Vector3f w = (Vector3f)lightFromScreen.Apply(new Point3f(ps.x, ps.y, 0));
                     w = pbrt.Normalize(w);
-                    Float dwdA = pbrt.Pow(3, pbrt.CosTheta(w));
+                    Float dwdA = pbrt.Pow3(pbrt.CosTheta(w));
 
                     RGB rgb = default;
                     for (int c = 0; c < 3; ++c)
@@ -636,7 +636,7 @@ namespace pbrt
             Vector3f w = (Vector3f)lightFromScreen.Apply(new Point3f(ps.x, ps.y, 0));
             Float cosTheta = pbrt.CosTheta(pbrt.Normalize(w));
             pbrt.CHECK_GT(cosTheta, 0);
-            Float pdfDir = pdf * screenBounds.Area() / (A * pbrt.Pow(3, cosTheta));
+            Float pdfDir = pdf * screenBounds.Area() / (A * pbrt.Pow3(cosTheta));
 
             // Compute radiance for projection light ray
             Point2f p = (Point2f)screenBounds.Offset(ps);
@@ -707,7 +707,7 @@ namespace pbrt
                                                                    (y + .5f) / image.Resolution().y));
                         Vector3f w = (Vector3f)lightFromScreen.Apply(new Point3f(ps.x, ps.y, 0));
                         w = pbrt.Normalize(w);
-                        Float dwdA = pbrt.Pow(3, w.z);
+                        Float dwdA = pbrt.Pow3(w.z);
 
                         for (int c = 0; c < 3; ++c)
                             sum += image.GetChannel(new Point2i(x, y), c) * luminance[c] * dwdA;

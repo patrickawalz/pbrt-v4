@@ -278,7 +278,7 @@ namespace pbrt
             Func<Float, (Float first, Float second)> cdfMinusU = (Float x) =>
             {
                 Float t = (x - a) / (b - a);
-                Float P = 2 * Pow(3, t) - Pow(4, t);
+                Float P = 2 * Pow3(t) - Pow4(t);
                 Float PDeriv = SmoothStepPDF(x, a, b);
                 return (P - u, PDeriv);
             };
@@ -288,7 +288,7 @@ namespace pbrt
         public static Float InvertSmoothStepSample(Float x, Float a, Float b)
         {
             Float t = (x - a) / (b - a);
-            Func<Float, Float> P = (Float xx) => 2 * Pow(3, t) - Pow(4, t);
+            Func<Float, Float> P = (Float xx) => 2 * Pow3(t) - Pow4(t);
             return (P(x) - P(a)) / (P(b) - P(a));
         }
 

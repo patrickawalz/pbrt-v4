@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/color.h, util/color.cpp
@@ -202,19 +202,6 @@ namespace pbrt
             }
         }
 
-        // Mul<RGB>(SquareMatrix<3>, RGB) via the generic SquareMatrix * T operator
-        public static RGB operator *(SquareMatrix3 m, RGB v)
-        {
-            RGB result = new RGB();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += m[i][j] * v[j];
-            }
-            return result;
-        }
-
         public override string ToString()
         {
             return string.Format(System.Globalization.CultureInfo.InvariantCulture, "[ {0:F6} {1:F6} {2:F6} ]", r, g, b);
@@ -280,19 +267,6 @@ namespace pbrt
                 else if (c == 1) Y = value;
                 else Z = value;
             }
-        }
-
-        // Mul<XYZ>(SquareMatrix<3>, XYZ)
-        public static XYZ operator *(SquareMatrix3 m, XYZ v)
-        {
-            XYZ result = new XYZ();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += m[i][j] * v[j];
-            }
-            return result;
         }
 
         public override string ToString()

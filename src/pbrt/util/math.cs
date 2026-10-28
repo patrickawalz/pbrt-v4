@@ -124,8 +124,12 @@ namespace pbrt
             return x;
         }
 
+        // https://developer.nvidia.com/blog/lerp-faster-cuda/
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Float Lerp(Float x, Float a, Float b) { return (1 - x) * a + x * b; }
+        public static Float Lerp(Float x, Float a, Float b)
+        {
+            return FMA(x, b, FMA(-x, a, a));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int FMA(int a, int b, int c) { return a * b + c; }
@@ -226,25 +230,435 @@ namespace pbrt
         [MethodImpl(MethodImplOptions.AggressiveInlining)] public static long Sqr(long v) { return v * v; }
         [MethodImpl(MethodImplOptions.AggressiveInlining)] public static ulong Sqr(ulong v) { return v * v; }
 
-        // Pow<n>(v): n is a (positive) compile-time constant in pbrt; here a runtime/inlined argument.
-        public static float Pow(int n, float v)
+        // Pow<n>(v): unrolled per exponent (C++ template recursion: Pow<n>(v) = Pow<n/2>^2 * Pow<n&1>)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow0(float v)
         {
-            if (n < 0)
-                return 1 / Pow(-n, v);
-            if (n == 0) return 1;
-            if (n == 1) return v;
-            float n2 = Pow(n / 2, v);
-            return n2 * n2 * Pow(n & 1, v);
+            return 1;
         }
 
-        public static double Pow(int n, double v)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow1(float v)
         {
-            if (n < 0)
-                return 1 / Pow(-n, v);
-            if (n == 0) return 1;
-            if (n == 1) return v;
-            double n2 = Pow(n / 2, v);
-            return n2 * n2 * Pow(n & 1, v);
+            return v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow2(float v)
+        {
+            float n2 = Pow1(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow3(float v)
+        {
+            float n2 = Pow1(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow4(float v)
+        {
+            float n2 = Pow2(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow5(float v)
+        {
+            float n2 = Pow2(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow6(float v)
+        {
+            float n2 = Pow3(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow7(float v)
+        {
+            float n2 = Pow3(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow8(float v)
+        {
+            float n2 = Pow4(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow9(float v)
+        {
+            float n2 = Pow4(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow10(float v)
+        {
+            float n2 = Pow5(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow11(float v)
+        {
+            float n2 = Pow5(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow12(float v)
+        {
+            float n2 = Pow6(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow13(float v)
+        {
+            float n2 = Pow6(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow14(float v)
+        {
+            float n2 = Pow7(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow15(float v)
+        {
+            float n2 = Pow7(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow16(float v)
+        {
+            float n2 = Pow8(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow17(float v)
+        {
+            float n2 = Pow8(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow18(float v)
+        {
+            float n2 = Pow9(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow19(float v)
+        {
+            float n2 = Pow9(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow20(float v)
+        {
+            float n2 = Pow10(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow21(float v)
+        {
+            float n2 = Pow10(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow22(float v)
+        {
+            float n2 = Pow11(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow23(float v)
+        {
+            float n2 = Pow11(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow24(float v)
+        {
+            float n2 = Pow12(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow25(float v)
+        {
+            float n2 = Pow12(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow26(float v)
+        {
+            float n2 = Pow13(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow27(float v)
+        {
+            float n2 = Pow13(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow28(float v)
+        {
+            float n2 = Pow14(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow29(float v)
+        {
+            float n2 = Pow14(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Pow32(float v)
+        {
+            float n2 = Pow16(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow0(double v)
+        {
+            return 1;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow1(double v)
+        {
+            return v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow2(double v)
+        {
+            double n2 = Pow1(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow3(double v)
+        {
+            double n2 = Pow1(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow4(double v)
+        {
+            double n2 = Pow2(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow5(double v)
+        {
+            double n2 = Pow2(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow6(double v)
+        {
+            double n2 = Pow3(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow7(double v)
+        {
+            double n2 = Pow3(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow8(double v)
+        {
+            double n2 = Pow4(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow9(double v)
+        {
+            double n2 = Pow4(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow10(double v)
+        {
+            double n2 = Pow5(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow11(double v)
+        {
+            double n2 = Pow5(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow12(double v)
+        {
+            double n2 = Pow6(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow13(double v)
+        {
+            double n2 = Pow6(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow14(double v)
+        {
+            double n2 = Pow7(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow15(double v)
+        {
+            double n2 = Pow7(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow16(double v)
+        {
+            double n2 = Pow8(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow17(double v)
+        {
+            double n2 = Pow8(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow18(double v)
+        {
+            double n2 = Pow9(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow19(double v)
+        {
+            double n2 = Pow9(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow20(double v)
+        {
+            double n2 = Pow10(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow21(double v)
+        {
+            double n2 = Pow10(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow22(double v)
+        {
+            double n2 = Pow11(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow23(double v)
+        {
+            double n2 = Pow11(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow24(double v)
+        {
+            double n2 = Pow12(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow25(double v)
+        {
+            double n2 = Pow12(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow26(double v)
+        {
+            double n2 = Pow13(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow27(double v)
+        {
+            double n2 = Pow13(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow28(double v)
+        {
+            double n2 = Pow14(v);
+            return n2 * n2;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow29(double v)
+        {
+            double n2 = Pow14(v);
+            return n2 * n2 * Pow1(v);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Pow32(double v)
+        {
+            double n2 = Pow16(v);
+            return n2 * n2;
         }
 
         // EvaluatePolynomial overloads (variadic template in pbrt)
@@ -1250,6 +1664,78 @@ namespace pbrt
             return uv;
         }
 
+        // Mul<Tresult>(SquareMatrix<3>, T): the result is built in the layout of the input
+        // (RGB and XYZ are both three consecutive Floats) and reinterpreted as Tresult.
+        public static Tresult Mul<Tresult>(SquareMatrix3 m, RGB v)
+        {
+            RGB result;
+            result.r = m.m00 * v.r + m.m01 * v.g + m.m02 * v.b;
+            result.g = m.m10 * v.r + m.m11 * v.g + m.m12 * v.b;
+            result.b = m.m20 * v.r + m.m21 * v.g + m.m22 * v.b;
+            return Unsafe.As<RGB, Tresult>(ref result);
+        }
+
+        public static Tresult Mul<Tresult>(SquareMatrix3 m, XYZ v)
+        {
+            XYZ result;
+            result.X = m.m00 * v.X + m.m01 * v.Y + m.m02 * v.Z;
+            result.Y = m.m10 * v.X + m.m11 * v.Y + m.m12 * v.Z;
+            result.Z = m.m20 * v.X + m.m21 * v.Y + m.m22 * v.Z;
+            return Unsafe.As<XYZ, Tresult>(ref result);
+        }
+
+        public static RGB Mul(SquareMatrix3 m, RGB v)
+        {
+            RGB result;
+            result.r = m.m00 * v.r + m.m01 * v.g + m.m02 * v.b;
+            result.g = m.m10 * v.r + m.m11 * v.g + m.m12 * v.b;
+            result.b = m.m20 * v.r + m.m21 * v.g + m.m22 * v.b;
+            return result;
+        }
+
+        public static XYZ Mul(SquareMatrix3 m, XYZ v)
+        {
+            XYZ result;
+            result.X = m.m00 * v.X + m.m01 * v.Y + m.m02 * v.Z;
+            result.Y = m.m10 * v.X + m.m11 * v.Y + m.m12 * v.Z;
+            result.Z = m.m20 * v.X + m.m21 * v.Y + m.m22 * v.Z;
+            return result;
+        }
+
+        public static Vector2f Mul(SquareMatrix2 m, Vector2f v)
+        {
+            Vector2f result;
+            result.x = m.m00 * v.x + m.m01 * v.y;
+            result.y = m.m10 * v.x + m.m11 * v.y;
+            return result;
+        }
+
+        public static pstd.array2<Float> Mul(SquareMatrix2 m, pstd.array2<Float> v)
+        {
+            pstd.array2<Float> result;
+            result.v0 = m.m00 * v.v0 + m.m01 * v.v1;
+            result.v1 = m.m10 * v.v0 + m.m11 * v.v1;
+            return result;
+        }
+
+        public static Vector3f Mul(SquareMatrix3 m, Vector3f v)
+        {
+            Vector3f result;
+            result.x = m.m00 * v.x + m.m01 * v.y + m.m02 * v.z;
+            result.y = m.m10 * v.x + m.m11 * v.y + m.m12 * v.z;
+            result.z = m.m20 * v.x + m.m21 * v.y + m.m22 * v.z;
+            return result;
+        }
+
+        public static pstd.array3<Float> Mul(SquareMatrix3 m, pstd.array3<Float> v)
+        {
+            pstd.array3<Float> result;
+            result.v0 = m.m00 * v.v0 + m.m01 * v.v1 + m.m02 * v.v2;
+            result.v1 = m.m10 * v.v0 + m.m11 * v.v1 + m.m12 * v.v2;
+            result.v2 = m.m20 * v.v0 + m.m21 * v.v1 + m.m22 * v.v2;
+            return result;
+        }
+
         // SquareMatrix free functions
         public static Float Determinant(SquareMatrix2 m)
         {
@@ -1829,28 +2315,14 @@ namespace pbrt
             return m * s;
         }
 
-        // Matrix * vector (Mul<Tresult>)
-        public static Vector2f operator *(SquareMatrix2 mm, Vector2f v)
+        public static Vector2f operator *(SquareMatrix2 m, Vector2f v)
         {
-            Vector2f result = new Vector2f();
-            for (int i = 0; i < 2; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 2; ++j)
-                    result[i] += mm[i][j] * v[j];
-            }
-            return result;
+            return Mul(m, v);
         }
-        public static pstd.array2<Float> operator *(SquareMatrix2 mm, pstd.array2<Float> v)
+
+        public static pstd.array2<Float> operator *(SquareMatrix2 m, pstd.array2<Float> v)
         {
-            pstd.array2<Float> result = new pstd.array2<Float>();
-            for (int i = 0; i < 2; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 2; ++j)
-                    result[i] += mm[i][j] * v[j];
-            }
-            return result;
+            return Mul(m, v);
         }
 
         public static SquareMatrix2 operator *(SquareMatrix2 m1, SquareMatrix2 m2)
@@ -2062,29 +2534,24 @@ namespace pbrt
             return m * s;
         }
 
-        // Matrix * vector (Mul<Tresult>)
-        public static Vector3f operator *(SquareMatrix3 mm, Vector3f v)
+        public static Vector3f operator *(SquareMatrix3 m, Vector3f v)
         {
-            Vector3f result = new Vector3f();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += mm[i][j] * v[j];
-            }
-            return result;
+            return Mul(m, v);
         }
 
-        public static pstd.array3<Float> operator *(SquareMatrix3 mm, pstd.array3<Float> v)
+        public static pstd.array3<Float> operator *(SquareMatrix3 m, pstd.array3<Float> v)
         {
-            pstd.array3<Float> result = new pstd.array3<Float>();
-            for (int i = 0; i < 3; ++i)
-            {
-                result[i] = 0;
-                for (int j = 0; j < 3; ++j)
-                    result[i] += mm[i][j] * v[j];
-            }
-            return result;
+            return Mul(m, v);
+        }
+
+        public static RGB operator *(SquareMatrix3 m, RGB v)
+        {
+            return Mul(m, v);
+        }
+
+        public static XYZ operator *(SquareMatrix3 m, XYZ v)
+        {
+            return Mul(m, v);
         }
 
         public static SquareMatrix3 operator *(SquareMatrix3 m1, SquareMatrix3 m2)

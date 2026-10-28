@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // bssrdf.h, bssrdf.cpp
@@ -64,8 +64,8 @@ namespace pbrt
 
                 // Compute dipole vector irradiance $-\N{}\cdot\dipoleE(r)$ using Equation
                 // $(\ref{eq:diffusion-dipole-vector-irradiance-normal})$
-                Float EDn = Inv4Pi * (zr * (1 + sigma_tr * dr) * FastExp(-sigma_tr * dr) / (Pow(3, dr)) -
-                                      zv * (1 + sigma_tr * dv) * FastExp(-sigma_tr * dv) / (Pow(3, dv)));
+                Float EDn = Inv4Pi * (zr * (1 + sigma_tr * dr) * FastExp(-sigma_tr * dr) / (Pow3(dr)) -
+                                      zv * (1 + sigma_tr * dv) * FastExp(-sigma_tr * dv) / (Pow3(dv)));
 
                 // Add contribution from dipole for depth $\depthreal$ to _Ed_
                 Float E = phiD * cPhi + EDn * cE;

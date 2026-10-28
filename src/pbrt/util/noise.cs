@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 //
@@ -99,7 +99,7 @@ namespace pbrt
 
         private static Float NoiseWeight(Float t)
         {
-            return 6 * Pow(5, t) - 15 * Pow(4, t) + 10 * Pow(3, t);
+            return 6 * Pow5(t) - 15 * Pow4(t) + 10 * Pow3(t);
         }
 
         public static Vector3f DNoise(Point3f p)

@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // cameras.h / cameras.cpp
@@ -769,7 +769,7 @@ namespace pbrt
             Float lensArea = lensRadius != 0 ? (Pi * pbrt.Sqr(lensRadius)) : 1;
 
             // Return importance for point on image plane
-            return new SampledSpectrum(1 / (A * lensArea * pbrt.Pow(4, cosTheta)));
+            return new SampledSpectrum(1 / (A * lensArea * pbrt.Pow4(cosTheta)));
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
@@ -798,7 +798,7 @@ namespace pbrt
             // Compute lens area  and return perspective camera probabilities
             Float lensArea = lensRadius != 0 ? (Pi * pbrt.Sqr(lensRadius)) : 1;
             *pdfPos = 1 / lensArea;
-            *pdfDir = 1 / (A * pbrt.Pow(3, cosTheta));
+            *pdfDir = 1 / (A * pbrt.Pow3(cosTheta));
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
@@ -1335,7 +1335,7 @@ namespace pbrt
 
             // Compute weighting for _RealisticCamera_ ray
             Float cosTheta = pbrt.Normalize(rFilm.d).z;
-            weight *= pbrt.Pow(4, cosTheta) / (eps.value().pdf * pbrt.Sqr(LensRearZ()));
+            weight *= pbrt.Pow4(cosTheta) / (eps.value().pdf * pbrt.Sqr(LensRearZ()));
 
             return new CameraRay(ray, new SampledSpectrum(weight));
         }

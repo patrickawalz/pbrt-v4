@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // bxdfs.h, bxdfs.cpp
@@ -1232,7 +1232,7 @@ namespace pbrt
             CHECK(beta_m >= 0 && beta_m <= 1);
             CHECK(beta_n >= 0 && beta_n <= 1);
             // _HairBxDF_ constructor implementation
-            v[0] = Sqr(0.726f * beta_m + 0.812f * Sqr(beta_m) + 3.7f * Pow(20, beta_m));
+            v[0] = Sqr(0.726f * beta_m + 0.812f * Sqr(beta_m) + 3.7f * Pow20(beta_m));
             v[1] = .25f * v[0];
             v[2] = 4 * v[0];
             for (int p = 3; p <= pMax; ++p)
@@ -1240,7 +1240,7 @@ namespace pbrt
                 v[p] = v[2];
 
             Float SqrtPiOver8 = 0.626657069f;
-            s = SqrtPiOver8 * (0.265f * beta_n + 1.194f * Sqr(beta_n) + 5.372f * Pow(22, beta_n));
+            s = SqrtPiOver8 * (0.265f * beta_n + 1.194f * Sqr(beta_n) + 5.372f * Pow22(beta_n));
             DCHECK(!IsNaN(s));
 
             sin2kAlpha[0] = std.sin(Radians(alpha));
@@ -1473,8 +1473,8 @@ namespace pbrt
         {
             SampledSpectrum sigma_a = default;
             for (int i = 0; i < NSpectrumSamples; ++i)
-                sigma_a[i] = Sqr(std.log(c[i]) / (5.969f - 0.215f * beta_n + 2.532f * Sqr(beta_n) - 10.73f * Pow(3, beta_n) +
-                                                  5.574f * Pow(4, beta_n) + 0.245f * Pow(5, beta_n)));
+                sigma_a[i] = Sqr(std.log(c[i]) / (5.969f - 0.215f * beta_n + 2.532f * Sqr(beta_n) - 10.73f * Pow3(beta_n) +
+                                                  5.574f * Pow4(beta_n) + 0.245f * Pow5(beta_n)));
             return sigma_a;
         }
 
