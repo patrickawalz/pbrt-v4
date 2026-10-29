@@ -788,6 +788,22 @@ namespace pbrt
         public override Float MinValue() { return -pbrt.FBmBound(omega, octaves); }
         public override Float MaxValue() { return pbrt.FBmBound(omega, octaves); }
 
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            // Map the region's corners and bound the mapped points
+            Bounds3f mapped = new Bounds3f();
+            for (int i = 0; i < 8; ++i)
+            {
+                TextureEvalContext ctx = new TextureEvalContext();
+                ctx.p = region.Corner(i);
+                TexCoord3D c = mapping.Map(ctx);
+                mapped = (i == 0) ? new Bounds3f(c.p) : pbrt.Union(mapped, c.p);
+            }
+            pbrt.FBmBounds(mapped, omega, octaves, out lo, out hi);
+            lo = std.max(lo, MinValue());
+            hi = std.min(hi, MaxValue());
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);

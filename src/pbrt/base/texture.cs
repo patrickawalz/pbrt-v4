@@ -23,6 +23,15 @@ namespace pbrt
         // context. Used to build majorants for texture-driven media.
         public abstract Float MinValue();
         public abstract Float MaxValue();
+
+        // (not in pbrt-v4) Bounds on the value over a region of the points passed in
+        // TextureEvalContext::p, assuming zero ray differentials (full octaves). Defaults to the
+        // global bounds; textures that can do better override it.
+        public virtual void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            lo = MinValue();
+            hi = MaxValue();
+        }
     }
 
     // SpectrumTexture Definition

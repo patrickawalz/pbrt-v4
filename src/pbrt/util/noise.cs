@@ -135,6 +135,10 @@ namespace pbrt
         // (not in pbrt-v4) Bound on |Noise()|; verified numerically in noise_test.cs.
         public const Float NoiseBound = 1;
 
+        // (not in pbrt-v4) Bound on the gradient magnitude of Noise(); the maximum found by
+        // sampling (see textures_test.cs) is about 3.15, so this leaves a margin.
+        public const Float NoiseGradientBound = 3.5f;
+
         // (not in pbrt-v4) Bound on |FBm()| for any p: at most maxOctaves terms of weight omega^i
         public static Float FBmBound(Float omega, int maxOctaves)
         {
@@ -147,16 +151,59 @@ namespace pbrt
             return NoiseBound * sum;
         }
 
-        // (not in pbrt-v4) Upper bound on Turbulence(); each term is either |Noise()| or 0.2
+        // (not in pbrt-v4) Upper bound on Turbulence(): the worst case over the number of full octaves
+        // nInt of nInt noise terms, the partial term at index nInt (|Noise()| or 0.2) and the 0.2 terms
+        // that stand in for the remaining octaves.
         public static Float TurbulenceBound(Float omega, int maxOctaves)
         {
-            Float sum = 0, o = 1;
-            for (int i = 0; i < maxOctaves; ++i)
+            Float worst = 0;
+            for (int nInt = 0; nInt <= maxOctaves; ++nInt)
             {
-                sum += o;
-                o *= std.abs(omega);
+                Float sum = 0, o = 1;
+                for (int i = 0; i < nInt; ++i)
+                {
+                    sum += o * NoiseBound;
+                    o *= std.abs(omega);
+                }
+                sum += o * std.max(NoiseBound, (Float)0.2);
+                for (int i = nInt; i < maxOctaves; ++i)
+                {
+                    sum += o * 0.2f;
+                    o *= std.abs(omega);
+                }
+                worst = std.max(worst, sum);
             }
-            return std.max(NoiseBound, (Float)0.2) * sum;
+            return worst;
+        }
+
+        // (not in pbrt-v4) Bounds on FBm() over a box (in the space passed to FBm) with zero ray
+        // differentials: each octave is bounded by Noise() at the box center plus the gradient bound
+        // times the octave's radius, capped by NoiseBound.
+        public static void FBmBounds(Bounds3f box, Float omega, int octaves, out Float lo, out Float hi)
+        {
+            Point3f center = new Point3f(.5f * (box.pMin.x + box.pMax.x), .5f * (box.pMin.y + box.pMax.y),
+                                         .5f * (box.pMin.z + box.pMax.z));
+            Float radius = .5f * Length(box.pMax - box.pMin);
+            lo = 0; hi = 0;
+            Float lambda = 1, o = 1;
+            for (int i = 0; i < octaves; ++i)
+            {
+                Float n = Noise(lambda * center);
+                Float r = NoiseGradientBound * lambda * radius;
+                Float termLo = std.max(-NoiseBound, n - r), termHi = std.min(NoiseBound, n + r);
+                if (o >= 0)
+                {
+                    lo += o * termLo;
+                    hi += o * termHi;
+                }
+                else
+                {
+                    lo += o * termHi;
+                    hi += o * termLo;
+                }
+                lambda *= 1.99f;
+                o *= omega;
+            }
         }
 
         // (not in pbrt-v4) min over a in [a0,a1], b in [b0,b1], t in [t0,t1] of (1 - t) * a + t * b.

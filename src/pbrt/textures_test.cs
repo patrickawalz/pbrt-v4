@@ -85,5 +85,46 @@ namespace pbrt
             EXPECT_EQ((Float)5, new SpectrumScaledTexture(c2, new FloatConstantTexture(2.5f)).MaxValue());
             EXPECT_EQ((Float)1, new MarbleTexture(new PointTransformMapping(new Transform()), 8, .5f, 1, 1).MaxValue());
         }
+
+        [TEST("TextureBounds", "NoiseGradientBound")]
+        public static void TextureBounds_NoiseGradientBound()
+        {
+            RNG rng = new RNG(5);
+            Float maxGrad = 0, h = 1e-3f;
+            for (int i = 0; i < 2000000; ++i)
+            {
+                Float x = 20 * rng.Uniform<Float>(), y = 20 * rng.Uniform<Float>(), z = 20 * rng.Uniform<Float>();
+                Float gx = (pbrt.Noise(x + h, y, z) - pbrt.Noise(x - h, y, z)) / (2 * h);
+                Float gy = (pbrt.Noise(x, y + h, z) - pbrt.Noise(x, y - h, z)) / (2 * h);
+                Float gz = (pbrt.Noise(x, y, z + h) - pbrt.Noise(x, y, z - h)) / (2 * h);
+                maxGrad = std.max(maxGrad, (Float)Math.Sqrt(gx * gx + gy * gy + gz * gz));
+            }
+            EXPECT_LE(maxGrad, pbrt.NoiseGradientBound);
+            EXPECT_GT(maxGrad, (Float)2);  // and it isn't absurdly loose
+        }
+
+        [TEST("TextureBounds", "FBmRegionBounds")]
+        public static void TextureBounds_FBmRegionBounds()
+        {
+            TextureMapping3D map = new PointTransformMapping(pbrt.Scale(1.6f, 1.6f, 1.6f));
+            FloatTexture tex = new FBmTexture(map, 4, .5f);
+            RNG rng = new RNG(11);
+            for (int i = 0; i < 2000; ++i)
+            {
+                Float size = 0.02f + 0.5f * rng.Uniform<Float>();
+                Point3f p0 = new Point3f(4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2);
+                Bounds3f region = new Bounds3f(p0, p0 + new Vector3f(size, size, size));
+                tex.RegionBounds(region, out Float lo, out Float hi);
+                for (int j = 0; j < 200; ++j)
+                {
+                    TextureEvalContext ctx = new TextureEvalContext();
+                    ctx.p = new Point3f(p0.x + size * rng.Uniform<Float>(), p0.y + size * rng.Uniform<Float>(),
+                                        p0.z + size * rng.Uniform<Float>());
+                    Float v = tex.Evaluate(ctx);
+                    EXPECT_GE(v, lo);
+                    EXPECT_LE(v, hi);
+                }
+            }
+        }
     }
 }
