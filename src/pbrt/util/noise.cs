@@ -135,10 +135,6 @@ namespace pbrt
         // (not in pbrt-v4) Bound on |Noise()|; verified numerically in noise_test.cs.
         public const Float NoiseBound = 1;
 
-        // (not in pbrt-v4) Bound on the gradient magnitude of Noise(); the maximum found by
-        // sampling (see textures_test.cs) is about 3.15, so this leaves a margin.
-        public const Float NoiseGradientBound = 3.5f;
-
         // (not in pbrt-v4) Bound on |FBm()| for any p: at most maxOctaves terms of weight omega^i
         public static Float FBmBound(Float omega, int maxOctaves)
         {
@@ -176,21 +172,120 @@ namespace pbrt
             return worst;
         }
 
+        // (not in pbrt-v4) Rigorous bounds on Noise() over a box. Noise() is a fixed function of the
+        // gradients at the corners of each unit lattice cell, so the box is clipped to each lattice cell
+        // it overlaps and the cell's trilinear-of-fade-weights expression is evaluated in interval
+        // arithmetic. Boxes spanning more than three cells along an axis just get [-NoiseBound, NoiseBound].
+        public static void NoiseBounds(Bounds3f box, out Float lo, out Float hi)
+        {
+            lo = -NoiseBound;
+            hi = NoiseBound;
+            if (std.abs(box.pMin.x) > 1e8f || std.abs(box.pMax.x) > 1e8f || std.abs(box.pMin.y) > 1e8f ||
+                std.abs(box.pMax.y) > 1e8f || std.abs(box.pMin.z) > 1e8f || std.abs(box.pMax.z) > 1e8f)
+                return;
+            int x0 = (int)std.floor(box.pMin.x), x1 = (int)std.floor(box.pMax.x);
+            int y0 = (int)std.floor(box.pMin.y), y1 = (int)std.floor(box.pMax.y);
+            int z0 = (int)std.floor(box.pMin.z), z1 = (int)std.floor(box.pMax.z);
+            if (x1 - x0 > 2 || y1 - y0 > 2 || z1 - z0 > 2)
+                return;
+
+            Float cellLo = Infinity, cellHi = -Infinity;
+            for (int iz = z0; iz <= z1; ++iz)
+            {
+                for (int iy = y0; iy <= y1; ++iy)
+                {
+                    for (int ix = x0; ix <= x1; ++ix)
+                    {
+                        // Offsets of the box within this lattice cell
+                        Float ax = Clamp(box.pMin.x - ix, 0, 1), bx = Clamp(box.pMax.x - ix, 0, 1);
+                        Float ay = Clamp(box.pMin.y - iy, 0, 1), by = Clamp(box.pMax.y - iy, 0, 1);
+                        Float az = Clamp(box.pMin.z - iz, 0, 1), bz = Clamp(box.pMax.z - iz, 0, 1);
+                        NoiseCellBounds(ix & (NoisePermSize - 1), iy & (NoisePermSize - 1), iz & (NoisePermSize - 1),
+                                        ax, bx, ay, by, az, bz, out Float l, out Float h);
+                        cellLo = std.min(cellLo, l);
+                        cellHi = std.max(cellHi, h);
+                    }
+                }
+            }
+            // widen slightly for floating-point rounding in Noise()
+            lo = std.max(-NoiseBound, cellLo - 2e-5f);
+            hi = std.min(NoiseBound, cellHi + 2e-5f);
+        }
+
+        // Interval of Grad() for a corner whose offsets lie in [dx0,dx1] x [dy0,dy1] x [dz0,dz1]
+        private static void GradBounds(int x, int y, int z, Float dx0, Float dx1, Float dy0, Float dy1, Float dz0,
+                                       Float dz1, out Float lo, out Float hi)
+        {
+            int h = NoisePerm[NoisePerm[NoisePerm[x] + y] + z];
+            h &= 15;
+            Float u0 = h < 8 || h == 12 || h == 13 ? dx0 : dy0, u1 = h < 8 || h == 12 || h == 13 ? dx1 : dy1;
+            Float v0 = h < 4 || h == 12 || h == 13 ? dy0 : dz0, v1 = h < 4 || h == 12 || h == 13 ? dy1 : dz1;
+            if ((h & 1) != 0)
+            {
+                Float t = -u0;
+                u0 = -u1;
+                u1 = t;
+            }
+            if ((h & 2) != 0)
+            {
+                Float t = -v0;
+                v0 = -v1;
+                v1 = t;
+            }
+            lo = u0 + v0;
+            hi = u1 + v1;
+        }
+
+        // Interval of (1 - t) * a + t * b with t in [t0, t1] subset of [0, 1] and a in [a0, a1], b in [b0, b1]
+        private static void LerpBounds(Float t0, Float t1, Float a0, Float a1, Float b0, Float b1, out Float lo,
+                                       out Float hi)
+        {
+            // (1 - t) in [1 - t1, 1 - t0], both factors nonnegative
+            Float p0 = std.min(std.min((1 - t1) * a0, (1 - t1) * a1), std.min((1 - t0) * a0, (1 - t0) * a1));
+            Float p1 = std.max(std.max((1 - t1) * a0, (1 - t1) * a1), std.max((1 - t0) * a0, (1 - t0) * a1));
+            Float q0 = std.min(std.min(t0 * b0, t0 * b1), std.min(t1 * b0, t1 * b1));
+            Float q1 = std.max(std.max(t0 * b0, t0 * b1), std.max(t1 * b0, t1 * b1));
+            lo = p0 + q0;
+            hi = p1 + q1;
+        }
+
+        private static void NoiseCellBounds(int ix, int iy, int iz, Float ax, Float bx, Float ay, Float by, Float az,
+                                            Float bz, out Float lo, out Float hi)
+        {
+            GradBounds(ix, iy, iz, ax, bx, ay, by, az, bz, out Float l000, out Float h000);
+            GradBounds(ix + 1, iy, iz, ax - 1, bx - 1, ay, by, az, bz, out Float l100, out Float h100);
+            GradBounds(ix, iy + 1, iz, ax, bx, ay - 1, by - 1, az, bz, out Float l010, out Float h010);
+            GradBounds(ix + 1, iy + 1, iz, ax - 1, bx - 1, ay - 1, by - 1, az, bz, out Float l110, out Float h110);
+            GradBounds(ix, iy, iz + 1, ax, bx, ay, by, az - 1, bz - 1, out Float l001, out Float h001);
+            GradBounds(ix + 1, iy, iz + 1, ax - 1, bx - 1, ay, by, az - 1, bz - 1, out Float l101, out Float h101);
+            GradBounds(ix, iy + 1, iz + 1, ax, bx, ay - 1, by - 1, az - 1, bz - 1, out Float l011, out Float h011);
+            GradBounds(ix + 1, iy + 1, iz + 1, ax - 1, bx - 1, ay - 1, by - 1, az - 1, bz - 1, out Float l111,
+                       out Float h111);
+
+            // NoiseWeight() is increasing on [0, 1]
+            Float wx0 = NoiseWeight(ax), wx1 = NoiseWeight(bx);
+            Float wy0 = NoiseWeight(ay), wy1 = NoiseWeight(by);
+            Float wz0 = NoiseWeight(az), wz1 = NoiseWeight(bz);
+
+            LerpBounds(wx0, wx1, l000, h000, l100, h100, out Float lx00, out Float hx00);
+            LerpBounds(wx0, wx1, l010, h010, l110, h110, out Float lx10, out Float hx10);
+            LerpBounds(wx0, wx1, l001, h001, l101, h101, out Float lx01, out Float hx01);
+            LerpBounds(wx0, wx1, l011, h011, l111, h111, out Float lx11, out Float hx11);
+            LerpBounds(wy0, wy1, lx00, hx00, lx10, hx10, out Float ly0, out Float hy0);
+            LerpBounds(wy0, wy1, lx01, hx01, lx11, hx11, out Float ly1, out Float hy1);
+            LerpBounds(wz0, wz1, ly0, hy0, ly1, hy1, out lo, out hi);
+        }
+
         // (not in pbrt-v4) Bounds on FBm() over a box (in the space passed to FBm) with zero ray
-        // differentials: each octave is bounded by Noise() at the box center plus the gradient bound
-        // times the octave's radius, capped by NoiseBound.
+        // differentials: the sum of each octave's NoiseBounds() over the scaled box.
         public static void FBmBounds(Bounds3f box, Float omega, int octaves, out Float lo, out Float hi)
         {
-            Point3f center = new Point3f(.5f * (box.pMin.x + box.pMax.x), .5f * (box.pMin.y + box.pMax.y),
-                                         .5f * (box.pMin.z + box.pMax.z));
-            Float radius = .5f * Length(box.pMax - box.pMin);
             lo = 0; hi = 0;
             Float lambda = 1, o = 1;
             for (int i = 0; i < octaves; ++i)
             {
-                Float n = Noise(lambda * center);
-                Float r = NoiseGradientBound * lambda * radius;
-                Float termLo = std.max(-NoiseBound, n - r), termHi = std.min(NoiseBound, n + r);
+                Bounds3f scaled = new Bounds3f(lambda * box.pMin, lambda * box.pMax);
+                NoiseBounds(scaled, out Float termLo, out Float termHi);
                 if (o >= 0)
                 {
                     lo += o * termLo;

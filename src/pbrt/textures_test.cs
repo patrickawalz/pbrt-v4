@@ -86,23 +86,6 @@ namespace pbrt
             EXPECT_EQ((Float)1, new MarbleTexture(new PointTransformMapping(new Transform()), 8, .5f, 1, 1).MaxValue());
         }
 
-        [TEST("TextureBounds", "NoiseGradientBound")]
-        public static void TextureBounds_NoiseGradientBound()
-        {
-            RNG rng = new RNG(5);
-            Float maxGrad = 0, h = 1e-3f;
-            for (int i = 0; i < 2000000; ++i)
-            {
-                Float x = 20 * rng.Uniform<Float>(), y = 20 * rng.Uniform<Float>(), z = 20 * rng.Uniform<Float>();
-                Float gx = (pbrt.Noise(x + h, y, z) - pbrt.Noise(x - h, y, z)) / (2 * h);
-                Float gy = (pbrt.Noise(x, y + h, z) - pbrt.Noise(x, y - h, z)) / (2 * h);
-                Float gz = (pbrt.Noise(x, y, z + h) - pbrt.Noise(x, y, z - h)) / (2 * h);
-                maxGrad = std.max(maxGrad, (Float)Math.Sqrt(gx * gx + gy * gy + gz * gz));
-            }
-            EXPECT_LE(maxGrad, pbrt.NoiseGradientBound);
-            EXPECT_GT(maxGrad, (Float)2);  // and it isn't absurdly loose
-        }
-
         [TEST("TextureBounds", "FBmRegionBounds")]
         public static void TextureBounds_FBmRegionBounds()
         {
@@ -125,6 +108,33 @@ namespace pbrt
                     EXPECT_LE(v, hi);
                 }
             }
+        }
+
+        [TEST("TextureBounds", "NoiseBounds")]
+        public static void TextureBounds_NoiseBounds()
+        {
+            RNG rng = new RNG(21);
+            Float totalWidth = 0;
+            int nBoxes = 4000;
+            for (int i = 0; i < nBoxes; ++i)
+            {
+                Float size = 0.01f + 1.5f * rng.Uniform<Float>() * rng.Uniform<Float>();
+                Point3f p0 = new Point3f(40 * rng.Uniform<Float>() - 20, 40 * rng.Uniform<Float>() - 20,
+                                         40 * rng.Uniform<Float>() - 20);
+                Bounds3f box = new Bounds3f(p0, p0 + new Vector3f(size, size, size));
+                pbrt.NoiseBounds(box, out Float lo, out Float hi);
+                for (int j = 0; j < 100; ++j)
+                {
+                    Float v = pbrt.Noise(p0.x + size * rng.Uniform<Float>(), p0.y + size * rng.Uniform<Float>(),
+                                         p0.z + size * rng.Uniform<Float>());
+                    EXPECT_GE(v, lo);
+                    EXPECT_LE(v, hi);
+                }
+                if (size < 0.1f)
+                    totalWidth += hi - lo;
+            }
+            // small boxes should give much tighter bounds than the global [-1, 1]
+            EXPECT_LT(totalWidth / nBoxes, (Float)0.2);
         }
     }
 }
