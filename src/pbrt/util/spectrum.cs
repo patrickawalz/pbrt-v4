@@ -91,6 +91,14 @@ namespace pbrt
             return ret;
         }
 
+        public static SampledSpectrum Abs(SampledSpectrum s)
+        {
+            SampledSpectrum ret = new SampledSpectrum();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                ret[i] = std.abs(s[i]);
+            return ret;
+        }
+
         public static SampledSpectrum Sqr(SampledSpectrum s) { return s * s; }
 
         public static SampledSpectrum Sqrt(SampledSpectrum s)

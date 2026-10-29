@@ -7,13 +7,13 @@ namespace pbrt
 {
     public static unsafe class MediaExperimentalTests
     {
-        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false)
+        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f)
         {
             TextureMapping3D map = new PointTransformMapping(pbrt.Scale(1.6f, 1.6f, 1.6f));
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, 0.01f, 0, false, false, adaptiveRatio, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -165,6 +165,75 @@ namespace pbrt
                 double sigma = Math.Sqrt(Math.Max(sum2 / nPaths - mean * mean, 0) / nPaths);
                 EXPECT_LT(Math.Abs(mean - reference), 4 * sigma + 1e-3);
             }
+        }
+
+        // Ratio tracking with a signed null coefficient (no clamping of the density to the majorant)
+        private static Float SignedRatioTracking(TextureMedium medium, Ray ray, Float tMax, SampledWavelengths lambda, ref RNG rng)
+        {
+            Float T_ray = 1;
+            pbrt.SampleT_maj(ray, tMax, rng.Uniform<Float>(), ref rng, lambda,
+                (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    T_ray *= (sigma_maj[0] - mp.sigma_a[0] - mp.sigma_s[0]) / sigma_maj[0];
+                    return T_ray != 0;
+                });
+            return T_ray;
+        }
+
+        // Progressive null-tracking without clamping is unbiased in every pass, even with a majorant that is
+        // far too small
+        [TEST("TextureMedium", "ProgressiveUnclampedUnbiased")]
+        public static void TextureMedium_ProgressiveUnclampedUnbiased()
+        {
+            TextureMedium reference = MakeMedium(false);
+            TextureMedium progressive = MakeMedium(true, false, true, 2.5f);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(11);
+            int nRays = 8;
+            Ray[] rays = new Ray[nRays];
+            double refMean = 0;
+            for (int i = 0; i < nRays; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                rays[i] = new Ray(o, d, 0, progressive);
+                refMean += ReferenceTransmittance(reference, rays[i], 2.2f, lambda) / nRays;
+            }
+            int nPasses = 24;
+            int pathsPerPass = 20000;
+            double sum = 0, sum2 = 0;
+            for (int pass = 1; pass <= nPasses; ++pass)
+            {
+                double passEst = 0;
+                for (int i = 0; i < nRays; ++i)
+                    for (int s = 0; s < pathsPerPass; ++s)
+                        passEst += SignedRatioTracking(progressive, rays[i], 2.2f, lambda, ref rng);
+                passEst /= nRays * pathsPerPass;
+                sum += passEst;
+                sum2 += passEst * passEst;
+                TextureMedium.EndProgressivePass();
+            }
+            double mean = sum / nPasses;
+            double stderr = Math.Sqrt(Math.Max(sum2 / nPasses - mean * mean, 0) / nPasses);
+            Console.WriteLine($"PROBE unclamped: mean {mean} reference {refMean} stderr {stderr}");
+            EXPECT_LT(Math.Abs(mean - refMean), 4 * stderr + 1e-3);
+
+            // For contrast: the same progressive run with the density clamped to the majorant
+            TextureMedium clamped = MakeMedium(true, false, false, 2.5f);
+            double cSum = 0;
+            for (int pass = 1; pass <= nPasses; ++pass)
+            {
+                double passEst = 0;
+                for (int i = 0; i < nRays; ++i)
+                {
+                    Ray r = new Ray(rays[i].o, rays[i].d, 0, clamped);
+                    for (int s = 0; s < pathsPerPass; ++s)
+                        passEst += RatioTracking(clamped, r, 2.2f, lambda, ref rng);
+                }
+                cSum += passEst / (nRays * pathsPerPass);
+                TextureMedium.EndProgressivePass();
+            }
+            Console.WriteLine($"PROBE clamped (same start, same passes): mean {cSum / nPasses}");
         }
     }
 }

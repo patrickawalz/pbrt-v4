@@ -3783,9 +3783,16 @@ namespace pbrt
                                 }
 
                                 // Compute medium event probabilities for interaction
-                                Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
-                                Float pScatter = mp.sigma_s[0] / sigma_maj[0];
-                                Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
+                                // (not in pbrt-v4) With a signed null coefficient the event probabilities are
+                                // proportional to the absolute values of the coefficients, which sum to
+                                // _sigma_c_ >= _sigma_maj_, and the weights carry the sign.
+                                SampledSpectrum sigma_n_signed = sigma_maj - mp.sigma_a - mp.sigma_s;
+                                SampledSpectrum sigma_c = mp.signedNull ? mp.sigma_a + mp.sigma_s + Abs(sigma_n_signed)
+                                                                        : sigma_maj;
+                                Float pAbsorb = mp.sigma_a[0] / sigma_c[0];
+                                Float pScatter = mp.sigma_s[0] / sigma_c[0];
+                                Float pNull = mp.signedNull ? std.abs(sigma_n_signed[0]) / sigma_c[0]
+                                                            : std.max<Float>(0, 1 - pAbsorb - pScatter);
                                 bool spectralTracking = mp.spectralTracking;
                                 if (spectralTracking)
                                 {
@@ -3833,6 +3840,12 @@ namespace pbrt
                                         pdf = T_maj_[0] * sigma_maj[0] * pScatter;
                                         beta *= T_maj_ * mp.sigma_s / pdf;
                                     }
+                                    else if (mp.signedNull)
+                                    {
+                                        pdf = T_maj_[0] * sigma_maj[0] * pScatter;
+                                        beta *= T_maj_ * mp.sigma_s / pdf;
+                                        r_u *= T_maj_ * sigma_maj * SafeDiv(mp.sigma_s, sigma_c) / pdf;
+                                    }
                                     else
                                     {
                                         beta *= T_maj_ * mp.sigma_s / pdf;
@@ -3879,6 +3892,16 @@ namespace pbrt
                                         Float pdfS = T_maj_[0] * sigma_maj[0] * pNull;
                                         beta *= T_maj_ * sigma_n / pdfS;
                                         r_l *= T_maj_ * sigma_maj / pdfS;
+                                        return (bool)beta && (bool)r_u;
+                                    }
+                                    if (mp.signedNull)
+                                    {
+                                        Float pdfU = T_maj_[0] * sigma_maj[0] * pNull;
+                                        beta *= T_maj_ * sigma_n_signed / pdfU;
+                                        if (pdfU == 0)
+                                            beta = new SampledSpectrum(0.0f);
+                                        r_u *= T_maj_ * sigma_maj * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdfU;
+                                        r_l *= T_maj_ * sigma_maj / pdfU;
                                         return (bool)beta && (bool)r_u;
                                     }
                                     Float pdf = T_maj_[0] * sigma_n[0];
@@ -4222,6 +4245,14 @@ namespace pbrt
                                             r_l *= T_maj_ * sigma_maj / pdf;
                                             r_u *= pNull;
                                         }
+                                        else if (mp.signedNull)
+                                        {
+                                            SampledSpectrum sigma_n_signed = sigma_maj - mp.sigma_a - mp.sigma_s;
+                                            SampledSpectrum sigma_c = mp.sigma_a + mp.sigma_s + Abs(sigma_n_signed);
+                                            T_ray *= T_maj_ * sigma_n_signed / pdf;
+                                            r_l *= T_maj_ * sigma_maj / pdf;
+                                            r_u *= T_maj_ * sigma_maj * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdf;
+                                        }
                                         else
                                         {
                                             T_ray *= T_maj_ * sigma_n / pdf;
@@ -4232,7 +4263,7 @@ namespace pbrt
                                         // Possibly terminate transmittance computation using
                                         // Russian roulette
                                         SampledSpectrum Tr = T_ray / (r_l + r_u).Average();
-                                        if (Tr.MaxComponentValue() < 0.05f)
+                                        if (Abs(Tr).MaxComponentValue() < 0.05f)
                                         {
                                             Float q = 0.75f;
                                             if (rng.Uniform<Float>() < q)

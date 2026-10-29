@@ -255,6 +255,10 @@ namespace pbrt
         // density with which light sampling's adaptive ratio tracking would have produced this null vertex
         // and the stretch of ray before it, normalized like T_maj * sigma_maj.
         public bool adaptiveLight;
+        // (not in pbrt-v4) Set by progressive null-tracking without clamping: the density may exceed the
+        // majorant, so the null coefficient (majorant minus extinction) can be negative.
+        public bool signedNull;
+        public bool adaptiveLight_;
         public SampledSpectrum lightDensity;
     }
 
@@ -1024,7 +1028,7 @@ namespace pbrt
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
-                             bool spectral, bool adaptiveRatio, Allocator alloc)
+                             bool spectral, bool adaptiveRatio, bool unclamped, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1058,6 +1062,7 @@ namespace pbrt
                 }
             }
             this.spectral = spectral;
+            this.unclamped = unclamped && progressive;
             this.adaptiveRatio = adaptiveRatio && !spectral;
             this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
 
@@ -1148,13 +1153,15 @@ namespace pbrt
                         }
                     }
                 }
-                density = clamped;
+                // Without clamping the estimators use signed null coefficients and stay unbiased for any majorant
+                if (!unclamped)
+                    density = clamped;
             }
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f),
-                                          spectralTracking = spectral };
+                                          spectralTracking = spectral, signedNull = unclamped };
         }
 
         public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
@@ -1416,7 +1423,7 @@ namespace pbrt
         private FloatTexture texture;
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
-        private bool progressive, decomposition, spectral, adaptiveRatio;
+        private bool progressive, decomposition, spectral, adaptiveRatio, unclamped;
         private int warmupPasses;
         // Decomposition tracking (Kutz et al. 2017): a control density, constant within each majorant
         // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
@@ -1471,6 +1478,7 @@ namespace pbrt
             bool decomposition = parameters.GetOneBool("decomposition", false);
             bool spectral = parameters.GetOneBool("spectral", false);
             bool adaptiveRatio = parameters.GetOneBool("adaptiveratio", false);
+            bool unclamped = parameters.GetOneBool("unclamped", false);
             int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
@@ -1478,7 +1486,7 @@ namespace pbrt
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, alloc);
         }
     }
 
