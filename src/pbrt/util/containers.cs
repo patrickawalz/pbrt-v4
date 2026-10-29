@@ -184,17 +184,28 @@ namespace pbrt
 
         ~SampledGrid()
         {
-            Dispose();
+            Dispose(false);
         }
 
         public void Dispose()
         {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposed)
+                return;
+
+            // values is unmanaged memory, so it is freed whether called from Dispose() or the finalizer;
+            // there are no managed members to release when disposing is true
             if (values != null)
             {
                 FreeAligned(values);
                 values = null;
             }
-            GC.SuppressFinalize(this);
+            disposed = true;
         }
 
         public size_t BytesAllocated()
@@ -234,6 +245,7 @@ namespace pbrt
         private T* values;
         private int count;
         private int nx, ny, nz;
+        private bool disposed;
     }
 
     // RGBUnboundedVoxel Definition: the value stored per voxel of a SampledGrid<RGBUnboundedVoxel>. In C++ the grid
