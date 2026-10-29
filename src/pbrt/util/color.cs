@@ -158,6 +158,51 @@ namespace pbrt
         // RGB Public Methods
         public RGB(Float r, Float g, Float b) { this.r = r; this.g = g; this.b = b; }
 
+        public void operator +=(RGB s)
+        {
+            r += s.r;
+            g += s.g;
+            b += s.b;
+        }
+
+        public void operator -=(RGB s)
+        {
+            r -= s.r;
+            g -= s.g;
+            b -= s.b;
+        }
+
+        public void operator *=(RGB s)
+        {
+            r *= s.r;
+            g *= s.g;
+            b *= s.b;
+        }
+
+        public void operator *=(Float a)
+        {
+            DCHECK(!IsNaN(a));
+            r *= a;
+            g *= a;
+            b *= a;
+        }
+
+        public void operator /=(RGB s)
+        {
+            r /= s.r;
+            g /= s.g;
+            b /= s.b;
+        }
+
+        public void operator /=(Float a)
+        {
+            DCHECK(!IsNaN(a));
+            DCHECK_NE(a, 0);
+            r /= a;
+            g /= a;
+            b /= a;
+        }
+
         public static RGB operator +(RGB a, RGB s) { return new RGB(a.r + s.r, a.g + s.g, a.b + s.b); }
         public static RGB operator -(RGB a, RGB s) { return new RGB(a.r - s.r, a.g - s.g, a.b - s.b); }
         public static RGB operator -(Float a, RGB s) { return new RGB(a - s.r, a - s.g, a - s.b); }
@@ -225,6 +270,51 @@ namespace pbrt
             if (xy.y == 0)
                 return new XYZ(0, 0, 0);
             return new XYZ(xy.x * Y / xy.y, Y, (1 - xy.x - xy.y) * Y / xy.y);
+        }
+
+        public void operator +=(XYZ s)
+        {
+            X += s.X;
+            Y += s.Y;
+            Z += s.Z;
+        }
+
+        public void operator -=(XYZ s)
+        {
+            X -= s.X;
+            Y -= s.Y;
+            Z -= s.Z;
+        }
+
+        public void operator *=(XYZ s)
+        {
+            X *= s.X;
+            Y *= s.Y;
+            Z *= s.Z;
+        }
+
+        public void operator *=(Float a)
+        {
+            DCHECK(!IsNaN(a));
+            X *= a;
+            Y *= a;
+            Z *= a;
+        }
+
+        public void operator /=(XYZ s)
+        {
+            X /= s.X;
+            Y /= s.Y;
+            Z /= s.Z;
+        }
+
+        public void operator /=(Float a)
+        {
+            DCHECK(!IsNaN(a));
+            DCHECK_NE(a, 0);
+            X /= a;
+            Y /= a;
+            Z /= a;
         }
 
         public static XYZ operator +(XYZ a, XYZ s) { return new XYZ(a.X + s.X, a.Y + s.Y, a.Z + s.Z); }

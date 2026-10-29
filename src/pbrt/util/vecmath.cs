@@ -4631,6 +4631,31 @@ namespace pbrt
         public Quaternion(Vector3f v, Float w) { this.v = v; this.w = w; }
         public static Quaternion Identity() { return new Quaternion(new Vector3f(), 1); }
 
+        public void operator +=(Quaternion q)
+        {
+            v += q.v;
+            w += q.w;
+        }
+
+        public void operator -=(Quaternion q)
+        {
+            v -= q.v;
+            w -= q.w;
+        }
+
+        public void operator *=(Float f)
+        {
+            v *= f;
+            w *= f;
+        }
+
+        public void operator /=(Float f)
+        {
+            DCHECK_NE(0, f);
+            v /= f;
+            w /= f;
+        }
+
         public static Quaternion operator +(Quaternion a, Quaternion q) { return new Quaternion(a.v + q.v, a.w + q.w); }
         public static Quaternion operator -(Quaternion a) { return new Quaternion(-a.v, -a.w); }
         public static Quaternion operator -(Quaternion a, Quaternion q) { return new Quaternion(a.v - q.v, a.w - q.w); }

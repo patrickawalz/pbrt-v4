@@ -199,6 +199,12 @@ namespace pbrt
                 values[i] += s.values[i];
         }
 
+        public void operator -=(SampledSpectrum s)
+        {
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] -= s.values[i];
+        }
+
         public void operator *=(SampledSpectrum s)
         {
             for (int i = 0; i < NSpectrumSamples; ++i)
@@ -210,6 +216,15 @@ namespace pbrt
             DCHECK(!IsNaN(a));
             for (int i = 0; i < NSpectrumSamples; ++i)
                 values[i] *= a;
+        }
+
+        public void operator /=(SampledSpectrum s)
+        {
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                DCHECK_NE(0, s.values[i]);
+                values[i] /= s.values[i];
+            }
         }
 
         public void operator /=(Float a)

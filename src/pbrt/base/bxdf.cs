@@ -24,15 +24,20 @@ namespace pbrt
 
 
     // BxDFReflTransFlags Definition
-    public readonly struct BxDFReflTransFlags : IEquatable<BxDFReflTransFlags>
+    public struct BxDFReflTransFlags : IEquatable<BxDFReflTransFlags>
     {
-        public readonly int value;
+        public int value;
         public BxDFReflTransFlags(int v) { value = v; }
 
         public static readonly BxDFReflTransFlags Unset = new BxDFReflTransFlags(0);
         public static readonly BxDFReflTransFlags Reflection = new BxDFReflTransFlags(1 << 0);
         public static readonly BxDFReflTransFlags Transmission = new BxDFReflTransFlags(1 << 1);
         public static readonly BxDFReflTransFlags All = new BxDFReflTransFlags((1 << 0) | (1 << 1));
+
+        public void operator |=(BxDFReflTransFlags b)
+        {
+            this = this | b;
+        }
 
         public static BxDFReflTransFlags operator |(BxDFReflTransFlags a, BxDFReflTransFlags b)
         {
@@ -59,9 +64,9 @@ namespace pbrt
     }
 
     // BxDFFlags Definition
-    public readonly struct BxDFFlags : IEquatable<BxDFFlags>
+    public struct BxDFFlags : IEquatable<BxDFFlags>
     {
-        public readonly int value;
+        public int value;
         public BxDFFlags(int v) { value = v; }
 
         public static readonly BxDFFlags Unset = new BxDFFlags(0);
@@ -78,6 +83,11 @@ namespace pbrt
         public static readonly BxDFFlags SpecularReflection = new BxDFFlags((1 << 4) | (1 << 0));
         public static readonly BxDFFlags SpecularTransmission = new BxDFFlags((1 << 4) | (1 << 1));
         public static readonly BxDFFlags All = new BxDFFlags((1 << 2) | (1 << 3) | (1 << 4) | (1 << 0) | (1 << 1));
+
+        public void operator |=(BxDFFlags b)
+        {
+            this = this | b;
+        }
 
         public static BxDFFlags operator |(BxDFFlags a, BxDFFlags b) { return new BxDFFlags(a.value | b.value); }
         public static int operator &(BxDFFlags a, BxDFFlags b) { return a.value & b.value; }

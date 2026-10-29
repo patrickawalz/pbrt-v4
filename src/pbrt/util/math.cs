@@ -2267,14 +2267,13 @@ namespace pbrt
             c = T.Zero;
         }
 
-        public static CompensatedSum<T> operator +(CompensatedSum<T> s, T v)
+        public void operator +=(T v)
         {
             // Algorithm 3: Kahan Summation (compensated)
-            T delta = v - s.c;
-            T newSum = s.sum + delta;
-            s.c = (newSum - s.sum) - delta;
-            s.sum = newSum;
-            return s;
+            T delta = v - c;
+            T newSum = sum + delta;
+            c = (newSum - sum) - delta;
+            sum = newSum;
         }
 
         public static explicit operator T(CompensatedSum<T> s)
@@ -2409,6 +2408,52 @@ namespace pbrt
         public static Interval operator -(Interval i)
         {
             return new Interval(-i.high, -i.low);
+        }
+
+        public void operator +=(Interval i)
+        {
+            this = this + i;
+        }
+
+        public void operator -=(Interval i)
+        {
+            this = this - i;
+        }
+
+        public void operator *=(Interval i)
+        {
+            this = this * i;
+        }
+
+        public void operator /=(Interval i)
+        {
+            this = this / i;
+        }
+
+        public void operator +=(Float f)
+        {
+            this += new Interval(f);
+        }
+
+        public void operator -=(Float f)
+        {
+            this -= new Interval(f);
+        }
+
+        public void operator *=(Float f)
+        {
+            if (f > 0)
+                this = new Interval(MulRoundDown(f, low), MulRoundUp(f, high));
+            else
+                this = new Interval(MulRoundDown(f, high), MulRoundUp(f, low));
+        }
+
+        public void operator /=(Float f)
+        {
+            if (f > 0)
+                this = new Interval(DivRoundDown(low, f), DivRoundUp(high, f));
+            else
+                this = new Interval(DivRoundDown(high, f), DivRoundUp(low, f));
         }
 
         public static Interval operator +(Interval a, Interval i)
