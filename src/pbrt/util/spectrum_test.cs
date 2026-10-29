@@ -51,9 +51,9 @@ namespace pbrt
                 Float xx = 0, yy = 0, zz = 0;
                 for (Float lambda = 360; lambda < 831; ++lambda)
                 {
-                    xx += Spectra.X().Apply(lambda);
-                    yy += Spectra.Y().Apply(lambda);
-                    zz += Spectra.Z().Apply(lambda);
+                    xx += Spectra.X().Evaluate(lambda);
+                    yy += Spectra.Y().Evaluate(lambda);
+                    zz += Spectra.Z().Evaluate(lambda);
                 }
                 const Float CIE_Y_integral = 106.856895f;
                 xx /= CIE_Y_integral;
@@ -109,17 +109,17 @@ namespace pbrt
                 RGBAlbedoSpectrum sr = new RGBAlbedoSpectrum(RGBColorSpace.sRGB, rgb);
                 Float m = sr.MaxValue() * 1.00001f;
                 for (Float lambda = 360; lambda < 830; lambda += .92f)
-                    EXPECT_LE(sr.Apply(lambda), m);
+                    EXPECT_LE(sr.Evaluate(lambda), m);
 
                 RGBUnboundedSpectrum su = new RGBUnboundedSpectrum(RGBColorSpace.sRGB, 10f * rgb);
                 m = su.MaxValue() * 1.00001f;
                 for (Float lambda = 360; lambda < 830; lambda += .92f)
-                    EXPECT_LE(su.Apply(lambda), m);
+                    EXPECT_LE(su.Evaluate(lambda), m);
 
                 RGBIlluminantSpectrum si = new RGBIlluminantSpectrum(RGBColorSpace.sRGB, rgb);
                 m = si.MaxValue() * 1.00001f;
                 for (Float lambda = 360; lambda < 830; lambda += .92f)
-                    EXPECT_LE(si.Apply(lambda), m);
+                    EXPECT_LE(si.Evaluate(lambda), m);
             }
         }
 
@@ -134,7 +134,7 @@ namespace pbrt
                 Float lambda = SampleVisibleWavelengths(u);
                 Float pdf = VisibleWavelengthsPDF(lambda);
                 if (pdf > 0)
-                    ysum += Spectra.Y().Apply(lambda) / pdf;
+                    ysum += Spectra.Y().Evaluate(lambda) / pdf;
             }
             Float yint = ysum / n;
 
@@ -155,7 +155,7 @@ namespace pbrt
                     Float lambdaU = Lerp(u, Lambda_min, Lambda_max);
                     Float pdfU = 1f / (Lambda_max - Lambda_min);
                     unifSum +=
-                        (Spectra.X().Apply(lambdaU) + Spectra.Y().Apply(lambdaU) + Spectra.Z().Apply(lambdaU)) /
+                        (Spectra.X().Evaluate(lambdaU) + Spectra.Y().Evaluate(lambdaU) + Spectra.Z().Evaluate(lambdaU)) /
                         pdfU;
                 }
 
@@ -163,7 +163,7 @@ namespace pbrt
                 Float pdf = VisibleWavelengthsPDF(lambda);
                 if (pdf > 0)
                     impSum +=
-                        (Spectra.X().Apply(lambda) + Spectra.Y().Apply(lambda) + Spectra.Z().Apply(lambda)) /
+                        (Spectra.X().Evaluate(lambda) + Spectra.Y().Evaluate(lambda) + Spectra.Z().Evaluate(lambda)) /
                         pdf;
             }
             Float impInt = impSum / n, unifInt = unifSum / n;

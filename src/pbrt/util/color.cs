@@ -375,14 +375,14 @@ namespace pbrt
 
         public Float MaxValue()
         {
-            Float result = std.max(Apply(360), Apply(830));
+            Float result = std.max(Evaluate(360), Evaluate(830));
             Float lambda = -c1 / (2 * c0);
             if (lambda >= 360 && lambda <= 830)
-                result = std.max(result, Apply(lambda));
+                result = std.max(result, Evaluate(lambda));
             return result;
         }
 
-        public Float Apply(Float lambda)
+        public Float Evaluate(Float lambda)
         {
             return s(EvaluatePolynomial(lambda, c2, c1, c0));  // c0 * lambda^2 + c1 * lambda + c2
         }

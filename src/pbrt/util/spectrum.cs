@@ -4,7 +4,7 @@
 // util/spectrum.h, util/spectrum.cpp
 //
 // Spectrum is a TaggedPointer in C++; here it is an abstract class with one sealed class per
-// tagged type. C++ operator()(lambda) is spelled Apply(lambda). The data tables from spectrum.cpp
+// tagged type. C++ operator()(lambda) is spelled Evaluate(lambda). The data tables from spectrum.cpp
 // were converted by script (double literals are narrowed to Float once at startup).
 
 using System;
@@ -60,7 +60,7 @@ namespace pbrt
         {
             Float integral = 0;
             for (Float lambda = Lambda_min; lambda <= Lambda_max; ++lambda)
-                integral += f.Apply(lambda) * g.Apply(lambda);
+                integral += f.Evaluate(lambda) * g.Evaluate(lambda);
             return integral;
         }
 
@@ -164,7 +164,7 @@ namespace pbrt
                 Float[] wls = {306, 360.932007f, 380, 402, 455, 503, 579,
                                610, 660, 692, 702, 760, 800, 860};
                 foreach (Float lambda in wls)
-                    if (a.Apply(lambda) != b.Apply(lambda))
+                    if (a.Evaluate(lambda) != b.Evaluate(lambda))
                         return false;
                 return true;
             };
@@ -183,7 +183,7 @@ namespace pbrt
     // BlackbodySpectrum>)
     public abstract class Spectrum
     {
-        public abstract Float Apply(Float lambda);
+        public abstract Float Evaluate(Float lambda);
         public abstract Float MaxValue();
         public abstract SampledSpectrum Sample(SampledWavelengths lambda);
         public abstract override string ToString();
@@ -557,7 +557,7 @@ namespace pbrt
     public sealed class ConstantSpectrum : Spectrum
     {
         public ConstantSpectrum(Float c) { this.c = c; }
-        public override Float Apply(Float lambda) { return c; }
+        public override Float Evaluate(Float lambda) { return c; }
         public override Float MaxValue() { return c; }
         public override SampledSpectrum Sample(SampledWavelengths w) { return new SampledSpectrum(c); }
         public override string ToString() { return $"[ ConstantSpectrum c: {c:F6} ]"; }
@@ -597,7 +597,7 @@ namespace pbrt
             CHECK_GE(lambda_max, lambda_min);
             if (spec != null)
                 for (int lambda = lambda_min; lambda <= lambda_max; ++lambda)
-                    values[lambda - lambda_min] = spec.Apply(lambda);
+                    values[lambda - lambda_min] = spec.Evaluate(lambda);
         }
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
@@ -646,7 +646,7 @@ namespace pbrt
             return s;
         }
 
-        public override Float Apply(Float lambda)
+        public override Float Evaluate(Float lambda)
         {
             DCHECK_GT(lambda, 0);
             int offset = (int)std.lround(lambda) - lambda_min;
@@ -691,7 +691,7 @@ namespace pbrt
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = Apply(lambda[i]);
+                s[i] = Evaluate(lambda[i]);
             return s;
         }
 
@@ -707,7 +707,7 @@ namespace pbrt
         // PiecewiseLinearSpectrum Public Methods
         public PiecewiseLinearSpectrum() { lambdas = new List<Float>(); values = new List<Float>(); }
 
-        public override Float Apply(Float lambda)
+        public override Float Evaluate(Float lambda)
         {
             // Handle _PiecewiseLinearSpectrum_ corner cases
             if (lambdas.Count == 0 || lambda < lambdas[0] || lambda > lambdas[lambdas.Count - 1])
@@ -830,7 +830,7 @@ namespace pbrt
             normalizationFactor = 1 / Blackbody(lambdaMax * 1e9f, T);
         }
 
-        public override Float Apply(Float lambda) { return Blackbody(lambda, T) * normalizationFactor; }
+        public override Float Evaluate(Float lambda) { return Blackbody(lambda, T) * normalizationFactor; }
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
@@ -852,14 +852,14 @@ namespace pbrt
     // RGBAlbedoSpectrum Definition
     public sealed class RGBAlbedoSpectrum : Spectrum
     {
-        public override Float Apply(Float lambda) { return rsp.Apply(lambda); }
+        public override Float Evaluate(Float lambda) { return rsp.Evaluate(lambda); }
         public override Float MaxValue() { return rsp.MaxValue(); }
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = rsp.Apply(lambda[i]);
+                s[i] = rsp.Evaluate(lambda[i]);
             return s;
         }
 
@@ -878,7 +878,7 @@ namespace pbrt
     // RGBUnboundedSpectrum Definition
     public sealed class RGBUnboundedSpectrum : Spectrum
     {
-        public override Float Apply(Float lambda) { return scale * rsp.Apply(lambda); }
+        public override Float Evaluate(Float lambda) { return scale * rsp.Evaluate(lambda); }
         public override Float MaxValue() { return scale * rsp.MaxValue(); }
 
         public RGBUnboundedSpectrum(RGBColorSpace cs, RGB rgb)
@@ -898,7 +898,7 @@ namespace pbrt
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Apply(lambda[i]);
+                s[i] = scale * rsp.Evaluate(lambda[i]);
             return s;
         }
 
@@ -925,15 +925,15 @@ namespace pbrt
                 return new SampledSpectrum(0);
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Apply(lambda[i]);
+                s[i] = scale * rsp.Evaluate(lambda[i]);
             return s * illuminant.Sample(lambda);
         }
 
-        public override Float Apply(Float lambda)
+        public override Float Evaluate(Float lambda)
         {
             if (illuminant == null)
                 return 0;
-            return scale * rsp.Apply(lambda) * illuminant.Apply(lambda);
+            return scale * rsp.Evaluate(lambda) * illuminant.Evaluate(lambda);
         }
         public RGBIlluminantSpectrum() { }
 
@@ -2707,7 +2707,7 @@ namespace pbrt
                 // CIE D ill-defined, use blackbody
                 BlackbodySpectrum bb = new BlackbodySpectrum(cct);
                 DenselySampledSpectrum blackbody = DenselySampledSpectrum.SampleFunction(
-                    (Float lambda) => bb.Apply(lambda));
+                    (Float lambda) => bb.Evaluate(lambda));
 
                 return blackbody;
             }

@@ -88,7 +88,7 @@ namespace pbrt
                     Float m = rs.MaxValue();
                     Float sm = 0;
                     for (Float lambda = 360; lambda <= 830; lambda += 1f / 16f)
-                        sm = std.max(sm, rs.Apply(lambda));
+                        sm = std.max(sm, rs.Evaluate(lambda));
                     EXPECT_LT(std.abs((sm - m) / sm), 1e-4,
                               "sampled " + sm + " MaxValue " + m + " for " + rs);
                 }
@@ -109,7 +109,7 @@ namespace pbrt
                     Float m = rs.MaxValue();
                     Float sm = 0;
                     for (Float lambda = 360; lambda <= 830; lambda += 1f / 16f)
-                        sm = std.max(sm, rs.Apply(lambda));
+                        sm = std.max(sm, rs.Evaluate(lambda));
                     EXPECT_LT(std.abs((sm - m) / sm), 1e-4,
                               "sampled " + sm + " MaxValue " + m + " for " + rs);
                 }
@@ -125,7 +125,7 @@ namespace pbrt
                 RGBAlbedoSpectrum rs = new RGBAlbedoSpectrum(cs, rgb);
 
                 DenselySampledSpectrum rsIllum = DenselySampledSpectrum.SampleFunction(
-                    (Float lambda) => rs.Apply(lambda) * cs.illuminant.Apply(lambda));
+                    (Float lambda) => rs.Evaluate(lambda) * cs.illuminant.Evaluate(lambda));
                 XYZ xyz = SpectrumToXYZ(rsIllum);
                 RGB rgb2 = cs.ToRGB(xyz);
 
@@ -158,7 +158,7 @@ namespace pbrt
                 RGBIlluminantSpectrum rs = new RGBIlluminantSpectrum(cs, rgb);
 
                 DenselySampledSpectrum rsIllum = DenselySampledSpectrum.SampleFunction(
-                    (Float lambda) => rs.Apply(lambda));
+                    (Float lambda) => rs.Evaluate(lambda));
                 XYZ xyz = SpectrumToXYZ(rsIllum);
                 RGB rgb2 = cs.ToRGB(xyz);
 

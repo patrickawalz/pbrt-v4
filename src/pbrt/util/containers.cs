@@ -266,7 +266,7 @@ namespace pbrt
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Apply(lambda[i]);
+                s[i] = scale * rsp.Evaluate(lambda[i]);
             return s;
         }
 
@@ -296,7 +296,7 @@ namespace pbrt
         {
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Apply(lambda[i]);
+                s[i] = scale * rsp.Evaluate(lambda[i]);
             return s * illuminant;
         }
 

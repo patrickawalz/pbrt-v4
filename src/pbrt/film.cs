@@ -139,10 +139,10 @@ namespace pbrt
             Float g_integral = 0;
             for (Float lambda = Lambda_min; lambda <= Lambda_max; ++lambda)
             {
-                g_integral += b2.Apply(lambda) * illum.Apply(lambda);
-                result[0] += b1.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
-                result[1] += b2.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
-                result[2] += b3.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
+                g_integral += b2.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[0] += b1.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[1] += b2.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[2] += b3.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
             }
             return result / g_integral;
         }
@@ -153,10 +153,10 @@ namespace pbrt
             Float g_integral = 0;
             for (Float lambda = Lambda_min; lambda <= Lambda_max; ++lambda)
             {
-                g_integral += b2.Apply(lambda) * illum.Apply(lambda);
-                result[0] += b1.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
-                result[1] += b2.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
-                result[2] += b3.Apply(lambda) * refl.Apply(lambda) * illum.Apply(lambda);
+                g_integral += b2.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[0] += b1.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[1] += b2.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
+                result[2] += b3.Evaluate(lambda) * refl.Evaluate(lambda) * illum.Evaluate(lambda);
             }
             return result / g_integral;
         }

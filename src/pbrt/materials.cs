@@ -252,7 +252,7 @@ namespace pbrt
             where TextureEvaluator : ITextureEvaluator
         {
             // Compute index of refraction for dielectric material
-            Float sampledEta = eta.Apply(lambda[0]);
+            Float sampledEta = eta.Evaluate(lambda[0]);
             if (!(eta is ConstantSpectrum))
                 lambda.TerminateSecondary();
             // Handle edge case in case lambda[0] is beyond the wavelengths stored by the
@@ -292,7 +292,7 @@ namespace pbrt
             where TextureEvaluator : ITextureEvaluator
         {
             // Compute index of refraction for dielectric material
-            Float sampledEta = eta.Apply(lambda[0]);
+            Float sampledEta = eta.Evaluate(lambda[0]);
             if (!(eta is ConstantSpectrum))
                 lambda.TerminateSecondary();
             // Handle edge case in case lambda[0] is beyond the wavelengths stored by the
@@ -783,7 +783,7 @@ namespace pbrt
 
             Float thick = texEval.Apply(thickness, ctx);
 
-            Float sampledEta = eta.Apply(lambda[0]);
+            Float sampledEta = eta.Evaluate(lambda[0]);
             if (!(eta is ConstantSpectrum))
                 lambda.TerminateSecondary();
             if (sampledEta == 0)
@@ -911,7 +911,7 @@ namespace pbrt
 
             Float thick = texEval.Apply(thickness, ctx);
 
-            Float ieta = interfaceEta.Apply(lambda[0]);
+            Float ieta = interfaceEta.Evaluate(lambda[0]);
             if (!(interfaceEta is ConstantSpectrum))
                 lambda.TerminateSecondary();
             if (ieta == 0)
