@@ -172,11 +172,11 @@ namespace pbrt
 
             // Make sure that we don't have too much stuff to be using integers to
             // index into things.
-            CHECK_LE(p.size(), (ulong)std.numeric_limits_int.max);
+            CHECK_LE(p.size(), (ulong)int.MaxValue);
             // We could be clever and check indices.size() / 3 if we were careful
             // to promote to a 64-bit int before multiplying by 3 when we look up
             // in the indices array...
-            CHECK_LE(indices.size(), (ulong)std.numeric_limits_int.max);
+            CHECK_LE(indices.size(), (ulong)int.MaxValue);
         }
 
         private static string Span<T>(T[] a, int n)
@@ -257,8 +257,8 @@ namespace pbrt
 
             // Make sure that we don't have too much stuff to be using integers to
             // index into things.
-            CHECK_LE(P.size(), (ulong)std.numeric_limits_int.max);
-            CHECK_LE(indices.size(), (ulong)std.numeric_limits_int.max);
+            CHECK_LE(P.size(), (ulong)int.MaxValue);
+            CHECK_LE(indices.size(), (ulong)int.MaxValue);
 
             vertexIndices = pbrt.intBufferCache.LookupOrAdd(new pstd.span<int>(indices.data(), 0, (int)indices.size()), alloc);
 

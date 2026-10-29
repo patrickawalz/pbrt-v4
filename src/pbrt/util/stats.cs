@@ -172,8 +172,8 @@ namespace pbrt
     public unsafe class StatIntDistribution
     {
         public int64_t sum = 0, count = 0;
-        public int64_t min = std.numeric_limits_long.max;
-        public int64_t max = std.numeric_limits_long.lowest;
+        public int64_t min = long.MaxValue;
+        public int64_t max = long.MinValue;
         public void Add(int64_t value)  // operator<<
         {
             sum += value;
@@ -356,8 +356,8 @@ namespace pbrt
             if (!stats.intDistributions.TryGetValue(name, out distrib))
             {
                 distrib = new Stats.Distribution<int64_t>();
-                distrib.min = std.numeric_limits_long.max;
-                distrib.max = std.numeric_limits_long.lowest;
+                distrib.min = long.MaxValue;
+                distrib.max = long.MinValue;
                 stats.intDistributions[name] = distrib;
             }
             distrib.sum += sum;

@@ -4760,8 +4760,8 @@ namespace pbrt
         // Bounds2i Public Methods
         public Bounds2i()
         {
-            int minNum = std.numeric_limits_int.lowest;
-            int maxNum = std.numeric_limits_int.max;
+            int minNum = int.MinValue;
+            int maxNum = int.MaxValue;
             pMin = new Point2i(maxNum, maxNum);
             pMax = new Point2i(minNum, minNum);
         }
@@ -4997,8 +4997,8 @@ namespace pbrt
         // Bounds3i Public Methods
         public Bounds3i()
         {
-            int minNum = std.numeric_limits_int.lowest;
-            int maxNum = std.numeric_limits_int.max;
+            int minNum = int.MinValue;
+            int maxNum = int.MaxValue;
             pMin = new Point3i(maxNum, maxNum, maxNum);
             pMax = new Point3i(minNum, minNum, minNum);
         }

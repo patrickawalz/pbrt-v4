@@ -267,18 +267,6 @@ public static partial class std
         public const double infinity  = double.PositiveInfinity;
         public const double quiet_NaN = double.NaN;
     }
-    public static unsafe class numeric_limits_int
-    {
-        public const int max    = int.MaxValue;
-        public const int lowest = int.MinValue;
-        public const int min    = int.MinValue;      // (min() is the lowest value for integer types)
-    }
-    public static unsafe class numeric_limits_long
-    {
-        public const long max    = long.MaxValue;
-        public const long lowest = long.MinValue;
-        public const long min    = long.MinValue;
-    }
 
 
         public static int partition<T>(Span<T> arr, Func<T, bool> pred)

@@ -35,10 +35,10 @@ namespace pbrt
                 value = 10 * value + (t.token[index] - '0');
                 ++index;
 
-                if (value > std.numeric_limits_int.max)
+                if (value > int.MaxValue)
                     ErrorExit(t.loc,
                               "Numeric value too large to represent as a 32-bit integer.");
-                else if (value < std.numeric_limits_int.lowest)
+                else if (value < int.MinValue)
                     Warning(t.loc, StringPrintf("Numeric value %d too low to represent as a 32-bit integer.", value));
             }
 

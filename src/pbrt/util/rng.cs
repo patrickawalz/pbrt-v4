@@ -77,12 +77,12 @@ namespace pbrt
             {
                 uint v = Uniform<uint>();
                 int r;
-                if (v <= (uint)std.numeric_limits_int.max)
+                if (v <= (uint)int.MaxValue)
                     r = (int)v;
                 else
                 {
                     DCHECK_GE(v, 0x80000000u);
-                    r = (int)(v - 0x80000000u) + std.numeric_limits_int.min;
+                    r = (int)(v - 0x80000000u) + int.MinValue;
                 }
                 return Unsafe.As<int, T>(ref r);
             }
@@ -90,12 +90,12 @@ namespace pbrt
             {
                 ulong v = Uniform<ulong>();
                 long r;
-                if (v <= (ulong)std.numeric_limits_long.max)
+                if (v <= (ulong)long.MaxValue)
                     r = (long)v;
                 else
                 {
                     DCHECK_GE(v, 0x8000000000000000UL);
-                    r = (long)(v - 0x8000000000000000UL) + std.numeric_limits_long.min;
+                    r = (long)(v - 0x8000000000000000UL) + long.MinValue;
                 }
                 return Unsafe.As<long, T>(ref r);
             }
