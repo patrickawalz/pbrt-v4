@@ -247,6 +247,15 @@ namespace pbrt
         // (not in pbrt-v4) The majorant that light sampling's ratio tracking sees at this point, when it
         // differs from the _sigma_maj_ passed to the callback (decomposition tracking); zero otherwise.
         public SampledSpectrum sigma_maj_light;
+        // (not in pbrt-v4) Set by media that use spectral tracking (Kutz et al. 2017): the majorant is the same
+        // for all wavelengths and the integrator chooses events with probabilities that follow the path's
+        // spectral throughput.
+        public bool spectralTracking;
+        // (not in pbrt-v4) Set by adaptive ratio tracking's camera-path sampling (Misso et al. 2023): the
+        // density with which light sampling's adaptive ratio tracking would have produced this null vertex
+        // and the stretch of ray before it, normalized like T_maj * sigma_maj.
+        public bool adaptiveLight;
+        public SampledSpectrum lightDensity;
     }
 
     // HomogeneousMajorantIterator Definition
@@ -1015,7 +1024,7 @@ namespace pbrt
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
-                             Allocator alloc)
+                             bool spectral, bool adaptiveRatio, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1048,7 +1057,9 @@ namespace pbrt
                     }
                 }
             }
-            this.decomposition = decomposition && !progressive && maxControl > 0;
+            this.spectral = spectral;
+            this.adaptiveRatio = adaptiveRatio && !spectral;
+            this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
 
             // Progressive null-tracking (Misso et al. 2023): ignore the texture bounds, start every
             // voxel at a deliberately poor majorant and learn it from the density lookups.
@@ -1142,7 +1153,8 @@ namespace pbrt
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
-            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f),
+                                          spectralTracking = spectral };
         }
 
         public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
@@ -1155,6 +1167,9 @@ namespace pbrt
             DCHECK_LE(tMax, raytMax);
 
             SampledSpectrum sigma_t = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+            // Spectral tracking samples distances with one majorant for all wavelengths
+            if (spectral)
+                sigma_t = new SampledSpectrum(sigma_t.MaxComponentValue());
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
         }
 
@@ -1164,6 +1179,143 @@ namespace pbrt
         }
 
         public bool UsesDecomposition() { return decomposition; }
+
+        public bool UsesAdaptiveRatio() { return adaptiveRatio; }
+
+        // Adaptive ratio tracking (Misso et al. 2023, Algorithm 2) for shadow rays: free-flight distances are
+        // sampled with the null coefficient found at the previous collision instead of with the majorant, so
+        // regions where the medium is close to the majorant are crossed with few density lookups. The
+        // per-wavelength sampling densities that the hero wavelength's sequence of collisions would have had
+        // are tracked in _r_l_ (as the densities of light sampling's strategy) and the classical
+        // path-sampling densities in _r_u_, as in volpath's ratio tracking.
+        public void AdaptiveRatioTracking(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+                                          ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u)
+        {
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            while (true)
+            {
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                    return;
+                RayMajorantSegment sg = seg.value();
+                SampledSpectrum c = sg.sigma_maj;
+                // Null coefficient of each wavelength's own sampling process, as of the last collision
+                SampledSpectrum muMC = c;
+                Float tMin = sg.tMin;
+                while (muMC[0] > 0)
+                {
+                    Float t = tMin + SampleExponential(u, muMC[0]);
+                    u = rng.Uniform<Float>();
+                    if (t >= sg.tMax)
+                        break;
+                    Float x = t - tMin;
+                    SampledSpectrum survMajorant = FastExp(-x * c), survSampling = FastExp(-x * muMC);
+                    Float pdf = muMC[0] * survSampling[0];
+                    MediumProperties mp = SamplePoint(ray.Apply(t), lambda);
+                    SampledSpectrum sigma_n = ClampZero(c - mp.sigma_a - mp.sigma_s);
+                    T_ray *= survMajorant * sigma_n / pdf;
+                    r_l *= muMC * survSampling / pdf;
+                    r_u *= survMajorant * sigma_n / pdf;
+                    muMC = sigma_n;
+                    tMin = t;
+
+                    // Possibly terminate transmittance computation using Russian roulette
+                    SampledSpectrum Tr = T_ray / (r_l + r_u).Average();
+                    if (Tr.MaxComponentValue() < 0.05f)
+                    {
+                        Float q = 0.75f;
+                        if (rng.Uniform<Float>() < q)
+                            T_ray = new SampledSpectrum(0.0f);
+                        else
+                            T_ray /= 1 - q;
+                    }
+                    if (!T_ray)
+                        return;
+                }
+                // Rest of the segment without a collision
+                Float dt = sg.tMax - tMin;
+                if (IsInf(dt))
+                    dt = Float.MaxValue;
+                SampledSpectrum survM = FastExp(-dt * c), survS = FastExp(-dt * muMC);
+                T_ray *= survM / survS[0];
+                r_l *= survS / survS[0];
+                r_u *= survM / survS[0];
+            }
+        }
+
+        // SampleT_maj() for camera paths when light sampling uses adaptive ratio tracking: the same
+        // majorant sampling as ordinary delta tracking, but each null vertex also gets the density that
+        // light sampling's adaptive ratio tracking would have given it (_mp.lightDensity_), and the
+        // light-sampling density of the stretch after the last vertex is returned in _tailLight_.
+        public SampledSpectrum SampleT_majAdaptiveCamera(Ray ray, Float tMax, Float u, ref RNG rng,
+                                                         SampledWavelengths lambda,
+                                                         Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback,
+                                                         out SampledSpectrum tailLight)
+        {
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            SampledSpectrum T_maj = new SampledSpectrum(1f);
+            SampledSpectrum lightAccum = new SampledSpectrum(1f);
+            tailLight = new SampledSpectrum(1f);
+            bool done = false;
+            while (!done)
+            {
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                {
+                    tailLight = lightAccum;
+                    return T_maj;
+                }
+                RayMajorantSegment sg = seg.value();
+                SampledSpectrum muMC = sg.sigma_maj;
+                if (sg.sigma_maj[0] == 0)
+                {
+                    Float dt = sg.tMax - sg.tMin;
+                    if (IsInf(dt))
+                        dt = Float.MaxValue;
+                    T_maj *= FastExp(-dt * sg.sigma_maj);
+                    lightAccum *= FastExp(-dt * sg.sigma_maj);
+                    continue;
+                }
+                Float tMin = sg.tMin;
+                while (true)
+                {
+                    Float t = tMin + SampleExponential(u, sg.sigma_maj[0]);
+                    u = rng.Uniform<Float>();
+                    if (t < sg.tMax)
+                    {
+                        T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
+                        lightAccum *= FastExp(-(t - tMin) * muMC);
+                        MediumProperties mp = SamplePoint(ray.Apply(t), lambda);
+                        mp.adaptiveLight = true;
+                        mp.lightDensity = lightAccum * muMC;
+                        if (!callback(ray.Apply(t), mp, sg.sigma_maj, T_maj))
+                        {
+                            done = true;
+                            break;
+                        }
+                        muMC = ClampZero(sg.sigma_maj - mp.sigma_a - mp.sigma_s);
+                        T_maj = new SampledSpectrum(1f);
+                        lightAccum = new SampledSpectrum(1f);
+                        tMin = t;
+                    }
+                    else
+                    {
+                        Float dt = sg.tMax - tMin;
+                        if (IsInf(dt))
+                            dt = Float.MaxValue;
+                        T_maj *= FastExp(-dt * sg.sigma_maj);
+                        lightAccum *= FastExp(-dt * muMC);
+                        break;
+                    }
+                }
+            }
+            return new SampledSpectrum(1f);
+        }
+
 
         // SampleT_maj() with analog decomposition tracking (camera paths only; shadow rays use ordinary ratio
         // tracking): each tentative collision is, with probability
@@ -1264,7 +1416,7 @@ namespace pbrt
         private FloatTexture texture;
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
-        private bool progressive, decomposition;
+        private bool progressive, decomposition, spectral, adaptiveRatio;
         private int warmupPasses;
         // Decomposition tracking (Kutz et al. 2017): a control density, constant within each majorant
         // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
@@ -1317,6 +1469,8 @@ namespace pbrt
             int majorantRes = parameters.GetOneInt("majorantres", 16);
             bool progressive = parameters.GetOneBool("progressive", false);
             bool decomposition = parameters.GetOneBool("decomposition", false);
+            bool spectral = parameters.GetOneBool("spectral", false);
+            bool adaptiveRatio = parameters.GetOneBool("adaptiveratio", false);
             int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
@@ -1324,7 +1478,7 @@ namespace pbrt
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, alloc);
         }
     }
 

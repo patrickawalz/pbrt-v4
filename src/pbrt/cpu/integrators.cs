@@ -3756,8 +3756,7 @@ namespace pbrt
                         RNG rng = new RNG(hash0, hash1);
 
                         SampledWavelengths lambdaCap = lambda;
-                        SampledSpectrum T_maj = SampleT_maj(
-                            new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda,
+                        Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> mediumCallback =
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                              SampledSpectrum T_maj_) =>
                             {
@@ -3787,8 +3786,27 @@ namespace pbrt
                                 Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
                                 Float pScatter = mp.sigma_s[0] / sigma_maj[0];
                                 Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
-
-                                CHECK_GE(1 - pAbsorb - pScatter, (Float)(-1e-6));
+                                bool spectralTracking = mp.spectralTracking;
+                                if (spectralTracking)
+                                {
+                                    // Spectral tracking (Kutz et al. 2017): the probability of each event
+                                    // follows the path's spectral throughput times the event's coefficient
+                                    SampledSpectrum sigma_n_ = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                                    Float wAbsorb = (beta * mp.sigma_a).Average();
+                                    Float wScatter = (beta * mp.sigma_s).Average();
+                                    Float wNull = (beta * sigma_n_).Average();
+                                    Float wSum = wAbsorb + wScatter + wNull;
+                                    if (!(wSum > 0))
+                                    {
+                                        terminated = true;
+                                        return false;
+                                    }
+                                    pAbsorb = wAbsorb / wSum;
+                                    pScatter = wScatter / wSum;
+                                    pNull = wNull / wSum;
+                                }
+                                else
+                                    CHECK_GE(1 - pAbsorb - pScatter, (Float)(-1e-6));
                                 // Sample medium scattering event type and update path
                                 Float um = rng.Uniform<Float>();
                                 int mode = SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, um);
@@ -3810,8 +3828,16 @@ namespace pbrt
 
                                     // Update _beta_ and _r_u_ for real-scattering event
                                     Float pdf = T_maj_[0] * mp.sigma_s[0];
-                                    beta *= T_maj_ * mp.sigma_s / pdf;
-                                    r_u *= T_maj_ * mp.sigma_s / pdf;
+                                    if (spectralTracking)
+                                    {
+                                        pdf = T_maj_[0] * sigma_maj[0] * pScatter;
+                                        beta *= T_maj_ * mp.sigma_s / pdf;
+                                    }
+                                    else
+                                    {
+                                        beta *= T_maj_ * mp.sigma_s / pdf;
+                                        r_u *= T_maj_ * mp.sigma_s / pdf;
+                                    }
 
                                     if ((bool)beta && (bool)r_u)
                                     {
@@ -3846,15 +3872,31 @@ namespace pbrt
                                     // Handle null scattering along ray path
                                     SampledSpectrum sigma_n =
                                         ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                                    if (spectralTracking)
+                                    {
+                                        // Every wavelength uses the same majorant, so only the event
+                                        // probability differs between this path and light sampling's
+                                        Float pdfS = T_maj_[0] * sigma_maj[0] * pNull;
+                                        beta *= T_maj_ * sigma_n / pdfS;
+                                        r_l *= T_maj_ * sigma_maj / pdfS;
+                                        return (bool)beta && (bool)r_u;
+                                    }
                                     Float pdf = T_maj_[0] * sigma_n[0];
                                     beta *= T_maj_ * sigma_n / pdf;
                                     if (pdf == 0)
                                         beta = new SampledSpectrum(0.0f);
                                     r_u *= T_maj_ * sigma_n / pdf;
-                                    r_l *= T_maj_ * ((bool)mp.sigma_maj_light ? mp.sigma_maj_light : sigma_maj) / pdf;
+                                    r_l *= (mp.adaptiveLight ? mp.lightDensity
+                                                                 : T_maj_ * ((bool)mp.sigma_maj_light ? mp.sigma_maj_light : sigma_maj)) / pdf;
                                     return (bool)beta && (bool)r_u;
                                 }
-                            }, true);
+                            };
+                        SampledSpectrum tailLight = default;
+                        bool adaptiveLight = ray.medium is TextureMedium adaptiveMedium && adaptiveMedium.UsesAdaptiveRatio();
+                        SampledSpectrum T_maj = adaptiveLight
+                            ? ((TextureMedium)ray.medium).SampleT_majAdaptiveCamera(
+                                  new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda, mediumCallback, out tailLight)
+                            : SampleT_maj(new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda, mediumCallback, true);
                         // Handle terminated, scattered, and unscattered medium rays
                         if (terminated || !beta || !r_u)
                             return L;
@@ -3863,7 +3905,7 @@ namespace pbrt
 
                         beta *= T_maj / T_maj[0];
                         r_u *= T_maj / T_maj[0];
-                        r_l *= T_maj / T_maj[0];
+                        r_l *= (adaptiveLight ? tailLight : T_maj) / T_maj[0];
                     }
                     // Handle surviving unscattered rays
                     // Add emitted light at volume path vertex or from the environment
@@ -4152,6 +4194,13 @@ namespace pbrt
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     Float uT = rng.Uniform<Float>();
+                    if (lightRay.medium is TextureMedium adaptiveMedium && adaptiveMedium.UsesAdaptiveRatio())
+                    {
+                        adaptiveMedium.AdaptiveRatioTracking(lightRay, tMax, uT, ref rng, lambda, ref T_ray, ref r_l,
+                                                             ref r_u);
+                    }
+                    else
+                    {
                     SampledSpectrum T_maj =
                         SampleT_maj(lightRay, tMax, uT, ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
@@ -4162,9 +4211,23 @@ namespace pbrt
                                         SampledSpectrum sigma_n =
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
                                         Float pdf = T_maj_[0] * sigma_maj[0];
-                                        T_ray *= T_maj_ * sigma_n / pdf;
-                                        r_l *= T_maj_ * sigma_maj / pdf;
-                                        r_u *= T_maj_ * sigma_n / pdf;
+                                        if (mp.spectralTracking)
+                                        {
+                                            // The probability that a camera path with the throughput so far
+                                            // would have had a null event here (see volpath's camera paths)
+                                            SampledSpectrum history = beta * f_hat * T_ray;
+                                            Float wSum = (history * (mp.sigma_a + mp.sigma_s + sigma_n)).Average();
+                                            Float pNull = wSum > 0 ? (history * sigma_n).Average() / wSum : 0;
+                                            T_ray *= T_maj_ * sigma_n / pdf;
+                                            r_l *= T_maj_ * sigma_maj / pdf;
+                                            r_u *= pNull;
+                                        }
+                                        else
+                                        {
+                                            T_ray *= T_maj_ * sigma_n / pdf;
+                                            r_l *= T_maj_ * sigma_maj / pdf;
+                                            r_u *= T_maj_ * sigma_n / pdf;
+                                        }
 
                                         // Possibly terminate transmittance computation using
                                         // Russian roulette
@@ -4186,6 +4249,7 @@ namespace pbrt
                     T_ray *= T_maj / T_maj[0];
                     r_l *= T_maj / T_maj[0];
                     r_u *= T_maj / T_maj[0];
+                    }
                 }
 
                 // Generate next ray segment or return final transmittance
