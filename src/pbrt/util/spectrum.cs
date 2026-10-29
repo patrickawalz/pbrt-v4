@@ -193,7 +193,33 @@ namespace pbrt
     public unsafe struct SampledSpectrum
     {
         // SampledSpectrum Public Methods
-        // (C++ operator+=, -=, *=, /= map onto C#'s compound assignment via these binary operators)
+        public void operator +=(SampledSpectrum s)
+        {
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] += s.values[i];
+        }
+
+        public void operator *=(SampledSpectrum s)
+        {
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] *= s.values[i];
+        }
+
+        public void operator *=(Float a)
+        {
+            DCHECK(!IsNaN(a));
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] *= a;
+        }
+
+        public void operator /=(Float a)
+        {
+            DCHECK_NE(a, 0);
+            DCHECK(!IsNaN(a));
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                values[i] /= a;
+        }
+
         public static SampledSpectrum operator +(SampledSpectrum s1, SampledSpectrum s2)
         {
             SampledSpectrum ret = s1;
