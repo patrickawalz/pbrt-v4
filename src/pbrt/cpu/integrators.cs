@@ -276,6 +276,27 @@ namespace pbrt
             if (Options.displayServer.Length != 0)
                 ErrorExit("--display-server is not supported by Magi.");
 
+            // (not in pbrt-v4) Progressive null-tracking media can learn their majorants in discarded passes first
+            int warmupPasses = TextureMedium.ProgressiveWarmupPasses();
+            RayIntegrator.discardSamples = warmupPasses > 0;
+            for (int warmup = 0; warmup < warmupPasses; ++warmup)
+            {
+                int warmupSampleIndex = spp + warmup;
+                ParallelFor2D(pixelBounds, (Bounds2i tileBounds) =>
+                {
+                    ScratchBuffer scratchBuffer = scratchBuffers.Get();
+                    Sampler sampler = samplers.Get();
+                    foreach (Point2i pPixel in tileBounds)
+                    {
+                        sampler.StartPixelSample(pPixel, warmupSampleIndex);
+                        EvaluatePixelSample(pPixel, warmupSampleIndex, sampler, scratchBuffer);
+                        scratchBuffer.Reset();
+                    }
+                });
+                TextureMedium.EndProgressivePass();
+            }
+            RayIntegrator.discardSamples = false;
+
             // Render image in waves
             while (waveStart < spp)
             {
@@ -430,13 +451,17 @@ namespace pbrt
                 }
             }
             // Add camera ray's contribution to image
-            camera.GetFilm().AddSample(pPixel, L, lambda, visibleSurface,
-                                       cameraSample.filterWeight);
+            if (!discardSamples)
+                camera.GetFilm().AddSample(pPixel, L, lambda, visibleSurface,
+                                           cameraSample.filterWeight);
         }
 
         public abstract SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda,
                                            Sampler sampler, ScratchBuffer scratchBuffer,
                                            VisibleSurface visibleSurface);
+
+        // (not in pbrt-v4) Warm-up passes are traced but not added to the film
+        public static volatile bool discardSamples;
     }
 
     // RandomWalkIntegrator Definition

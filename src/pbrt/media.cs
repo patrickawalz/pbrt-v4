@@ -1014,8 +1014,10 @@ namespace pbrt
 
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
-                             bool progressive, Float initialMajorant, bool decomposition, Allocator alloc)
+                             bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
+                             Allocator alloc)
         {
+            this.warmupPasses = warmupPasses;
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
@@ -1071,6 +1073,21 @@ namespace pbrt
             {
                 return progressiveMedia.Count > 0;
             }
+        }
+
+        // (not in pbrt-v4) Number of discarded passes rendered before the real ones, so that the biased early
+        // passes of progressive null-tracking don't contribute to the image
+        public Float[] DebugMajorants() { return (Float[])majorantGrid.voxels.Clone(); }
+
+        public static int ProgressiveWarmupPasses()
+        {
+            int passes = 0;
+            lock (progressiveMedia)
+            {
+                foreach (TextureMedium medium in progressiveMedia)
+                    passes = std.max(passes, medium.warmupPasses);
+            }
+            return passes;
         }
 
         public static void EndProgressivePass()
@@ -1248,7 +1265,8 @@ namespace pbrt
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
         private bool progressive, decomposition;
-        // Decomposition tracking (Kettunen et al. 2021): a control density, constant within each majorant
+        private int warmupPasses;
+        // Decomposition tracking (Kutz et al. 2017): a control density, constant within each majorant
         // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
         // density lookup.
         private Float[] controlGrid;
@@ -1299,13 +1317,14 @@ namespace pbrt
             int majorantRes = parameters.GetOneInt("majorantres", 16);
             bool progressive = parameters.GetOneBool("progressive", false);
             bool decomposition = parameters.GetOneBool("decomposition", false);
+            int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, progressive, initialMajorant, decomposition, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, alloc);
         }
     }
 
