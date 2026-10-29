@@ -132,6 +132,64 @@ namespace pbrt
             return sum;
         }
 
+        // (not in pbrt-v4) Bound on |Noise()|; verified numerically in noise_test.cs.
+        public const Float NoiseBound = 1;
+
+        // (not in pbrt-v4) Bound on |FBm()| for any p: at most maxOctaves terms of weight omega^i
+        public static Float FBmBound(Float omega, int maxOctaves)
+        {
+            Float sum = 0, o = 1;
+            for (int i = 0; i < maxOctaves; ++i)
+            {
+                sum += o;
+                o *= std.abs(omega);
+            }
+            return NoiseBound * sum;
+        }
+
+        // (not in pbrt-v4) Upper bound on Turbulence(); each term is either |Noise()| or 0.2
+        public static Float TurbulenceBound(Float omega, int maxOctaves)
+        {
+            Float sum = 0, o = 1;
+            for (int i = 0; i < maxOctaves; ++i)
+            {
+                sum += o;
+                o *= std.abs(omega);
+            }
+            return std.max(NoiseBound, (Float)0.2) * sum;
+        }
+
+        // (not in pbrt-v4) min over a in [a0,a1], b in [b0,b1], t in [t0,t1] of (1 - t) * a + t * b.
+        // The expression is multilinear, so the extremes are at the corners.
+        public static Float BlendMin(Float a0, Float a1, Float b0, Float b1, Float t0, Float t1)
+        {
+            Float m = Infinity;
+            for (int ia = 0; ia < 2; ++ia)
+            {
+                for (int ib = 0; ib < 2; ++ib)
+                {
+                    for (int it = 0; it < 2; ++it)
+                    {
+                        Float a = ia == 0 ? a0 : a1, b = ib == 0 ? b0 : b1, t = it == 0 ? t0 : t1;
+                        Float v = (1 - t) * a + t * b;
+                        if (Float.IsNaN(v))
+                            return -Infinity;
+                        m = std.min(m, v);
+                    }
+                }
+            }
+            return m;
+        }
+
+        // (not in pbrt-v4) min over a in [a0,a1], b in [b0,b1] of a * b
+        public static Float ProductMin(Float a0, Float a1, Float b0, Float b1)
+        {
+            Float v0 = a0 * b0, v1 = a0 * b1, v2 = a1 * b0, v3 = a1 * b1;
+            if (Float.IsNaN(v0) || Float.IsNaN(v1) || Float.IsNaN(v2) || Float.IsNaN(v3))
+                return -Infinity;
+            return std.min(std.min(v0, v1), std.min(v2, v3));
+        }
+
         public static Float Turbulence(Point3f p, Vector3f dpdx, Vector3f dpdy, Float omega, int maxOctaves)
         {
             // Compute number of octaves for antialiased FBm

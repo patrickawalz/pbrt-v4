@@ -428,6 +428,8 @@ namespace pbrt
     {
         public FloatConstantTexture(Float value) { this.value = value; }
         public override Float Evaluate(TextureEvalContext ctx) { return value; }
+        public override Float MinValue() { return value; }
+        public override Float MaxValue() { return value; }
 
         public override string ToString() { return pbrt.StringPrintf("[ FloatConstantTexture value: %f ]", value); }
         // FloatConstantTexture Public Methods
@@ -469,6 +471,16 @@ namespace pbrt
         public FloatBilerpTexture(TextureMapping2D mapping, Float v00, Float v01, Float v10, Float v11)
         {
             this.mapping = mapping; this.v00 = v00; this.v01 = v01; this.v10 = v10; this.v11 = v11;
+        }
+
+        public override Float MinValue()
+        {
+            return std.min(std.min(v00, v01), std.min(v10, v11));
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(std.max(v00, v01), std.max(v10, v11));
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -546,6 +558,16 @@ namespace pbrt
         public FloatCheckerboardTexture(TextureMapping2D map2D, TextureMapping3D map3D, FloatTexture tex1, FloatTexture tex2)
         {
             this.map2D = map2D; this.map3D = map3D; tex = new FloatTexture[] { tex1, tex2 };
+        }
+
+        public override Float MinValue()
+        {
+            return std.min(tex[0].MinValue(), tex[1].MinValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(tex[0].MaxValue(), tex[1].MaxValue());
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -668,6 +690,16 @@ namespace pbrt
             this.mapping = mapping; this.outsideDot = outsideDot; this.insideDot = insideDot;
         }
 
+        public override Float MinValue()
+        {
+            return std.min(insideDot.MinValue(), outsideDot.MinValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(insideDot.MaxValue(), outsideDot.MaxValue());
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord2D c = mapping.Map(ctx);
@@ -741,6 +773,9 @@ namespace pbrt
         {
             this.mapping = mapping; this.omega = omega; this.octaves = octaves;
         }
+
+        public override Float MinValue() { return -pbrt.FBmBound(omega, octaves); }
+        public override Float MaxValue() { return pbrt.FBmBound(omega, octaves); }
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
@@ -871,6 +906,46 @@ namespace pbrt
             b = new ImageTextureBase(m, filename, filterOptions, wm, scale, invert, encoding, alloc);
             b_mapping = m; this.filename = filename; this.scale = scale; this.invert = invert;
             mipmap = pbrt.GetImageTextureMIPMap(b);
+        }
+
+        // Range of the (pre-scale) filtered texel values: every filter is a convex combination of
+        // level 0 texels (the coarser levels are averages of it), and Float lookups read channel 0
+        // or the channel average, so the extremes over all channels of level 0 bound them.
+        private void ComputeTexelRange(out Float lo, out Float hi)
+        {
+            Image image = mipmap.GetLevel(0);
+            Point2i res = image.Resolution();
+            lo = pbrt.Infinity; hi = -pbrt.Infinity;
+            for (int y = 0; y < res.y; ++y)
+            {
+                for (int x = 0; x < res.x; ++x)
+                {
+                    for (int c = 0; c < image.NChannels(); ++c)
+                    {
+                        Float v = image.GetChannel(new Point2i(x, y), c);
+                        lo = std.min(lo, v);
+                        hi = std.max(hi, v);
+                    }
+                }
+            }
+        }
+
+        public override Float MinValue()
+        {
+            ComputeTexelRange(out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            if (invert)
+                return std.max<Float>(0, 1 - std.max(a, b));
+            return std.min(a, b);
+        }
+
+        public override Float MaxValue()
+        {
+            ComputeTexelRange(out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            if (invert)
+                return std.max<Float>(0, 1 - std.min(a, b));
+            return std.max(a, b);
         }
 
         public void MultiplyScale(Float s) { scale *= s; }
@@ -1084,6 +1159,19 @@ namespace pbrt
             this.tex1 = tex1; this.tex2 = tex2; this.amount = amount;
         }
 
+        // The mix amount is not clamped, so bound the blend over the amount's range.
+        public override Float MinValue()
+        {
+            return pbrt.BlendMin(tex1.MinValue(), tex1.MaxValue(), tex2.MinValue(), tex2.MaxValue(),
+                                 amount.MinValue(), amount.MaxValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex1.MaxValue(), -tex1.MinValue(), -tex2.MaxValue(), -tex2.MinValue(),
+                                  amount.MinValue(), amount.MaxValue());
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             Float amt = amount.Evaluate(ctx);
@@ -1118,6 +1206,17 @@ namespace pbrt
         public FloatDirectionMixTexture(FloatTexture tex1, FloatTexture tex2, Vector3f dir)
         {
             this.tex1 = tex1; this.tex2 = tex2; this.dir = dir;
+        }
+
+        // amt = AbsDot(n, dir) lies in [0, 1] for unit vectors
+        public override Float MinValue()
+        {
+            return pbrt.BlendMin(tex2.MinValue(), tex2.MaxValue(), tex1.MinValue(), tex1.MaxValue(), 0, 1);
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex2.MaxValue(), -tex2.MinValue(), -tex1.MaxValue(), -tex1.MinValue(), 0, 1);
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -1343,6 +1442,10 @@ namespace pbrt
             b = new PtexTextureBase(filename, encoding, scale);
         }
         public override string ToString() { return pbrt.StringPrintf("[ FloatPtexTexture %s ]", BaseToStringPublic()); }
+        // Ptex face data can't be bounded without reading the whole file
+        public override Float MinValue() { return -pbrt.Infinity; }
+        public override Float MaxValue() { return pbrt.Infinity; }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             float* result = stackalloc float[3];
@@ -1405,6 +1508,16 @@ namespace pbrt
     {
         // FloatScaledTexture Public Methods
         public FloatScaledTexture(FloatTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
+
+        public override Float MinValue()
+        {
+            return pbrt.ProductMin(tex.MinValue(), tex.MaxValue(), scale.MinValue(), scale.MaxValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.ProductMin(-tex.MaxValue(), -tex.MinValue(), scale.MinValue(), scale.MaxValue());
+        }
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
@@ -1508,6 +1621,13 @@ namespace pbrt
         // WindyTexture Public Methods
         public WindyTexture(TextureMapping3D mapping) { this.mapping = mapping; }
 
+        public override Float MinValue() { return -MaxValue(); }
+
+        public override Float MaxValue()
+        {
+            return pbrt.FBmBound(.5f, 3) * pbrt.FBmBound(.5f, 6);
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);
@@ -1537,6 +1657,13 @@ namespace pbrt
         {
             this.mapping = mapping; this.octaves = octaves; this.omega = omega;
         }
+
+        public override Float MinValue()
+        {
+            return omega >= 0 ? 0 : -MaxValue();
+        }
+
+        public override Float MaxValue() { return pbrt.TurbulenceBound(omega, octaves); }
 
         public override Float Evaluate(TextureEvalContext ctx)
         {

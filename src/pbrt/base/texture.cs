@@ -18,6 +18,11 @@ namespace pbrt
         // FloatTexture Interface
         public abstract override string ToString();
         public abstract Float Evaluate(TextureEvalContext ctx);
+
+        // (not in pbrt-v4) Conservative bounds on the values Evaluate() can return, for any
+        // context. Used to build majorants for texture-driven media.
+        public abstract Float MinValue();
+        public abstract Float MaxValue();
     }
 
     // SpectrumTexture Definition
