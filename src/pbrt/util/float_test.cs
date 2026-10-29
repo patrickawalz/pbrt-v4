@@ -146,8 +146,8 @@ namespace pbrt
             EXPECT_EQ(new Half((float)Infinity).Bits(), HalfPositiveInfinity);
             EXPECT_EQ(new Half(-(float)Infinity).Bits(), HalfNegativeInfinity);
 
-            EXPECT_TRUE(new Half(float.NaN).IsNaN());
-            EXPECT_TRUE(new Half(float.NaN).IsNaN());
+            EXPECT_TRUE(new Half(std.numeric_limits_Float.quiet_NaN).IsNaN());
+            EXPECT_TRUE(new Half(std.numeric_limits_Float.quiet_NaN).IsNaN());
             EXPECT_FALSE(Half.FromBits(HalfPositiveInfinity).IsNaN());
 
             for (uint32_t bits = 0; bits < 65536; ++bits)

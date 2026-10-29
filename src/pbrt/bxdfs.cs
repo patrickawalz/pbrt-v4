@@ -563,15 +563,12 @@ namespace pbrt
             this.twoSided = twoSided;
             this.top = top;
             this.bottom = bottom;
-            this.thickness = std.max(thickness, FloatMinNormal);
+            this.thickness = std.max(thickness, std.numeric_limits_Float.min);
             this.g = g;
             this.albedo = albedo;
             this.maxDepth = maxDepth;
             this.nSamples = nSamples;
         }
-
-        // std::numeric_limits<Float>::min(): smallest positive normal value
-        private static readonly Float FloatMinNormal = (Float)1.17549435e-38f;
 
         public override void Regularize()
         {
@@ -924,7 +921,7 @@ namespace pbrt
         // LayeredBxDF Private Methods
         private static Float Tr(Float dz, Vector3f w)
         {
-            if (std.abs(dz) <= FloatMinNormal)
+            if (std.abs(dz) <= std.numeric_limits_Float.min)
                 return 1;
             return FastExp(-std.abs(dz / w.z));
         }

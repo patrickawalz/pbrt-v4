@@ -372,8 +372,8 @@ namespace pbrt
             if (!stats.floatDistributions.TryGetValue(name, out distrib))
             {
                 distrib = new Stats.Distribution<double>();
-                distrib.min = double.MaxValue;
-                distrib.max = double.MinValue;
+                distrib.min = std.numeric_limits_double.max;
+                distrib.max = std.numeric_limits_double.lowest;
                 stats.floatDistributions[name] = distrib;
             }
             distrib.sum += sum;
