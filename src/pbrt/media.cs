@@ -178,10 +178,15 @@ namespace pbrt
         }
 
         // SampleT_maj(): dispatch on the ray's medium type (ray.medium.Dispatch)
+        // (_analogEvents_ is not in pbrt-v4: it says the callback picks absorption/scattering/null events itself, as
+        // volpath's camera paths do, which lets decomposition tracking skip density lookups.)
         public static SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
-                                                  Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
+                                                  Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback,
+                                                  bool analogEvents = false)
         {
             Medium m = ray.medium;
+            if (analogEvents && m is TextureMedium decomposed && decomposed.UsesDecomposition())
+                return decomposed.SampleT_majDecomposed(ray, tMax, u, ref rng, lambda, callback);
             if (m is HomogeneousMedium)
                 return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             else if (m is GridMedium)
@@ -239,6 +244,9 @@ namespace pbrt
         public SampledSpectrum sigma_a, sigma_s;
         public PhaseFunction phase;
         public SampledSpectrum Le;
+        // (not in pbrt-v4) The majorant that light sampling's ratio tracking sees at this point, when it
+        // differs from the _sigma_maj_ passed to the callback (decomposition tracking); zero otherwise.
+        public SampledSpectrum sigma_maj_light;
     }
 
     // HomogeneousMajorantIterator Definition
@@ -1006,7 +1014,7 @@ namespace pbrt
 
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
-                             Allocator alloc)
+                             bool progressive, Float initialMajorant, bool decomposition, Allocator alloc)
         {
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
@@ -1019,6 +1027,7 @@ namespace pbrt
 
             // Bound the density in each majorant grid voxel using the texture's region bounds
             majorantGrid = new MajorantGrid(bounds, new Point3i(majorantRes, majorantRes, majorantRes), alloc);
+            controlGrid = new Float[majorantRes * majorantRes * majorantRes];
             for (int z = 0; z < majorantGrid.res.z; ++z)
             {
                 for (int y = 0; y < majorantGrid.res.y; ++y)
@@ -1031,7 +1040,47 @@ namespace pbrt
                         Float a = densityOffset + densityScale * lo;
                         Float b = densityOffset + densityScale * hi;
                         majorantGrid.Set(x, y, z, std.max<Float>(0, std.max(a, b)));
+                        Float voxelControl = std.max<Float>(0, std.min(a, b));
+                        controlGrid[x + majorantGrid.res.x * (y + majorantGrid.res.y * z)] = voxelControl;
+                        maxControl = std.max(maxControl, voxelControl);
                     }
+                }
+            }
+            this.decomposition = decomposition && !progressive && maxControl > 0;
+
+            // Progressive null-tracking (Misso et al. 2023): ignore the texture bounds, start every
+            // voxel at a deliberately poor majorant and learn it from the density lookups.
+            this.progressive = progressive;
+            if (progressive)
+            {
+                for (int i = 0; i < majorantGrid.voxels.Length; ++i)
+                    majorantGrid.voxels[i] = initialMajorant;
+                pendingMajorants = (Float[])majorantGrid.voxels.Clone();
+                lock (progressiveMedia)
+                {
+                    progressiveMedia.Add(this);
+                }
+            }
+        }
+
+        // Progressive null-tracking passes: the majorants are fixed while a pass is rendered and the
+        // maxima found by the density lookups take effect when it ends.
+        public static bool AnyProgressive()
+        {
+            lock (progressiveMedia)
+            {
+                return progressiveMedia.Count > 0;
+            }
+        }
+
+        public static void EndProgressivePass()
+        {
+            lock (progressiveMedia)
+            {
+                foreach (TextureMedium medium in progressiveMedia)
+                {
+                    for (int i = 0; i < medium.majorantGrid.voxels.Length; ++i)
+                        medium.majorantGrid.voxels[i] = std.max(medium.majorantGrid.voxels[i], medium.pendingMajorants[i]);
                 }
             }
         }
@@ -1043,6 +1092,36 @@ namespace pbrt
             TextureEvalContext ctx = new TextureEvalContext();
             ctx.p = renderFromMedium.ApplyInverse(p);
             Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
+            if (progressive)
+            {
+                // Clamp the density to the current majorant (so the null density stays non-negative)
+                // and record the lookup for the next pass (benign data race, as in the paper)
+                // A point on a voxel boundary may be assigned to either neighboring voxel by the majorant
+                // iterator, so it is treated as inside every voxel within a small tolerance of it.
+                Vector3f o = bounds.Offset(ctx.p);
+                Float fx = o.x * majorantGrid.res.x, fy = o.y * majorantGrid.res.y, fz = o.z * majorantGrid.res.z;
+                int x0 = std.min(std.max((int)std.floor(fx - 1e-3f), 0), majorantGrid.res.x - 1);
+                int x1 = std.min(std.max((int)std.floor(fx + 1e-3f), 0), majorantGrid.res.x - 1);
+                int y0 = std.min(std.max((int)std.floor(fy - 1e-3f), 0), majorantGrid.res.y - 1);
+                int y1 = std.min(std.max((int)std.floor(fy + 1e-3f), 0), majorantGrid.res.y - 1);
+                int z0 = std.min(std.max((int)std.floor(fz - 1e-3f), 0), majorantGrid.res.z - 1);
+                int z1 = std.min(std.max((int)std.floor(fz + 1e-3f), 0), majorantGrid.res.z - 1);
+                Float clamped = density;
+                for (int vz = z0; vz <= z1; ++vz)
+                {
+                    for (int vy = y0; vy <= y1; ++vy)
+                    {
+                        for (int vx = x0; vx <= x1; ++vx)
+                        {
+                            int voxel = vx + majorantGrid.res.x * (vy + majorantGrid.res.y * vz);
+                            if (density + progressiveEpsilon > pendingMajorants[voxel])
+                                pendingMajorants[voxel] = density + progressiveEpsilon;
+                            clamped = std.min(clamped, majorantGrid.voxels[voxel]);
+                        }
+                    }
+                }
+                density = clamped;
+            }
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
@@ -1067,6 +1146,99 @@ namespace pbrt
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
 
+        public bool UsesDecomposition() { return decomposition; }
+
+        // SampleT_maj() with analog decomposition tracking (camera paths only; shadow rays use ordinary ratio
+        // tracking): each tentative collision is, with probability
+        // controlDensity / (voxel majorant), a collision with the homogeneous control medium, which is
+        // handled without a density lookup; otherwise it is a collision with the residual medium, whose
+        // majorant is what is left over. The callback sees the control and residual media as two media with
+        // their own majorants, so its event probabilities and weights are the ones of the combined medium.
+        public SampledSpectrum SampleT_majDecomposed(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+                                                     Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
+        {
+            // Normalize ray direction and update _tMax_ accordingly
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+
+            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            SampledSpectrum sigma_a0 = sigma_a_spec.Sample(lambda), sigma_s0 = sigma_s_spec.Sample(lambda);
+            SampledSpectrum sigma_t = sigma_a0 + sigma_s0;
+
+            SampledSpectrum T_maj = new SampledSpectrum(1f);
+            bool done = false;
+            while (!done)
+            {
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                    return T_maj;
+                RayMajorantSegment sg = seg.value();
+                if (sg.sigma_maj[0] == 0)
+                {
+                    Float dt = sg.tMax - sg.tMin;
+                    if (IsInf(dt))
+                        dt = Float.MaxValue;
+                    T_maj *= FastExp(-dt * sg.sigma_maj);
+                    continue;
+                }
+
+                // The majorant segment lies in one grid voxel, which has its own control density
+                Float controlDensity = ControlDensityAt(ray.Apply(.5f * (sg.tMin + sg.tMax)));
+                SampledSpectrum sigma_c = controlDensity * sigma_t;
+                MediumProperties control = new MediumProperties { sigma_a = controlDensity * sigma_a0,
+                                                                  sigma_s = controlDensity * sigma_s0, phase = phase,
+                                                                  Le = new SampledSpectrum(0f) };
+
+                Float tMin = sg.tMin;
+                while (true)
+                {
+                    Float t = tMin + SampleExponential(u, sg.sigma_maj[0]);
+                    u = rng.Uniform<Float>();
+                    if (t < sg.tMax)
+                    {
+                        T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
+                        Point3f p = ray.Apply(t);
+                        bool keepGoing;
+                        if (rng.Uniform<Float>() < sigma_c[0] / sg.sigma_maj[0])
+                        {
+                            // Control collision: no lookup
+                            keepGoing = callback(p, control, sigma_c, T_maj);
+                        }
+                        else
+                        {
+                            // Residual collision: look up the density and subtract the control part
+                            TextureEvalContext ctx = new TextureEvalContext();
+                            ctx.p = renderFromMedium.ApplyInverse(p);
+                            Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
+                            Float residual = std.max<Float>(0, density - controlDensity);
+                            MediumProperties mp = new MediumProperties { sigma_a = residual * sigma_a_spec.Sample(lambda),
+                                                                         sigma_s = residual * sigma_s_spec.Sample(lambda),
+                                                                         phase = phase, Le = new SampledSpectrum(0f) };
+                            // light sampling's shadow rays still see the whole majorant
+                            mp.sigma_maj_light = sg.sigma_maj;
+                            keepGoing = callback(p, mp, sg.sigma_maj - sigma_c, T_maj);
+                        }
+                        if (!keepGoing)
+                        {
+                            done = true;
+                            break;
+                        }
+                        T_maj = new SampledSpectrum(1f);
+                        tMin = t;
+                    }
+                    else
+                    {
+                        Float dt = sg.tMax - tMin;
+                        if (IsInf(dt))
+                            dt = Float.MaxValue;
+                        T_maj *= FastExp(-dt * sg.sigma_maj);
+                        break;
+                    }
+                }
+            }
+            return new SampledSpectrum(1f);
+        }
+
         // TextureMedium Private Members
         private Bounds3f bounds;
         private Transform renderFromMedium;
@@ -1075,6 +1247,25 @@ namespace pbrt
         private FloatTexture texture;
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
+        private bool progressive, decomposition;
+        // Decomposition tracking (Kettunen et al. 2021): a control density, constant within each majorant
+        // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
+        // density lookup.
+        private Float[] controlGrid;
+        private Float maxControl;
+
+        // Control density of the majorant grid voxel containing the point _p_ (in render space)
+        private Float ControlDensityAt(Point3f p)
+        {
+            Vector3f o = bounds.Offset(renderFromMedium.ApplyInverse(p));
+            int vx = std.min(std.max((int)(o.x * majorantGrid.res.x), 0), majorantGrid.res.x - 1);
+            int vy = std.min(std.max((int)(o.y * majorantGrid.res.y), 0), majorantGrid.res.y - 1);
+            int vz = std.min(std.max((int)(o.z * majorantGrid.res.z), 0), majorantGrid.res.z - 1);
+            return controlGrid[vx + majorantGrid.res.x * (vy + majorantGrid.res.y * vz)];
+        }
+        private Float[] pendingMajorants;
+        private const Float progressiveEpsilon = 1e-3f;
+        private static readonly List<TextureMedium> progressiveMedia = new List<TextureMedium>();
 
         public static TextureMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                            Allocator alloc)
@@ -1106,12 +1297,15 @@ namespace pbrt
             Float densityOffset = parameters.GetOneFloat("densityoffset", 0f);
             Float densityScale = parameters.GetOneFloat("densityscale", 1f);
             int majorantRes = parameters.GetOneInt("majorantres", 16);
+            bool progressive = parameters.GetOneBool("progressive", false);
+            bool decomposition = parameters.GetOneBool("decomposition", false);
+            Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, decomposition, alloc);
         }
     }
 

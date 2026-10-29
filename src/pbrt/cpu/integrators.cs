@@ -315,10 +315,16 @@ namespace pbrt
                     progress.Update((waveEndCopy - waveStartCopy) * tileBounds.Area());
                 });
 
+                // (not in pbrt-v4) Progressive null-tracking media learn their majorants between waves,
+                // and need many short passes
+                bool progressivePasses = TextureMedium.AnyProgressive();
+                if (progressivePasses)
+                    TextureMedium.EndProgressivePass();
+
                 // Update start and end wave
                 waveStart = waveEnd;
                 waveEnd = std.min(spp, waveEnd + nextWaveSize);
-                if (referenceImage == null)
+                if (referenceImage == null && !progressivePasses)
                     nextWaveSize = std.min(2 * nextWaveSize, 64);
                 if (waveStart == spp)
                     progress.Done();
@@ -3820,10 +3826,10 @@ namespace pbrt
                                     if (pdf == 0)
                                         beta = new SampledSpectrum(0.0f);
                                     r_u *= T_maj_ * sigma_n / pdf;
-                                    r_l *= T_maj_ * sigma_maj / pdf;
+                                    r_l *= T_maj_ * ((bool)mp.sigma_maj_light ? mp.sigma_maj_light : sigma_maj) / pdf;
                                     return (bool)beta && (bool)r_u;
                                 }
-                            });
+                            }, true);
                         // Handle terminated, scattered, and unscattered medium rays
                         if (terminated || !beta || !r_u)
                             return L;
