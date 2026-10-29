@@ -711,16 +711,14 @@ namespace pbrt
             p = renderFromMedium.ApplyInverse(p);
             p = (Point3f)bounds.Offset(p);
             // Compute $\sigmaa$ and $\sigmas$ for _RGBGridMedium_
-            Func<RGBUnboundedSpectrum, SampledSpectrum> convert = (RGBUnboundedSpectrum s) => s.Sample(lambda);
-            SampledSpectrum sigma_a = sigmaScale * (sigma_aGrid ? sigma_aGrid.value().Lookup(p, convert) : new SampledSpectrum(1f));
-            SampledSpectrum sigma_s = sigmaScale * (sigma_sGrid ? sigma_sGrid.value().Lookup(p, convert) : new SampledSpectrum(1f));
+            SampledSpectrum sigma_a = sigmaScale * (sigma_aGrid ? sigma_aGrid.value().Lookup(p, lambda) : new SampledSpectrum(1f));
+            SampledSpectrum sigma_s = sigmaScale * (sigma_sGrid ? sigma_sGrid.value().Lookup(p, lambda) : new SampledSpectrum(1f));
 
             // Find emitted radiance _Le_ for _RGBGridMedium_
             SampledSpectrum Le = new SampledSpectrum(0f);
             if (LeGrid && LeScale > 0)
             {
-                Func<RGBIlluminantSpectrum, SampledSpectrum> convertLe = (RGBIlluminantSpectrum s) => s.Sample(lambda);
-                Le = LeScale * LeGrid.value().Lookup(p, convertLe);
+                Le = LeScale * LeGrid.value().Lookup(p, lambda, LeIlluminant);
             }
 
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = Le };
@@ -745,9 +743,10 @@ namespace pbrt
         }
         // RGBGridMedium Public Methods
         public RGBGridMedium(Bounds3f bounds, Transform renderFromMedium, Float g,
-                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbA,
-                             pstd.optional<SampledGrid<RGBUnboundedSpectrum>> rgbS, Float sigmaScale,
-                             pstd.optional<SampledGrid<RGBIlluminantSpectrum>> rgbLe, Float LeScale, Allocator alloc)
+                             pstd.optional<SampledGrid<RGBUnboundedVoxel>> rgbA,
+                             pstd.optional<SampledGrid<RGBUnboundedVoxel>> rgbS, Float sigmaScale,
+                             pstd.optional<SampledGrid<RGBIlluminantVoxel>> rgbLe, Float LeScale,
+                             DenselySampledSpectrum LeIlluminant, Allocator alloc)
         {
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
@@ -758,6 +757,7 @@ namespace pbrt
             majorantGrid = new MajorantGrid(bounds, new Point3i(16, 16, 16), alloc);
             LeGrid = rgbLe;
             this.LeScale = LeScale;
+            this.LeIlluminant = LeIlluminant;
             if (LeGrid)
                 CHECK((bool)sigma_aGrid);
             if (sigma_aGrid)
@@ -774,9 +774,8 @@ namespace pbrt
                     {
                         Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
                         // Initialize _majorantGrid_ voxel for RGB $\sigmaa$ and $\sigmas$
-                        Func<RGBUnboundedSpectrum, Float> max = (RGBUnboundedSpectrum s) => s.MaxValue();
-                        Float maxSigma_t = (sigma_aGrid ? sigma_aGrid.value().MaxValue(vb, max) : 1) +
-                                           (sigma_sGrid ? sigma_sGrid.value().MaxValue(vb, max) : 1);
+                        Float maxSigma_t = (sigma_aGrid ? sigma_aGrid.value().MaxValue(vb) : 1) +
+                                           (sigma_sGrid ? sigma_sGrid.value().MaxValue(vb) : 1);
                         majorantGrid.Set(x, y, z, sigmaScale * maxSigma_t);
                     }
         }
@@ -814,32 +813,32 @@ namespace pbrt
             if (nDensity != (size_t)(nx * ny * nz))
                 ErrorExit(loc, StringPrintf("RGB grid medium has %d density values; expected nx*ny*nz = %d", nDensity, nx * ny * nz));
 
-            pstd.optional<SampledGrid<RGBUnboundedSpectrum>> sigma_aGrid = default, sigma_sGrid = default;
-            pstd.optional<SampledGrid<RGBIlluminantSpectrum>> LeGrid = default;
+            pstd.optional<SampledGrid<RGBUnboundedVoxel>> sigma_aGrid = default, sigma_sGrid = default;
+            pstd.optional<SampledGrid<RGBIlluminantVoxel>> LeGrid = default;
 
             if (sigma_a.Count != 0)
             {
                 RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
+                List<RGBUnboundedVoxel> rgbSpectrumDensity = new List<RGBUnboundedVoxel>();
                 foreach (RGB rgb in sigma_a)
-                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
-                sigma_aGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+                    rgbSpectrumDensity.Add(RGBUnboundedVoxel.FromRGB(colorSpace, rgb));
+                sigma_aGrid = new SampledGrid<RGBUnboundedVoxel>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
             }
             if (sigma_s.Count != 0)
             {
                 RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBUnboundedSpectrum> rgbSpectrumDensity = new List<RGBUnboundedSpectrum>();
+                List<RGBUnboundedVoxel> rgbSpectrumDensity = new List<RGBUnboundedVoxel>();
                 foreach (RGB rgb in sigma_s)
-                    rgbSpectrumDensity.Add(new RGBUnboundedSpectrum(colorSpace, rgb));
-                sigma_sGrid = new SampledGrid<RGBUnboundedSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+                    rgbSpectrumDensity.Add(RGBUnboundedVoxel.FromRGB(colorSpace, rgb));
+                sigma_sGrid = new SampledGrid<RGBUnboundedVoxel>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
             }
             if (Le.Count != 0)
             {
                 RGBColorSpace colorSpace = parameters.ColorSpace();
-                List<RGBIlluminantSpectrum> rgbSpectrumDensity = new List<RGBIlluminantSpectrum>();
+                List<RGBIlluminantVoxel> rgbSpectrumDensity = new List<RGBIlluminantVoxel>();
                 foreach (RGB rgb in Le)
-                    rgbSpectrumDensity.Add(new RGBIlluminantSpectrum(colorSpace, rgb));
-                LeGrid = new SampledGrid<RGBIlluminantSpectrum>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
+                    rgbSpectrumDensity.Add(RGBIlluminantVoxel.FromRGB(colorSpace, rgb));
+                LeGrid = new SampledGrid<RGBIlluminantVoxel>(rgbSpectrumDensity.ToArray(), nx, ny, nz, alloc);
             }
 
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
@@ -849,16 +848,17 @@ namespace pbrt
             Float sigmaScale = parameters.GetOneFloat("scale", 1f);
 
             return new RGBGridMedium(new Bounds3f(p0, p1), renderFromMedium, g, sigma_aGrid, sigma_sGrid, sigmaScale, LeGrid,
-                                     LeScale, alloc);
+                                     LeScale, parameters.ColorSpace().illuminant, alloc);
         }
 
         // RGBGridMedium Private Members
         private Bounds3f bounds;
         private Transform renderFromMedium;
-        private pstd.optional<SampledGrid<RGBIlluminantSpectrum>> LeGrid;
+        private pstd.optional<SampledGrid<RGBIlluminantVoxel>> LeGrid;
         private Float LeScale;
+        private DenselySampledSpectrum LeIlluminant;
         private HGPhaseFunction phase;
-        private pstd.optional<SampledGrid<RGBUnboundedSpectrum>> sigma_aGrid, sigma_sGrid;
+        private pstd.optional<SampledGrid<RGBUnboundedVoxel>> sigma_aGrid, sigma_sGrid;
         private Float sigmaScale;
         private MajorantGrid majorantGrid;
 

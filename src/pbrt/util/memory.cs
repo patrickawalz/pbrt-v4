@@ -9,6 +9,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace pbrt
@@ -18,6 +19,28 @@ namespace pbrt
         public static size_t GetCurrentRSS()
         {
             return (size_t)Process.GetCurrentProcess().WorkingSet64;
+        }
+
+        public static unsafe void* AllocAligned(size_t size)
+        {
+            return NativeMemory.AlignedAlloc((nuint)size, PBRT_L1_CACHE_LINE_SIZE);
+        }
+
+        public static unsafe T* AllocAligned<T>(size_t count)
+            where T : unmanaged
+        {
+            return (T*)AllocAligned(count * (size_t)sizeof(T));
+        }
+
+        public static unsafe void FreeAligned(void* ptr)
+        {
+            NativeMemory.AlignedFree(ptr);
+        }
+
+        public static unsafe void ZeroMemory<T>(T* dest, size_t count)
+            where T : unmanaged
+        {
+            NativeMemory.Clear(dest, (nuint)(count * (size_t)sizeof(T)));
         }
     }
 

@@ -148,76 +148,175 @@ namespace pbrt
         private readonly Dictionary<Key, Value> dict = new Dictionary<Key, Value>();
     }
 
-    // SampledGrid Definition
-    public class SampledGrid<T>
+    // SampledGrid Definition: values live in aligned native memory, so T must be unmanaged. The T-specific
+    // interpolation (C++ templates instantiated lazily) is in SampledGridExtensions below.
+    public unsafe class SampledGrid<T> : IDisposable
+        where T : unmanaged
     {
         // SampledGrid Public Methods
-        public SampledGrid() { values = new List<T>(); }
-        public SampledGrid(Allocator alloc) { values = new List<T>(); }
+        public SampledGrid()
+        {
+        }
+
+        public SampledGrid(Allocator alloc)
+        {
+        }
+
         public SampledGrid(pstd.span<T> v, int nx, int ny, int nz, Allocator alloc = null)
         {
-            values = new List<T>((int)v.size());
-            for (int i = 0; i < (int)v.size(); ++i)
-                values.Add(v[i]);
             this.nx = nx;
             this.ny = ny;
             this.nz = nz;
-            CHECK_EQ(nx * ny * nz, values.Count);
+            count = (int)v.size();
+            CHECK_EQ(nx * ny * nz, count);
+            if (count > 0)
+            {
+                values = AllocAligned<T>((size_t)count);
+                for (int i = 0; i < count; ++i)
+                    values[i] = v[i];
+            }
         }
+
         public SampledGrid(T[] v, int nx, int ny, int nz, Allocator alloc = null)
-            : this(new pstd.span<T>(v), nx, ny, nz, alloc) { }
-
-        public size_t BytesAllocated() { return (size_t)values.Count * (size_t)System.Runtime.CompilerServices.Unsafe.SizeOf<T>(); }
-        public int XSize() { return nx; }
-        public int YSize() { return ny; }
-        public int ZSize() { return nz; }
-
-        public IEnumerator<T> GetEnumerator() { return values.GetEnumerator(); }
-
-        // template <typename F> auto Lookup(Point3f p, F convert) const
-        public R Lookup<R>(Point3f p, Func<T, R> convert)
-            where R : IAdditionOperators<R, R, R>, IMultiplyOperators<R, Float, R>
+            : this(new pstd.span<T>(v), nx, ny, nz, alloc)
         {
-            // Compute voxel coordinates and offsets for _p_
-            Point3f pSamples = new Point3f(p.x * nx - .5f, p.y * ny - .5f, p.z * nz - .5f);
-            Point3i pi = (Point3i)Floor(pSamples);
-            Vector3f d = pSamples - (Point3f)pi;
-
-            // Return trilinearly interpolated voxel values
-            R d00 = LerpR(d.x, Lookup(pi, convert), Lookup(pi + new Vector3i(1, 0, 0), convert));
-            R d10 = LerpR(d.x, Lookup(pi + new Vector3i(0, 1, 0), convert),
-                          Lookup(pi + new Vector3i(1, 1, 0), convert));
-            R d01 = LerpR(d.x, Lookup(pi + new Vector3i(0, 0, 1), convert),
-                          Lookup(pi + new Vector3i(1, 0, 1), convert));
-            R d11 = LerpR(d.x, Lookup(pi + new Vector3i(0, 1, 1), convert),
-                          Lookup(pi + new Vector3i(1, 1, 1), convert));
-            return LerpR(d.z, LerpR(d.y, d00, d10), LerpR(d.y, d01, d11));
         }
 
-        internal static R LerpR<R>(Float t, R a, R b)
-            where R : IAdditionOperators<R, R, R>, IMultiplyOperators<R, Float, R>
+        ~SampledGrid()
         {
-            return a * (1 - t) + b * t;
+            Dispose();
         }
 
-        public R Lookup<R>(Point3i p, Func<T, R> convert)
+        public void Dispose()
         {
-            Bounds3i sampleBounds = new Bounds3i(new Point3i(0, 0, 0), new Point3i(nx, ny, nz));
-            if (!InsideExclusive(p, sampleBounds))
-                return convert(outsideValue);
-            return convert(values[(p.z * ny + p.y) * nx + p.x]);
+            if (values != null)
+            {
+                FreeAligned(values);
+                values = null;
+            }
+            GC.SuppressFinalize(this);
+        }
+
+        public size_t BytesAllocated()
+        {
+            return (size_t)count * (size_t)sizeof(T);
+        }
+
+        public int XSize()
+        {
+            return nx;
+        }
+
+        public int YSize()
+        {
+            return ny;
+        }
+
+        public int ZSize()
+        {
+            return nz;
         }
 
         public T Lookup(Point3i p)
         {
             Bounds3i sampleBounds = new Bounds3i(new Point3i(0, 0, 0), new Point3i(nx, ny, nz));
             if (!InsideExclusive(p, sampleBounds))
-                return outsideValue;
+                return default;
             return values[(p.z * ny + p.y) * nx + p.x];
         }
 
-        public R MaxValue<R>(Bounds3f bounds, Func<T, R> convert) where R : IComparisonOperators<R, R, bool>
+        public override string ToString()
         {
+            return $"[ SampledGrid nx: {nx} ny: {ny} nz: {nz} values: {count} ]";
+        }
+
+        // SampledGrid Private Members
+        private T* values;
+        private int count;
+        private int nx, ny, nz;
+    }
+
+    // RGBUnboundedVoxel Definition: the value stored per voxel of a SampledGrid<RGBUnboundedVoxel>. In C++ the grid
+    // holds RGBUnboundedSpectrum values directly; here the spectrum types are classes, so this unmanaged struct
+    // holds the same data (scale and RGBSigmoidPolynomial) inline.
+    public struct RGBUnboundedVoxel
+    {
+        public static RGBUnboundedVoxel FromRGB(RGBColorSpace cs, RGB rgb)
+        {
+            RGBUnboundedVoxel v;
+            Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
+            v.scale = 2 * m;
+            v.rsp = cs.ToRGBCoeffs(v.scale != 0 ? rgb / v.scale : new RGB(0, 0, 0));
+            return v;
+        }
+
+        public SampledSpectrum Sample(SampledWavelengths lambda)
+        {
+            SampledSpectrum s = new SampledSpectrum();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                s[i] = scale * rsp.Apply(lambda[i]);
+            return s;
+        }
+
+        public Float MaxValue()
+        {
+            return scale * rsp.MaxValue();
+        }
+
+        public Float scale;
+        public RGBSigmoidPolynomial rsp;
+    }
+
+    // RGBIlluminantVoxel Definition: the value stored per voxel of a SampledGrid<RGBIlluminantVoxel>. The illuminant
+    // is shared by every voxel of a grid, so it is passed to the lookup instead of being stored per voxel.
+    public struct RGBIlluminantVoxel
+    {
+        public static RGBIlluminantVoxel FromRGB(RGBColorSpace cs, RGB rgb)
+        {
+            RGBIlluminantVoxel v;
+            Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
+            v.scale = 2 * m;
+            v.rsp = cs.ToRGBCoeffs(v.scale != 0 ? rgb / v.scale : new RGB(0, 0, 0));
+            return v;
+        }
+
+        public SampledSpectrum Sample(SampledWavelengths lambda, SampledSpectrum illuminant)
+        {
+            SampledSpectrum s = new SampledSpectrum();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                s[i] = scale * rsp.Apply(lambda[i]);
+            return s * illuminant;
+        }
+
+        public Float scale;
+        public RGBSigmoidPolynomial rsp;
+    }
+
+    // SampledGrid<T> operations that depend on T (the C++ Lookup/MaxValue templates, instantiated for the three
+    // element types that are used)
+    public static class SampledGridExtensions
+    {
+        // SampledGrid<Float>
+        public static Float Lookup(this SampledGrid<Float> g, Point3f p)
+        {
+            // Compute voxel coordinates and offsets for _p_
+            Point3f pSamples = new Point3f(p.x * g.XSize() - .5f, p.y * g.YSize() - .5f, p.z * g.ZSize() - .5f);
+            Point3i pi = (Point3i)Floor(pSamples);
+            Vector3f d = pSamples - (Point3f)pi;
+
+            // Return trilinearly interpolated voxel values
+            Float d00 = Lerp(d.x, g.Lookup(pi), g.Lookup(pi + new Vector3i(1, 0, 0)));
+            Float d10 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 0)), g.Lookup(pi + new Vector3i(1, 1, 0)));
+            Float d01 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 0, 1)), g.Lookup(pi + new Vector3i(1, 0, 1)));
+            Float d11 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 1)), g.Lookup(pi + new Vector3i(1, 1, 1)));
+            return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
+        }
+
+        public static Float MaxValue(this SampledGrid<Float> g, Bounds3f bounds)
+        {
+            int nx = g.XSize();
+            int ny = g.YSize();
+            int nz = g.ZSize();
             Point3f[] ps = {new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f,
                                         bounds.pMin.z * nz - .5f),
                             new Point3f(bounds.pMax.x * nx - .5f, bounds.pMax.y * ny - .5f,
@@ -226,44 +325,96 @@ namespace pbrt
                             Min((Point3i)Floor(ps[1]) + new Vector3i(1, 1, 1),
                                 new Point3i(nx - 1, ny - 1, nz - 1))};
 
-            R maxValue = Lookup(pi[0], convert);
+            Float maxValue = g.Lookup(pi[0]);
             for (int z = pi[0].z; z <= pi[1].z; ++z)
+            {
                 for (int y = pi[0].y; y <= pi[1].y; ++y)
+                {
                     for (int x = pi[0].x; x <= pi[1].x; ++x)
                     {
-                        R v = Lookup(new Point3i(x, y, z), convert);
-                        if (v > maxValue) maxValue = v;  // std::max(maxValue, v)
+                        Float v = g.Lookup(new Point3i(x, y, z));
+                        if (v > maxValue)
+                        {
+                            maxValue = v;  // std::max(maxValue, v)
+                        }
                     }
+                }
+            }
             return maxValue;
         }
 
-        public override string ToString()
+        // SampledGrid<RGBUnboundedVoxel>
+        public static SampledSpectrum Lookup(this SampledGrid<RGBUnboundedVoxel> g, Point3f p, SampledWavelengths lambda)
         {
-            return $"[ SampledGrid nx: {nx} ny: {ny} nz: {nz} values: {values.Count} ]";
+            // Compute voxel coordinates and offsets for _p_
+            Point3f pSamples = new Point3f(p.x * g.XSize() - .5f, p.y * g.YSize() - .5f, p.z * g.ZSize() - .5f);
+            Point3i pi = (Point3i)Floor(pSamples);
+            Vector3f d = pSamples - (Point3f)pi;
+
+            // Return trilinearly interpolated voxel values
+            SampledSpectrum d00 = Lerp(d.x, g.Lookup(pi).Sample(lambda),
+                                       g.Lookup(pi + new Vector3i(1, 0, 0)).Sample(lambda));
+            SampledSpectrum d10 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 0)).Sample(lambda),
+                                       g.Lookup(pi + new Vector3i(1, 1, 0)).Sample(lambda));
+            SampledSpectrum d01 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 0, 1)).Sample(lambda),
+                                       g.Lookup(pi + new Vector3i(1, 0, 1)).Sample(lambda));
+            SampledSpectrum d11 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 1)).Sample(lambda),
+                                       g.Lookup(pi + new Vector3i(1, 1, 1)).Sample(lambda));
+            return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
         }
 
-        // SampledGrid Private Members
-        // (C++ returns T{} for lookups outside the grid; for reference types, such as the spectrum
-        // classes, that is a default-constructed instance)
-        private static readonly T outsideValue =
-            typeof(T).IsValueType ? default(T) : (T)Activator.CreateInstance(typeof(T));
-        private List<T> values;
-        private int nx, ny, nz;
-    }
-
-    // Overloads of SampledGrid<T> that need arithmetic on T itself (C++ templates instantiate them lazily)
-    public static class SampledGridExtensions
-    {
-        public static T Lookup<T>(this SampledGrid<T> g, Point3f p)
-            where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, Float, T>
+        public static Float MaxValue(this SampledGrid<RGBUnboundedVoxel> g, Bounds3f bounds)
         {
-            return g.Lookup<T>(p, (T v) => v);
+            int nx = g.XSize();
+            int ny = g.YSize();
+            int nz = g.ZSize();
+            Point3f[] ps = {new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f,
+                                        bounds.pMin.z * nz - .5f),
+                            new Point3f(bounds.pMax.x * nx - .5f, bounds.pMax.y * ny - .5f,
+                                        bounds.pMax.z * nz - .5f)};
+            Point3i[] pi = {Max((Point3i)Floor(ps[0]), new Point3i(0, 0, 0)),
+                            Min((Point3i)Floor(ps[1]) + new Vector3i(1, 1, 1),
+                                new Point3i(nx - 1, ny - 1, nz - 1))};
+
+            Float maxValue = g.Lookup(pi[0]).MaxValue();
+            for (int z = pi[0].z; z <= pi[1].z; ++z)
+            {
+                for (int y = pi[0].y; y <= pi[1].y; ++y)
+                {
+                    for (int x = pi[0].x; x <= pi[1].x; ++x)
+                    {
+                        Float v = g.Lookup(new Point3i(x, y, z)).MaxValue();
+                        if (v > maxValue)
+                        {
+                            maxValue = v;  // std::max(maxValue, v)
+                        }
+                    }
+                }
+            }
+            return maxValue;
         }
 
-        public static T MaxValue<T>(this SampledGrid<T> g, Bounds3f bounds)
-            where T : IComparisonOperators<T, T, bool>
+        // SampledGrid<RGBIlluminantVoxel>: the grid's shared illuminant is sampled once and applied to each corner
+        public static SampledSpectrum Lookup(this SampledGrid<RGBIlluminantVoxel> g, Point3f p, SampledWavelengths lambda,
+                                             DenselySampledSpectrum illuminant)
         {
-            return g.MaxValue<T>(bounds, (T v) => v);
+            SampledSpectrum illum = illuminant != null ? illuminant.Sample(lambda) : new SampledSpectrum(0f);
+
+            // Compute voxel coordinates and offsets for _p_
+            Point3f pSamples = new Point3f(p.x * g.XSize() - .5f, p.y * g.YSize() - .5f, p.z * g.ZSize() - .5f);
+            Point3i pi = (Point3i)Floor(pSamples);
+            Vector3f d = pSamples - (Point3f)pi;
+
+            // Return trilinearly interpolated voxel values
+            SampledSpectrum d00 = Lerp(d.x, g.Lookup(pi).Sample(lambda, illum),
+                                       g.Lookup(pi + new Vector3i(1, 0, 0)).Sample(lambda, illum));
+            SampledSpectrum d10 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 0)).Sample(lambda, illum),
+                                       g.Lookup(pi + new Vector3i(1, 1, 0)).Sample(lambda, illum));
+            SampledSpectrum d01 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 0, 1)).Sample(lambda, illum),
+                                       g.Lookup(pi + new Vector3i(1, 0, 1)).Sample(lambda, illum));
+            SampledSpectrum d11 = Lerp(d.x, g.Lookup(pi + new Vector3i(0, 1, 1)).Sample(lambda, illum),
+                                       g.Lookup(pi + new Vector3i(1, 1, 1)).Sample(lambda, illum));
+            return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
         }
     }
 
