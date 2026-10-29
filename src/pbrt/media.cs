@@ -190,6 +190,8 @@ namespace pbrt
                 return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+            else if (m is TextureMedium)
+                return SampleT_maj<TextureMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
@@ -987,6 +989,117 @@ namespace pbrt
         }
     }
 
+    // TextureMedium Definition (not in pbrt-v4)
+    // A medium whose density is driven by a procedural FloatTexture evaluated at the medium-space point:
+    // density(p) = max(0, densityOffset + densityScale * texture(frequency * p)). The majorant is the
+    // constant density bound derived from FloatTexture.MinValue()/MaxValue().
+    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<HomogeneousMajorantIterator>
+    {
+        // TextureMedium Public Methods
+        public override string ToString()
+        {
+            return StringPrintf("[ TextureMedium bounds: %s renderFromMedium: %s phase: %s " +
+                                "sigma_a_spec: %s sigma_s_spec: %s texture: %s densityOffset: %f densityScale: %f ]",
+                                bounds, renderFromMedium, phase, sigma_a_spec, sigma_s_spec, texture, densityOffset,
+                                densityScale);
+        }
+
+        public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
+                             FloatTexture texture, Float densityOffset, Float densityScale, Allocator alloc)
+        {
+            this.bounds = bounds;
+            this.renderFromMedium = renderFromMedium;
+            sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
+            sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
+            phase = new HGPhaseFunction(g);
+            this.texture = texture;
+            this.densityOffset = densityOffset;
+            this.densityScale = densityScale;
+
+            // Bound the density over the whole volume using the texture bounds
+            Float a = densityOffset + densityScale * texture.MinValue();
+            Float b = densityOffset + densityScale * texture.MaxValue();
+            maxDensity = std.max<Float>(0, std.max(a, b));
+        }
+
+        public override bool IsEmissive() { return false; }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
+        {
+            TextureEvalContext ctx = new TextureEvalContext();
+            ctx.p = renderFromMedium.ApplyInverse(p);
+            Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
+            DCHECK_LE(density, maxDensity * (1 + 1e-4f));
+            SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
+            SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
+
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
+        }
+
+        public HomogeneousMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
+        {
+            // Transform ray to medium's space and compute bounds overlap
+            ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+            Float tMin, tMax;
+            if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
+                return new HomogeneousMajorantIterator();
+            DCHECK_LE(tMax, raytMax);
+
+            SampledSpectrum sigma_t = maxDensity * (sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda));
+            return new HomogeneousMajorantIterator(tMin, tMax, sigma_t);
+        }
+
+        public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return buf.Alloc(SampleRay(ray, tMax, lambda));
+        }
+
+        // TextureMedium Private Members
+        private Bounds3f bounds;
+        private Transform renderFromMedium;
+        private HGPhaseFunction phase;
+        private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
+        private FloatTexture texture;
+        private Float densityOffset, densityScale, maxDensity;
+
+        public static TextureMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
+                                           Allocator alloc)
+        {
+            Spectrum sigma_a = parameters.GetOneSpectrum("sigma_a", null, SpectrumType.Unbounded, alloc);
+            if (sigma_a == null)
+                sigma_a = new ConstantSpectrum(1f);
+            Spectrum sigma_s = parameters.GetOneSpectrum("sigma_s", null, SpectrumType.Unbounded, alloc);
+            if (sigma_s == null)
+                sigma_s = new ConstantSpectrum(1f);
+            Float g = parameters.GetOneFloat("g", 0f);
+
+            // Procedural density texture, mapped by scaling medium space by _frequency_
+            string textureName = parameters.GetOneString("texture", "fbm");
+            Float frequency = parameters.GetOneFloat("frequency", 1);
+            int octaves = parameters.GetOneInt("octaves", 8);
+            Float roughness = parameters.GetOneFloat("roughness", .5f);
+            TextureMapping3D mapping = new PointTransformMapping(pbrt.Scale(frequency, frequency, frequency));
+            FloatTexture texture = null;
+            if (textureName == "fbm")
+                texture = new FBmTexture(mapping, octaves, roughness);
+            else if (textureName == "wrinkled")
+                texture = new WrinkledTexture(mapping, octaves, roughness);
+            else if (textureName == "windy")
+                texture = new WindyTexture(mapping);
+            else
+                ErrorExit(loc, $"{textureName}: texture unknown for the \"texture\" medium.");
+
+            Float densityOffset = parameters.GetOneFloat("densityoffset", 0f);
+            Float densityScale = parameters.GetOneFloat("densityscale", 1f);
+
+            Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
+            Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
+
+            return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
+                                     densityScale, alloc);
+        }
+    }
+
     // NanoVDBMedium Definition
     // NanoVDBBuffer Definition
     public sealed unsafe class NanoVDBBuffer : nanovdb.IGridBuffer<NanoVDBBuffer>
@@ -1291,6 +1404,10 @@ namespace pbrt
             else if (name == "cloud")
             {
                 m = CloudMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "texture")
+            {
+                m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else if (name == "nanovdb")
             {
