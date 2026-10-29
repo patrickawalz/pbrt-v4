@@ -229,21 +229,13 @@ namespace pbrt
         public override bool Equals(object o) { return o is RGB s && this == s; }
         public override int GetHashCode() { return HashCode.Combine(r, g, b); }
 
-        public Float this[int c]
+        public unsafe ref Float this[int c]
         {
             get
             {
                 DCHECK(c >= 0 && c < 3);
-                if (c == 0) return r;
-                else if (c == 1) return g;
-                return b;
-            }
-            set
-            {
-                DCHECK(c >= 0 && c < 3);
-                if (c == 0) r = value;
-                else if (c == 1) g = value;
-                else b = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<RGB, Float>(ref this), c);
             }
         }
 
@@ -341,21 +333,13 @@ namespace pbrt
         public override bool Equals(object o) { return o is XYZ s && this == s; }
         public override int GetHashCode() { return HashCode.Combine(X, Y, Z); }
 
-        public Float this[int c]
+        public unsafe ref Float this[int c]
         {
             get
             {
                 DCHECK(c >= 0 && c < 3);
-                if (c == 0) return X;
-                else if (c == 1) return Y;
-                return Z;
-            }
-            set
-            {
-                DCHECK(c >= 0 && c < 3);
-                if (c == 0) X = value;
-                else if (c == 1) Y = value;
-                else Z = value;
+                return ref Unsafe.Add(
+                    ref Unsafe.As<XYZ, Float>(ref this), c);
             }
         }
 
