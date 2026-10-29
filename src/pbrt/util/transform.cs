@@ -213,8 +213,7 @@ namespace pbrt
             else
             {
                 // Initialize _mInv_ with NaNs
-                Float NaN = std.numeric_limits_Float.has_signaling_NaN ? std.numeric_limits_Float.signaling_NaN
-                                                                       : std.numeric_limits_Float.quiet_NaN;
+                Float NaN = Float.NaN;
                 for (int i = 0; i < 4; ++i)
                     for (int j = 0; j < 4; ++j)
                         mInv[i][j] = NaN;

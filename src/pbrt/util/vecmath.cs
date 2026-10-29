@@ -4680,8 +4680,8 @@ namespace pbrt
         // Bounds2f Public Methods
         public Bounds2f()
         {
-            Float minNum = std.numeric_limits_Float.lowest;
-            Float maxNum = std.numeric_limits_Float.max;
+            Float minNum = Float.MinValue;
+            Float maxNum = Float.MaxValue;
             pMin = new Point2f(maxNum, maxNum);
             pMax = new Point2f(minNum, minNum);
         }
@@ -4843,8 +4843,8 @@ namespace pbrt
         // Bounds3f Public Methods
         public Bounds3f()
         {
-            Float minNum = std.numeric_limits_Float.lowest;
-            Float maxNum = std.numeric_limits_Float.max;
+            Float minNum = Float.MinValue;
+            Float maxNum = Float.MaxValue;
             pMin = new Point3f(maxNum, maxNum, maxNum);
             pMax = new Point3f(minNum, minNum, minNum);
         }

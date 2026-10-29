@@ -267,28 +267,6 @@ public static partial class std
         public const double infinity  = double.PositiveInfinity;
         public const double quiet_NaN = double.NaN;
     }
-    // numeric_limits<Float>: follows the Float type (float, or double with PBRT_FLOAT_AS_DOUBLE)
-    public static unsafe class numeric_limits_Float
-    {
-#if PBRT_FLOAT_AS_DOUBLE
-        public const Float max       = numeric_limits_double.max;
-        public const Float lowest    = numeric_limits_double.lowest;
-        public const Float min       = numeric_limits_double.min;
-        public const Float epsilon   = numeric_limits_double.epsilon;
-        public const Float infinity  = numeric_limits_double.infinity;
-        public const Float quiet_NaN = numeric_limits_double.quiet_NaN;
-        public static readonly Float signaling_NaN = BitConverter.Int64BitsToDouble(0x7FF4000000000000L);
-#else
-        public const Float max       = numeric_limits_float.max;
-        public const Float lowest    = numeric_limits_float.lowest;
-        public const Float min       = numeric_limits_float.min;
-        public const Float epsilon   = numeric_limits_float.epsilon;
-        public const Float infinity  = numeric_limits_float.infinity;
-        public const Float quiet_NaN = numeric_limits_float.quiet_NaN;
-        public static readonly Float signaling_NaN = BitConverter.Int32BitsToSingle(0x7FA00000);
-#endif
-        public const bool has_signaling_NaN = true;
-    }
     public static unsafe class numeric_limits_int
     {
         public const int max    = int.MaxValue;

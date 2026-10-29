@@ -1467,7 +1467,7 @@ namespace pbrt
         {
             // https://stackoverflow.com/a/49743348
             float p;
-            float t = std.log(std.max(FMA(a, -a, 1), std.numeric_limits_Float.min));
+            float t = std.log(std.max(FMA(a, -a, 1), 1.17549435e-38f));
             CHECK(!IsNaN(t) && !IsInf(t));
             if (std.abs(t) > 6.125f)
             {                                      // maximum ulp error = 2.35793

@@ -133,7 +133,7 @@ namespace pbrt
                     Float dt = sg.tMax - sg.tMin;
                     // Handle infinite _dt_ for ray majorant segment
                     if (IsInf(dt))
-                        dt = std.numeric_limits_Float.max;
+                        dt = Float.MaxValue;
 
                     T_maj *= FastExp(-dt * sg.sigma_maj);
                     continue;
@@ -167,7 +167,7 @@ namespace pbrt
                         Float dt = sg.tMax - tMin;
                         // Handle infinite _dt_ for ray majorant segment
                         if (IsInf(dt))
-                            dt = std.numeric_limits_Float.max;
+                            dt = Float.MaxValue;
 
                         T_maj *= FastExp(-dt * sg.sigma_maj);
                         break;

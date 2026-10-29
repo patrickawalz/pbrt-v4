@@ -10,9 +10,13 @@ namespace pbrt
 {
     public static unsafe partial class pbrt
     {
-        public const Float Infinity = std.numeric_limits_Float.infinity;
+        public const Float Infinity = Float.PositiveInfinity;
 
-        public const Float MachineEpsilon = std.numeric_limits_Float.epsilon * 0.5f;
+#if PBRT_FLOAT_AS_DOUBLE
+        public const Float MachineEpsilon = 2.220446049250313e-16 * 0.5;
+#else
+        public const Float MachineEpsilon = 1.1920929e-07f * 0.5f;
+#endif
 
         public const double DoubleOneMinusEpsilon = 0.99999999999999989;           // 0x1.fffffffffffffp-1
         public const float FloatOneMinusEpsilon = 0.99999994f;                    // 0x1.fffffep-1
