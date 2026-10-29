@@ -1,4 +1,4 @@
-﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // util/containers.h
@@ -175,7 +175,8 @@ namespace pbrt
         public IEnumerator<T> GetEnumerator() { return values.GetEnumerator(); }
 
         // template <typename F> auto Lookup(Point3f p, F convert) const
-        public Float Lookup(Point3f p, Func<T, Float> convert)
+        public R Lookup<R>(Point3f p, Func<T, R> convert)
+            where R : IAdditionOperators<R, R, R>, IMultiplyOperators<R, Float, R>
         {
             // Compute voxel coordinates and offsets for _p_
             Point3f pSamples = new Point3f(p.x * nx - .5f, p.y * ny - .5f, p.z * nz - .5f);
@@ -183,32 +184,20 @@ namespace pbrt
             Vector3f d = pSamples - (Point3f)pi;
 
             // Return trilinearly interpolated voxel values
-            Float d00 = Lerp(d.x, Lookup(pi, convert), Lookup(pi + new Vector3i(1, 0, 0), convert));
-            Float d10 = Lerp(d.x, Lookup(pi + new Vector3i(0, 1, 0), convert),
-                         Lookup(pi + new Vector3i(1, 1, 0), convert));
-            Float d01 = Lerp(d.x, Lookup(pi + new Vector3i(0, 0, 1), convert),
-                         Lookup(pi + new Vector3i(1, 0, 1), convert));
-            Float d11 = Lerp(d.x, Lookup(pi + new Vector3i(0, 1, 1), convert),
-                         Lookup(pi + new Vector3i(1, 1, 1), convert));
-            return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
+            R d00 = LerpR(d.x, Lookup(pi, convert), Lookup(pi + new Vector3i(1, 0, 0), convert));
+            R d10 = LerpR(d.x, Lookup(pi + new Vector3i(0, 1, 0), convert),
+                          Lookup(pi + new Vector3i(1, 1, 0), convert));
+            R d01 = LerpR(d.x, Lookup(pi + new Vector3i(0, 0, 1), convert),
+                          Lookup(pi + new Vector3i(1, 0, 1), convert));
+            R d11 = LerpR(d.x, Lookup(pi + new Vector3i(0, 1, 1), convert),
+                          Lookup(pi + new Vector3i(1, 1, 1), convert));
+            return LerpR(d.z, LerpR(d.y, d00, d10), LerpR(d.y, d01, d11));
         }
 
-        public SampledSpectrum Lookup(Point3f p, Func<T, SampledSpectrum> convert)
+        internal static R LerpR<R>(Float t, R a, R b)
+            where R : IAdditionOperators<R, R, R>, IMultiplyOperators<R, Float, R>
         {
-            // Compute voxel coordinates and offsets for _p_
-            Point3f pSamples = new Point3f(p.x * nx - .5f, p.y * ny - .5f, p.z * nz - .5f);
-            Point3i pi = (Point3i)Floor(pSamples);
-            Vector3f d = pSamples - (Point3f)pi;
-
-            // Return trilinearly interpolated voxel values
-            SampledSpectrum d00 = Lerp(d.x, Lookup(pi, convert), Lookup(pi + new Vector3i(1, 0, 0), convert));
-            SampledSpectrum d10 = Lerp(d.x, Lookup(pi + new Vector3i(0, 1, 0), convert),
-                         Lookup(pi + new Vector3i(1, 1, 0), convert));
-            SampledSpectrum d01 = Lerp(d.x, Lookup(pi + new Vector3i(0, 0, 1), convert),
-                         Lookup(pi + new Vector3i(1, 0, 1), convert));
-            SampledSpectrum d11 = Lerp(d.x, Lookup(pi + new Vector3i(0, 1, 1), convert),
-                         Lookup(pi + new Vector3i(1, 1, 1), convert));
-            return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
+            return a * (1 - t) + b * t;
         }
 
         public R Lookup<R>(Point3i p, Func<T, R> convert)
@@ -227,7 +216,7 @@ namespace pbrt
             return values[(p.z * ny + p.y) * nx + p.x];
         }
 
-        public Float MaxValue(Bounds3f bounds, Func<T, Float> convert)
+        public R MaxValue<R>(Bounds3f bounds, Func<T, R> convert) where R : IComparisonOperators<R, R, bool>
         {
             Point3f[] ps = {new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f,
                                         bounds.pMin.z * nz - .5f),
@@ -237,21 +226,14 @@ namespace pbrt
                             Min((Point3i)Floor(ps[1]) + new Vector3i(1, 1, 1),
                                 new Point3i(nx - 1, ny - 1, nz - 1))};
 
-            Float maxValue = Lookup(pi[0], convert);
+            R maxValue = Lookup(pi[0], convert);
             for (int z = pi[0].z; z <= pi[1].z; ++z)
-            {
                 for (int y = pi[0].y; y <= pi[1].y; ++y)
-                {
                     for (int x = pi[0].x; x <= pi[1].x; ++x)
                     {
-                        Float v = Lookup(new Point3i(x, y, z), convert);
-                        if (v > maxValue)
-                        {
-                            maxValue = v;  // std::max(maxValue, v)
-                        }
+                        R v = Lookup(new Point3i(x, y, z), convert);
+                        if (v > maxValue) maxValue = v;  // std::max(maxValue, v)
                     }
-                }
-            }
             return maxValue;
         }
 
@@ -272,14 +254,16 @@ namespace pbrt
     // Overloads of SampledGrid<T> that need arithmetic on T itself (C++ templates instantiate them lazily)
     public static class SampledGridExtensions
     {
-        public static Float Lookup(this SampledGrid<Float> g, Point3f p)
+        public static T Lookup<T>(this SampledGrid<T> g, Point3f p)
+            where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, Float, T>
         {
-            return g.Lookup(p, (Float v) => v);
+            return g.Lookup<T>(p, (T v) => v);
         }
 
-        public static Float MaxValue(this SampledGrid<Float> g, Bounds3f bounds)
+        public static T MaxValue<T>(this SampledGrid<T> g, Bounds3f bounds)
+            where T : IComparisonOperators<T, T, bool>
         {
-            return g.MaxValue(bounds, (Float v) => v);
+            return g.MaxValue<T>(bounds, (T v) => v);
         }
     }
 

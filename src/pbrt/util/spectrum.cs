@@ -190,7 +190,8 @@ namespace pbrt
     }
 
     // SampledSpectrum Definition
-    public unsafe struct SampledSpectrum
+    public unsafe struct SampledSpectrum : IAdditionOperators<SampledSpectrum, SampledSpectrum, SampledSpectrum>,
+                                           IMultiplyOperators<SampledSpectrum, Float, SampledSpectrum>
     {
         // SampledSpectrum Public Methods
         // (C++ operator+=, -=, *=, /= map onto C#'s compound assignment via these binary operators)
