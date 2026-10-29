@@ -67,5 +67,23 @@ namespace pbrt
             EXPECT_EQ((Float)(-2), mix01.MinValue());
             EXPECT_EQ((Float)3, mix01.MaxValue());
         }
+
+        [TEST("TextureBounds", "SpectrumTextures")]
+        public static void TextureBounds_SpectrumTextures()
+        {
+            SpectrumTexture c2 = new SpectrumConstantTexture(new ConstantSpectrum(2));
+            SpectrumTexture c3 = new SpectrumConstantTexture(new ConstantSpectrum(3));
+            EXPECT_EQ((Float)2, c2.MaxValue());
+            EXPECT_EQ((Float)3, new SpectrumCheckerboardTexture(new UVMapping(), null, c2, c3).MaxValue());
+            EXPECT_EQ((Float)3, new SpectrumDotsTexture(new UVMapping(), c2, c3).MaxValue());
+            EXPECT_EQ((Float)3, new SpectrumDirectionMixTexture(c2, c3, new Vector3f(0, 0, 1)).MaxValue());
+            // mix with an amount in [0, 1] can't exceed the larger input
+            FloatTexture amt = new FloatBilerpTexture(new UVMapping(), 0, 1, 0, 1);
+            EXPECT_EQ((Float)3, new SpectrumMixTexture(c2, c3, amt).MaxValue());
+            // scaled by a negative constant: the value is <= 0, so the bound clamps to 0
+            EXPECT_EQ((Float)0, new SpectrumScaledTexture(c2, new FloatConstantTexture(-1)).MaxValue());
+            EXPECT_EQ((Float)5, new SpectrumScaledTexture(c2, new FloatConstantTexture(2.5f)).MaxValue());
+            EXPECT_EQ((Float)1, new MarbleTexture(new PointTransformMapping(new Transform()), 8, .5f, 1, 1).MaxValue());
+        }
     }
 }

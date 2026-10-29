@@ -448,6 +448,8 @@ namespace pbrt
         // SpectrumConstantTexture Public Methods
         public SpectrumConstantTexture(Spectrum value) { this.value = value; }
 
+        public override Float MaxValue() { return value.MaxValue(); }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             return value.Sample(lambda);
@@ -517,6 +519,11 @@ namespace pbrt
         public SpectrumBilerpTexture(TextureMapping2D mapping, Spectrum v00, Spectrum v01, Spectrum v10, Spectrum v11)
         {
             this.mapping = mapping; this.v00 = v00; this.v01 = v01; this.v10 = v10; this.v11 = v11;
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(std.max(v00.MaxValue(), v01.MaxValue()), std.max(v10.MaxValue(), v11.MaxValue()));
         }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
@@ -629,6 +636,8 @@ namespace pbrt
             this.map2D = map2D; this.map3D = map3D; tex = new SpectrumTexture[] { tex1, tex2 };
         }
 
+        public override Float MaxValue() { return std.max(tex[0].MaxValue(), tex[1].MaxValue()); }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             Float w = pbrt.Checkerboard(ctx, map2D, map3D);
@@ -735,6 +744,8 @@ namespace pbrt
         {
             this.mapping = mapping; this.outsideDot = outsideDot; this.insideDot = insideDot;
         }
+
+        public override Float MaxValue() { return std.max(insideDot.MaxValue(), outsideDot.MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -887,6 +898,45 @@ namespace pbrt
         private static readonly Dictionary<TexInfo, MIPMap> textureCache = new Dictionary<TexInfo, MIPMap>();
     }
 
+    public static unsafe partial class pbrt
+    {
+        // (not in pbrt-v4) Min/max over every channel of every level 0 texel
+        public static void MIPMapTexelRange(MIPMap mipmap, out Float lo, out Float hi)
+        {
+            Image image = mipmap.GetLevel(0);
+            Point2i res = image.Resolution();
+            lo = Infinity; hi = -Infinity;
+            for (int y = 0; y < res.y; ++y)
+            {
+                for (int x = 0; x < res.x; ++x)
+                {
+                    for (int c = 0; c < image.NChannels(); ++c)
+                    {
+                        Float v = image.GetChannel(new Point2i(x, y), c);
+                        lo = std.min(lo, v);
+                        hi = std.max(hi, v);
+                    }
+                }
+            }
+        }
+
+        // (not in pbrt-v4) Bound on the spectrum an RGB texel with every component <= maxComponent
+        // produces. The sigmoid polynomial is <= 1, so unbounded spectra are <= 2 * m and illuminant
+        // spectra are <= 2 * m * illuminant; albedo spectra are <= 1.
+        public static Float RGBSpectrumBound(SpectrumType spectrumType, RGBColorSpace cs, Float maxComponent)
+        {
+            if (maxComponent <= 0)
+                return 0;
+            if (cs == null)
+                return maxComponent;
+            if (spectrumType == SpectrumType.Unbounded)
+                return 2 * maxComponent;
+            if (spectrumType == SpectrumType.Albedo)
+                return 1;
+            return 2 * maxComponent * cs.illuminant.MaxValue();
+        }
+    }
+
     // FloatImageTexture Definition
     public sealed unsafe class FloatImageTexture : FloatTexture
     {
@@ -913,21 +963,7 @@ namespace pbrt
         // or the channel average, so the extremes over all channels of level 0 bound them.
         private void ComputeTexelRange(out Float lo, out Float hi)
         {
-            Image image = mipmap.GetLevel(0);
-            Point2i res = image.Resolution();
-            lo = pbrt.Infinity; hi = -pbrt.Infinity;
-            for (int y = 0; y < res.y; ++y)
-            {
-                for (int x = 0; x < res.x; ++x)
-                {
-                    for (int c = 0; c < image.NChannels(); ++c)
-                    {
-                        Float v = image.GetChannel(new Point2i(x, y), c);
-                        lo = std.min(lo, v);
-                        hi = std.max(hi, v);
-                    }
-                }
-            }
+            pbrt.MIPMapTexelRange(mipmap, out lo, out hi);
         }
 
         public override Float MinValue()
@@ -1025,6 +1061,15 @@ namespace pbrt
         public void MultiplyScale(Float s) { scale *= s; }
         public SpectrumImageTexture Clone() { return (SpectrumImageTexture)MemberwiseClone(); }
 
+        // (see FloatImageTexture.MinValue/MaxValue for the texel range argument)
+        public override Float MaxValue()
+        {
+            pbrt.MIPMapTexelRange(mipmap, out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            Float m = invert ? 1 - std.min(a, b) : std.max(a, b);
+            return pbrt.RGBSpectrumBound(spectrumType, mipmap.GetRGBColorSpace(), m);
+        }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             // Apply texture mapping and flip $t$ coordinate for image texture lookup
@@ -1105,6 +1150,9 @@ namespace pbrt
             new RGB(.5f, .5f, .5f),   new RGB(.6f, .59f, .58f), new RGB(.58f, .58f, .6f),
             new RGB(.58f, .58f, .6f), new RGB(.2f, .2f, .33f),  new RGB(.58f, .58f, .6f),
         };
+
+        // the result is an RGBAlbedoSpectrum, which is <= 1
+        public override Float MaxValue() { return 1; }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -1257,6 +1305,11 @@ namespace pbrt
             this.tex1 = tex1; this.tex2 = tex2; this.amount = amount;
         }
 
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex1.MaxValue(), 0, -tex2.MaxValue(), 0, amount.MinValue(), amount.MaxValue());
+        }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             Float amt = amount.Evaluate(ctx);
@@ -1295,6 +1348,8 @@ namespace pbrt
         {
             this.tex1 = tex1; this.tex2 = tex2; this.dir = dir;
         }
+
+        public override Float MaxValue() { return std.max(tex1.MaxValue(), tex2.MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -1477,6 +1532,8 @@ namespace pbrt
             this.spectrumType = spectrumType;
         }
         public override string ToString() { return pbrt.StringPrintf("[ SpectrumPtexTexture %s ]", b.BaseToStringInternal()); }
+        public override Float MaxValue() { return pbrt.Infinity; }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             float* result = stackalloc float[3];
@@ -1572,6 +1629,8 @@ namespace pbrt
     {
         // SpectrumScaledTexture Public Methods
         public SpectrumScaledTexture(SpectrumTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
+
+        public override Float MaxValue() { return tex.MaxValue() * std.max<Float>(0, scale.MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {

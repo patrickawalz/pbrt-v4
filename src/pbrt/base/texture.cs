@@ -35,6 +35,10 @@ namespace pbrt
         // SpectrumTexture Interface
         public abstract override string ToString();
         public abstract SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda);
+
+        // (not in pbrt-v4) Conservative upper bound on the value at any wavelength, for any
+        // context. The pbrt spectrum textures are non-negative, so no lower bound is needed.
+        public abstract Float MaxValue();
     }
 
 }  // namespace pbrt
