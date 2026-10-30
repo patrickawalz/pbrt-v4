@@ -1416,6 +1416,88 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) Next event estimation of the medium's emission. The volpath integrator samples the emission from
+        // scattering vertices like a light, and combines the result with its gathering of the emission at collisions.
+        // The estimators of the other tracking modes don't have a matching light strategy.
+        public void EnableEmissionSampling(int res)
+        {
+            if (emissionTexture == null && emissionTextureName.Length == 0)
+                ErrorExit(new FileLoc(), "\"emission_nee\" needs an emission_texture.");
+            if (mixture || adaptiveRatio || spectral || kettunen || decompositionRequested || residualRatio)
+                ErrorExit(new FileLoc(), "\"emission_nee\" can't be combined with mixture, adaptive, spectral, kettunen, decomposition or " +
+                                         "residualratio tracking.");
+            lock (emissionMedia)
+            {
+                if (emissionLight == null)
+                {
+                    emissionLight = new VolumeEmissionLight(this, res);
+                    emissionMedia.Add(this);
+                }
+            }
+        }
+
+        // The light that samples this medium's emission, or null
+        public VolumeEmissionLight EmissionLight() { return emissionLight; }
+
+        // The lights plus the emission lights of the media that ask for them
+        public static List<Light> AddEmissionLights(List<Light> lights)
+        {
+            List<Light> all = new List<Light>(lights);
+            lock (emissionMedia)
+            {
+                foreach (TextureMedium medium in emissionMedia)
+                {
+                    if (medium.emissionLight.HasEmission() && !all.Contains(medium.emissionLight))
+                        all.Add(medium.emissionLight);
+                }
+            }
+            return all;
+        }
+
+        // Forgets the media that ask for emission sampling, for tests that build several in one process
+        public static void ClearEmissionLights()
+        {
+            lock (emissionMedia)
+            {
+                emissionMedia.Clear();
+            }
+        }
+
+        public Bounds3f MediumBounds() { return bounds; }
+        public Transform RenderFromMedium() { return renderFromMedium; }
+
+        // Emitted radiance per length at the render-space point p
+        public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda)
+        {
+            MediumProperties mp = SamplePoint(p, lambda);
+            return emissionPerLength ? mp.Le : mp.sigma_a * mp.Le;
+        }
+
+        // An upper bound of EmissionAt() over a region of medium space, over all wavelengths
+        public Float EmissionBound(Bounds3f region)
+        {
+            if (emissionTexture == null)
+                return 0;
+            Float bound = emissionScale * emissionTexture.RegionMax(ToTextureSpace(region));
+            if (!emissionPerLength)
+            {
+                TextureRegionBounds(region, out Float lo, out Float hi);
+                Float density = std.max<Float>(0, std.max(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
+                bound *= density * CoefficientBound(region) * sigma_a_spec.MaxValue();
+            }
+            return bound;
+        }
+
+        // The majorant that the tracking of a ray uses at the render-space point p
+        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda)
+        {
+            RayMajorantIterator iterator = SampleRay(new Ray(p, new Vector3f(0, 0, 1), 0, this), 1e-4f, lambda);
+            pstd.optional<RayMajorantSegment> segment = iterator.Next();
+            if (!segment)
+                return new SampledSpectrum(0f);
+            return segment.value().sigma_maj;
+        }
+
         // (not in pbrt-v4) Forgets the progressive media, for tests that build several in one process
         public static void ClearProgressive()
         {
@@ -2020,6 +2102,8 @@ namespace pbrt
         private Float refineThreshold;
         private const Float progressiveEpsilon = 1e-3f;
         private static readonly List<TextureMedium> progressiveMedia = new List<TextureMedium>();
+        private static readonly List<TextureMedium> emissionMedia = new List<TextureMedium>();
+        private VolumeEmissionLight emissionLight;
 
         public static TextureMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                            Allocator alloc)
@@ -2108,9 +2192,14 @@ namespace pbrt
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
-            return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
+            bool emissionNee = parameters.GetOneBool("emission_nee", false);
+            int emissionNeeRes = parameters.GetOneInt("emission_nee_res", 16);
+            TextureMedium created = new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
                                      mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, emissionTextureName, emissionScale, emissionPerLength, emissionMajorantScale, multiScattering, alloc);
+            if (emissionNee)
+                created.EnableEmissionSampling(emissionNeeRes);
+            return created;
         }
     }
 

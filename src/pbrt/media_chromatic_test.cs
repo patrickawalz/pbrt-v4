@@ -478,5 +478,128 @@ namespace pbrt
             }
             TextureMedium.ClearProgressive();
         }
+
+        // A glowing blob: emission 2 exp(-|p - c|^2 / 0.04), with the exact bound over a box
+        private sealed class BlobEmissionTexture : SpectrumTexture
+        {
+            public BlobEmissionTexture(Point3f center) { this.center = center; }
+            public override string ToString() { return "[ BlobEmissionTexture ]"; }
+            public override Float MaxValue() { return 2f; }
+            public override Float RegionMax(Bounds3f region)
+            {
+                Float d2 = 0;
+                d2 += Axis(region.pMin.x, region.pMax.x, center.x);
+                d2 += Axis(region.pMin.y, region.pMax.y, center.y);
+                d2 += Axis(region.pMin.z, region.pMax.z, center.z);
+                return 2f * (Float)Math.Exp(-d2 / .04f);
+            }
+            private static Float Axis(Float lo, Float hi, Float c)
+            {
+                Float d = c < lo ? lo - c : (c > hi ? c - hi : 0);
+                return d * d;
+            }
+            public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
+            {
+                Float d2 = pbrt.DistanceSquared(ctx.p, center);
+                return new SampledSpectrum(2f * (Float)Math.Exp(-d2 / .04f));
+            }
+            private Point3f center;
+        }
+
+        // Sampling the emission as a light changes the variance and not the mean. The medium is invisible for the
+        // equilibrium of absorption and emission, which here needs both strategies: emission is seen from scattering
+        // vertices and from the camera.
+        [TEST("ChromaticMedia", "EmissionSamplingEquilibrium")]
+        public static void ChromaticMedia_EmissionSamplingEquilibrium()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum rampUp = MakeRamp(0.3f, 3.0f, true), rampDown = MakeRamp(0.3f, 3.0f, false);
+            try
+            {
+                foreach (bool area in new bool[] { false, true })
+                {
+                    double[] refMean, refErr, mean, err;
+                    RenderMean(null, L, scale, area, 8, 256, Name("ref_nee", area), out refMean, out refErr);
+
+                    foreach (bool perLength in new bool[] { false, true })
+                    {
+                        foreach (bool progressive in new bool[] { false, true })
+                        {
+                            TextureMedium.ClearProgressive();
+                            TextureMedium.ClearEmissionLights();
+                            NamedTextures textures = MakeTextures();
+                            textures.floatTextures["wavy"] = new WavyDensityTexture();
+                            textures.unboundedSpectrumTextures["up"] = new SpectrumConstantTexture(rampUp);
+                            textures.unboundedSpectrumTextures["down"] = new SpectrumConstantTexture(rampDown);
+                            textures.illuminantSpectrumTextures["emit"] = perLength ? (SpectrumTexture)new AbsorbedEmissionTexture(rampUp)
+                                                                                    : new SpectrumConstantTexture(L);
+                            TextureMedium medium;
+                            if (progressive)
+                                medium = MakeProgressiveMedium(new ConstantSpectrum(1), new ConstantSpectrum(1), "wavy", "up", "down",
+                                                               "emit", scale, perLength, perLength ? 4f : 0f, 0.5f, textures);
+                            else
+                                medium = MakeTextureMedium(new ConstantSpectrum(1), new ConstantSpectrum(1), "wavy", 0f, 1f, "emit", scale,
+                                                           textures, "up", "down", perLength, perLength ? 4f : 0f);
+                            medium.EnableEmissionSampling(8);
+                            RenderMean(medium, L, scale, area, 200, 256, Name("nee", area), out mean, out err);
+                            Compare("emission sampling equilibrium, " + (perLength ? "per-length" : "volume") + ", " +
+                                    (progressive ? "progressive" : "analytic bounds") + EmitterLabel(area), mean, err, refMean);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearProgressive();
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // A scattering medium with a glowing blob in the dark: the image with the emission also sampled as a light has the
+        // same mean as the image that only gathers it at collisions
+        [TEST("ChromaticMedia", "EmissionSamplingMatchesGathering")]
+        public static void ChromaticMedia_EmissionSamplingMatchesGathering()
+        {
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = MakeRamp(0.5f, 3.5f, false);
+            try
+            {
+                foreach (bool perLength in new bool[] { false, true })
+                {
+                    double[] gatherMean = null, gatherErr = null;
+                    foreach (bool sampled in new bool[] { false, true })
+                    {
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                                 "", "", perLength, perLength ? 4f : 0f);
+                        if (sampled)
+                            medium.EnableEmissionSampling(8);
+                        double[] mean, err;
+                        RenderMean(medium, zero, 0f, true, 200, 512, Name("blob", sampled), out mean, out err);
+                        if (!sampled)
+                        {
+                            gatherMean = mean;
+                            gatherErr = err;
+                            continue;
+                        }
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            double combined = Math.Sqrt(err[c] * err[c] + gatherErr[c] * gatherErr[c]);
+                            Console.WriteLine($"PROBE emission sampling {(perLength ? "per-length" : "volume")} channel {c}: sampled {mean[c]:F5} " +
+                                              $"(stderr {err[c]:F5}) gathered {gatherMean[c]:F5} (stderr {gatherErr[c]:F5})");
+                            EXPECT_LT(Math.Abs(mean[c] - gatherMean[c]), 4 * combined + 0.01 * Math.Abs(gatherMean[c]));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
     }
 }
