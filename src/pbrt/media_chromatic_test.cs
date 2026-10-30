@@ -68,7 +68,7 @@ namespace pbrt
         }
 
         private static void RenderMean(Medium medium, Spectrum lightSpectrum, Float lightScale, bool areaEmitter, int maxDepth, int spp, string filename,
-                                       out double[] mean, out double[] stderr, bool bidirectional = false)
+                                       out double[] mean, out double[] stderr, bool bidirectional = false, bool lightWavelengths = false, bool spectralMIS = true)
         {
             Transform id = new Transform();
             Point2i resolution = new Point2i(16, 16);
@@ -106,8 +106,10 @@ namespace pbrt
             Primitive bvh = new BVHAggregate(prims);
 
             Sampler sampler = new IndependentSampler(spp, 3);
-            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false)
+            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false, false, spectralMIS)
                                                   : new VolPathIntegrator(maxDepth, camera, sampler, bvh, lights);
+            if (lightWavelengths)
+                rgbFilm.SetWavelengthDistribution(WavelengthDistribution.FromLights(lights));
             integrator.Render();
 
             ImageAndMetadata im = Image.Read(filename);
@@ -694,6 +696,55 @@ namespace pbrt
             }
         }
 
+        // With a scattering coefficient that depends on the wavelength the bidirectional integrator must agree with the volumetric
+        // path tracer, and the spectral MIS weights must beat the ones that follow the first wavelength only.
+        [TEST("ChromaticMedia", "BidirectionalSpectralMIS")]
+        public static void ChromaticMedia_BidirectionalSpectralMIS()
+        {
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.5f, false);
+            try
+            {
+                double[] pathMean = null, pathErr = null;
+                double[] errors = new double[3];
+                for (int variant = 0; variant < 3; ++variant)
+                {
+                    TextureMedium.ClearEmissionLights();
+                    NamedTextures textures = MakeTextures();
+                    textures.floatTextures["wavy"] = new WavyDensityTexture();
+                    textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                    TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                             "", "", true, 4f);
+                    medium.EnableEmissionSampling(8);
+                    double[] mean, err;
+                    // 0: volumetric path tracing, 1: bidirectional with spectral MIS, 2: bidirectional without it
+                    RenderMean(medium, zero, 0f, true, variant == 0 ? 7 : 6, 1024, Name("blob_spec" + variant, true), out mean, out err,
+                               variant != 0, false, variant == 1);
+                    if (variant == 0)
+                    {
+                        pathMean = mean;
+                        pathErr = err;
+                        continue;
+                    }
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        double combined = Math.Sqrt(err[c] * err[c] + pathErr[c] * pathErr[c]);
+                        Console.WriteLine($"PROBE bidirectional {(variant == 1 ? "spectral MIS" : "first wavelength only")} channel {c}: " +
+                                          $"{mean[c]:F5} (stderr {err[c]:F5}) path tracing {pathMean[c]:F5} (stderr {pathErr[c]:F5})");
+                        if (variant == 1)
+                            EXPECT_LT(Math.Abs(mean[c] - pathMean[c]), 4 * combined + 0.01 * Math.Abs(pathMean[c]));
+                        errors[variant] += err[c];
+                    }
+                }
+                Console.WriteLine($"PROBE bidirectional stderr summed over channels: spectral MIS {errors[1]:F5}, first wavelength only {errors[2]:F5}");
+                EXPECT_LT(errors[1], errors[2]);
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
         // The density of the directions that forward next event estimation picks integrates to one over the sphere, from
         // inside the bounds of the medium and from outside, and the sampled directions follow it
         [TEST("ChromaticMedia", "FneeDirectionDensity")]
@@ -826,6 +877,36 @@ namespace pbrt
             {
                 TextureMedium.ClearEmissionLights();
             }
+        }
+
+        // A spiky light spectrum rendered with wavelengths that follow it must give the same image as the sensor-only density
+        // (here through an emitting and absorbing medium, so that the spectral MIS weights take part), with less noise.
+        [TEST("ChromaticMedia", "LightWavelengthSampling")]
+        public static void ChromaticMedia_LightWavelengthSampling()
+        {
+            List<Float> lambdas = new List<Float>();
+            List<Float> values = new List<Float>();
+            for (Float lambda = Lambda_min; lambda <= Lambda_max; lambda += 1)
+            {
+                lambdas.Add(lambda);
+                values.Add((Float)(Math.Exp(-0.5 * Math.Pow((lambda - 620) / 10, 2)) + 0.3 * Math.Exp(-0.5 * Math.Pow((lambda - 450) / 12, 2)) + 0.002));
+            }
+            Spectrum L = new PiecewiseLinearSpectrum(lambdas, values);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum sigma_a = MakeRamp(0.3f, 3.0f, true);
+            Spectrum sigma_s = MakeRamp(0.3f, 3.0f, false);
+
+            double[] refMean, refErr, mean, err, meanLights, errLights;
+            RenderMean(null, L, scale, true, 8, 1024, Name("ref_w", true), out refMean, out refErr);
+            RenderMean(new HomogeneousMedium(sigma_a, sigma_s, 1f, L, scale, 0f, null), L, scale, true, 200, 256,
+                       Name("vis_w", true), out mean, out err);
+            RenderMean(new HomogeneousMedium(sigma_a, sigma_s, 1f, L, scale, 0f, null), L, scale, true, 200, 256,
+                       Name("lights_w", true), out meanLights, out errLights, false, true);
+            Compare("equilibrium, sensor-only wavelengths", mean, err, refMean);
+            Compare("equilibrium, wavelengths that follow the light", meanLights, errLights, refMean);
+            for (int c = 0; c < 3; ++c)
+                Console.WriteLine($"PROBE wavelength sampling channel {c}: stderr sensor-only {err[c]:F5}, following the light {errLights[c]:F5}");
+            EXPECT_LT(errLights[0] + errLights[1] + errLights[2], err[0] + err[1] + err[2]);
         }
     }
 }

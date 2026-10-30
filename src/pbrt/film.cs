@@ -425,6 +425,7 @@ namespace pbrt
             this.diagonal = diagonal;
             this.sensor = sensor;
             this.filename = filename;
+            lightWavelengths = false;
         }
 
         // FilmBaseParameters Method Definitions
@@ -550,8 +551,16 @@ namespace pbrt
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("Degenerate pixel bounds provided to film: %s.", pixelBounds));
 
             diagonal = parameters.GetOneFloat("diagonal", 35.0f);
+
+            // (not in pbrt-v4) "visible" samples wavelengths by the response of the sensor, "lights" also by the spectra of the lights
+            string wavelengthSampling = parameters.GetOneString("wavelengthsampling", "visible");
+            if (wavelengthSampling == "lights")
+                lightWavelengths = true;
+            else if (wavelengthSampling != "visible")
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unknown wavelengthsampling, use \"visible\" or \"lights\".", wavelengthSampling));
         }
 
+        public bool lightWavelengths;
         public Point2i fullResolution;
         public Bounds2i pixelBounds;
         public Filter filter;
@@ -580,6 +589,7 @@ namespace pbrt
             diagonal = p.diagonal * .001f;
             sensor = p.sensor;
             filename = p.filename;
+            lightWavelengths = p.lightWavelengths;
             pbrt.CHECK(!pixelBounds.IsEmpty());
             pbrt.CHECK_GE(pixelBounds.pMin.x, 0);
             pbrt.CHECK_LE(pixelBounds.pMax.x, fullResolution.x);
@@ -597,8 +607,13 @@ namespace pbrt
 
         public override SampledWavelengths SampleWavelengths(Float u)
         {
+            if (wavelengthDistribution != null)
+                return SampledWavelengths.Sample(u, wavelengthDistribution);
             return SampledWavelengths.SampleVisible(u);
         }
+
+        public override bool WantsLightWavelengths() { return lightWavelengths; }
+        public override void SetWavelengthDistribution(PiecewiseConstant1D distribution) { wavelengthDistribution = distribution; }
 
         // FilmBase Method Definitions
         public override Bounds2f SampleBounds()
@@ -616,6 +631,8 @@ namespace pbrt
         }
 
         // FilmBase Protected Members
+        protected bool lightWavelengths;
+        protected PiecewiseConstant1D wavelengthDistribution;
         protected Point2i fullResolution;
         protected Bounds2i pixelBounds;
         protected Filter filter;
@@ -1474,6 +1491,10 @@ namespace pbrt
 
     public abstract unsafe partial class Film
     {
+        // (not in pbrt-v4) Whether the scene setup should give the film a wavelength density that follows the lights
+        public virtual bool WantsLightWavelengths() { return false; }
+        public virtual void SetWavelengthDistribution(PiecewiseConstant1D distribution) { }
+
         public static Film Create(string name, ParameterDictionary parameters, Float exposureTime,
                                   CameraTransform cameraTransform, Filter filter, FileLoc loc, Allocator alloc)
         {

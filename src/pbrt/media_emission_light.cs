@@ -256,7 +256,22 @@ namespace pbrt
         public override SampledSpectrum Phi(SampledWavelengths lambda)
         {
             EnsureBuilt();
-            return new SampledSpectrum(4 * Pi * totalWeight * voxelVolume);
+            if (!(totalWeight > 0))
+                return new SampledSpectrum(0);
+            // The emission integrated over the volume, estimated at points that follow the density of the light. The points
+            // are a fixed low discrepancy sequence, so that the result does not depend on the sampler.
+            const int pointCount = 64;
+            SampledSpectrum sum = new SampledSpectrum(0);
+            for (int i = 0; i < pointCount; ++i)
+            {
+                Point3f p;
+                Float pdfPoint;
+                if (!SamplePointInVolume(new Point2f(RadicalInverse(0, (uint64_t)i), RadicalInverse(1, (uint64_t)i)),
+                                         RadicalInverse(2, (uint64_t)i), out p, out pdfPoint))
+                    continue;
+                sum += medium.EmissionAt(p, lambda) / pdfPoint;
+            }
+            return 4 * Pi * sum / (Float)pointCount;
         }
 
         public override pstd.optional<LightBounds> Bounds()
