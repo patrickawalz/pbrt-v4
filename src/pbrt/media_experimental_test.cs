@@ -7,13 +7,13 @@ namespace pbrt
 {
     public static unsafe class MediaExperimentalTests
     {
-        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f)
+        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f, bool residualRatio = false)
         {
             TextureMapping3D map = new PointTransformMapping(pbrt.Scale(1.6f, 1.6f, 1.6f));
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -141,6 +141,37 @@ namespace pbrt
         public static void TextureMedium_AdaptiveRatioUnbiased()
         {
             TextureMedium medium = MakeMedium(false, true);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(5);
+            int nRays = 8;
+            int nPaths = 20000;
+            for (int i = 0; i < nRays; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Ray ray = new Ray(o, d, 0, medium);
+                Float reference = ReferenceTransmittance(medium, ray, 2.2f, lambda);
+                double sum = 0, sum2 = 0;
+                for (int s = 0; s < nPaths; ++s)
+                {
+                    SampledSpectrum T_ray = new SampledSpectrum(1f), r_l = new SampledSpectrum(1f), r_u = new SampledSpectrum(1f);
+                    medium.AdaptiveRatioTracking(ray, 2.2f, rng.Uniform<Float>(), ref rng, lambda, ref T_ray, ref r_l, ref r_u);
+                    // constant spectra: all wavelengths agree
+                    EXPECT_NEAR(r_l[0], r_l[3], 1e-4f * r_l[0] + 1e-6f);
+                    sum += T_ray[0];
+                    sum2 += T_ray[0] * T_ray[0];
+                }
+                double mean = sum / nPaths;
+                double sigma = Math.Sqrt(Math.Max(sum2 / nPaths - mean * mean, 0) / nPaths);
+                EXPECT_LT(Math.Abs(mean - reference), 4 * sigma + 1e-3);
+            }
+        }
+
+        // Residual ratio tracking's transmittance estimate is unbiased
+        [TEST("TextureMedium", "ResidualRatioUnbiased")]
+        public static void TextureMedium_ResidualRatioUnbiased()
+        {
+            TextureMedium medium = MakeMedium(false, false, false, 0.01f, true);
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
             RNG rng = new RNG(5);
             int nRays = 8;

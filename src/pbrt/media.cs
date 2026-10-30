@@ -1028,7 +1028,7 @@ namespace pbrt
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
-                             bool spectral, bool adaptiveRatio, bool unclamped, Allocator alloc)
+                             bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1063,7 +1063,8 @@ namespace pbrt
             }
             this.spectral = spectral;
             this.unclamped = unclamped && progressive;
-            this.adaptiveRatio = adaptiveRatio && !spectral;
+            this.residualRatio = residualRatio && !spectral && !progressive;
+            this.adaptiveRatio = (adaptiveRatio || this.residualRatio) && !spectral;
             this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
 
             // Progressive null-tracking (Misso et al. 2023): ignore the texture bounds, start every
@@ -1189,6 +1190,20 @@ namespace pbrt
 
         public bool UsesAdaptiveRatio() { return adaptiveRatio; }
 
+        // Majorant left over after removing the voxel's minimum extinction (the control medium of residual ratio
+        // tracking), for the voxel that the majorant segment _sg_ lies in
+        private SampledSpectrum ResidualMajorant(Ray ray, RayMajorantSegment sg)
+        {
+            Point3f p = ray.Apply(.5f * (sg.tMin + sg.tMax));
+            Float controlDensity = ControlDensityAt(p);
+            Float maxDensity = MajorantDensityAt(p);
+            // The majorant is the voxel's maximum density times sigma_t, so what is left after removing the
+            // control extinction is the same spectrum scaled by (max - min) / max
+            if (controlDensity <= 0 || maxDensity <= 0)
+                return sg.sigma_maj;
+            return sg.sigma_maj * std.max<Float>(0, 1 - controlDensity / maxDensity);
+        }
+
         // Adaptive ratio tracking (Misso et al. 2023, Algorithm 2) for shadow rays: free-flight distances are
         // sampled with the null coefficient found at the previous collision instead of with the majorant, so
         // regions where the medium is close to the majorant are crossed with few density lookups. The
@@ -1208,8 +1223,11 @@ namespace pbrt
                     return;
                 RayMajorantSegment sg = seg.value();
                 SampledSpectrum c = sg.sigma_maj;
-                // Null coefficient of each wavelength's own sampling process, as of the last collision
-                SampledSpectrum muMC = c;
+                // Null coefficient of each wavelength's own sampling process, as of the last collision. With
+                // residual ratio tracking, collisions are only sampled against what is left of the majorant
+                // after the voxel's minimum extinction (the control medium), whose transmittance follows
+                // analytically from the pdf ratios below.
+                SampledSpectrum muMC = residualRatio ? ResidualMajorant(ray, sg) : c;
                 Float tMin = sg.tMin;
                 while (muMC[0] > 0)
                 {
@@ -1225,7 +1243,8 @@ namespace pbrt
                     T_ray *= survMajorant * sigma_n / pdf;
                     r_l *= muMC * survSampling / pdf;
                     r_u *= survMajorant * sigma_n / pdf;
-                    muMC = sigma_n;
+                    if (!residualRatio)
+                        muMC = sigma_n;
                     tMin = t;
 
                     // Possibly terminate transmittance computation using Russian roulette
@@ -1277,14 +1296,14 @@ namespace pbrt
                     return T_maj;
                 }
                 RayMajorantSegment sg = seg.value();
-                SampledSpectrum muMC = sg.sigma_maj;
+                SampledSpectrum muMC = residualRatio ? ResidualMajorant(ray, sg) : sg.sigma_maj;
                 if (sg.sigma_maj[0] == 0)
                 {
                     Float dt = sg.tMax - sg.tMin;
                     if (IsInf(dt))
                         dt = Float.MaxValue;
                     T_maj *= FastExp(-dt * sg.sigma_maj);
-                    lightAccum *= FastExp(-dt * sg.sigma_maj);
+                    lightAccum *= FastExp(-dt * muMC);
                     continue;
                 }
                 Float tMin = sg.tMin;
@@ -1304,7 +1323,8 @@ namespace pbrt
                             done = true;
                             break;
                         }
-                        muMC = ClampZero(sg.sigma_maj - mp.sigma_a - mp.sigma_s);
+                        if (!residualRatio)
+                            muMC = ClampZero(sg.sigma_maj - mp.sigma_a - mp.sigma_s);
                         T_maj = new SampledSpectrum(1f);
                         lightAccum = new SampledSpectrum(1f);
                         tMin = t;
@@ -1423,13 +1443,23 @@ namespace pbrt
         private FloatTexture texture;
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
-        private bool progressive, decomposition, spectral, adaptiveRatio, unclamped;
+        private bool progressive, decomposition, spectral, adaptiveRatio, unclamped, residualRatio;
         private int warmupPasses;
         // Decomposition tracking (Kutz et al. 2017): a control density, constant within each majorant
         // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
         // density lookup.
         private Float[] controlGrid;
         private Float maxControl;
+
+        // Majorant density of the majorant grid voxel containing the point _p_ (in render space)
+        private Float MajorantDensityAt(Point3f p)
+        {
+            Vector3f o = bounds.Offset(renderFromMedium.ApplyInverse(p));
+            int vx = std.min(std.max((int)(o.x * majorantGrid.res.x), 0), majorantGrid.res.x - 1);
+            int vy = std.min(std.max((int)(o.y * majorantGrid.res.y), 0), majorantGrid.res.y - 1);
+            int vz = std.min(std.max((int)(o.z * majorantGrid.res.z), 0), majorantGrid.res.z - 1);
+            return majorantGrid.Lookup(vx, vy, vz);
+        }
 
         // Control density of the majorant grid voxel containing the point _p_ (in render space)
         private Float ControlDensityAt(Point3f p)
@@ -1479,6 +1509,7 @@ namespace pbrt
             bool spectral = parameters.GetOneBool("spectral", false);
             bool adaptiveRatio = parameters.GetOneBool("adaptiveratio", false);
             bool unclamped = parameters.GetOneBool("unclamped", false);
+            bool residualRatio = parameters.GetOneBool("residualratio", false);
             int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
@@ -1486,7 +1517,7 @@ namespace pbrt
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, alloc);
         }
     }
 
