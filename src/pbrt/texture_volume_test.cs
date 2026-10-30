@@ -414,6 +414,69 @@ namespace pbrt
             }
         }
 
+        // Progressive tracking of a medium whose coefficients are scaled by textures learns majorants that cover the
+        // textured extinction, not just the density
+        [TEST("TextureMedium", "ProgressiveTexturedMajorantsCover")]
+        public static void TextureMedium_ProgressiveTexturedMajorantsCover()
+        {
+            TextureMedium.ClearProgressive();
+            NamedTextures textures = new NamedTextures();
+            textures.floatTextures["density"] = new FBmTexture(new PointTransformMapping(Scale(1.6f, 1.6f, 1.6f)), 4, .5f);
+            textures.unboundedSpectrumTextures["wave"] = new WaveSpectrumTexture();
+            Bounds3f box = new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f));
+            TextureMedium reference = new TextureMedium(box, new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
+                                                        null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
+                                                        .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "", "", 1f,
+                                                        false, 0f, true, null);
+            reference.ResolveTextures(textures, new FileLoc());
+            // Not unclamped on purpose: textured coefficients switch progressive tracking to signed null coefficients
+            TextureMedium progressive = new TextureMedium(box, new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
+                                                          null, 0.05f, 8f, 8, true, 0.2f, 0, false, false, false, false, false, false, 4f,
+                                                          .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "", "", 1f,
+                                                          false, 0f, true, null);
+            progressive.ResolveTextures(textures, new FileLoc());
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(10);
+            int res = 8;
+            Float[] trueMax = new Float[res * res * res];
+            for (int i = 0; i < 400000; ++i)
+            {
+                Point3f p = new Point3f(-.8f + 1.6f * rng.Uniform<Float>(), .2f + 1.6f * rng.Uniform<Float>(),
+                                        -.8f + 1.6f * rng.Uniform<Float>());
+                int vx = std.min((int)((p.x + .8f) / 1.6f * res), res - 1), vy = std.min((int)((p.y - .2f) / 1.6f * res), res - 1);
+                int vz = std.min((int)((p.z + .8f) / 1.6f * res), res - 1);
+                int v = vx + res * (vy + res * vz);
+                MediumProperties mp = reference.SamplePoint(p, lambda);
+                for (int k = 0; k < NSpectrumSamples; ++k)
+                    trueMax[v] = std.max(trueMax[v], (mp.sigma_a[k] + mp.sigma_s[k]) / 2.05f);
+            }
+            for (int pass = 1; pass <= 64; ++pass)
+            {
+                for (int s = 0; s < 40000; ++s)
+                {
+                    Point3f o = new Point3f(-1.2f + 2.4f * rng.Uniform<Float>(), -.2f + 2.4f * rng.Uniform<Float>(),
+                                            -1.2f + 2.4f * rng.Uniform<Float>());
+                    Vector3f d = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                    RatioTracking(progressive, new Ray(o, d, 0, progressive), 3f, lambda, ref rng);
+                }
+                TextureMedium.EndProgressivePass();
+            }
+            Float[] learned = progressive.DebugMajorants();
+            int considered = 0, covered = 0;
+            for (int v = 0; v < learned.Length; ++v)
+            {
+                if (trueMax[v] < 0.05f)
+                    continue;
+                ++considered;
+                if (learned[v] >= 0.9f * trueMax[v])
+                    ++covered;
+            }
+            Console.WriteLine($"PROBE progressive textured majorants: {covered} of {considered} voxels covered");
+            TextureMedium.ClearProgressive();
+            EXPECT_GT(considered, 100);
+            EXPECT_GE(covered, (int)(0.95f * considered));
+        }
+
         private sealed class GlowSpectrumTexture : SpectrumTexture
         {
             public override string ToString() { return "[ GlowSpectrumTexture ]"; }

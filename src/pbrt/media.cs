@@ -1152,12 +1152,20 @@ namespace pbrt
             this.hierarchyDepth = std.min(hierarchyDepth, 4);
             this.refineThreshold = refineThreshold;
 
-            if (HasCoefficientTextures() && (progressive || this.decompositionRequested || residualRatio) ||
+            if (HasCoefficientTextures() && (this.decompositionRequested || residualRatio) ||
                 emissionTextureName.Length != 0 && (this.decompositionRequested || residualRatio))
-                ErrorExit(new FileLoc(), "The \"texture\" medium's sigma_a/sigma_s textures can't be combined with progressive, " +
+                ErrorExit(new FileLoc(), "The \"texture\" medium's sigma_a/sigma_s textures and emission can't be combined with " +
                                          "decomposition or residualratio tracking.");
-            if (emissionTextureName.Length != 0 && progressive && (emissionPerLength || emissionMajorantScale > 0))
-                ErrorExit(new FileLoc(), "Emission that sets the majorant can't be combined with progressive tracking.");
+            // (not in pbrt-v4) The clamped estimator of progressive tracking is only unbiased once every majorant has been
+            // learned, which a texture that scales the coefficients (or emission that sets the majorant) makes harder to
+            // guarantee, so those media use the signed null coefficients, which are unbiased for any positive majorant
+            if (progressive && !this.unclamped && (HasCoefficientTextures() ||
+                emissionTextureName.Length != 0 && (emissionPerLength || emissionMajorantScale > 0)))
+            {
+                Warning("Progressive tracking of a \"texture\" medium with sigma_a/sigma_s textures or emission that sets the " +
+                        "majorant uses unclamped (signed) null coefficients, which keep the estimate unbiased.");
+                this.unclamped = true;
+            }
             if (emissionPerLength && emissionTextureName.Length != 0 && this.emissionMajorantScale <= 0)
                 ErrorExit(new FileLoc(), "\"perlength\" emission needs a positive \"emissionmajorant\", or its glow would be missed where the density is zero.");
             // A medium driven by named textures builds its majorants once the scene's textures exist
@@ -1223,12 +1231,22 @@ namespace pbrt
                 emissionBound *= densityBound * sigma_a_spec.MaxValue();
             if (emissionBound <= 0)
                 return densityBound;
-            Float minimumExtinction = Infinity;
-            for (Float lambda = 360; lambda <= 830; lambda += 1)
-                minimumExtinction = std.min(minimumExtinction, sigma_a_spec.Evaluate(lambda) + sigma_s_spec.Evaluate(lambda));
-            if (!(minimumExtinction > 0))
-                ErrorExit(new FileLoc(), "Emission that sets the majorant needs sigma_a + sigma_s > 0 at every visible wavelength.");
-            return std.max(densityBound, emissionMajorantScale * emissionBound / minimumExtinction);
+            return std.max(densityBound, emissionMajorantScale * emissionBound / MinimumBaseExtinction());
+        }
+
+        // (not in pbrt-v4) The smallest base sigma_a + sigma_s over the visible wavelengths
+        private Float MinimumBaseExtinction()
+        {
+            if (minimumBaseExtinction == 0)
+            {
+                Float minimumExtinction = Infinity;
+                for (Float lambda = 360; lambda <= 830; lambda += 1)
+                    minimumExtinction = std.min(minimumExtinction, sigma_a_spec.Evaluate(lambda) + sigma_s_spec.Evaluate(lambda));
+                if (!(minimumExtinction > 0))
+                    ErrorExit(new FileLoc(), "Emission that sets the majorant needs sigma_a + sigma_s > 0 at every visible wavelength.");
+                minimumBaseExtinction = minimumExtinction;
+            }
+            return minimumBaseExtinction;
         }
 
         private Bounds3f ToTextureSpace(Bounds3f region)
@@ -1398,6 +1416,15 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) Forgets the progressive media, for tests that build several in one process
+        public static void ClearProgressive()
+        {
+            lock (progressiveMedia)
+            {
+                progressiveMedia.Clear();
+            }
+        }
+
         public override bool IsEmissive() { return emissionTextureName.Length != 0; }
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
@@ -1406,12 +1433,58 @@ namespace pbrt
                 System.Threading.Interlocked.Increment(ref lookupCount);
             Point3f pMedium = renderFromMedium.ApplyInverse(p);
             Float density = std.max<Float>(0, densityOffset + densityScale * EvaluateTexture(p));
+            SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
+            SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
+            // (not in pbrt-v4) The largest factor by which the textures raise the extinction over the base spectra, and the
+            // majorant density that the emission asks for; the progressive majorants have to cover both
+            Float coefficientRatio = 1;
+            PhaseFunction pointPhase = phase;
+            if (sigmaATexture != null || sigmaSTexture != null || gTexture != null)
+            {
+                TextureEvalContext ctx = new TextureEvalContext();
+                ctx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
+                SampledSpectrum baseExtinction = sigma_a + sigma_s;
+                if (sigmaATexture != null)
+                    sigma_a *= ClampZero(sigmaATexture.Evaluate(ctx, lambda));
+                if (sigmaSTexture != null)
+                    sigma_s *= ClampZero(sigmaSTexture.Evaluate(ctx, lambda));
+                if (gTexture != null)
+                    pointPhase = new HGPhaseFunction(std.min(std.max(gTexture.Evaluate(ctx), -.99f), .99f));
+                if (progressive && (sigmaATexture != null || sigmaSTexture != null))
+                {
+                    SampledSpectrum extinction = sigma_a + sigma_s;
+                    coefficientRatio = 0;
+                    for (int i = 0; i < NSpectrumSamples; ++i)
+                    {
+                        if (baseExtinction[i] > 0)
+                            coefficientRatio = std.max(coefficientRatio, extinction[i] / baseExtinction[i]);
+                    }
+                }
+            }
+            // Emitted radiance, which the integrator weights by sigma_a at absorption events
+            SampledSpectrum pointLe = new SampledSpectrum(0f);
+            if (emissionTexture != null)
+            {
+                TextureEvalContext ectx = new TextureEvalContext();
+                ectx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
+                pointLe = emissionScale * ClampZero(emissionTexture.Evaluate(ectx, lambda));
+            }
+
             if (progressive)
             {
                 // Clamp the density to the current majorant (so the null density stays non-negative)
                 // and record the lookup for the next pass (benign data race, as in the paper)
                 // A point on a voxel boundary may be assigned to either neighboring voxel by the majorant
                 // iterator, so it is treated as inside every voxel within a small tolerance of it.
+                Float recorded = density * coefficientRatio;
+                if (emissionTexture != null && emissionMajorantScale > 0)
+                {
+                    // The majorant density at which the emission majorant of BuildMajorants() would sit at this point
+                    Float emission = pointLe.MaxComponentValue();
+                    if (!emissionPerLength)
+                        emission *= density * sigma_a_spec.MaxValue();
+                    recorded = std.max(recorded, emissionMajorantScale * emission / MinimumBaseExtinction());
+                }
                 Vector3f o = bounds.Offset(pMedium);
                 Float fx = o.x * majorantGrid.res.x, fy = o.y * majorantGrid.res.y, fz = o.z * majorantGrid.res.z;
                 int x0 = std.min(std.max((int)std.floor(fx - 1e-3f), 0), majorantGrid.res.x - 1);
@@ -1428,37 +1501,19 @@ namespace pbrt
                         for (int vx = x0; vx <= x1; ++vx)
                         {
                             int voxel = vx + majorantGrid.res.x * (vy + majorantGrid.res.y * vz);
-                            if (density + progressiveEpsilon > pendingMajorants[voxel])
-                                pendingMajorants[voxel] = density + progressiveEpsilon;
+                            if (recorded + progressiveEpsilon > pendingMajorants[voxel])
+                                pendingMajorants[voxel] = recorded + progressiveEpsilon;
                             clamped = std.min(clamped, majorantGrid.voxels[voxel]);
                         }
                     }
                 }
                 // Without clamping the estimators use signed null coefficients and stay unbiased for any majorant
                 if (!unclamped)
-                    density = clamped;
-            }
-            SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
-            SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
-            PhaseFunction pointPhase = phase;
-            if (sigmaATexture != null || sigmaSTexture != null || gTexture != null)
-            {
-                TextureEvalContext ctx = new TextureEvalContext();
-                ctx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
-                if (sigmaATexture != null)
-                    sigma_a *= ClampZero(sigmaATexture.Evaluate(ctx, lambda));
-                if (sigmaSTexture != null)
-                    sigma_s *= ClampZero(sigmaSTexture.Evaluate(ctx, lambda));
-                if (gTexture != null)
-                    pointPhase = new HGPhaseFunction(std.min(std.max(gTexture.Evaluate(ctx), -.99f), .99f));
-            }
-            // Emitted radiance, which the integrator weights by sigma_a at absorption events
-            SampledSpectrum pointLe = new SampledSpectrum(0f);
-            if (emissionTexture != null)
-            {
-                TextureEvalContext ectx = new TextureEvalContext();
-                ectx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
-                pointLe = emissionScale * ClampZero(emissionTexture.Evaluate(ectx, lambda));
+                {
+                    // (only reached without coefficient textures or majorant-setting emission, which force unclamped)
+                    sigma_a = clamped * sigma_a_spec.Sample(lambda);
+                    sigma_s = clamped * sigma_s_spec.Sample(lambda);
+                }
             }
 
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = pointLe, emissionPerLength = emissionPerLength, singleScatter = !multiScattering,
@@ -1954,7 +2009,7 @@ namespace pbrt
         private string densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName;
         private string emissionTextureName;
         private bool emissionPerLength, multiScattering;
-        private Float emissionScale, emissionMajorantScale;
+        private Float emissionScale, emissionMajorantScale, minimumBaseExtinction;
         private SpectrumTexture sigmaATexture, sigmaSTexture, emissionTexture;
         private FloatTexture gTexture;
         private int majorantRes;

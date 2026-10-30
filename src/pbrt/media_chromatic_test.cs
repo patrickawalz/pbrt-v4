@@ -255,5 +255,150 @@ namespace pbrt
                 Compare("equilibrium texture medium, varying density" + EmitterLabel(area), mean, err, refMean);
             }
         }
+
+        // 1 + 0.8 sin(3x + 1) cos(2z), a density that varies along every ray, with bounds 0.2 and 1.8
+        private sealed class WavyDensityTexture : FloatTexture
+        {
+            public static Float Density(Point3f p)
+            {
+                return 1f + .8f * (Float)(Math.Sin(3 * p.x + 1) * Math.Cos(2 * p.z));
+            }
+            public override string ToString() { return "[ WavyDensityTexture ]"; }
+            public override Float MinValue() { return .2f; }
+            public override Float MaxValue() { return 1.8f; }
+            public override Float Evaluate(TextureEvalContext ctx) { return Density(ctx.p); }
+        }
+
+        // What a medium with the wavy density and the base absorption sigma_a(lambda) scaled by "ramp" absorbs, per
+        // length: emitting it makes the medium invisible against a light of radiance scale
+        private sealed class AbsorbedEmissionTexture : SpectrumTexture
+        {
+            public AbsorbedEmissionTexture(Spectrum sigma_a) { this.sigma_a = sigma_a; }
+            public override string ToString() { return "[ AbsorbedEmissionTexture ]"; }
+            public override Float MaxValue() { return 1.8f * sigma_a.MaxValue(); }
+            public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
+            {
+                return WavyDensityTexture.Density(ctx.p) * sigma_a.Sample(lambda);
+            }
+            private Spectrum sigma_a;
+        }
+
+        // Progressive null-tracking, every pass starting from the majorant learned by the previous ones. The initial
+        // majorant is far below the density, so the first passes rely on the signed null coefficients; boundsFloor 0.5 keeps
+        // those weights bounded by starting every voxel at half of its analytic bound. Without a floor the estimate is still
+        // unbiased, but its variance is too large for a test to resolve.
+        private static TextureMedium MakeProgressiveMedium(Spectrum sigma_a, Spectrum sigma_s, string densityName, string sigmaAName,
+                                                           string sigmaSName, string emissionName, Float emissionScale,
+                                                           bool emissionPerLength, Float emissionMajorantScale, Float boundsFloor,
+                                                           NamedTextures textures)
+        {
+            TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-2, -2, -2), new Point3f(2, 2, 2)), new Transform(),
+                                                     sigma_a, sigma_s, 0f, null, 0f, 1f, 8, true, 0.1f, 0, false, false, false,
+                                                     false, false, false, 4f, .5f, boundsFloor, false, 4, 2, .7f, false, 4, 0f, true,
+                                                     densityName, sigmaAName, sigmaSName, "", emissionName, emissionScale,
+                                                     emissionPerLength, emissionMajorantScale, true, null);
+            medium.ResolveTextures(textures, new FileLoc());
+            return medium;
+        }
+
+        // Textured absorption under progressive tracking, with the signed null coefficients that the texture forces
+        [TEST("ChromaticMedia", "ProgressiveTexturedAbsorber")]
+        public static void ChromaticMedia_ProgressiveTexturedAbsorber()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum ramp = MakeRamp(0.3f, 3.8f, true);
+            Spectrum zero = new ConstantSpectrum(0);
+
+            foreach (bool area in new bool[] { false, true })
+            {
+                double[] refMean, refErr, mean, err;
+                RenderMean(null, MakeAttenuation(ramp, sphereRadius), scale, area, 8, 256, Name("ref_pa", area), out refMean,
+                           out refErr);
+
+                // sigma_a is 1 times the texture, which is the ramp: the textures scale the base coefficients
+                foreach (Float boundsFloor in new Float[] { 0.5f })
+                {
+                    TextureMedium.ClearProgressive();
+                    NamedTextures textures = MakeTextures();
+                    textures.unboundedSpectrumTextures["ramp"] = new SpectrumConstantTexture(ramp);
+                    RenderMean(MakeProgressiveMedium(new ConstantSpectrum(1), zero, "loose", "ramp", "", "", 1f, false, 0f, boundsFloor,
+                                                     textures), L, scale, area, 8, 256, Name("pa", area), out mean, out err);
+                    Compare("progressive textured absorber, boundsfloor " + boundsFloor + EmitterLabel(area), mean, err, refMean);
+                }
+            }
+            TextureMedium.ClearProgressive();
+        }
+
+        // Textured scattering and absorption with a density that varies along the ray, in the furnace and in equilibrium
+        // with volume emission
+        [TEST("ChromaticMedia", "ProgressiveTexturedFurnaceAndEquilibrium")]
+        public static void ChromaticMedia_ProgressiveTexturedFurnaceAndEquilibrium()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum rampUp = MakeRamp(0.3f, 3.0f, true), rampDown = MakeRamp(0.3f, 3.0f, false);
+
+            foreach (bool area in new bool[] { false, true })
+            {
+                double[] refMean, refErr, mean, err;
+                RenderMean(null, L, scale, area, 8, 256, Name("ref_pf", area), out refMean, out refErr);
+
+                // Furnace: only scattering, scaled by a texture that changes with wavelength
+                TextureMedium.ClearProgressive();
+                NamedTextures textures = MakeTextures();
+                textures.floatTextures["wavy"] = new WavyDensityTexture();
+                textures.unboundedSpectrumTextures["down"] = new SpectrumConstantTexture(rampDown);
+                RenderMean(MakeProgressiveMedium(zero, new ConstantSpectrum(1), "wavy", "", "down", "", 1f, false, 0f, 0.9f, textures), L,
+                           scale, area, 200, 256, Name("pf", area), out mean, out err);
+                Compare("progressive textured furnace" + EmitterLabel(area), mean, err, refMean);
+
+                // Equilibrium: textured absorption and scattering, volume emission sigma_a Le with Le = L
+                TextureMedium.ClearProgressive();
+                textures = MakeTextures();
+                textures.floatTextures["wavy"] = new WavyDensityTexture();
+                textures.unboundedSpectrumTextures["up"] = new SpectrumConstantTexture(rampUp);
+                textures.unboundedSpectrumTextures["down"] = new SpectrumConstantTexture(rampDown);
+                textures.illuminantSpectrumTextures["emit"] = new SpectrumConstantTexture(L);
+                RenderMean(MakeProgressiveMedium(new ConstantSpectrum(1), new ConstantSpectrum(1), "wavy", "up", "down", "emit", scale,
+                                                 false, 0f, 0.5f, textures), L, scale, area, 200, 256, Name("pe", area), out mean, out err);
+                Compare("progressive textured equilibrium" + EmitterLabel(area), mean, err, refMean);
+            }
+            TextureMedium.ClearProgressive();
+        }
+
+        // Per-length emission that sets the majorant, under progressive tracking: the medium emits exactly what its
+        // textured absorption removes, so it is invisible
+        [TEST("ChromaticMedia", "ProgressivePerLengthEmissionEquilibrium")]
+        public static void ChromaticMedia_ProgressivePerLengthEmissionEquilibrium()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum rampUp = MakeRamp(0.3f, 3.0f, true), rampDown = MakeRamp(0.3f, 3.0f, false);
+
+            foreach (bool area in new bool[] { false, true })
+            {
+                double[] refMean, refErr, mean, err;
+                RenderMean(null, L, scale, area, 8, 256, Name("ref_pl", area), out refMean, out refErr);
+
+                foreach (Float boundsFloor in new Float[] { 0.5f })
+                {
+                    TextureMedium.ClearProgressive();
+                    NamedTextures textures = MakeTextures();
+                    textures.floatTextures["wavy"] = new WavyDensityTexture();
+                    textures.unboundedSpectrumTextures["up"] = new SpectrumConstantTexture(rampUp);
+                    textures.unboundedSpectrumTextures["down"] = new SpectrumConstantTexture(rampDown);
+                    // sigma_a = wavy density * 1 * ramp, which is the density times the base absorption times the texture
+                    textures.illuminantSpectrumTextures["emit"] = new AbsorbedEmissionTexture(rampUp);
+                    RenderMean(MakeProgressiveMedium(new ConstantSpectrum(1), new ConstantSpectrum(1), "wavy", "up", "down", "emit",
+                                                     scale, true, 4f, boundsFloor, textures), L, scale, area, 200, 256,
+                               Name("pl", area), out mean, out err);
+                    Compare("progressive per-length emission equilibrium, boundsfloor " + boundsFloor + EmitterLabel(area), mean, err,
+                            refMean);
+                }
+            }
+            TextureMedium.ClearProgressive();
+        }
     }
 }
