@@ -13,7 +13,7 @@ namespace pbrt
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, 0f, false, "", "", "", "", "", 1f, false, 0f, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, 0f, false, "", "", "", "", "", 1f, false, 0f, true, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -463,7 +463,7 @@ namespace pbrt
             {
                 return new TextureMedium(bounds, new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
                                          0f, 6f, majorantRes, false, 0.01f, 0, false, false, false, false, false, false, 4f, .5f, 0f,
-                                         hierarchical, 4, 1, .7f, false, 4, 0f, true, "", "", "", "", "", 1f, false, 0f, null);
+                                         hierarchical, 4, 1, .7f, false, 4, 0f, true, "", "", "", "", "", 1f, false, 0f, true, null);
             }
             TextureMedium coarse = MakeImageMedium(1, false);
             TextureMedium fine = MakeImageMedium(16, false);

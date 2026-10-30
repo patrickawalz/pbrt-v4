@@ -3739,6 +3739,9 @@ namespace pbrt
                 // (not in pbrt-v4) The path since its last scattering vertex went through a medium whose shadow rays use the
                 // unbiased ray-marching transmittance estimator for area lights, which has no MIS partner
                 bool throughKettunen = false;
+                // (not in pbrt-v4) The path's last vertex was a medium scattering event, so media that don't allow
+                // multiple scattering (LuxCore's "multiscattering false") only attenuate the ray
+                bool scatteredInMedium = false;
                 int depth = 0;
                 Float etaScale = 1;
 
@@ -3798,6 +3801,14 @@ namespace pbrt
                                 Float pScatter = mp.sigma_s[0] / sigma_c[0];
                                 Float pNull = mp.signedNull ? std.abs(sigma_n_signed[0]) / sigma_c[0]
                                                             : std.max<Float>(0, 1 - pAbsorb - pScatter);
+                                // Scattering that isn't allowed is attenuation, which terminating the path at the
+                                // collision gives in expectation
+                                bool scatterAllowed = !(mp.singleScatter && scatteredInMedium);
+                                if (!scatterAllowed)
+                                {
+                                    pAbsorb += pScatter;
+                                    pScatter = 0;
+                                }
                                 bool spectralTracking = mp.spectralTracking;
                                 if (spectralTracking)
                                 {
@@ -3805,7 +3816,9 @@ namespace pbrt
                                     // follows the path's spectral throughput times the event's coefficient
                                     SampledSpectrum sigma_n_ = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
                                     Float wAbsorb = (beta * mp.sigma_a).Average();
-                                    Float wScatter = (beta * mp.sigma_s).Average();
+                                    Float wScatter = scatterAllowed ? (beta * mp.sigma_s).Average() : 0;
+                                    if (!scatterAllowed)
+                                        wAbsorb += (beta * mp.sigma_s).Average();
                                     Float wNull = (beta * sigma_n_).Average();
                                     Float wSum = wAbsorb + wScatter + wNull;
                                     if (!(wSum > 0))
@@ -3937,6 +3950,7 @@ namespace pbrt
                         if (scattered)
                         {
                             throughKettunen = false;
+                            scatteredInMedium = true;
                             continue;
                         }
 
@@ -4070,6 +4084,7 @@ namespace pbrt
                     // Update volumetric integrator path state after surface scattering
                     specularBounce = bs.value().IsSpecular();
                     throughKettunen = false;
+                    scatteredInMedium = false;
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
                     if (bs.value().IsTransmission())
                         etaScale *= Sqr(bs.value().eta);
@@ -4147,6 +4162,7 @@ namespace pbrt
                         DCHECK(!IsInf(beta.y(lambda)));
                         specularBounce = bsSw.value().IsSpecular();
                         throughKettunen = false;
+                        scatteredInMedium = false;
                         ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
                     }
 

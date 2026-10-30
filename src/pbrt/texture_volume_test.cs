@@ -103,6 +103,177 @@ namespace pbrt
             EXPECT_LT(maxDifference, 2e-3f);
         }
 
+        private static FloatGridTexture MakeGrid(int seed, Float scale, Float offset)
+        {
+            int nx = 6, ny = 5, nz = 7;
+            Float[] values = RandomGrid(nx, ny, nz, seed);
+            for (int i = 0; i < values.Length; ++i)
+                values[i] = values[i] * scale + offset;
+            Transform renderFromTexture = Translate(new Vector3f(.1f * seed, -.2f, .3f)) * Scale(1.4f, 1.2f, 1.7f);
+            return new FloatGridTexture(new PointTransformMapping(Inverse(renderFromTexture)), nx, ny, nz, values, WrapMode.Repeat);
+        }
+
+        // Each math texture's global and region bounds contain its values, with grids (which have tight region bounds)
+        // and constants as inputs
+        [TEST("FloatMathTextures", "BoundsValid")]
+        public static void FloatMathTextures_BoundsValid()
+        {
+            FloatTexture a = MakeGrid(1, 1f, -1f), b = MakeGrid(2, 2f, .5f), c = MakeGrid(3, .5f, 1f);
+            FloatTexture two = new FloatConstantTexture(2f), half = new FloatConstantTexture(.5f);
+            (string name, FloatTexture texture)[] cases =
+            {
+                ("add", new FloatAddTexture(a, b)),
+                ("subtract", new FloatSubtractTexture(a, b)),
+                ("abs", new FloatAbsTexture(a)),
+                ("clamp", new FloatClampTexture(a, -.3f, .8f)),
+                ("divide by positive", new FloatDivideTexture(a, c)),
+                ("power", new FloatPowerTexture(c, half)),
+                ("power of signed base", new FloatPowerTexture(a, two)),
+                ("remap", new FloatRemapTexture(a, new FloatConstantTexture(-1f), new FloatConstantTexture(1f), half, two)),
+                ("rounding", new FloatRoundingTexture(b, half)),
+                ("modulo", new FloatModuloTexture(a, half)),
+                ("greaterthan", new FloatCompareTexture(a, b, true)),
+                ("lessthan", new FloatCompareTexture(a, b, false)),
+                ("nested", new FloatAddTexture(new FloatAbsTexture(new FloatSubtractTexture(a, b)), new FloatClampTexture(c, 0f, 1.2f))),
+            };
+            foreach ((string name, FloatTexture texture) in cases)
+            {
+                RNG rng = new RNG(13);
+                int violations = 0, globalViolations = 0, tighter = 0;
+                Float globalLo = texture.MinValue(), globalHi = texture.MaxValue();
+                for (int i = 0; i < 1500; ++i)
+                {
+                    Point3f center = new Point3f(-1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>());
+                    Vector3f extent = new Vector3f(.3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>());
+                    texture.RegionBounds(new Bounds3f(center, center + extent), out Float lo, out Float hi);
+                    if (hi < globalHi - 1e-4f || lo > globalLo + 1e-4f)
+                        ++tighter;
+                    for (int k = 0; k < 30; ++k)
+                    {
+                        TextureEvalContext ctx = new TextureEvalContext();
+                        ctx.p = new Point3f(center.x + extent.x * rng.Uniform<Float>(), center.y + extent.y * rng.Uniform<Float>(),
+                                            center.z + extent.z * rng.Uniform<Float>());
+                        Float v = texture.Evaluate(ctx);
+                        if (v < lo - 1e-4f || v > hi + 1e-4f)
+                            ++violations;
+                        if (v < globalLo - 1e-4f || v > globalHi + 1e-4f)
+                            ++globalViolations;
+                    }
+                }
+                Console.WriteLine($"PROBE math texture {name}: region violations {violations}, global violations {globalViolations}, tighter regions {tighter}/1500");
+                EXPECT_EQ(violations, 0);
+                EXPECT_EQ(globalViolations, 0);
+            }
+        }
+
+        // Values of LuxCore's math textures at fixed inputs
+        [TEST("FloatMathTextures", "LuxCoreValues")]
+        public static void FloatMathTextures_LuxCoreValues()
+        {
+            TextureEvalContext ctx = new TextureEvalContext();
+            FloatTexture Const(Float v) { return new FloatConstantTexture(v); }
+            EXPECT_EQ(new FloatDivideTexture(Const(3f), Const(0f)).Evaluate(ctx), 0f);
+            EXPECT_EQ(new FloatDivideTexture(Const(3f), Const(2f)).Evaluate(ctx), 1.5f);
+            EXPECT_EQ(new FloatPowerTexture(Const(-2f), Const(.5f)).Evaluate(ctx), 0f);
+            EXPECT_EQ(new FloatPowerTexture(Const(-2f), Const(3f)).Evaluate(ctx), -8f);
+            EXPECT_EQ(new FloatModuloTexture(Const(5.5f), Const(2f)).Evaluate(ctx), 1.5f);
+            EXPECT_EQ(new FloatModuloTexture(Const(5.5f), Const(0f)).Evaluate(ctx), 0f);
+            EXPECT_EQ(new FloatRoundingTexture(Const(1.3f), Const(.5f)).Evaluate(ctx), 1.5f);
+            EXPECT_EQ(new FloatRoundingTexture(Const(1.1f), Const(.5f)).Evaluate(ctx), 1f);
+            EXPECT_EQ(new FloatRemapTexture(Const(.5f), Const(0f), Const(1f), Const(10f), Const(20f)).Evaluate(ctx), 15f);
+            EXPECT_EQ(new FloatRemapTexture(Const(3f), Const(0f), Const(1f), Const(10f), Const(20f)).Evaluate(ctx), 20f);
+            EXPECT_EQ(new FloatCompareTexture(Const(2f), Const(1f), true).Evaluate(ctx), 1f);
+            EXPECT_EQ(new FloatCompareTexture(Const(2f), Const(1f), false).Evaluate(ctx), 0f);
+            EXPECT_EQ(new FloatClampTexture(Const(5f), 0f, 1f).Evaluate(ctx), 1f);
+            EXPECT_EQ(new FloatAbsTexture(Const(-4f)).Evaluate(ctx), 4f);
+        }
+
+        // The cloud texture stays in [0,1], is a cloud (zero far from the center, positive near it), and its spheres work
+        [TEST("FloatCloudTexture", "RangeAndShape")]
+        public static void FloatCloudTexture_RangeAndShape()
+        {
+            foreach (int spheres in new int[] { 0, 12 })
+            {
+                FloatCloudTexture cloud = new FloatCloudTexture(new PointTransformMapping(new Transform()), .5f, .5f, .01f, 6f, .9f, .8f,
+                                                                2, .5f, .3f, spheres, .15f);
+                RNG rng = new RNG(14);
+                int outOfRange = 0, positive = 0;
+                for (int i = 0; i < 20000; ++i)
+                {
+                    TextureEvalContext ctx = new TextureEvalContext();
+                    ctx.p = new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>());
+                    Float v = cloud.Evaluate(ctx);
+                    if (!(v >= 0 && v <= 1))
+                        ++outOfRange;
+                    if (v > 0)
+                        ++positive;
+                }
+                TextureEvalContext far = new TextureEvalContext();
+                far.p = new Point3f(5, 5, 5);
+                Console.WriteLine($"PROBE cloud spheres={spheres}: out of range {outOfRange}, positive {positive}/20000, far value {cloud.Evaluate(far)}");
+                EXPECT_EQ(outOfRange, 0);
+                EXPECT_GT(positive, 200);
+                EXPECT_EQ(cloud.Evaluate(far), 0f);
+            }
+        }
+
+        // Three different textures along the three axes, bounds valid
+        [TEST("FloatTriplanarTexture", "ThreeTexturesBoundsValid")]
+        public static void FloatTriplanarTexture_ThreeTexturesBoundsValid()
+        {
+            FloatImageTexture t1 = MakeProjectedImage("magi_triplanar_a.exr", WrapMode.Clamp, 1f);
+            FloatImageTexture t2 = MakeProjectedImage("magi_triplanar_b.exr", WrapMode.Repeat, 3f);
+            FloatTexture t3 = new FloatConstantTexture(.25f);
+            Transform renderFromTexture = Translate(new Vector3f(.3f, .1f, -.2f)) * Scale(1.3f, 1.3f, 1.3f);
+            FloatTriplanarTexture texture = new FloatTriplanarTexture(new PointTransformMapping(Inverse(renderFromTexture)), t1, t2,
+                                                                      t3, 1f, 1f, 2f);
+            RNG rng = new RNG(15);
+            int violations = 0;
+            for (int i = 0; i < 1500; ++i)
+            {
+                Point3f c = new Point3f(-1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>());
+                Vector3f e = new Vector3f(.3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>());
+                texture.RegionBounds(new Bounds3f(c, c + e), out Float lo, out Float hi);
+                for (int k = 0; k < 30; ++k)
+                {
+                    TextureEvalContext ctx = new TextureEvalContext();
+                    ctx.p = new Point3f(c.x + e.x * rng.Uniform<Float>(), c.y + e.y * rng.Uniform<Float>(), c.z + e.z * rng.Uniform<Float>());
+                    Float v = texture.Evaluate(ctx);
+                    if (v < lo - 1e-5f || v > hi + 1e-5f || v < texture.MinValue() - 1e-5f || v > texture.MaxValue() + 1e-5f)
+                        ++violations;
+                }
+            }
+            Console.WriteLine($"PROBE triplanar with three textures: violations {violations}");
+            EXPECT_EQ(violations, 0);
+        }
+
+        // A color grid is three float grids; its spectrum bound holds at every wavelength
+        [TEST("SpectrumGridTexture", "BoundsValid")]
+        public static void SpectrumGridTexture_BoundsValid()
+        {
+            FloatGridTexture r = MakeGrid(4, 1f, 0f), g = MakeGrid(5, 2f, 0f), b = MakeGrid(6, .5f, 0f);
+            SpectrumGridTexture texture = new SpectrumGridTexture(r, g, b, SpectrumType.Unbounded, RGBColorSpace.sRGB);
+            RNG rng = new RNG(16);
+            int violations = 0;
+            for (int i = 0; i < 600; ++i)
+            {
+                Point3f c = new Point3f(-1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>(), -1 + 3 * rng.Uniform<Float>());
+                Vector3f e = new Vector3f(.3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>(), .3f * rng.Uniform<Float>());
+                Float bound = texture.RegionMax(new Bounds3f(c, c + e));
+                for (int k = 0; k < 10; ++k)
+                {
+                    TextureEvalContext ctx = new TextureEvalContext();
+                    ctx.p = new Point3f(c.x + e.x * rng.Uniform<Float>(), c.y + e.y * rng.Uniform<Float>(), c.z + e.z * rng.Uniform<Float>());
+                    SampledSpectrum value = texture.Evaluate(ctx, SampledWavelengths.SampleVisible(rng.Uniform<Float>()));
+                    for (int w = 0; w < 4; ++w)
+                        if (value[w] > bound + 1e-4f || value[w] > texture.MaxValue() + 1e-4f)
+                            ++violations;
+                }
+            }
+            Console.WriteLine($"PROBE spectrum grid: violations {violations}");
+            EXPECT_EQ(violations, 0);
+        }
+
         private static FloatImageTexture MakeProjectedImage(string name, WrapMode wrap, Float scale)
         {
             Point2i res = new Point2i(32, 16);
@@ -190,7 +361,7 @@ namespace pbrt
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                      null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "asym", "", 1f, false, 0f,
+                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "asym", "", 1f, false, 0f, true,
                                                      null);
             medium.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -263,7 +434,7 @@ namespace pbrt
             TextureMedium glowing = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                       new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                       null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                      .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 3f, false, 0f,
+                                                      .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 3f, false, 0f, true,
                                                       null);
             glowing.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -274,7 +445,7 @@ namespace pbrt
             TextureMedium plain = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                     new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                     null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                    .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "", 1f, false, 0f,
+                                                    .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "", 1f, false, 0f, true,
                                                     null);
             plain.ResolveTextures(textures, new FileLoc());
             EXPECT_FALSE(plain.IsEmissive());
@@ -292,7 +463,7 @@ namespace pbrt
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                      new Transform(), new ConstantSpectrum(1f), new ConstantSpectrum(1f), 0f,
                                                      null, 0f, 1f, 4, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "one", "wave", "wave", "", "", 1f, false, 0f,
+                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "one", "wave", "wave", "", "", 1f, false, 0f, true,
                                                      null);
             medium.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -322,7 +493,7 @@ namespace pbrt
                                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                      null, -.15f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
                                                      .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 1f,
-                                                     true, 1f, null);
+                                                     true, 1f, true, null);
             medium.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
             RNG rng = new RNG(12);

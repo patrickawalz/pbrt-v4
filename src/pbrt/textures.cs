@@ -1904,6 +1904,30 @@ namespace pbrt
                 tex = WindyTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "densitygrid")
                 tex = FloatGridTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "add")
+                tex = FloatAddTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "subtract")
+                tex = FloatSubtractTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "abs")
+                tex = FloatAbsTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "clamp")
+                tex = FloatClampTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "divide")
+                tex = FloatDivideTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "power")
+                tex = FloatPowerTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "remap")
+                tex = FloatRemapTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "rounding")
+                tex = FloatRoundingTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "modulo")
+                tex = FloatModuloTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "greaterthan")
+                tex = FloatCompareTexture.Create(renderFromTexture, parameters, true, loc, alloc);
+            else if (name == "lessthan")
+                tex = FloatCompareTexture.Create(renderFromTexture, parameters, false, loc, alloc);
+            else if (name == "cloud")
+                tex = FloatCloudTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "triplanar")
                 tex = FloatTriplanarTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "ptex")
@@ -1955,6 +1979,8 @@ namespace pbrt
                 tex = SpectrumDotsTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "marble")
                 tex = MarbleTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "densitygrid")
+                tex = SpectrumGridTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)

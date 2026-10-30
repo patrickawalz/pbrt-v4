@@ -634,6 +634,7 @@ namespace pbrt
         public string GetOneString(string name, string def) { return dict.GetOneString(name, def); }
 
         public List<Float> GetFloatArray(string name) { return dict.GetFloatArray(name); }
+        public List<RGB> GetRGBArray(string name) { return dict.GetRGBArray(name); }
         public List<int> GetIntArray(string name) { return dict.GetIntArray(name); }
         public List<byte> GetBoolArray(string name) { return dict.GetBoolArray(name); }
         public List<Point2f> GetPoint2fArray(string name) { return dict.GetPoint2fArray(name); }

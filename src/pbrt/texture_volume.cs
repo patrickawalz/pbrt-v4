@@ -188,14 +188,25 @@ namespace pbrt
                 if (res.x != nx || res.y != ny * nz)
                     pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: %s is %d x %d but %d x %d (nx x ny*nz) was expected.",
                                                           filename, res.x, res.y, nx, ny * nz));
+                // Like LuxCore, a color image gives its luminance
                 int channels = im.image.NChannels();
                 for (int i = 0; i < values.Length; ++i)
                 {
-                    Float sum = 0;
-                    for (int c = 0; c < channels; ++c)
-                        sum += im.image.GetChannel(new Point2i(i % nx, i / nx), c);
-                    values[i] = sum / channels;
+                    Point2i pixel = new Point2i(i % nx, i / nx);
+                    values[i] = (channels >= 3) ? Luminance(im.image.GetChannel(pixel, 0), im.image.GetChannel(pixel, 1),
+                                                            im.image.GetChannel(pixel, 2))
+                                                : im.image.GetChannel(pixel, 0);
                 }
+            }
+            else if (parameters.GetRGBArray("density").Count != 0)
+            {
+                // "rgb density": one color per voxel, used as its luminance (as in LuxCore)
+                List<RGB> data = parameters.GetRGBArray("density");
+                if (data.Count != values.Length)
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: %d values given for a %d x %d x %d grid.", data.Count,
+                                                          nx, ny, nz));
+                for (int i = 0; i < values.Length; ++i)
+                    values[i] = Luminance(data[i].r, data[i].g, data[i].b);
             }
             else
             {
@@ -206,18 +217,28 @@ namespace pbrt
                 for (int i = 0; i < values.Length; ++i)
                     values[i] = data[i];
             }
-            string wrap = parameters.GetOneString("wrap", "black");
+            string sampling0 = parameters.GetOneString("sampling", "centers");
+            // The default wrap mode is LuxCore's "repeat" for node sampling, and a black border (as in a "uniformgrid"
+            // medium) for the default center sampling
+            string wrap = parameters.GetOneString("wrap", sampling0 == "nodes" ? "repeat" : "black");
             // "white" is a black-style border that reads 1, as in LuxCore's density grid
             Float borderValue = (wrap == "white") ? 1f : 0f;
             pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrap == "white" ? "black" : wrap);
             if (!wrapMode || wrapMode.value() == WrapMode.OctahedralSphere)
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: wrap mode \"%s\" is not supported.", wrap));
             TextureMapping3D mapping = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
-            string sampling = parameters.GetOneString("sampling", "centers");
+            string sampling = sampling0;
             if (sampling != "centers" && sampling != "nodes")
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: sampling \"%s\" is unknown.", sampling));
             return new FloatGridTexture(mapping, nx, ny, nz, values, wrapMode.value(), borderValue, sampling == "nodes");
         }
+
+        // LuxCore's Spectrum::Y()
+        public static Float Luminance(Float r, Float g, Float b) { return 0.212671f * r + 0.715160f * g + 0.072169f * b; }
+
+        public int NX() { return nx; }
+        public int NY() { return ny; }
+        public int NZ() { return nz; }
 
         private static Float Lerp(Float t, Float a, Float b) { return (1 - t) * a + t * b; }
 
@@ -229,6 +250,80 @@ namespace pbrt
         private Float lo, hi, borderValue;
     }
 
+    // SpectrumGridTexture Definition
+    // A grid of colors (LuxCore's "densitygrid" read as a spectrum), for coefficients that vary in color through the
+    // volume: the red, green and blue channels are three grids that share a mapping, trilinear interpolation and wrap mode
+    public sealed unsafe class SpectrumGridTexture : SpectrumTexture
+    {
+        public SpectrumGridTexture(FloatGridTexture red, FloatGridTexture green, FloatGridTexture blue,
+                                   SpectrumType spectrumType, RGBColorSpace colorSpace)
+        {
+            channels = new FloatGridTexture[] { red, green, blue };
+            this.spectrumType = spectrumType;
+            this.colorSpace = colorSpace;
+        }
+
+        public override Float MaxValue()
+        {
+            return pbrt.RGBSpectrumBound(spectrumType, colorSpace,
+                                         std.max(channels[0].MaxValue(), std.max(channels[1].MaxValue(), channels[2].MaxValue())));
+        }
+
+        public override Float RegionMax(Bounds3f region)
+        {
+            Float m = 0;
+            for (int c = 0; c < 3; ++c)
+            {
+                channels[c].RegionBounds(region, out Float lo, out Float hi);
+                m = std.max(m, hi);
+            }
+            return pbrt.RGBSpectrumBound(spectrumType, colorSpace, m);
+        }
+
+        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
+        {
+            RGB rgb = pbrt.ClampZero(new RGB(channels[0].Evaluate(ctx), channels[1].Evaluate(ctx), channels[2].Evaluate(ctx)));
+            if (spectrumType == SpectrumType.Unbounded)
+                return new RGBUnboundedSpectrum(colorSpace, rgb).Sample(lambda);
+            if (spectrumType == SpectrumType.Albedo)
+                return new RGBAlbedoSpectrum(colorSpace, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
+            return new RGBIlluminantSpectrum(colorSpace, rgb).Sample(lambda);
+        }
+
+        public override string ToString() { return "[ SpectrumGridTexture ]"; }
+
+        public static SpectrumGridTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
+                                                 SpectrumType spectrumType, FileLoc loc, Allocator alloc)
+        {
+            int nx = parameters.GetOneInt("nx", 1), ny = parameters.GetOneInt("ny", 1), nz = parameters.GetOneInt("nz", 1);
+            List<RGB> data = parameters.GetRGBArray("density");
+            if (nx < 1 || ny < 1 || nz < 1 || data.Count != nx * ny * nz)
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: %d colors given for a %d x %d x %d grid.", data.Count, nx, ny, nz));
+            string sampling = parameters.GetOneString("sampling", "centers");
+            string wrap = parameters.GetOneString("wrap", sampling == "nodes" ? "repeat" : "black");
+            Float borderValue = (wrap == "white") ? 1f : 0f;
+            pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrap == "white" ? "black" : wrap);
+            if (!wrapMode || wrapMode.value() == WrapMode.OctahedralSphere)
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: wrap mode \"%s\" is not supported.", wrap));
+            TextureMapping3D mapping = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
+            Float[][] values = new Float[3][] { new Float[data.Count], new Float[data.Count], new Float[data.Count] };
+            for (int i = 0; i < data.Count; ++i)
+            {
+                values[0][i] = data[i].r;
+                values[1][i] = data[i].g;
+                values[2][i] = data[i].b;
+            }
+            FloatGridTexture[] grids = new FloatGridTexture[3];
+            for (int c = 0; c < 3; ++c)
+                grids[c] = new FloatGridTexture(mapping, nx, ny, nz, values[c], wrapMode.value(), borderValue, sampling == "nodes");
+            return new SpectrumGridTexture(grids[0], grids[1], grids[2], spectrumType, RGBColorSpace.sRGB);
+        }
+
+        private FloatGridTexture[] channels;
+        private SpectrumType spectrumType;
+        private RGBColorSpace colorSpace;
+    }
+
     // FloatTriplanarTexture Definition
     // Projects a 2D texture along the three axes of the texture's 3D mapping and blends the results with fixed weights.
     // The projected texture sees (y,z), (x,z) and (x,y) as the x and y of its points, so it takes a "planar" mapping
@@ -236,15 +331,38 @@ namespace pbrt
     public sealed unsafe class FloatTriplanarTexture : FloatTexture
     {
         public FloatTriplanarTexture(TextureMapping3D mapping, FloatTexture tex, Float wx, Float wy, Float wz)
+            : this(mapping, tex, tex, tex, wx, wy, wz)
+        {
+        }
+
+        // As in LuxCore, each projection can have its own texture (texture1 is seen along x, texture2 along y and
+        // texture3 along z)
+        public FloatTriplanarTexture(TextureMapping3D mapping, FloatTexture tex1, FloatTexture tex2, FloatTexture tex3,
+                                     Float wx, Float wy, Float wz)
         {
             this.mapping = mapping;
-            this.tex = tex;
+            textures = new FloatTexture[] { tex1, tex2, tex3 };
             Float sum = wx + wy + wz;
             weights = new Float[] { wx / sum, wy / sum, wz / sum };
         }
 
-        public override Float MinValue() { return tex.MinValue(); }
-        public override Float MaxValue() { return tex.MaxValue(); }
+        public override Float MinValue()
+        {
+            Float lo = 0;
+            for (int axis = 0; axis < 3; ++axis)
+                if (weights[axis] != 0)
+                    lo += weights[axis] * textures[axis].MinValue();
+            return lo;
+        }
+
+        public override Float MaxValue()
+        {
+            Float hi = 0;
+            for (int axis = 0; axis < 3; ++axis)
+                if (weights[axis] != 0)
+                    hi += weights[axis] * textures[axis].MaxValue();
+            return hi;
+        }
 
         private static TextureEvalContext ProjectedContext(Point3f p, int axis)
         {
@@ -260,7 +378,7 @@ namespace pbrt
             Float sum = 0;
             for (int axis = 0; axis < 3; ++axis)
                 if (weights[axis] != 0)
-                    sum += weights[axis] * tex.Evaluate(ProjectedContext(p, axis));
+                    sum += weights[axis] * textures[axis].Evaluate(ProjectedContext(p, axis));
             return sum;
         }
 
@@ -281,7 +399,7 @@ namespace pbrt
                 if (weights[axis] == 0)
                     continue;
                 Point3f a = ProjectedContext(mapped.pMin, axis).p, b = ProjectedContext(mapped.pMax, axis).p;
-                tex.RegionBounds(new Bounds3f(a, b), out Float tlo, out Float thi);
+                textures[axis].RegionBounds(new Bounds3f(a, b), out Float tlo, out Float thi);
                 lo += weights[axis] * tlo;
                 hi += weights[axis] * thi;
             }
@@ -289,24 +407,27 @@ namespace pbrt
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ FloatTriplanarTexture tex: %s weights: %f %f %f ]", tex, weights[0], weights[1],
-                                     weights[2]);
+            return pbrt.StringPrintf("[ FloatTriplanarTexture tex1: %s tex2: %s tex3: %s weights: %f %f %f ]", textures[0],
+                                     textures[1], textures[2], weights[0], weights[1], weights[2]);
         }
 
         public static FloatTriplanarTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
                                                    FileLoc loc, Allocator alloc)
         {
             FloatTexture tex = parameters.GetFloatTexture("tex", 1f, alloc);
+            FloatTexture tex1 = parameters.GetFloatTextureOrNull("texture1", alloc) ?? tex;
+            FloatTexture tex2 = parameters.GetFloatTextureOrNull("texture2", alloc) ?? tex;
+            FloatTexture tex3 = parameters.GetFloatTextureOrNull("texture3", alloc) ?? tex;
             Float wx = parameters.GetOneFloat("xweight", 1f), wy = parameters.GetOneFloat("yweight", 1f),
                   wz = parameters.GetOneFloat("zweight", 1f);
             if (wx < 0 || wy < 0 || wz < 0 || wx + wy + wz <= 0)
                 pbrt.ErrorExit(loc, "triplanar: the weights must be non-negative and not all zero.");
             TextureMapping3D mapping = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
-            return new FloatTriplanarTexture(mapping, tex, wx, wy, wz);
+            return new FloatTriplanarTexture(mapping, tex1, tex2, tex3, wx, wy, wz);
         }
 
         private TextureMapping3D mapping;
-        private FloatTexture tex;
+        private FloatTexture[] textures;
         private Float[] weights;
     }
 }
