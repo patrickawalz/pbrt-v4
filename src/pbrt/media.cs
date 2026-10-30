@@ -1101,7 +1101,7 @@ namespace pbrt
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
                              bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, bool mixture, Float mixtureLooseness,
                              Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
-                             Float refineThreshold, bool kettunen, int kettunenPoints, Allocator alloc)
+                             Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1145,6 +1145,7 @@ namespace pbrt
 
             this.kettunen = kettunen && !progressive;
             this.kettunenPoints = std.max(kettunenPoints, 1);
+            this.kettunenSpacing = kettunenSpacing;
 
             // (not in pbrt-v4) Refine the majorant grid where the texture bound is loose
             if (hierarchical && !progressive && !this.decomposition && !this.residualRatio)
@@ -1380,12 +1381,18 @@ namespace pbrt
             if (nSegments == 0)
                 return new SampledSpectrum(1f);
 
+            // The series converges only when the control is close to the optical depth, so with _kettunenSpacing_ > 0
+            // the comb has at least one point per _kettunenSpacing_ of the majorant's optical depth (at most 256)
+            int points = kettunenPoints;
+            if (kettunenSpacing > 0)
+                points = std.min(std.max(points, (int)std.ceil(total / kettunenSpacing)), 256);
+
             // Estimate the control and the optical depths
-            SampledSpectrum c = KettunenOpticalDepth(ray, nSegments, total, ref rng, lambda);
+            SampledSpectrum c = KettunenOpticalDepth(ray, nSegments, total, points, ref rng, lambda);
             SampledSpectrum sum = new SampledSpectrum(1f), term = new SampledSpectrum(1f);
             for (int n = 1; n < 1000; ++n)
             {
-                SampledSpectrum a = (c - KettunenOpticalDepth(ray, nSegments, total, ref rng, lambda)) / n;
+                SampledSpectrum a = (c - KettunenOpticalDepth(ray, nSegments, total, points, ref rng, lambda)) / n;
                 Float p = std.min<Float>(1, std.max<Float>(Abs(a).MaxComponentValue(), .05f));
                 if (rng.Uniform<Float>() >= p)
                     break;
@@ -1397,14 +1404,14 @@ namespace pbrt
 
         // Comb estimate of the optical depth: the points are evenly spaced in the majorant's optical depth, so each
         // sample's weight is the density's ratio to the majorant at the hero wavelength
-        private SampledSpectrum KettunenOpticalDepth(Ray ray, int nSegments, Float total, ref RNG rng, SampledWavelengths lambda)
+        private SampledSpectrum KettunenOpticalDepth(Ray ray, int nSegments, Float total, int points, ref RNG rng, SampledWavelengths lambda)
         {
             SampledSpectrum ratioSum = new SampledSpectrum(0f);
             Float u = rng.Uniform<Float>();
             int segment = 0;
-            for (int j = 0; j < kettunenPoints; ++j)
+            for (int j = 0; j < points; ++j)
             {
-                Float s = (j + u) / kettunenPoints * total;
+                Float s = (j + u) / points * total;
                 while (segment < nSegments - 1 && s >= kettunenCumulative[segment + 1])
                     ++segment;
                 Float t = kettunenTMin[segment] + (s - kettunenCumulative[segment]) / kettunenRate[segment];
@@ -1413,7 +1420,7 @@ namespace pbrt
                 // sigma_t(x) / sigma_maj(x) at the hero wavelength
                 ratioSum += (mp.sigma_a + mp.sigma_s) / (kettunenRate[segment] > 0 ? kettunenRate[segment] : 1f);
             }
-            return ratioSum * (total / kettunenPoints);
+            return ratioSum * (total / points);
         }
 
 
@@ -1783,6 +1790,7 @@ namespace pbrt
         private MajorantNode[] topNodes;
         private bool kettunen;
         private int kettunenPoints;
+        private Float kettunenSpacing;
         private int hierarchyRes, hierarchyDepth;
         private Float refineThreshold;
         private const Float progressiveEpsilon = 1e-3f;
@@ -1841,13 +1849,14 @@ namespace pbrt
             Float refineThreshold = parameters.GetOneFloat("refinethreshold", .7f);
             bool kettunen = parameters.GetOneBool("kettunen", false);
             int kettunenPoints = parameters.GetOneInt("kettunenpoints", 4);
+            Float kettunenSpacing = parameters.GetOneFloat("kettunenspacing", 0f);
 
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, alloc);
         }
     }
 

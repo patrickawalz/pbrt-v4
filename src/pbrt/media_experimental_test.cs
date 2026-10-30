@@ -13,7 +13,7 @@ namespace pbrt
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, 0f, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
