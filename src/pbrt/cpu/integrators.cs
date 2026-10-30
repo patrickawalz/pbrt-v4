@@ -3842,9 +3842,10 @@ namespace pbrt
                                     }
                                     else if (mp.signedNull)
                                     {
-                                        pdf = T_maj_[0] * sigma_maj[0] * pScatter;
+                                        SampledSpectrum densityRate = mp.mixture ? mp.mixRatio : T_maj_ * sigma_maj;
+                                        pdf = densityRate[0] * pScatter;
                                         beta *= T_maj_ * mp.sigma_s / pdf;
-                                        r_u *= T_maj_ * sigma_maj * SafeDiv(mp.sigma_s, sigma_c) / pdf;
+                                        r_u *= densityRate * SafeDiv(mp.sigma_s, sigma_c) / pdf;
                                     }
                                     else
                                     {
@@ -3896,12 +3897,13 @@ namespace pbrt
                                     }
                                     if (mp.signedNull)
                                     {
-                                        Float pdfU = T_maj_[0] * sigma_maj[0] * pNull;
+                                        SampledSpectrum densityRate = mp.mixture ? mp.mixRatio : T_maj_ * sigma_maj;
+                                        Float pdfU = densityRate[0] * pNull;
                                         beta *= T_maj_ * sigma_n_signed / pdfU;
                                         if (pdfU == 0)
                                             beta = new SampledSpectrum(0.0f);
-                                        r_u *= T_maj_ * sigma_maj * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdfU;
-                                        r_l *= T_maj_ * sigma_maj / pdfU;
+                                        r_u *= densityRate * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdfU;
+                                        r_l *= densityRate / pdfU;
                                         return (bool)beta && (bool)r_u;
                                     }
                                     Float pdf = T_maj_[0] * sigma_n[0];
@@ -3916,7 +3918,11 @@ namespace pbrt
                             };
                         SampledSpectrum tailLight = default;
                         bool adaptiveLight = ray.medium is TextureMedium adaptiveMedium && adaptiveMedium.UsesAdaptiveRatio();
-                        SampledSpectrum T_maj = adaptiveLight
+                        bool mixtureSampling = ray.medium is TextureMedium mixtureMedium && mixtureMedium.UsesMixture();
+                        SampledSpectrum T_maj = mixtureSampling
+                            ? ((TextureMedium)ray.medium).SampleT_majMixture(
+                                  new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda, mediumCallback, out tailLight)
+                            : adaptiveLight
                             ? ((TextureMedium)ray.medium).SampleT_majAdaptiveCamera(
                                   new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda, mediumCallback, out tailLight)
                             : SampleT_maj(new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda, mediumCallback, true);
@@ -3926,9 +3932,18 @@ namespace pbrt
                         if (scattered)
                             continue;
 
-                        beta *= T_maj / T_maj[0];
-                        r_u *= T_maj / T_maj[0];
-                        r_l *= (adaptiveLight ? tailLight : T_maj) / T_maj[0];
+                        if (mixtureSampling)
+                        {
+                            beta *= T_maj / tailLight[0];
+                            r_u *= tailLight / tailLight[0];
+                            r_l *= tailLight / tailLight[0];
+                        }
+                        else
+                        {
+                            beta *= T_maj / T_maj[0];
+                            r_u *= T_maj / T_maj[0];
+                            r_l *= (adaptiveLight ? tailLight : T_maj) / T_maj[0];
+                        }
                     }
                     // Handle surviving unscattered rays
                     // Add emitted light at volume path vertex or from the environment
@@ -4224,8 +4239,7 @@ namespace pbrt
                     }
                     else
                     {
-                    SampledSpectrum T_maj =
-                        SampleT_maj(lightRay, tMax, uT, ref rng, lambda,
+                    Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> shadowCallback =
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj_) =>
                                     {
@@ -4249,9 +4263,11 @@ namespace pbrt
                                         {
                                             SampledSpectrum sigma_n_signed = sigma_maj - mp.sigma_a - mp.sigma_s;
                                             SampledSpectrum sigma_c = mp.sigma_a + mp.sigma_s + Abs(sigma_n_signed);
+                                            SampledSpectrum densityRate = mp.mixture ? mp.mixRatio : T_maj_ * sigma_maj;
+                                            pdf = densityRate[0];
                                             T_ray *= T_maj_ * sigma_n_signed / pdf;
-                                            r_l *= T_maj_ * sigma_maj / pdf;
-                                            r_u *= T_maj_ * sigma_maj * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdf;
+                                            r_l *= densityRate / pdf;
+                                            r_u *= densityRate * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdf;
                                         }
                                         else
                                         {
@@ -4275,11 +4291,23 @@ namespace pbrt
                                         if (!T_ray)
                                             return false;
                                         return true;
-                                    });
-                    // Update transmittance estimate for final segment
-                    T_ray *= T_maj / T_maj[0];
-                    r_l *= T_maj / T_maj[0];
-                    r_u *= T_maj / T_maj[0];
+                                    };
+                    if (lightRay.medium is TextureMedium mixtureMedium && mixtureMedium.UsesMixture())
+                    {
+                        SampledSpectrum T_I = mixtureMedium.SampleT_majMixture(lightRay, tMax, uT, ref rng, lambda,
+                                                                               shadowCallback, out SampledSpectrum tail);
+                        T_ray *= T_I / tail[0];
+                        r_l *= tail / tail[0];
+                        r_u *= tail / tail[0];
+                    }
+                    else
+                    {
+                        SampledSpectrum T_maj = SampleT_maj(lightRay, tMax, uT, ref rng, lambda, shadowCallback);
+                        // Update transmittance estimate for final segment
+                        T_ray *= T_maj / T_maj[0];
+                        r_l *= T_maj / T_maj[0];
+                        r_u *= T_maj / T_maj[0];
+                    }
                     }
                 }
 

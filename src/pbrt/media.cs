@@ -258,6 +258,10 @@ namespace pbrt
         // (not in pbrt-v4) Set by progressive null-tracking without clamping: the density may exceed the
         // majorant, so the null coefficient (majorant minus extinction) can be negative.
         public bool signedNull;
+        // (not in pbrt-v4) Set by mixture sampling of the collision distances (Miller et al. 2019): the
+        // per-wavelength ratio of the mixture's path density after and before this vertex.
+        public bool mixture;
+        public SampledSpectrum mixRatio;
         public bool adaptiveLight_;
         public SampledSpectrum lightDensity;
     }
@@ -1028,7 +1032,8 @@ namespace pbrt
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
-                             bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, Allocator alloc)
+                             bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, bool mixture, Float mixtureLooseness,
+                             Float mixtureWeight, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1062,7 +1067,10 @@ namespace pbrt
                 }
             }
             this.spectral = spectral;
-            this.unclamped = unclamped && progressive;
+            this.mixture = mixture && progressive;
+            this.mixtureLooseness = std.max<Float>(mixtureLooseness, 1);
+            this.mixtureWeight = mixtureWeight;
+            this.unclamped = (unclamped || this.mixture) && progressive;
             this.residualRatio = residualRatio && !spectral && !progressive;
             this.adaptiveRatio = (adaptiveRatio || this.residualRatio) && !spectral;
             this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
@@ -1162,7 +1170,7 @@ namespace pbrt
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f),
-                                          spectralTracking = spectral, signedNull = unclamped };
+                                          spectralTracking = spectral, signedNull = unclamped, mixture = false };
         }
 
         public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
@@ -1187,6 +1195,87 @@ namespace pbrt
         }
 
         public bool UsesDecomposition() { return decomposition; }
+
+        public bool UsesMixture() { return mixture; }
+
+        // SampleT_maj() with mixture sampling of the collision distances (Miller et al. 2019, applied to progressive
+        // null-tracking without clamping). The integrand's majorant is the loose one, _mixtureLooseness_ times the
+        // majorant grid's, so that the weights stay bounded even where the learned grid majorant is too small.
+        // For each call one of two ways of sampling collisions is picked at random: with the grid majorant itself
+        // (the cheap, tight rate) or with the loose one. The path density is the mixture of both, which the
+        // callback sees as _mp.mixRatio_, the per-wavelength ratio of the mixture density after and before each
+        // vertex. _tailMixture_ is that ratio for the stretch after the last vertex.
+        public SampledSpectrum SampleT_majMixture(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+                                                  Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback,
+                                                  out SampledSpectrum tailMixture)
+        {
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            bool useTight = rng.Uniform<Float>() < mixtureWeight;
+            // Densities of the tight and loose techniques since the last vertex, per wavelength (their mixture
+            // is 1 right after a vertex)
+            SampledSpectrum densityTight = new SampledSpectrum(1f), densityLoose = new SampledSpectrum(1f);
+            SampledSpectrum T_I = new SampledSpectrum(1f);
+            tailMixture = new SampledSpectrum(1f);
+            bool done = false;
+            while (!done)
+            {
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                {
+                    tailMixture = mixtureWeight * densityTight + (1 - mixtureWeight) * densityLoose;
+                    return T_I;
+                }
+                RayMajorantSegment sg = seg.value();
+                SampledSpectrum tight = sg.sigma_maj;
+                SampledSpectrum loose = mixtureLooseness * sg.sigma_maj;
+                if (tight[0] == 0)
+                    continue;
+                Float tMin = sg.tMin;
+                while (true)
+                {
+                    Float rate = useTight ? tight[0] : loose[0];
+                    Float t = tMin + SampleExponential(u, rate);
+                    u = rng.Uniform<Float>();
+                    if (t < sg.tMax)
+                    {
+                        Float x = t - tMin;
+                        SampledSpectrum survivalTight = FastExp(-x * tight), survivalLoose = FastExp(-x * loose);
+                        T_I *= survivalLoose;
+                        densityTight *= survivalTight * tight;
+                        densityLoose *= survivalLoose * loose;
+                        SampledSpectrum mixed = mixtureWeight * densityTight + (1 - mixtureWeight) * densityLoose;
+                        MediumProperties mp = SamplePoint(ray.Apply(t), lambda);
+                        mp.mixture = true;
+                        mp.mixRatio = mixed;
+                        bool keepGoing = callback(ray.Apply(t), mp, loose, T_I);
+                        if (!keepGoing)
+                        {
+                            done = true;
+                            break;
+                        }
+                        // Renormalize so that the mixture density is 1 right after the vertex
+                        densityTight = SafeDiv(densityTight, mixed);
+                        densityLoose = SafeDiv(densityLoose, mixed);
+                        T_I = new SampledSpectrum(1f);
+                        tMin = t;
+                    }
+                    else
+                    {
+                        Float dt = sg.tMax - tMin;
+                        if (IsInf(dt))
+                            dt = Float.MaxValue;
+                        densityTight *= FastExp(-dt * tight);
+                        SampledSpectrum survivalLoose = FastExp(-dt * loose);
+                        densityLoose *= survivalLoose;
+                        T_I *= survivalLoose;
+                        break;
+                    }
+                }
+            }
+            return new SampledSpectrum(1f);
+        }
 
         public bool UsesAdaptiveRatio() { return adaptiveRatio; }
 
@@ -1443,7 +1532,8 @@ namespace pbrt
         private FloatTexture texture;
         private MajorantGrid majorantGrid;
         private Float densityOffset, densityScale;
-        private bool progressive, decomposition, spectral, adaptiveRatio, unclamped, residualRatio;
+        private bool progressive, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture;
+        private Float mixtureLooseness, mixtureWeight;
         private int warmupPasses;
         // Decomposition tracking (Kutz et al. 2017): a control density, constant within each majorant
         // grid voxel, that is a lower bound of the density there; collisions that fall in it need no
@@ -1510,6 +1600,9 @@ namespace pbrt
             bool adaptiveRatio = parameters.GetOneBool("adaptiveratio", false);
             bool unclamped = parameters.GetOneBool("unclamped", false);
             bool residualRatio = parameters.GetOneBool("residualratio", false);
+            bool mixture = parameters.GetOneBool("mixture", false);
+            Float mixtureLooseness = parameters.GetOneFloat("mixturelooseness", 4f);
+            Float mixtureWeight = parameters.GetOneFloat("mixtureweight", .5f);
             int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
 
@@ -1517,7 +1610,8 @@ namespace pbrt
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
-                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, alloc);
+                                     densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
+                                     mixtureWeight, alloc);
         }
     }
 

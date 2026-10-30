@@ -7,13 +7,13 @@ namespace pbrt
 {
     public static unsafe class MediaExperimentalTests
     {
-        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f, bool residualRatio = false)
+        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f, bool residualRatio = false, bool mixture = false, Float mixtureWeight = .5f, Float mixtureLooseness = 4f)
         {
             TextureMapping3D map = new PointTransformMapping(pbrt.Scale(1.6f, 1.6f, 1.6f));
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -265,6 +265,52 @@ namespace pbrt
                 TextureMedium.EndProgressivePass();
             }
             Console.WriteLine($"PROBE clamped (same start, same passes): mean {cSum / nPasses}");
+        }
+
+        // One transmittance estimate with mixture sampling of the collision distances, as in volpath's shadow rays
+        private static Float MixtureTracking(TextureMedium medium, Ray ray, Float tMax, SampledWavelengths lambda, ref RNG rng)
+        {
+            Float T_ray = 1;
+            SampledSpectrum T_I = medium.SampleT_majMixture(ray, tMax, rng.Uniform<Float>(), ref rng, lambda,
+                (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    T_ray *= T_maj_[0] * (sigma_maj[0] - mp.sigma_a[0] - mp.sigma_s[0]) / mp.mixRatio[0];
+                    return T_ray != 0;
+                }, out SampledSpectrum tail);
+            return T_ray * T_I[0] / tail[0];
+        }
+
+        // With a majorant that is far too small, mixture sampling gives an unbiased estimate with much less variance
+        // than signed ratio tracking alone
+        [TEST("TextureMedium", "MixtureUnbiased")]
+        public static void TextureMedium_MixtureUnbiased()
+        {
+            TextureMedium reference = MakeMedium(false);
+            TextureMedium mixture = MakeMedium(true, false, true, 0.3f, false, true);
+            TextureMedium plain = MakeMedium(true, false, true, 0.3f);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(21);
+            for (int i = 0; i < 4; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Float refT = ReferenceTransmittance(reference, new Ray(o, d, 0, reference), 2.2f, lambda);
+                int n = 200000;
+                double sumM = 0, sumM2 = 0, sumP = 0, sumP2 = 0;
+                for (int s = 0; s < n; ++s)
+                {
+                    Float m = MixtureTracking(mixture, new Ray(o, d, 0, mixture), 2.2f, lambda, ref rng);
+                    sumM += m;
+                    sumM2 += m * m;
+                    Float q = SignedRatioTracking(plain, new Ray(o, d, 0, plain), 2.2f, lambda, ref rng);
+                    sumP += q;
+                    sumP2 += q * q;
+                }
+                double meanM = sumM / n, seM = Math.Sqrt(Math.Max(sumM2 / n - meanM * meanM, 0) / n);
+                double meanP = sumP / n, seP = Math.Sqrt(Math.Max(sumP2 / n - meanP * meanP, 0) / n);
+                Console.WriteLine($"PROBE mixture ray {i}: reference {refT} mixture {meanM} (stderr {seM}) signed-only {meanP} (stderr {seP})");
+                EXPECT_LT(Math.Abs(meanM - refT), 4 * seM + 1e-3);
+            }
         }
     }
 }
