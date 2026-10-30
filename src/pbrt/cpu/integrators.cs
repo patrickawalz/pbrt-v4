@@ -3737,7 +3737,7 @@ namespace pbrt
                                 r_u = new SampledSpectrum(1.0f), r_l = new SampledSpectrum(1.0f);
                 bool specularBounce = false, anyNonSpecularBounces = false;
                 // (not in pbrt-v4) The path since its last scattering vertex went through a medium whose shadow rays use the
-                // unbiased ray-marching transmittance estimator, which has no MIS partner
+                // unbiased ray-marching transmittance estimator for area lights, which has no MIS partner
                 bool throughKettunen = false;
                 int depth = 0;
                 Float etaScale = 1;
@@ -3965,10 +3965,6 @@ namespace pbrt
                             {
                                 if (depth == 0 || specularBounce)
                                     L += beta * Le / r_u.Average();
-                                else if (throughKettunen)
-                                {
-                                    // Light sampling alone accounts for paths through such media
-                                }
                                 else
                                 {
                                     // Add infinite light contribution using both PDFs with MIS
@@ -4251,7 +4247,7 @@ namespace pbrt
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     Float uT = rng.Uniform<Float>();
-                    if (lightRay.medium is TextureMedium kettunenMedium && kettunenMedium.UsesKettunen())
+                    if (lightRay.medium is TextureMedium kettunenMedium && kettunenMedium.UsesKettunen() && light.Type() == LightType.Area)
                     {
                         // Unbiased ray-marching transmittance (Kettunen et al. 2021): no null-collision vertices, so
                         // the unidirectional strategy is dropped for this path (see _throughKettunen_)
