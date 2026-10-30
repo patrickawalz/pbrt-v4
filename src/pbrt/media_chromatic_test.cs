@@ -927,6 +927,58 @@ namespace pbrt
             }
         }
 
+        // The bidirectional integrator with forward next event estimation of the emissive volume must agree with the volumetric
+        // path tracer that gathers the emission, and with the bidirectional integrator that samples points of the volume.
+        [TEST("ChromaticMedia", "BidirectionalFnee")]
+        public static void ChromaticMedia_BidirectionalFnee()
+        {
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.5f, false);
+            try
+            {
+                foreach (bool perLength in new bool[] { false, true })
+                {
+                    double[] pathMean = null, pathErr = null;
+                    double[] errors = new double[3];
+                    for (int variant = 0; variant < 3; ++variant)
+                    {
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                                 "", "", perLength, perLength ? 4f : 0f);
+                        // 0: volumetric path tracing gathering the emission, 1: bidirectional with points of the volume,
+                        // 2: bidirectional with forward next event estimation
+                        if (variant != 0)
+                            medium.EnableEmissionSampling(8, variant == 2);
+                        double[] mean, err;
+                        RenderMean(medium, zero, 0f, true, variant == 0 ? 7 : 6, 1024, Name("blob_bfnee" + variant, perLength), out mean, out err,
+                                   variant != 0);
+                        if (variant == 0)
+                        {
+                            pathMean = mean;
+                            pathErr = err;
+                            continue;
+                        }
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            double combined = Math.Sqrt(err[c] * err[c] + pathErr[c] * pathErr[c]);
+                            Console.WriteLine($"PROBE bidirectional {(perLength ? "per-length" : "volume")} {(variant == 1 ? "points" : "line sampling")} " +
+                                              $"channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) path tracing {pathMean[c]:F5} (stderr {pathErr[c]:F5})");
+                            EXPECT_LT(Math.Abs(mean[c] - pathMean[c]), 4 * combined + 0.01 * Math.Abs(pathMean[c]));
+                            errors[variant] += err[c];
+                        }
+                    }
+                    Console.WriteLine($"PROBE bidirectional {(perLength ? "per-length" : "volume")} stderr summed: points {errors[1]:F5}, line sampling {errors[2]:F5}");
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
         // A spiky light spectrum rendered with wavelengths that follow it must give the same image as the sensor-only density
         // (here through an emitting and absorbing medium, so that the spectral MIS weights take part), with less noise.
         [TEST("ChromaticMedia", "LightWavelengthSampling")]

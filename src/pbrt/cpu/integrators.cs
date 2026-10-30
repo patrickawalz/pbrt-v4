@@ -2241,15 +2241,40 @@ namespace pbrt
                 Float splatScale = (Float)film.FullResolution().x * (Float)film.FullResolution().y /
                                    (Float)film.PixelBounds().Area();
 
+                // (not in pbrt-v4) An emissive volume that is sampled along lines is found by two techniques that differ in the
+                // density of the point of emission: the s = 1 strategy samples a direction from the vertex before it
+                // (fneeDensity), every other strategy that has the point on the light subpath samples it in the volume
+                // (pointDensity). The ratio of the two corrects the strategies that the sums below consider.
+                Float cameraFneeScale = 1;
+                if (s == 1)
+                {
+                    VolumeEmissionLight fneeLight = FneeLightOf(qs);
+                    if (fneeLight != null)
+                        cameraFneeScale = remap0(qs.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler)) / remap0(qs.pdfFwd);
+                }
+
                 // Consider hypothetical connection strategies along the camera subpath
                 Float ri = 1;
                 for (int i = t - 1; i > 0; --i)
                 {
+                    Float riBefore = ri;
                     ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
                     // See https://github.com/mmp/pbrt-v4/issues/347
                     if (i == 1) ri /= splatScale;
                     if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
-                        sumRi += ri;
+                    {
+                        if (s == 0 && i == t - 1 && i > 1 && FneeLightOf(cameraVertices[i]) != null &&
+                            cameraVertices[i - 1].IsConnectible())
+                        {
+                            // The strategy that would find this point of emission by forward NEE
+                            Float fneeRi = riBefore * remap0(FneeVertexDensity(cameraVertices[i - 1], cameraVertices[i],
+                                                                               FneeLightOf(cameraVertices[i]), lightSampler)) /
+                                           remap0(cameraVertices[i].pdfFwd);
+                            sumRi += fneeRi;
+                        }
+                        else
+                            sumRi += ri * cameraFneeScale;
+                    }
                 }
 
                 // Consider hypothetical connection strategies along the light subpath
@@ -2259,7 +2284,16 @@ namespace pbrt
                     ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
                     bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
                     if (!lightVertices[i].delta && !deltaLightvertex)
-                        sumRi += ri;
+                    {
+                        // (not in pbrt-v4) With only the point of emission left on the light subpath, the strategy would sample
+                        // its direction from vertex 1
+                        VolumeEmissionLight fneeLight = i == 1 && s > 1 ? FneeLightOf(lightVertices[0]) : null;
+                        if (fneeLight != null && lightVertices[1].IsConnectible())
+                            sumRi += ri * remap0(FneeVertexDensity(lightVertices[1], lightVertices[0], fneeLight, lightSampler)) /
+                                     remap0(lightVertices[0].pdfFwd);
+                        else if (fneeLight == null)
+                            sumRi += ri;
+                    }
                 }
 
                 // See https://github.com/mmp/pbrt-v4/issues/347
@@ -2297,6 +2331,124 @@ namespace pbrt
             foreach (Light light in infiniteLights)
                 pdf += light.PDF_Li(new LightSampleContext(new Interaction()), -w) * lightSampler.PMF(light);
             return pdf;
+        }
+
+        // (not in pbrt-v4) The emissive volume of an emission vertex when the volume is sampled along lines (forward NEE)
+        static VolumeEmissionLight FneeLightOf(Vertex v)
+        {
+            if (v != null && v.type == VertexType.Light && v.ei.light is VolumeEmissionLight volumeLight && volumeLight.UsesFnee())
+                return volumeLight;
+            return null;
+        }
+
+        // (not in pbrt-v4) The density, with respect to volume at the emission vertex e, with which a path from the vertex "from"
+        // finds e by forward NEE: the light is chosen, then the direction, and the collision along the line has the density
+        // of the tracking, which is the same as for a path that goes there by sampling the BSDF or phase function.
+        static Float FneeVertexDensity(Vertex from, Vertex e, VolumeEmissionLight volumeLight, LightSampler lightSampler)
+        {
+            Vector3f d = e.p() - from.p();
+            if (LengthSquared(d) == 0)
+                return 0;
+            return from.ConvertDensity(lightSampler.PMF(volumeLight) * volumeLight.PdfDirection(from.p(), Normalize(d)), e);
+        }
+
+        // (not in pbrt-v4) The s = 1 strategy for an emissive volume that is sampled along lines: from the camera subpath vertex
+        // pt a direction is sampled toward the emitting voxels, and the ray in that direction is followed through the medium.
+        // Every collision on it that is in the volume is a point of emission and a complete path of its own, with a weight of
+        // its own; the ray goes on only through null collisions, as the camera subpath would (see VolPathIntegrator).
+        static SampledSpectrum ConnectFnee(Integrator integrator, SampledWavelengths lambda, Vertex[] lightVertices,
+                                           Vertex[] cameraVertices, int t, VolumeEmissionLight volumeLight, Float pmf,
+                                           LightSampler lightSampler, Camera camera, Sampler sampler,
+                                           ref Float misWeightOut)
+        {
+            Vertex pt = cameraVertices[t - 1];
+            if (!pt.IsConnectible())
+                return new SampledSpectrum(0.0f);
+            Point2f uDirection = sampler.Get2D();
+            Float uPoint = sampler.Get1D();
+            if (!volumeLight.SampleDirection(pt.p(), uDirection, uPoint, out Vector3f w, out Float pdfDirection) ||
+                !(pdfDirection > 0))
+                return new SampledSpectrum(0.0f);
+
+            TextureMedium emissive = volumeLight.Medium();
+            RayDifferential ray = new RayDifferential(pt.GetInteraction().SpawnRay(w));
+            SampledSpectrum lineBeta = new SampledSpectrum(1.0f), lineRatio = new SampledSpectrum(1.0f);
+            SampledSpectrum weighted = new SampledSpectrum(0.0f), unweighted = new SampledSpectrum(0.0f);
+            RNG rng = new RNG(Hash(sampler.Get1D()), Hash(sampler.Get1D()));
+            for (int segment = 0; segment < 256; ++segment)
+            {
+                pstd.optional<ShapeIntersection> si = integrator.Intersect(new RayDifferential(ray));
+                bool terminated = false;
+                if (ray.medium != null)
+                {
+                    Float tMax = si ? si.value().tHit : Infinity;
+                    bool emitting = ray.medium == emissive;
+                    SampledSpectrum betaCap = lineBeta, ratioCap = lineRatio;
+                    SampledSpectrum Tmaj = SampleT_maj(new RayDifferential(ray), tMax, sampler.Get1D(), ref rng, lambda,
+                        (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
+                        {
+                            if (!betaCap)
+                            {
+                                terminated = true;
+                                return false;
+                            }
+                            // The point of emission is a complete path: the camera subpath and this vertex
+                            Float pdfCollision = sigma_maj[0] * T_maj[0];
+                            if (emitting && (bool)mp.Le && pdfCollision > 0)
+                            {
+                                SampledSpectrum emission = emissive.EmissionOf(mp);
+                                if ((bool)emission)
+                                {
+                                    Vertex emissionVertex = Vertex.CreateLight(
+                                        new EndpointInteraction(volumeLight, new Interaction(p, ray.time, ray.medium)),
+                                        betaCap * T_maj / pdfCollision, 0);
+                                    emissionVertex.sigmaMaj = std.max(sigma_maj[0], 1e-30f);
+                                    emissionVertex.rCum = ratioCap * T_maj * sigma_maj / pdfCollision;
+                                    emissionVertex.pdfFwd = FneeVertexDensity(pt, emissionVertex, volumeLight, lightSampler);
+                                    SampledSpectrum f = pt.f(emissionVertex, TransportMode.Radiance);
+                                    if (pt.IsOnSurface())
+                                        f *= AbsDot(w, pt.ns());
+                                    SampledSpectrum L = pt.beta * f * emissionVertex.beta * emission / (pmf * pdfDirection);
+                                    if ((bool)L)
+                                    {
+                                        unweighted += L;
+                                        weighted += L * MISWeight(integrator, camera, lightVertices, cameraVertices, emissionVertex,
+                                                                  1, t, lightSampler);
+                                    }
+                                }
+                            }
+                            // Only null collisions let the ray go on
+                            Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
+                            Float pScatter = mp.sigma_s[0] / sigma_maj[0];
+                            Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
+                            if (SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, sampler.Get1D()) != 2)
+                            {
+                                terminated = true;
+                                return false;
+                            }
+                            SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                            Float pdfN = T_maj[0] * sigma_n[0];
+                            if (pdfN == 0)
+                                betaCap = new SampledSpectrum(0.0f);
+                            else
+                            {
+                                betaCap *= T_maj * sigma_n / pdfN;
+                                ratioCap = ratioCap * T_maj * sigma_n / pdfN;
+                            }
+                            return (bool)betaCap;
+                        });
+                    if (terminated || !betaCap)
+                        break;
+                    lineBeta = betaCap * Tmaj / Tmaj[0];
+                    lineRatio = ratioCap * Tmaj / Tmaj[0];
+                }
+                // The ray ends at a surface that isn't an interface between media
+                if (!si || si.value().intr.material != null)
+                    break;
+                ray = new RayDifferential(si.value().intr.SpawnRay(ray.d));
+            }
+            misWeightOut = (bool)unweighted ? weighted.Average() / unweighted.Average() : 0.0f;
+            return weighted;
         }
 
         public static SampledSpectrum ConnectBDPT(Integrator integrator, ref SampledWavelengths lambdaRef,
@@ -2377,6 +2529,12 @@ namespace pbrt
                             ctx = new LightSampleContext(pt.GetInteraction());
                         // (not in pbrt-v4) The point of an emissive volume has a third coordinate
                         VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
+                        if (volumeLight != null && volumeLight.UsesFnee())
+                        {
+                            // Forward NEE: every collision on the line has its own weight, so the result is complete
+                            return ConnectFnee(integrator, lambda, lightVertices, cameraVertices, t, volumeLight, p_l, lightSampler,
+                                               camera, sampler, ref misWeightOut);
+                        }
                         pstd.optional<LightLiSample> lightWeight = volumeLight != null
                             ? volumeLight.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda)
                             : light.SampleLi(ctx, sampler.Get2D(), lambda);
