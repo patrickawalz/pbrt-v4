@@ -264,6 +264,9 @@ namespace pbrt
         public SampledSpectrum mixRatio;
         public bool adaptiveLight_;
         public SampledSpectrum lightDensity;
+        // (not in pbrt-v4) Set when Le is the emitted radiance per unit length, as in LuxCore, instead of the radiance
+        // that is weighted by sigma_a (Huang et al. 2021 gather it at every free-path sample)
+        public bool emissionPerLength;
     }
 
     // HomogeneousMajorantIterator Definition
@@ -1102,8 +1105,11 @@ namespace pbrt
                              Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
                              Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, bool textureInRenderSpace,
                              string densityTextureName, string sigmaATextureName, string sigmaSTextureName, string gTextureName,
-                             string emissionTextureName, Float emissionScale, Allocator alloc)
+                             string emissionTextureName, Float emissionScale, bool emissionPerLength, Float emissionMajorantScale,
+                             Allocator alloc)
         {
+            this.emissionPerLength = emissionPerLength;
+            this.emissionMajorantScale = emissionMajorantScale;
             this.emissionTextureName = emissionTextureName;
             this.emissionScale = emissionScale;
             this.sigmaATextureName = sigmaATextureName;
@@ -1146,6 +1152,10 @@ namespace pbrt
                 emissionTextureName.Length != 0 && (this.decompositionRequested || residualRatio))
                 ErrorExit(new FileLoc(), "The \"texture\" medium's sigma_a/sigma_s textures can't be combined with progressive, " +
                                          "decomposition or residualratio tracking.");
+            if (emissionTextureName.Length != 0 && progressive && (emissionPerLength || emissionMajorantScale > 0))
+                ErrorExit(new FileLoc(), "Emission that sets the majorant can't be combined with progressive tracking.");
+            if (emissionPerLength && emissionTextureName.Length != 0 && this.emissionMajorantScale <= 0)
+                ErrorExit(new FileLoc(), "\"perlength\" emission needs a positive \"emissionmajorant\", or its glow would be missed where the density is zero.");
             // A medium driven by named textures builds its majorants once the scene's textures exist
             if (texture != null && sigmaATextureName.Length == 0 && sigmaSTextureName.Length == 0 && gTextureName.Length == 0 && emissionTextureName.Length == 0)
                 BuildMajorants(alloc);
@@ -1195,6 +1205,28 @@ namespace pbrt
             return m;
         }
 
+        // (not in pbrt-v4) Huang et al. 2021 choose the majorant as the maximum of the extinction majorant and the
+        // majorant of the emission, so the steps are short where the medium glows. The grid value scales the base
+        // extinction, so the emission bound is divided by the smallest base extinction over the visible wavelengths.
+        // Any positive majorant keeps the estimate unbiased; this one makes sure it is positive wherever there is
+        // emission.
+        private Float EmissionMajorant(Bounds3f region, Float densityBound)
+        {
+            if (emissionTextureName.Length == 0 || emissionMajorantScale <= 0)
+                return densityBound;
+            Float emissionBound = emissionScale * emissionTexture.RegionMax(ToTextureSpace(region));
+            if (!emissionPerLength)
+                emissionBound *= densityBound * sigma_a_spec.MaxValue();
+            if (emissionBound <= 0)
+                return densityBound;
+            Float minimumExtinction = Infinity;
+            for (Float lambda = 360; lambda <= 830; lambda += 1)
+                minimumExtinction = std.min(minimumExtinction, sigma_a_spec.Evaluate(lambda) + sigma_s_spec.Evaluate(lambda));
+            if (!(minimumExtinction > 0))
+                ErrorExit(new FileLoc(), "Emission that sets the majorant needs sigma_a + sigma_s > 0 at every visible wavelength.");
+            return std.max(densityBound, emissionMajorantScale * emissionBound / minimumExtinction);
+        }
+
         private Bounds3f ToTextureSpace(Bounds3f region)
         {
             if (!textureInRenderSpace)
@@ -1241,7 +1273,7 @@ namespace pbrt
                         TextureRegionBounds(region, out Float lo, out Float hi);
                         Float a = densityOffset + densityScale * lo;
                         Float b = densityOffset + densityScale * hi;
-                        majorantGrid.Set(x, y, z, std.max<Float>(0, std.max(a, b)) * CoefficientBound(region));
+                        majorantGrid.Set(x, y, z, EmissionMajorant(region, std.max<Float>(0, std.max(a, b)) * CoefficientBound(region)));
                         Float voxelControl = std.max<Float>(0, std.min(a, b));
                         controlGrid[x + majorantGrid.res.x * (y + majorantGrid.res.y * z)] = voxelControl;
                         maxControl = std.max(maxControl, voxelControl);
@@ -1303,7 +1335,7 @@ namespace pbrt
                                     TextureRegionBounds(cr, out Float lo, out Float hi);
                                     Float a = densityOffset + densityScale * lo;
                                     Float b = densityOffset + densityScale * hi;
-                                    Float childMax = std.min(parent, std.max<Float>(0, std.max(a, b)) * CoefficientBound(cr));
+                                    Float childMax = std.min(parent, EmissionMajorant(cr, std.max<Float>(0, std.max(a, b)) * CoefficientBound(cr)));
                                     child.Set(cx, cy, cz, childMax);
                                     sum += childMax;
                                 }
@@ -1423,7 +1455,7 @@ namespace pbrt
                 pointLe = emissionScale * ClampZero(emissionTexture.Evaluate(ectx, lambda));
             }
 
-            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = pointLe,
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = pointLe, emissionPerLength = emissionPerLength,
                                           spectralTracking = spectral, signedNull = unclamped, mixture = false };
         }
 
@@ -1915,7 +1947,8 @@ namespace pbrt
         private bool textureInRenderSpace, hierarchical, decompositionRequested;
         private string densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName;
         private string emissionTextureName;
-        private Float emissionScale;
+        private bool emissionPerLength;
+        private Float emissionScale, emissionMajorantScale;
         private SpectrumTexture sigmaATexture, sigmaSTexture, emissionTexture;
         private FloatTexture gTexture;
         private int majorantRes;
@@ -1950,6 +1983,14 @@ namespace pbrt
             // A named illuminant spectrum texture gives the emitted radiance, scaled by "Lescale"
             string emissionTextureName = parameters.GetOneString("emission_texture", "");
             Float emissionScale = parameters.GetOneFloat("Lescale", 1f);
+            // "volume": Le is weighted by sigma_a, as in pbrt-v4. "perlength": the texture is the radiance emitted per
+            // unit length, as in LuxCore. "emissionmajorant" k > 0 makes the majorant at least k times the emission's
+            // majorant (Huang et al. 2021); it defaults to 1 for "perlength" and to off for "volume".
+            string emissionMode = parameters.GetOneString("emission_mode", "volume");
+            if (emissionMode != "volume" && emissionMode != "perlength")
+                ErrorExit(loc, $"{emissionMode}: emission mode unknown for the \"texture\" medium.");
+            bool emissionPerLength = emissionMode == "perlength";
+            Float emissionMajorantScale = parameters.GetOneFloat("emissionmajorant", emissionPerLength ? 1f : 0f);
             string textureName = parameters.GetOneString("texture", "fbm");
             Float frequency = parameters.GetOneFloat("frequency", 1);
             int octaves = parameters.GetOneInt("octaves", 8);
@@ -2002,7 +2043,7 @@ namespace pbrt
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, emissionTextureName, emissionScale, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, emissionTextureName, emissionScale, emissionPerLength, emissionMajorantScale, alloc);
         }
     }
 

@@ -13,13 +13,14 @@ namespace pbrt
     // "uniformgrid" medium. Lookups outside the cube follow the wrap mode (black by default, as in SampledGrid).
     public sealed unsafe class FloatGridTexture : FloatTexture
     {
-        public FloatGridTexture(TextureMapping3D mapping, int nx, int ny, int nz, Float[] values, WrapMode wrapMode, Float borderValue = 0)
+        public FloatGridTexture(TextureMapping3D mapping, int nx, int ny, int nz, Float[] values, WrapMode wrapMode, Float borderValue = 0, bool nodes = false)
         {
             this.mapping = mapping;
             this.nx = nx; this.ny = ny; this.nz = nz;
             this.values = values;
             this.wrapMode = wrapMode;
             this.borderValue = borderValue;
+            this.nodes = nodes;
             lo = Infinity;
             hi = -Infinity;
             for (int i = 0; i < values.Length; ++i)
@@ -61,9 +62,45 @@ namespace pbrt
             return values[x + nx * (y + ny * z)];
         }
 
+        // (not in pbrt-v4) LuxCore's density grid: the samples are at the nodes i / n, not at voxel centers, and the
+        // neighbor of a cell is always clamped to the grid, even when the wrap mode is repeat
+        private Float EvaluateNodes(Point3f p)
+        {
+            Float fx, fy, fz;
+            int ix, iy, iz;
+            switch (wrapMode)
+            {
+                case WrapMode.Repeat:
+                    fx = p.x * nx; ix = (int)std.floor(fx); fx -= ix; ix = ((ix % nx) + nx) % nx;
+                    fy = p.y * ny; iy = (int)std.floor(fy); fy -= iy; iy = ((iy % ny) + ny) % ny;
+                    fz = p.z * nz; iz = (int)std.floor(fz); fz -= iz; iz = ((iz % nz) + nz) % nz;
+                    break;
+                case WrapMode.Clamp:
+                    fx = std.min(std.max(p.x, 0), 1) * nx; ix = std.min((int)std.floor(fx), nx - 1); fx -= ix;
+                    fy = std.min(std.max(p.y, 0), 1) * ny; iy = std.min((int)std.floor(fy), ny - 1); fy -= iy;
+                    fz = std.min(std.max(p.z, 0), 1) * nz; iz = std.min((int)std.floor(fz), nz - 1); fz -= iz;
+                    break;
+                default:
+                    if (!(p.x >= 0 && p.x < 1 && p.y >= 0 && p.y < 1 && p.z >= 0 && p.z < 1))
+                        return borderValue;
+                    fx = p.x * nx; ix = (int)std.floor(fx); fx -= ix;
+                    fy = p.y * ny; iy = (int)std.floor(fy); fy -= iy;
+                    fz = p.z * nz; iz = (int)std.floor(fz); fz -= iz;
+                    break;
+            }
+            int ix1 = std.min(ix + 1, nx - 1), iy1 = std.min(iy + 1, ny - 1), iz1 = std.min(iz + 1, nz - 1);
+            Float d00 = Lerp(fx, values[ix + nx * (iy + ny * iz)], values[ix1 + nx * (iy + ny * iz)]);
+            Float d10 = Lerp(fx, values[ix + nx * (iy1 + ny * iz)], values[ix1 + nx * (iy1 + ny * iz)]);
+            Float d01 = Lerp(fx, values[ix + nx * (iy + ny * iz1)], values[ix1 + nx * (iy + ny * iz1)]);
+            Float d11 = Lerp(fx, values[ix + nx * (iy1 + ny * iz1)], values[ix1 + nx * (iy1 + ny * iz1)]);
+            return Lerp(fz, Lerp(fy, d00, d10), Lerp(fy, d01, d11));
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             Point3f p = mapping.Map(ctx).p;
+            if (nodes)
+                return EvaluateNodes(p);
             // Compute voxel coordinates and offsets for _p_
             Float fx = p.x * nx - .5f, fy = p.y * ny - .5f, fz = p.z * nz - .5f;
             int ix = (int)std.floor(fx), iy = (int)std.floor(fy), iz = (int)std.floor(fz);
@@ -91,9 +128,11 @@ namespace pbrt
                 mapped = (i == 0) ? new Bounds3f(p) : pbrt.Union(mapped, p);
             }
             int[] xa = new int[2], xb = new int[2], ya = new int[2], yb = new int[2], za = new int[2], zb = new int[2];
-            if (!pbrt.TexelIntervals(mapped.pMin.x, mapped.pMax.x, nx, wrapMode, xa, xb, out int cx, out bool zx) ||
-                !pbrt.TexelIntervals(mapped.pMin.y, mapped.pMax.y, ny, wrapMode, ya, yb, out int cy, out bool zy) ||
-                !pbrt.TexelIntervals(mapped.pMin.z, mapped.pMax.z, nz, wrapMode, za, zb, out int cz, out bool zz))
+            // Node sampling reads the cells floor(s n) and floor(s n) + 1, which are the centered cells of s + 1 / (2 n)
+            Vector3f shift = nodes ? new Vector3f(.5f / nx, .5f / ny, .5f / nz) : new Vector3f(0, 0, 0);
+            if (!pbrt.TexelIntervals(mapped.pMin.x + shift.x, mapped.pMax.x + shift.x, nx, wrapMode, xa, xb, out int cx, out bool zx) ||
+                !pbrt.TexelIntervals(mapped.pMin.y + shift.y, mapped.pMax.y + shift.y, ny, wrapMode, ya, yb, out int cy, out bool zy) ||
+                !pbrt.TexelIntervals(mapped.pMin.z + shift.z, mapped.pMax.z + shift.z, nz, wrapMode, za, zb, out int cz, out bool zz))
                 return;
             Float bLo = Infinity, bHi = -Infinity;
             for (int k = 0; k < cz; ++k)
@@ -174,7 +213,10 @@ namespace pbrt
             if (!wrapMode || wrapMode.value() == WrapMode.OctahedralSphere)
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: wrap mode \"%s\" is not supported.", wrap));
             TextureMapping3D mapping = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
-            return new FloatGridTexture(mapping, nx, ny, nz, values, wrapMode.value(), borderValue);
+            string sampling = parameters.GetOneString("sampling", "centers");
+            if (sampling != "centers" && sampling != "nodes")
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: sampling \"%s\" is unknown.", sampling));
+            return new FloatGridTexture(mapping, nx, ny, nz, values, wrapMode.value(), borderValue, sampling == "nodes");
         }
 
         private static Float Lerp(Float t, Float a, Float b) { return (1 - t) * a + t * b; }
@@ -183,6 +225,7 @@ namespace pbrt
         private int nx, ny, nz;
         private Float[] values;
         private WrapMode wrapMode;
+        private bool nodes;
         private Float lo, hi, borderValue;
     }
 

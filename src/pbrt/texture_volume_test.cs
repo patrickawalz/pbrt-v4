@@ -47,12 +47,12 @@ namespace pbrt
         {
             int nx = 9, ny = 6, nz = 7;
             Float[] values = RandomGrid(nx, ny, nz, 3);
-            // The fourth case is the white border (a black-style border that reads 1)
-            foreach ((WrapMode wrap, Float border) in new (WrapMode, Float)[] { (WrapMode.Black, 0f), (WrapMode.Clamp, 0f), (WrapMode.Repeat, 0f), (WrapMode.Black, 1f) })
+            // The fourth case is the white border (a black-style border that reads 1); the last three sample at the nodes
+            foreach ((WrapMode wrap, Float border, bool nodes) in new (WrapMode, Float, bool)[] { (WrapMode.Black, 0f, false), (WrapMode.Clamp, 0f, false), (WrapMode.Repeat, 0f, false), (WrapMode.Black, 1f, false), (WrapMode.Black, 0f, true), (WrapMode.Clamp, 0f, true), (WrapMode.Repeat, 0f, true), (WrapMode.Black, 1f, true) })
             {
                 Transform renderFromTexture = Translate(new Vector3f(.1f, -.2f, .3f)) * Scale(1.5f, 1.2f, 2f);
                 FloatGridTexture texture = new FloatGridTexture(new PointTransformMapping(Inverse(renderFromTexture)), nx, ny, nz,
-                                                                values, wrap, border);
+                                                                values, wrap, border, nodes);
                 RNG rng = new RNG(4);
                 int violations = 0, tighter = 0;
                 for (int i = 0; i < 2000; ++i)
@@ -72,10 +72,35 @@ namespace pbrt
                             ++violations;
                     }
                 }
-                Console.WriteLine($"PROBE densitygrid {wrap} border {border}: violations {violations}, tighter-than-global regions {tighter}/2000");
+                Console.WriteLine($"PROBE densitygrid {wrap} border {border} nodes {nodes}: violations {violations}, tighter-than-global regions {tighter}/2000");
                 EXPECT_EQ(violations, 0);
                 EXPECT_GT(tighter, 200);
             }
+        }
+
+        // Node sampling puts the samples at i / n, as LuxCore's density grid does
+        [TEST("FloatGridTexture", "NodeSamplesAtNodes")]
+        public static void FloatGridTexture_NodeSamplesAtNodes()
+        {
+            int nx = 6, ny = 5, nz = 4;
+            Float[] values = RandomGrid(nx, ny, nz, 11);
+            FloatGridTexture texture = new FloatGridTexture(new PointTransformMapping(new Transform()), nx, ny, nz, values,
+                                                            WrapMode.Clamp, 0, true);
+            Float maxDifference = 0;
+            for (int z = 0; z < nz; ++z)
+            {
+                for (int y = 0; y < ny; ++y)
+                {
+                    for (int x = 0; x < nx; ++x)
+                    {
+                        TextureEvalContext ctx = new TextureEvalContext();
+                        ctx.p = new Point3f((x + 1e-4f) / nx, (y + 1e-4f) / ny, (z + 1e-4f) / nz);
+                        maxDifference = std.max(maxDifference, std.abs(texture.Evaluate(ctx) - values[x + nx * (y + ny * z)]));
+                    }
+                }
+            }
+            Console.WriteLine($"PROBE node grid: max difference at the nodes {maxDifference}");
+            EXPECT_LT(maxDifference, 2e-3f);
         }
 
         private static FloatImageTexture MakeProjectedImage(string name, WrapMode wrap, Float scale)
@@ -165,7 +190,7 @@ namespace pbrt
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                      null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "asym", "", 1f,
+                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "wave", "wave", "asym", "", 1f, false, 0f,
                                                      null);
             medium.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -238,7 +263,7 @@ namespace pbrt
             TextureMedium glowing = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                       new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                       null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                      .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 3f,
+                                                      .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 3f, false, 0f,
                                                       null);
             glowing.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -249,7 +274,7 @@ namespace pbrt
             TextureMedium plain = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                     new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
                                                     null, 0.05f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                    .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "", 1f,
+                                                    .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "", 1f, false, 0f,
                                                     null);
             plain.ResolveTextures(textures, new FileLoc());
             EXPECT_FALSE(plain.IsEmissive());
@@ -267,7 +292,7 @@ namespace pbrt
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                                      new Transform(), new ConstantSpectrum(1f), new ConstantSpectrum(1f), 0f,
                                                      null, 0f, 1f, 4, false, 0.01f, 0, false, false, false, false, false, false, 4f,
-                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "one", "wave", "wave", "", "", 1f,
+                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "one", "wave", "wave", "", "", 1f, false, 0f,
                                                      null);
             medium.ResolveTextures(textures, new FileLoc());
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -282,6 +307,68 @@ namespace pbrt
             }
             Console.WriteLine($"PROBE coefficient textures: max |sigma - texture| {maxDifference}");
             EXPECT_LT(maxDifference, 1e-5f);
+        }
+
+        // Per-length emission is gathered at every free-path sample and matches the quadrature of T(t) E(t), including
+        // where the density (and so the extinction) is zero
+        [TEST("TextureMedium", "PerLengthEmissionUnbiased")]
+        public static void TextureMedium_PerLengthEmissionUnbiased()
+        {
+            NamedTextures textures = new NamedTextures();
+            textures.floatTextures["density"] = new FBmTexture(new PointTransformMapping(Scale(1.6f, 1.6f, 1.6f)), 4, .5f);
+            textures.illuminantSpectrumTextures["glow"] = new GlowSpectrumTexture();
+            // The offset makes the density zero over part of the volume, where only the emission majorant is positive
+            TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
+                                                     new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f,
+                                                     null, -.15f, 8f, 8, false, 0.01f, 0, false, false, false, false, false, false, 4f,
+                                                     .5f, 0f, false, 4, 2, .7f, false, 4, 0f, true, "density", "", "", "", "glow", 1f,
+                                                     true, 1f, null);
+            medium.ResolveTextures(textures, new FileLoc());
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(12);
+            int zeroDensityPoints = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Ray ray = new Ray(o, d, 0, medium);
+                // Quadrature of T(t) E(t)
+                int n = 20000;
+                double tau = 0, reference = 0;
+                for (int k = 0; k < n; ++k)
+                {
+                    Float t = (k + .5f) / n * 2.2f;
+                    Point3f p = ray.Apply(t);
+                    if (p.x < -.8f || p.x > .8f || p.y < .2f || p.y > 1.8f || p.z < -.8f || p.z > .8f)
+                        continue;
+                    MediumProperties mp = medium.SamplePoint(p, lambda);
+                    double sigma = mp.sigma_a[0] + mp.sigma_s[0];
+                    if (sigma == 0 && mp.Le[0] > 0)
+                        ++zeroDensityPoints;
+                    reference += Math.Exp(-tau) * mp.Le[0] * 2.2 / n;
+                    tau += sigma * 2.2 / n;
+                }
+                int samples = 200000;
+                double sum = 0, sum2 = 0;
+                for (int s = 0; s < samples; ++s)
+                {
+                    Float beta = 1, estimate = 0;
+                    pbrt.SampleT_maj(ray, 2.2f, rng.Uniform<Float>(), ref rng, lambda,
+                        (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                        {
+                            estimate += beta * mp.Le[0] / sigma_maj[0];
+                            beta *= std.max<Float>(0, sigma_maj[0] - mp.sigma_a[0] - mp.sigma_s[0]) / sigma_maj[0];
+                            return beta > 0;
+                        });
+                    sum += estimate;
+                    sum2 += estimate * estimate;
+                }
+                double mean = sum / samples, stderr = Math.Sqrt(Math.Max(sum2 / samples - mean * mean, 0) / samples);
+                Console.WriteLine($"PROBE per-length emission: mean {mean} reference {reference} stderr {stderr}");
+                EXPECT_LT(Math.Abs(mean - reference), 4 * stderr + 1e-3);
+            }
+            Console.WriteLine($"PROBE per-length emission: quadrature points with emission but no extinction {zeroDensityPoints}");
+            EXPECT_GT(zeroDensityPoints, 100);
         }
 
         private static Float ReferenceTransmittance(TextureMedium medium, Ray ray, Float tMax, SampledWavelengths lambda)

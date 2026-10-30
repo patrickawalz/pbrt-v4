@@ -3784,7 +3784,7 @@ namespace pbrt
 
                                     // Update _L_ for medium emission
                                     if ((bool)r_e)
-                                        L += betap * mp.sigma_a * mp.Le / r_e.Average();
+                                        L += betap * (mp.emissionPerLength ? mp.Le : mp.sigma_a * mp.Le) / r_e.Average();
                                 }
 
                                 // Compute medium event probabilities for interaction
