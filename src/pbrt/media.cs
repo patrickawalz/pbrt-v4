@@ -1101,7 +1101,8 @@ namespace pbrt
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
                              bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, bool mixture, Float mixtureLooseness,
                              Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
-                             Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, Allocator alloc)
+                             Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, bool textureInRenderSpace,
+                             string densityTextureName, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1113,6 +1114,64 @@ namespace pbrt
             this.densityOffset = densityOffset;
             this.densityScale = densityScale;
 
+            this.textureInRenderSpace = textureInRenderSpace;
+            this.densityTextureName = densityTextureName;
+            this.majorantRes = majorantRes;
+            this.initialMajorant = initialMajorant;
+            this.boundsFloor = boundsFloor;
+            this.hierarchical = hierarchical;
+            this.decompositionRequested = decomposition;
+            this.progressive = progressive;
+            this.spectral = spectral;
+            this.mixture = mixture && progressive;
+            this.mixtureLooseness = std.max<Float>(mixtureLooseness, 1);
+            this.mixtureWeight = mixtureWeight;
+            this.unclamped = (unclamped || this.mixture || boundsFloor > 0) && progressive;
+            this.residualRatio = residualRatio && !spectral && !progressive;
+            this.adaptiveRatio = (adaptiveRatio || this.residualRatio) && !spectral;
+
+            this.kettunen = kettunen && !progressive;
+            this.kettunenPoints = std.max(kettunenPoints, 1);
+            this.kettunenSpacing = kettunenSpacing;
+            this.hierarchyRes = std.max(hierarchyRes, 2);
+            this.hierarchyDepth = std.min(hierarchyDepth, 4);
+            this.refineThreshold = refineThreshold;
+
+            // A medium driven by a named texture builds its majorants once the scene's textures exist
+            if (texture != null)
+                BuildMajorants(alloc);
+        }
+
+        // (not in pbrt-v4) Supplies the named density texture of a medium created before the textures were
+        public void ResolveDensityTexture(IDictionary<string, FloatTexture> floatTextures, FileLoc loc)
+        {
+            if (texture != null || densityTextureName.Length == 0)
+                return;
+            if (!floatTextures.TryGetValue(densityTextureName, out FloatTexture named))
+                ErrorExit(loc, $"{densityTextureName}: float texture not defined for the \"texture\" medium.");
+            texture = named;
+            BuildMajorants(new Allocator());
+        }
+
+        // Bounds of the density texture over a region of medium space
+        private void TextureRegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            if (textureInRenderSpace)
+            {
+                // The texture's mappings take render-space points
+                Bounds3f renderRegion = new Bounds3f();
+                for (int i = 0; i < 8; ++i)
+                {
+                    Point3f p = renderFromMedium.Apply(region.Corner(i));
+                    renderRegion = (i == 0) ? new Bounds3f(p) : Union(renderRegion, p);
+                }
+                region = renderRegion;
+            }
+            texture.RegionBounds(region, out lo, out hi);
+        }
+
+        private void BuildMajorants(Allocator alloc)
+        {
             // Bound the density in each majorant grid voxel using the texture's region bounds
             majorantGrid = new MajorantGrid(bounds, new Point3i(majorantRes, majorantRes, majorantRes), alloc);
             controlGrid = new Float[majorantRes * majorantRes * majorantRes];
@@ -1124,7 +1183,7 @@ namespace pbrt
                     {
                         Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
                         Bounds3f region = new Bounds3f(bounds.Lerp(vb.pMin), bounds.Lerp(vb.pMax));
-                        texture.RegionBounds(region, out Float lo, out Float hi);
+                        TextureRegionBounds(region, out Float lo, out Float hi);
                         Float a = densityOffset + densityScale * lo;
                         Float b = densityOffset + densityScale * hi;
                         majorantGrid.Set(x, y, z, std.max<Float>(0, std.max(a, b)));
@@ -1134,31 +1193,14 @@ namespace pbrt
                     }
                 }
             }
-            this.spectral = spectral;
-            this.mixture = mixture && progressive;
-            this.mixtureLooseness = std.max<Float>(mixtureLooseness, 1);
-            this.mixtureWeight = mixtureWeight;
-            this.unclamped = (unclamped || this.mixture || boundsFloor > 0) && progressive;
-            this.residualRatio = residualRatio && !spectral && !progressive;
-            this.adaptiveRatio = (adaptiveRatio || this.residualRatio) && !spectral;
-            this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
-
-            this.kettunen = kettunen && !progressive;
-            this.kettunenPoints = std.max(kettunenPoints, 1);
-            this.kettunenSpacing = kettunenSpacing;
+            this.decomposition = decompositionRequested && !progressive && !spectral && !adaptiveRatio && maxControl > 0;
 
             // (not in pbrt-v4) Refine the majorant grid where the texture bound is loose
-            if (hierarchical && !progressive && !this.decomposition && !this.residualRatio)
-            {
-                this.hierarchyRes = std.max(hierarchyRes, 2);
-                this.hierarchyDepth = std.min(hierarchyDepth, 4);
-                this.refineThreshold = refineThreshold;
+            if (hierarchical && !progressive && !decomposition && !residualRatio)
                 topNodes = RefineMajorantGrid(majorantGrid, 1);
-            }
 
             // Progressive null-tracking (Misso et al. 2023): ignore the texture bounds, start every
             // voxel at a deliberately poor majorant and learn it from the density lookups.
-            this.progressive = progressive;
             if (progressive)
             {
                 // (not in pbrt-v4) With _boundsFloor_ > 0 the analytic texture bounds replace the poor initial majorant:
@@ -1203,7 +1245,7 @@ namespace pbrt
                                 {
                                     Bounds3f cb = child.VoxelBounds(cx, cy, cz);
                                     Bounds3f cr = new Bounds3f(region.Lerp(cb.pMin), region.Lerp(cb.pMax));
-                                    texture.RegionBounds(cr, out Float lo, out Float hi);
+                                    TextureRegionBounds(cr, out Float lo, out Float hi);
                                     Float a = densityOffset + densityScale * lo;
                                     Float b = densityOffset + densityScale * hi;
                                     Float childMax = std.min(parent, std.max<Float>(0, std.max(a, b)));
@@ -1269,16 +1311,15 @@ namespace pbrt
         {
             if (countLookups)
                 System.Threading.Interlocked.Increment(ref lookupCount);
-            TextureEvalContext ctx = new TextureEvalContext();
-            ctx.p = renderFromMedium.ApplyInverse(p);
-            Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
+            Point3f pMedium = renderFromMedium.ApplyInverse(p);
+            Float density = std.max<Float>(0, densityOffset + densityScale * EvaluateTexture(p));
             if (progressive)
             {
                 // Clamp the density to the current majorant (so the null density stays non-negative)
                 // and record the lookup for the next pass (benign data race, as in the paper)
                 // A point on a voxel boundary may be assigned to either neighboring voxel by the majorant
                 // iterator, so it is treated as inside every voxel within a small tolerance of it.
-                Vector3f o = bounds.Offset(ctx.p);
+                Vector3f o = bounds.Offset(pMedium);
                 Float fx = o.x * majorantGrid.res.x, fy = o.y * majorantGrid.res.y, fz = o.z * majorantGrid.res.z;
                 int x0 = std.min(std.max((int)std.floor(fx - 1e-3f), 0), majorantGrid.res.x - 1);
                 int x1 = std.min(std.max((int)std.floor(fx + 1e-3f), 0), majorantGrid.res.x - 1);
@@ -1339,6 +1380,15 @@ namespace pbrt
         public bool UsesMixture() { return mixture; }
 
         public bool UsesKettunen() { return kettunen; }
+
+        // Procedural textures take medium-space points; named textures keep their own mappings and take render-space
+        // points
+        private Float EvaluateTexture(Point3f p)
+        {
+            TextureEvalContext ctx = new TextureEvalContext();
+            ctx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
+            return texture.Evaluate(ctx);
+        }
 
         [ThreadStatic] private static Float[] kettunenTMin;
         [ThreadStatic] private static Float[] kettunenTMax;
@@ -1718,9 +1768,7 @@ namespace pbrt
                         else
                         {
                             // Residual collision: look up the density and subtract the control part
-                            TextureEvalContext ctx = new TextureEvalContext();
-                            ctx.p = renderFromMedium.ApplyInverse(p);
-                            Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
+                            Float density = std.max<Float>(0, densityOffset + densityScale * EvaluateTexture(p));
                             Float residual = std.max<Float>(0, density - controlDensity);
                             MediumProperties mp = new MediumProperties { sigma_a = residual * sigma_a_spec.Sample(lambda),
                                                                          sigma_s = residual * sigma_s_spec.Sample(lambda),
@@ -1789,6 +1837,10 @@ namespace pbrt
         private Float[] pendingMajorants;
         private MajorantNode[] topNodes;
         private bool kettunen;
+        private bool textureInRenderSpace, hierarchical, decompositionRequested;
+        private string densityTextureName;
+        private int majorantRes;
+        private Float initialMajorant, boundsFloor;
         private int kettunenPoints;
         private Float kettunenSpacing;
         private int hierarchyRes, hierarchyDepth;
@@ -1807,14 +1859,21 @@ namespace pbrt
                 sigma_s = new ConstantSpectrum(1f);
             Float g = parameters.GetOneFloat("g", 0f);
 
-            // Procedural density texture, mapped by scaling medium space by _frequency_
+            // A named float texture ("string densitytexture"), defined with the Texture directive, drives the density through
+            // its own mapping, from render space. Otherwise a procedural density texture is mapped by scaling medium
+            // space by _frequency_.
+            string densityTextureName = parameters.GetOneString("densitytexture", "");
             string textureName = parameters.GetOneString("texture", "fbm");
             Float frequency = parameters.GetOneFloat("frequency", 1);
             int octaves = parameters.GetOneInt("octaves", 8);
             Float roughness = parameters.GetOneFloat("roughness", .5f);
             TextureMapping3D mapping = new PointTransformMapping(pbrt.Scale(frequency, frequency, frequency));
             FloatTexture texture = null;
-            if (textureName == "fbm")
+            if (densityTextureName.Length != 0)
+            {
+                // resolved by ResolveDensityTexture() once the scene's textures exist
+            }
+            else if (textureName == "fbm")
                 texture = new FBmTexture(mapping, octaves, roughness);
             else if (textureName == "wrinkled")
                 texture = new WrinkledTexture(mapping, octaves, roughness);
@@ -1856,7 +1915,7 @@ namespace pbrt
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, alloc);
         }
     }
 

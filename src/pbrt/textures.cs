@@ -230,6 +230,14 @@ namespace pbrt
         public abstract TexCoord2D Map(TextureEvalContext ctx);
         public abstract override string ToString();
 
+        // (not in pbrt-v4) Rectangle of (s,t) that the points in _region_ (in the space of TextureEvalContext::p, with
+        // no uv) map to, or false if there is no bound better than the whole plane
+        public virtual bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            st = new Bounds2f();
+            return false;
+        }
+
         public static TextureMapping2D Create(ParameterDictionary parameters, Transform renderFromTexture, FileLoc loc,
                                               Allocator alloc)
         {
@@ -276,6 +284,14 @@ namespace pbrt
 
             Point2f st = new Point2f(su * ctx.uv[0] + du, sv * ctx.uv[1] + dv);
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
+        }
+
+        // Media have no uv, so every point maps to the same (s,t)
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            TexCoord2D c = Map(new TextureEvalContext());
+            st = new Bounds2f(c.st);
+            return true;
         }
 
         public override string ToString()
@@ -345,6 +361,20 @@ namespace pbrt
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
         }
 
+        // t is the height in texture space; s is the angle, which can be anything in [0,1]
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            Float zMin = Infinity, zMax = -Infinity;
+            for (int i = 0; i < 8; ++i)
+            {
+                Point3f pt = textureFromRender.Apply(region.Corner(i));
+                zMin = std.min(zMin, pt.z);
+                zMax = std.max(zMax, pt.z);
+            }
+            st = new Bounds2f(new Point2f(0, zMin), new Point2f(1, zMax));
+            return true;
+        }
+
         public override string ToString()
         {
             return pbrt.StringPrintf("[ CylindricalMapping textureFromRender: %s ]", textureFromRender);
@@ -375,6 +405,19 @@ namespace pbrt
 
             Point2f st = new Point2f(ds + pbrt.Dot(vec, vs), dt + pbrt.Dot(vec, vt));
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
+        }
+
+        // (s,t) is affine in the point, so the extremes over the region are at its corners
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            st = new Bounds2f();
+            for (int i = 0; i < 8; ++i)
+            {
+                Vector3f vec = (Vector3f)textureFromRender.Apply(region.Corner(i));
+                Point2f p = new Point2f(ds + pbrt.Dot(vec, vs), dt + pbrt.Dot(vec, vt));
+                st = (i == 0) ? new Bounds2f(p) : pbrt.Union(st, p);
+            }
+            return true;
         }
 
         public override string ToString()
@@ -1003,6 +1046,37 @@ namespace pbrt
         public void MultiplyScale(Float s) { scale *= s; }
         public FloatImageTexture Clone() { return (FloatImageTexture)MemberwiseClone(); }
 
+        // (not in pbrt-v4) Bounds of the texels a lookup in the region can read, from a min/max pyramid
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            lo = MinValue();
+            hi = MaxValue();
+            if (!mapping.RegionST(region, out Bounds2f st))
+                return;
+            lock (pyramidLock)
+            {
+                if (pyramid == null)
+                    pyramid = new ImageRangePyramid(mipmap.GetLevel(0));
+            }
+            // Image rows run top to bottom
+            if (!pbrt.ImageRegionRange(pyramid, mipmap.GetWrapMode(), st.pMin.x, st.pMax.x, 1 - st.pMax.y, 1 - st.pMin.y,
+                                       out Float tlo, out Float thi))
+                return;
+            Float a = scale * tlo, b = scale * thi;
+            Float vlo = std.min(a, b), vhi = std.max(a, b);
+            if (invert)
+            {
+                Float ilo = std.max<Float>(0, 1 - vhi), ihi = std.max<Float>(0, 1 - vlo);
+                vlo = ilo;
+                vhi = ihi;
+            }
+            lo = std.max(lo, vlo);
+            hi = std.min(hi, vhi);
+        }
+
+        private ImageRangePyramid pyramid;
+        private readonly object pyramidLock = new object();
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord2D c = mapping.Map(ctx);
@@ -1234,6 +1308,15 @@ namespace pbrt
         {
             return -pbrt.BlendMin(-tex1.MaxValue(), -tex1.MinValue(), -tex2.MaxValue(), -tex2.MinValue(),
                                   amount.MinValue(), amount.MaxValue());
+        }
+
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            tex1.RegionBounds(region, out Float a0, out Float a1);
+            tex2.RegionBounds(region, out Float b0, out Float b1);
+            amount.RegionBounds(region, out Float t0, out Float t1);
+            lo = pbrt.BlendMin(a0, a1, b0, b1, t0, t1);
+            hi = -pbrt.BlendMin(-a1, -a0, -b1, -b0, t0, t1);
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -1590,6 +1673,14 @@ namespace pbrt
         public override Float MaxValue()
         {
             return -pbrt.ProductMin(-tex.MaxValue(), -tex.MinValue(), scale.MinValue(), scale.MaxValue());
+        }
+
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            tex.RegionBounds(region, out Float t0, out Float t1);
+            scale.RegionBounds(region, out Float s0, out Float s1);
+            lo = pbrt.ProductMin(t0, t1, s0, s1);
+            hi = -pbrt.ProductMin(-t1, -t0, s0, s1);
         }
 
         public override Float Evaluate(TextureEvalContext ctx)

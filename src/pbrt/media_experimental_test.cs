@@ -13,7 +13,7 @@ namespace pbrt
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, 0f, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, 0f, false, "", null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -387,6 +387,139 @@ namespace pbrt
                 double rSigma = Math.Sqrt(Math.Max(rSum2 / n - (rSum / n) * (rSum / n), 0) / n);
                 Console.WriteLine($"PROBE kettunen: mean {mean} reference {refT} stderr {sigma} (ratio tracking stderr {rSigma})");
                 EXPECT_LT(Math.Abs(mean - refT), 4 * sigma + 1e-3);
+            }
+        }
+
+        // The min/max pyramid bounds a bilinear lookup over any rectangle of texture coordinates, for every wrap mode
+        [TEST("TextureBounds", "ImageRegionRange")]
+        public static void TextureBounds_ImageRegionRange()
+        {
+            Point2i res = new Point2i(37, 23);
+            Image image = new Image(PixelFormat.Float, res, new string[] { "Y" });
+            RNG rng = new RNG(61);
+            for (int y = 0; y < res.y; ++y)
+                for (int x = 0; x < res.x; ++x)
+                    image.SetChannel(new Point2i(x, y), 0, rng.Uniform<Float>() < .3f ? 0f : rng.Uniform<Float>() * 5);
+            ImageRangePyramid pyramid = new ImageRangePyramid(image);
+            WrapMode[] wraps = new WrapMode[] { WrapMode.Repeat, WrapMode.Clamp, WrapMode.Black };
+            int violations = 0, queries = 0;
+            double slack = 0, slackCount = 0;
+            foreach (WrapMode wrap in wraps)
+            {
+                for (int i = 0; i < 400; ++i)
+                {
+                    Float s0 = -.7f + 2.4f * rng.Uniform<Float>(), t0 = -.7f + 2.4f * rng.Uniform<Float>();
+                    Float ds = (i % 3 == 0 ? .02f : i % 3 == 1 ? .2f : 1.4f) * rng.Uniform<Float>();
+                    Float dt = (i % 3 == 0 ? .02f : i % 3 == 1 ? .2f : 1.4f) * rng.Uniform<Float>();
+                    bool ok = pbrt.ImageRegionRange(pyramid, wrap, s0, s0 + ds, t0, t0 + dt, out Float lo, out Float hi);
+                    EXPECT_TRUE(ok);
+                    Float bLo = Infinity, bHi = -Infinity;
+                    for (int k = 0; k < 200; ++k)
+                    {
+                        Point2f st = new Point2f(s0 + ds * rng.Uniform<Float>(), t0 + dt * rng.Uniform<Float>());
+                        Float v = image.BilerpChannel(st, 0, new WrapMode2D(wrap));
+                        bLo = std.min(bLo, v);
+                        bHi = std.max(bHi, v);
+                    }
+                    ++queries;
+                    if (bLo < lo - 1e-5f || bHi > hi + 1e-5f)
+                        ++violations;
+                    slack += (hi - lo) - (bHi - bLo);
+                    ++slackCount;
+                }
+            }
+            Console.WriteLine($"PROBE image range: {queries} queries, {violations} violations, mean looseness {slack / slackCount}");
+            EXPECT_EQ(violations, 0);
+        }
+
+        // A medium driven by an image texture through a planar mapping: the region bounds from the min/max pyramid bound
+        // the density everywhere, are much tighter than the global bound, and the transmittance is unbiased
+        [TEST("TextureMedium", "ImageDrivenUnbiased")]
+        public static void TextureMedium_ImageDrivenUnbiased()
+        {
+            Point2i res = new Point2i(40, 30);
+            Image image = new Image(PixelFormat.Float, res, new string[] { "R", "G", "B" });
+            RNG imgRng = new RNG(71);
+            for (int y = 0; y < res.y; ++y)
+            {
+                for (int x = 0; x < res.x; ++x)
+                {
+                    Float u = (x + .5f) / res.x - .35f, v = (y + .5f) / res.y - .6f;
+                    Float blob = (Float)Math.Exp(-(u * u + v * v) * 18) + .6f * (Float)Math.Exp(-((u + .5f) * (u + .5f) + (v + .3f) * (v + .3f)) * 30);
+                    Float value = std.max<Float>(0, blob - .1f + .15f * (imgRng.Uniform<Float>() - .5f));
+                    for (int c = 0; c < 3; ++c)
+                        image.SetChannel(new Point2i(x, y), c, value);
+                }
+            }
+            string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "magi_image_medium_test.exr");
+            EXPECT_TRUE(image.Write(file));
+            MIPMapFilterOptions options = new MIPMapFilterOptions();
+            options.filter = FilterFunction.Bilinear;
+            TextureMapping2D mapping = new PlanarMapping(new Transform(), new Vector3f(.625f, 0, 0), new Vector3f(0, 0, .625f), .5f, .5f);
+            FloatTexture texture = new FloatImageTexture(mapping, file, options, WrapMode.Clamp, 1f, false, ColorEncoding.Linear, null);
+
+            Bounds3f bounds = new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f));
+            TextureMedium MakeImageMedium(int majorantRes, bool hierarchical)
+            {
+                return new TextureMedium(bounds, new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
+                                         0f, 6f, majorantRes, false, 0.01f, 0, false, false, false, false, false, false, 4f, .5f, 0f,
+                                         hierarchical, 4, 1, .7f, false, 4, 0f, true, "", null);
+            }
+            TextureMedium coarse = MakeImageMedium(1, false);
+            TextureMedium fine = MakeImageMedium(16, false);
+            TextureMedium tree = MakeImageMedium(8, true);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(72);
+            int violations = 0;
+            double coarseDepth = 0, fineDepth = 0, treeDepth = 0;
+            for (int i = 0; i < 300; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .5f * (rng.Uniform<Float>() - .5f), .5f * (rng.Uniform<Float>() - .5f)));
+                foreach ((TextureMedium medium, int which) in new (TextureMedium, int)[] { (coarse, 0), (fine, 1), (tree, 2) })
+                {
+                    RayMajorantIterator it = medium.SampleRay(new Ray(o, d, 0, medium), 2.2f, lambda);
+                    for (pstd.optional<RayMajorantSegment> seg = it.Next(); seg; seg = it.Next())
+                    {
+                        RayMajorantSegment sg = seg.value();
+                        double depth = sg.sigma_maj[0] * (sg.tMax - sg.tMin);
+                        if (which == 0) coarseDepth += depth;
+                        else if (which == 1) fineDepth += depth;
+                        else treeDepth += depth;
+                        for (int k = 0; k < 6; ++k)
+                        {
+                            Float t = sg.tMin + (sg.tMax - sg.tMin) * rng.Uniform<Float>();
+                            MediumProperties mp = medium.SamplePoint(new Point3f(o.x + t * d.x, o.y + t * d.y, o.z + t * d.z), lambda);
+                            if (mp.sigma_a[0] + mp.sigma_s[0] > sg.sigma_maj[0] * (1 + 1e-3f) + 1e-4f)
+                                ++violations;
+                        }
+                    }
+                }
+            }
+            Console.WriteLine($"PROBE image medium: violations {violations}, majorant optical depth coarse {coarseDepth} grid16 {fineDepth} tree {treeDepth}");
+            EXPECT_EQ(violations, 0);
+            EXPECT_LT(fineDepth, coarseDepth);
+
+            foreach (TextureMedium medium in new TextureMedium[] { fine, tree })
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                    Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                    Float refT = ReferenceTransmittance(fine, new Ray(o, d, 0, fine), 2.2f, lambda);
+                    int n = 100000;
+                    double sum = 0, sum2 = 0;
+                    for (int s2 = 0; s2 < n; ++s2)
+                    {
+                        Float q = RatioTracking(medium, new Ray(o, d, 0, medium), 2.2f, lambda, ref rng);
+                        sum += q;
+                        sum2 += q * q;
+                    }
+                    double mean = sum / n;
+                    double sigma = Math.Sqrt(Math.Max(sum2 / n - mean * mean, 0) / n);
+                    Console.WriteLine($"PROBE image medium: mean {mean} reference {refT} stderr {sigma}");
+                    EXPECT_LT(Math.Abs(mean - refT), 4 * sigma + 1e-3);
+                }
             }
         }
 
