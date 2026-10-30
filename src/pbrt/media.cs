@@ -997,7 +997,6 @@ namespace pbrt
             Float density = Density(renderFromMedium.ApplyInverse(p));
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
-
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
         }
 
@@ -1102,8 +1101,12 @@ namespace pbrt
                              bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, bool mixture, Float mixtureLooseness,
                              Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
                              Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, bool textureInRenderSpace,
-                             string densityTextureName, Allocator alloc)
+                             string densityTextureName, string sigmaATextureName, string sigmaSTextureName, string gTextureName,
+                             Allocator alloc)
         {
+            this.sigmaATextureName = sigmaATextureName;
+            this.sigmaSTextureName = sigmaSTextureName;
+            this.gTextureName = gTextureName;
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
@@ -1137,20 +1140,67 @@ namespace pbrt
             this.hierarchyDepth = std.min(hierarchyDepth, 4);
             this.refineThreshold = refineThreshold;
 
-            // A medium driven by a named texture builds its majorants once the scene's textures exist
-            if (texture != null)
+            if (HasCoefficientTextures() && (progressive || this.decompositionRequested || residualRatio))
+                ErrorExit(new FileLoc(), "The \"texture\" medium's sigma_a/sigma_s textures can't be combined with progressive, " +
+                                         "decomposition or residualratio tracking.");
+            // A medium driven by named textures builds its majorants once the scene's textures exist
+            if (texture != null && sigmaATextureName.Length == 0 && sigmaSTextureName.Length == 0 && gTextureName.Length == 0)
                 BuildMajorants(alloc);
         }
 
-        // (not in pbrt-v4) Supplies the named density texture of a medium created before the textures were
-        public void ResolveDensityTexture(IDictionary<string, FloatTexture> floatTextures, FileLoc loc)
+        // (not in pbrt-v4) Whether the absorption or scattering coefficient is driven by a spectrum texture
+        private bool HasCoefficientTextures() { return sigmaATextureName.Length != 0 || sigmaSTextureName.Length != 0; }
+
+        // (not in pbrt-v4) Supplies the named textures (the density texture, and the textures that multiply sigma_a and
+        // sigma_s and set g) to a medium created before the textures were, and builds its majorants
+        public void ResolveTextures(NamedTextures textures, FileLoc loc)
         {
-            if (texture != null || densityTextureName.Length == 0)
+            if (densityTextureName.Length == 0 && !HasCoefficientTextures() && gTextureName.Length == 0)
                 return;
-            if (!floatTextures.TryGetValue(densityTextureName, out FloatTexture named))
-                ErrorExit(loc, $"{densityTextureName}: float texture not defined for the \"texture\" medium.");
-            texture = named;
+            if (texture == null)
+            {
+                if (!textures.floatTextures.TryGetValue(densityTextureName, out FloatTexture named))
+                    ErrorExit(loc, $"{densityTextureName}: float texture not defined for the \"texture\" medium.");
+                texture = named;
+            }
+            if (sigmaATextureName.Length != 0 && !textures.unboundedSpectrumTextures.TryGetValue(sigmaATextureName, out sigmaATexture))
+                ErrorExit(loc, $"{sigmaATextureName}: spectrum texture not defined for the \"texture\" medium.");
+            if (sigmaSTextureName.Length != 0 && !textures.unboundedSpectrumTextures.TryGetValue(sigmaSTextureName, out sigmaSTexture))
+                ErrorExit(loc, $"{sigmaSTextureName}: spectrum texture not defined for the \"texture\" medium.");
+            if (gTextureName.Length != 0 && !textures.floatTextures.TryGetValue(gTextureName, out gTexture))
+                ErrorExit(loc, $"{gTextureName}: float texture not defined for the \"texture\" medium.");
             BuildMajorants(new Allocator());
+        }
+
+        // (not in pbrt-v4) Upper bound of the factors by which the textures scale sigma_a and sigma_s over a region of
+        // medium space: sigma_t <= density * (sigma_a * A + sigma_s * S) <= density * (sigma_a + sigma_s) * max(A, S)
+        private Float CoefficientBound(Bounds3f region)
+        {
+            if (!HasCoefficientTextures())
+                return 1;
+            Float m = 0;
+            if (sigmaATextureName.Length != 0)
+                m = std.max(m, sigmaATexture.RegionMax(ToTextureSpace(region)));
+            else
+                m = 1;
+            if (sigmaSTextureName.Length != 0)
+                m = std.max(m, sigmaSTexture.RegionMax(ToTextureSpace(region)));
+            else
+                m = std.max<Float>(m, 1);
+            return m;
+        }
+
+        private Bounds3f ToTextureSpace(Bounds3f region)
+        {
+            if (!textureInRenderSpace)
+                return region;
+            Bounds3f renderRegion = new Bounds3f();
+            for (int i = 0; i < 8; ++i)
+            {
+                Point3f p = renderFromMedium.Apply(region.Corner(i));
+                renderRegion = (i == 0) ? new Bounds3f(p) : Union(renderRegion, p);
+            }
+            return renderRegion;
         }
 
         // Bounds of the density texture over a region of medium space
@@ -1186,7 +1236,7 @@ namespace pbrt
                         TextureRegionBounds(region, out Float lo, out Float hi);
                         Float a = densityOffset + densityScale * lo;
                         Float b = densityOffset + densityScale * hi;
-                        majorantGrid.Set(x, y, z, std.max<Float>(0, std.max(a, b)));
+                        majorantGrid.Set(x, y, z, std.max<Float>(0, std.max(a, b)) * CoefficientBound(region));
                         Float voxelControl = std.max<Float>(0, std.min(a, b));
                         controlGrid[x + majorantGrid.res.x * (y + majorantGrid.res.y * z)] = voxelControl;
                         maxControl = std.max(maxControl, voxelControl);
@@ -1248,7 +1298,7 @@ namespace pbrt
                                     TextureRegionBounds(cr, out Float lo, out Float hi);
                                     Float a = densityOffset + densityScale * lo;
                                     Float b = densityOffset + densityScale * hi;
-                                    Float childMax = std.min(parent, std.max<Float>(0, std.max(a, b)));
+                                    Float childMax = std.min(parent, std.max<Float>(0, std.max(a, b)) * CoefficientBound(cr));
                                     child.Set(cx, cy, cz, childMax);
                                     sum += childMax;
                                 }
@@ -1347,8 +1397,20 @@ namespace pbrt
             }
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
+            PhaseFunction pointPhase = phase;
+            if (sigmaATexture != null || sigmaSTexture != null || gTexture != null)
+            {
+                TextureEvalContext ctx = new TextureEvalContext();
+                ctx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
+                if (sigmaATexture != null)
+                    sigma_a *= ClampZero(sigmaATexture.Evaluate(ctx, lambda));
+                if (sigmaSTexture != null)
+                    sigma_s *= ClampZero(sigmaSTexture.Evaluate(ctx, lambda));
+                if (gTexture != null)
+                    pointPhase = new HGPhaseFunction(std.min(std.max(gTexture.Evaluate(ctx), -.99f), .99f));
+            }
 
-            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f),
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = new SampledSpectrum(0f),
                                           spectralTracking = spectral, signedNull = unclamped, mixture = false };
         }
 
@@ -1838,7 +1900,9 @@ namespace pbrt
         private MajorantNode[] topNodes;
         private bool kettunen;
         private bool textureInRenderSpace, hierarchical, decompositionRequested;
-        private string densityTextureName;
+        private string densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName;
+        private SpectrumTexture sigmaATexture, sigmaSTexture;
+        private FloatTexture gTexture;
         private int majorantRes;
         private Float initialMajorant, boundsFloor;
         private int kettunenPoints;
@@ -1863,6 +1927,11 @@ namespace pbrt
             // its own mapping, from render space. Otherwise a procedural density texture is mapped by scaling medium
             // space by _frequency_.
             string densityTextureName = parameters.GetOneString("densitytexture", "");
+            // Named spectrum textures that multiply sigma_a and sigma_s, and a float texture for g (as in LuxCore's
+            // heterogeneous volumes, whose absorption, scattering and asymmetry are textures)
+            string sigmaATextureName = parameters.GetOneString("sigma_a_texture", "");
+            string sigmaSTextureName = parameters.GetOneString("sigma_s_texture", "");
+            string gTextureName = parameters.GetOneString("g_texture", "");
             string textureName = parameters.GetOneString("texture", "fbm");
             Float frequency = parameters.GetOneFloat("frequency", 1);
             int octaves = parameters.GetOneInt("octaves", 8);
@@ -1871,7 +1940,7 @@ namespace pbrt
             FloatTexture texture = null;
             if (densityTextureName.Length != 0)
             {
-                // resolved by ResolveDensityTexture() once the scene's textures exist
+                // resolved by ResolveTextures() once the scene's textures exist
             }
             else if (textureName == "fbm")
                 texture = new FBmTexture(mapping, octaves, roughness);
@@ -1915,7 +1984,7 @@ namespace pbrt
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, alloc);
         }
     }
 

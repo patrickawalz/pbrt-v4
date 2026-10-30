@@ -48,6 +48,10 @@ namespace pbrt
         // (not in pbrt-v4) Conservative upper bound on the value at any wavelength, for any
         // context. The pbrt spectrum textures are non-negative, so no lower bound is needed.
         public abstract Float MaxValue();
+
+        // (not in pbrt-v4) Upper bound on the value at any wavelength for contexts whose point lies in a region of
+        // texture space; the default is the global bound
+        public virtual Float RegionMax(Bounds3f region) { return MaxValue(); }
     }
 
 }  // namespace pbrt

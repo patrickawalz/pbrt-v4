@@ -104,7 +104,7 @@ namespace pbrt
     {
         // Texel intervals along one axis that a bilinear lookup with coordinates in [s0,s1] can read. Returns false
         // for wrap modes that aren't handled; _includesZero_ is set when the lookup can fall outside a Black image.
-        private static bool TexelIntervals(Float s0, Float s1, int n, WrapMode wrap, int[] a, int[] b, out int count,
+        internal static bool TexelIntervals(Float s0, Float s1, int n, WrapMode wrap, int[] a, int[] b, out int count,
                                            out bool includesZero)
         {
             count = 0;

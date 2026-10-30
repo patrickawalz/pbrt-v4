@@ -1902,6 +1902,10 @@ namespace pbrt
                 tex = WrinkledTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "windy")
                 tex = WindyTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "densitygrid")
+                tex = FloatGridTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "triplanar")
+                tex = FloatTriplanarTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)
