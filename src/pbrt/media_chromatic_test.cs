@@ -145,11 +145,12 @@ namespace pbrt
         private static TextureMedium MakeTextureMedium(Spectrum sigma_a, Spectrum sigma_s, string densityName, Float densityOffset,
                                                        Float densityScale, string emissionName, Float emissionScale,
                                                        NamedTextures textures, string sigmaAName = "", string sigmaSName = "",
-                                                       bool emissionPerLength = false, Float emissionMajorantScale = 0f)
+                                                       bool emissionPerLength = false, Float emissionMajorantScale = 0f,
+                                                       bool signedNull = false, Float initialMajorant = 0.01f)
         {
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-2, -2, -2), new Point3f(2, 2, 2)), new Transform(),
-                                                     sigma_a, sigma_s, 0f, null, densityOffset, densityScale, 8, false, 0.01f, 0,
-                                                     false, false, false, false, false, false, 4f, .5f, 0f, false, 4, 2, .7f, false,
+                                                     sigma_a, sigma_s, 0f, null, densityOffset, densityScale, 8, signedNull, initialMajorant, 0,
+                                                     false, false, false, signedNull, false, false, 4f, .5f, 0f, false, 4, 2, .7f, false,
                                                      4, 0f, true, densityName, sigmaAName, sigmaSName, "", emissionName, emissionScale,
                                                      emissionPerLength, emissionMajorantScale, true, null);
             medium.ResolveTextures(textures, new FileLoc());
@@ -742,6 +743,53 @@ namespace pbrt
             finally
             {
                 TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // Progressive tracking without clamping gives null coefficients that are negative where the density exceeds the majorant.
+        // The bidirectional integrator must handle them like the volumetric path tracer does: both must agree with the image of
+        // the same medium with an ordinary majorant.
+        [TEST("ChromaticMedia", "BidirectionalSignedNull")]
+        public static void ChromaticMedia_BidirectionalSignedNull()
+        {
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = new ConstantSpectrum(2);
+            try
+            {
+                double[] referenceMean = null, referenceErr = null;
+                for (int variant = 0; variant < 3; ++variant)
+                {
+                    TextureMedium.ClearEmissionLights();
+                    TextureMedium.ClearProgressive();
+                    NamedTextures textures = MakeTextures();
+                    textures.floatTextures["wavy"] = new WavyDensityTexture();
+                    textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                    // 0: ordinary majorant, volumetric path tracing; 1 and 2: signed nulls with a majorant far below the density
+                    TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                             "", "", false, 0f, variant != 0, 0.4f);
+                    medium.EnableEmissionSampling(8);
+                    double[] mean, err;
+                    RenderMean(medium, zero, 0f, true, variant == 2 ? 6 : 7, 2048, Name("blob_signed" + variant, true), out mean, out err,
+                               variant == 2);
+                    if (variant == 0)
+                    {
+                        referenceMean = mean;
+                        referenceErr = err;
+                        continue;
+                    }
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        double combined = Math.Sqrt(err[c] * err[c] + referenceErr[c] * referenceErr[c]);
+                        Console.WriteLine($"PROBE signed null {(variant == 1 ? "volumetric path tracing" : "bidirectional")} channel {c}: " +
+                                          $"{mean[c]:F5} (stderr {err[c]:F5}) ordinary majorant {referenceMean[c]:F5} (stderr {referenceErr[c]:F5})");
+                        EXPECT_LT(Math.Abs(mean[c] - referenceMean[c]), 4 * combined + 0.01 * Math.Abs(referenceMean[c]));
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+                TextureMedium.ClearProgressive();
             }
         }
 
