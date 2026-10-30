@@ -1102,8 +1102,10 @@ namespace pbrt
                              Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
                              Float refineThreshold, bool kettunen, int kettunenPoints, Float kettunenSpacing, bool textureInRenderSpace,
                              string densityTextureName, string sigmaATextureName, string sigmaSTextureName, string gTextureName,
-                             Allocator alloc)
+                             string emissionTextureName, Float emissionScale, Allocator alloc)
         {
+            this.emissionTextureName = emissionTextureName;
+            this.emissionScale = emissionScale;
             this.sigmaATextureName = sigmaATextureName;
             this.sigmaSTextureName = sigmaSTextureName;
             this.gTextureName = gTextureName;
@@ -1140,11 +1142,12 @@ namespace pbrt
             this.hierarchyDepth = std.min(hierarchyDepth, 4);
             this.refineThreshold = refineThreshold;
 
-            if (HasCoefficientTextures() && (progressive || this.decompositionRequested || residualRatio))
+            if (HasCoefficientTextures() && (progressive || this.decompositionRequested || residualRatio) ||
+                emissionTextureName.Length != 0 && (this.decompositionRequested || residualRatio))
                 ErrorExit(new FileLoc(), "The \"texture\" medium's sigma_a/sigma_s textures can't be combined with progressive, " +
                                          "decomposition or residualratio tracking.");
             // A medium driven by named textures builds its majorants once the scene's textures exist
-            if (texture != null && sigmaATextureName.Length == 0 && sigmaSTextureName.Length == 0 && gTextureName.Length == 0)
+            if (texture != null && sigmaATextureName.Length == 0 && sigmaSTextureName.Length == 0 && gTextureName.Length == 0 && emissionTextureName.Length == 0)
                 BuildMajorants(alloc);
         }
 
@@ -1155,7 +1158,7 @@ namespace pbrt
         // sigma_s and set g) to a medium created before the textures were, and builds its majorants
         public void ResolveTextures(NamedTextures textures, FileLoc loc)
         {
-            if (densityTextureName.Length == 0 && !HasCoefficientTextures() && gTextureName.Length == 0)
+            if (densityTextureName.Length == 0 && !HasCoefficientTextures() && gTextureName.Length == 0 && emissionTextureName.Length == 0)
                 return;
             if (texture == null)
             {
@@ -1169,6 +1172,8 @@ namespace pbrt
                 ErrorExit(loc, $"{sigmaSTextureName}: spectrum texture not defined for the \"texture\" medium.");
             if (gTextureName.Length != 0 && !textures.floatTextures.TryGetValue(gTextureName, out gTexture))
                 ErrorExit(loc, $"{gTextureName}: float texture not defined for the \"texture\" medium.");
+            if (emissionTextureName.Length != 0 && !textures.illuminantSpectrumTextures.TryGetValue(emissionTextureName, out emissionTexture))
+                ErrorExit(loc, $"{emissionTextureName}: spectrum texture not defined for the \"texture\" medium.");
             BuildMajorants(new Allocator());
         }
 
@@ -1355,7 +1360,7 @@ namespace pbrt
             }
         }
 
-        public override bool IsEmissive() { return false; }
+        public override bool IsEmissive() { return emissionTextureName.Length != 0; }
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
@@ -1409,8 +1414,16 @@ namespace pbrt
                 if (gTexture != null)
                     pointPhase = new HGPhaseFunction(std.min(std.max(gTexture.Evaluate(ctx), -.99f), .99f));
             }
+            // Emitted radiance, which the integrator weights by sigma_a at absorption events
+            SampledSpectrum pointLe = new SampledSpectrum(0f);
+            if (emissionTexture != null)
+            {
+                TextureEvalContext ectx = new TextureEvalContext();
+                ectx.p = textureInRenderSpace ? p : renderFromMedium.ApplyInverse(p);
+                pointLe = emissionScale * ClampZero(emissionTexture.Evaluate(ectx, lambda));
+            }
 
-            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = new SampledSpectrum(0f),
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = pointPhase, Le = pointLe,
                                           spectralTracking = spectral, signedNull = unclamped, mixture = false };
         }
 
@@ -1901,7 +1914,9 @@ namespace pbrt
         private bool kettunen;
         private bool textureInRenderSpace, hierarchical, decompositionRequested;
         private string densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName;
-        private SpectrumTexture sigmaATexture, sigmaSTexture;
+        private string emissionTextureName;
+        private Float emissionScale;
+        private SpectrumTexture sigmaATexture, sigmaSTexture, emissionTexture;
         private FloatTexture gTexture;
         private int majorantRes;
         private Float initialMajorant, boundsFloor;
@@ -1932,6 +1947,9 @@ namespace pbrt
             string sigmaATextureName = parameters.GetOneString("sigma_a_texture", "");
             string sigmaSTextureName = parameters.GetOneString("sigma_s_texture", "");
             string gTextureName = parameters.GetOneString("g_texture", "");
+            // A named illuminant spectrum texture gives the emitted radiance, scaled by "Lescale"
+            string emissionTextureName = parameters.GetOneString("emission_texture", "");
+            Float emissionScale = parameters.GetOneFloat("Lescale", 1f);
             string textureName = parameters.GetOneString("texture", "fbm");
             Float frequency = parameters.GetOneFloat("frequency", 1);
             int octaves = parameters.GetOneInt("octaves", 8);
@@ -1984,7 +2002,7 @@ namespace pbrt
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, emissionTextureName, emissionScale, alloc);
         }
     }
 

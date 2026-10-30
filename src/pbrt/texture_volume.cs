@@ -13,12 +13,13 @@ namespace pbrt
     // "uniformgrid" medium. Lookups outside the cube follow the wrap mode (black by default, as in SampledGrid).
     public sealed unsafe class FloatGridTexture : FloatTexture
     {
-        public FloatGridTexture(TextureMapping3D mapping, int nx, int ny, int nz, Float[] values, WrapMode wrapMode)
+        public FloatGridTexture(TextureMapping3D mapping, int nx, int ny, int nz, Float[] values, WrapMode wrapMode, Float borderValue = 0)
         {
             this.mapping = mapping;
             this.nx = nx; this.ny = ny; this.nz = nz;
             this.values = values;
             this.wrapMode = wrapMode;
+            this.borderValue = borderValue;
             lo = Infinity;
             hi = -Infinity;
             for (int i = 0; i < values.Length; ++i)
@@ -26,11 +27,11 @@ namespace pbrt
                 lo = std.min(lo, values[i]);
                 hi = std.max(hi, values[i]);
             }
-            // A black border reads zeros outside the grid
+            // A constant border (black, or white as in LuxCore) reads its value outside the grid
             if (wrapMode == WrapMode.Black)
             {
-                lo = std.min(lo, 0);
-                hi = std.max(hi, 0);
+                lo = std.min(lo, borderValue);
+                hi = std.max(hi, borderValue);
             }
         }
 
@@ -54,7 +55,7 @@ namespace pbrt
                     break;
                 default:
                     if (x < 0 || x >= nx || y < 0 || y >= ny || z < 0 || z >= nz)
-                        return 0;
+                        return borderValue;
                     break;
             }
             return values[x + nx * (y + ny * z)];
@@ -119,8 +120,8 @@ namespace pbrt
             }
             if (zx || zy || zz || cx == 0 || cy == 0 || cz == 0)
             {
-                bLo = std.min(bLo, 0);
-                bHi = std.max(bHi, 0);
+                bLo = std.min(bLo, borderValue);
+                bHi = std.max(bHi, borderValue);
             }
             rlo = std.max(rlo, bLo);
             rhi = std.min(rhi, bHi);
@@ -167,11 +168,13 @@ namespace pbrt
                     values[i] = data[i];
             }
             string wrap = parameters.GetOneString("wrap", "black");
-            pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrap);
+            // "white" is a black-style border that reads 1, as in LuxCore's density grid
+            Float borderValue = (wrap == "white") ? 1f : 0f;
+            pstd.optional<WrapMode> wrapMode = pbrt.ParseWrapMode(wrap == "white" ? "black" : wrap);
             if (!wrapMode || wrapMode.value() == WrapMode.OctahedralSphere)
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("densitygrid: wrap mode \"%s\" is not supported.", wrap));
             TextureMapping3D mapping = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
-            return new FloatGridTexture(mapping, nx, ny, nz, values, wrapMode.value());
+            return new FloatGridTexture(mapping, nx, ny, nz, values, wrapMode.value(), borderValue);
         }
 
         private static Float Lerp(Float t, Float a, Float b) { return (1 - t) * a + t * b; }
@@ -180,7 +183,7 @@ namespace pbrt
         private int nx, ny, nz;
         private Float[] values;
         private WrapMode wrapMode;
-        private Float lo, hi;
+        private Float lo, hi, borderValue;
     }
 
     // FloatTriplanarTexture Definition
