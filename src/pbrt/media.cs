@@ -1419,18 +1419,21 @@ namespace pbrt
         // (not in pbrt-v4) Next event estimation of the medium's emission. The volpath integrator samples the emission from
         // scattering vertices like a light, and combines the result with its gathering of the emission at collisions.
         // The estimators of the other tracking modes don't have a matching light strategy.
-        public void EnableEmissionSampling(int res)
+        public void EnableEmissionSampling(int res, bool fnee = false)
         {
             if (emissionTexture == null && emissionTextureName.Length == 0)
                 ErrorExit(new FileLoc(), "\"emission_nee\" needs an emission_texture.");
             if (mixture || adaptiveRatio || spectral || kettunen || decompositionRequested || residualRatio)
                 ErrorExit(new FileLoc(), "\"emission_nee\" can't be combined with mixture, adaptive, spectral, kettunen, decomposition or " +
                                          "residualratio tracking.");
+            if (fnee && (progressive || unclamped || !multiScattering))
+                ErrorExit(new FileLoc(), "\"emission_fnee\" can't be combined with progressive tracking or single scattering.");
             lock (emissionMedia)
             {
                 if (emissionLight == null)
                 {
                     emissionLight = new VolumeEmissionLight(this, res);
+                    emissionLight.SetFnee(fnee);
                     emissionMedia.Add(this);
                 }
             }
@@ -1469,7 +1472,12 @@ namespace pbrt
         // Emitted radiance per length at the render-space point p
         public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda)
         {
-            MediumProperties mp = SamplePoint(p, lambda);
+            return EmissionOf(SamplePoint(p, lambda));
+        }
+
+        // Emitted radiance per length, from the properties of a point that were already looked up
+        public SampledSpectrum EmissionOf(MediumProperties mp)
+        {
             return emissionPerLength ? mp.Le : mp.sigma_a * mp.Le;
         }
 
@@ -2193,12 +2201,15 @@ namespace pbrt
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             bool emissionNee = parameters.GetOneBool("emission_nee", false);
+            bool emissionFnee = parameters.GetOneBool("emission_fnee", false);
             int emissionNeeRes = parameters.GetOneInt("emission_nee_res", 16);
             TextureMedium created = new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
                                      mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, kettunenSpacing, densityTextureName.Length != 0, densityTextureName, sigmaATextureName, sigmaSTextureName, gTextureName, emissionTextureName, emissionScale, emissionPerLength, emissionMajorantScale, multiScattering, alloc);
+            if (emissionFnee && !emissionNee)
+                ErrorExit(new FileLoc(), "\"emission_fnee\" needs \"emission_nee\" (it chooses how the emission is sampled).");
             if (emissionNee)
-                created.EnableEmissionSampling(emissionNeeRes);
+                created.EnableEmissionSampling(emissionNeeRes, emissionFnee);
             return created;
         }
     }

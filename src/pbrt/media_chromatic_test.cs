@@ -68,7 +68,7 @@ namespace pbrt
         }
 
         private static void RenderMean(Medium medium, Spectrum lightSpectrum, Float lightScale, bool areaEmitter, int maxDepth, int spp, string filename,
-                                       out double[] mean, out double[] stderr)
+                                       out double[] mean, out double[] stderr, bool bidirectional = false)
         {
             Transform id = new Transform();
             Point2i resolution = new Point2i(16, 16);
@@ -106,7 +106,8 @@ namespace pbrt
             Primitive bvh = new BVHAggregate(prims);
 
             Sampler sampler = new IndependentSampler(spp, 3);
-            VolPathIntegrator integrator = new VolPathIntegrator(maxDepth, camera, sampler, bvh, lights);
+            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false)
+                                                  : new VolPathIntegrator(maxDepth, camera, sampler, bvh, lights);
             integrator.Render();
 
             ImageAndMetadata im = Image.Read(filename);
@@ -130,12 +131,12 @@ namespace pbrt
             try { File.Delete(filename); } catch (Exception) { }
         }
 
-        private static void Compare(string label, double[] mean, double[] stderr, double[] reference)
+        private static void Compare(string label, double[] mean, double[] stderr, double[] reference, double relativeSlack = 0.01)
         {
             for (int c = 0; c < 3; ++c)
             {
                 Console.WriteLine($"PROBE chromatic {label} channel {c}: {mean[c]:F5} reference {reference[c]:F5} stderr {stderr[c]:F5}");
-                EXPECT_LT(Math.Abs(mean[c] - reference[c]), 4 * stderr[c] + 0.01 * Math.Abs(reference[c]));
+                EXPECT_LT(Math.Abs(mean[c] - reference[c]), 4 * stderr[c] + relativeSlack * Math.Abs(reference[c]));
             }
         }
 
@@ -590,6 +591,231 @@ namespace pbrt
                         {
                             double combined = Math.Sqrt(err[c] * err[c] + gatherErr[c] * gatherErr[c]);
                             Console.WriteLine($"PROBE emission sampling {(perLength ? "per-length" : "volume")} channel {c}: sampled {mean[c]:F5} " +
+                                              $"(stderr {err[c]:F5}) gathered {gatherMean[c]:F5} (stderr {gatherErr[c]:F5})");
+                            EXPECT_LT(Math.Abs(mean[c] - gatherMean[c]), 4 * combined + 0.01 * Math.Abs(gatherMean[c]));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // Bidirectional path tracing finds the emission of a volume with its light subpaths (which start inside the medium
+        // and have to stay out of the parts of its bounds that the sphere doesn't enclose), with next event estimation, and
+        // with the camera subpaths that pass through it. The medium is invisible when it emits what it absorbs, so every
+        // strategy and all of their weights have to add up to the light.
+        [TEST("ChromaticMedia", "BidirectionalEmissionEquilibrium")]
+        public static void ChromaticMedia_BidirectionalEmissionEquilibrium()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            try
+            {
+                foreach (bool area in new bool[] { false, true })
+                {
+                    double[] refMean, refErr, mean, err;
+                    RenderMean(null, L, scale, area, 10, 768, Name("ref_bdpt", area), out refMean, out refErr, true);
+
+                    foreach (bool perLength in new bool[] { false, true })
+                    {
+                        TextureMedium.ClearProgressive();
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.illuminantSpectrumTextures["emit"] = perLength ? (SpectrumTexture)new AbsorbedEmissionTexture(new ConstantSpectrum(1))
+                                                                                : new SpectrumConstantTexture(L);
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(1), new ConstantSpectrum(.5f), "wavy", 0f, 1f, "emit",
+                                                                 scale, textures, "", "", perLength, perLength ? 4f : 0f);
+                        medium.EnableEmissionSampling(8);
+                        RenderMean(medium, L, scale, area, 10, 768, Name("bdpt", area), out mean, out err, true);
+                        // The image is uniform, so the spread over the pixels is the noise of the render: a loss of a
+                        // strategy shows as a few tenths of a percent
+                        Compare("bidirectional emission equilibrium, " + (perLength ? "per-length" : "volume") + EmitterLabel(area),
+                                mean, err, refMean, 0.004);
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearProgressive();
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // A scattering medium with a glowing blob in the dark. The bidirectional integrator has one more bounce than the
+        // volumetric path tracer for the same depth, because its depth counts the vertices between the camera and the
+        // emission and the path tracer's counts the scattering before the gathering. The scattering is gray: the
+        // bidirectional integrator, like the one of pbrt-v4, samples distances with the first wavelength only, which
+        // converges very slowly when the coefficients depend on the wavelength.
+        [TEST("ChromaticMedia", "BidirectionalMatchesPathTracing")]
+        public static void ChromaticMedia_BidirectionalMatchesPathTracing()
+        {
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = new ConstantSpectrum(2);
+            try
+            {
+                foreach (bool perLength in new bool[] { false, true })
+                {
+                    double[] pathMean = null, pathErr = null;
+                    foreach (bool bidirectional in new bool[] { false, true })
+                    {
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                                 "", "", perLength, perLength ? 4f : 0f);
+                        medium.EnableEmissionSampling(8);
+                        double[] mean, err;
+                        RenderMean(medium, zero, 0f, true, bidirectional ? 6 : 7, 1024, Name("blob_bdpt", bidirectional),
+                                   out mean, out err, bidirectional);
+                        if (!bidirectional)
+                        {
+                            pathMean = mean;
+                            pathErr = err;
+                            continue;
+                        }
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            double combined = Math.Sqrt(err[c] * err[c] + pathErr[c] * pathErr[c]);
+                            Console.WriteLine($"PROBE bidirectional {(perLength ? "per-length" : "volume")} channel {c}: bidirectional {mean[c]:F5} " +
+                                              $"(stderr {err[c]:F5}) path tracing {pathMean[c]:F5} (stderr {pathErr[c]:F5})");
+                            EXPECT_LT(Math.Abs(mean[c] - pathMean[c]), 4 * combined + 0.01 * Math.Abs(pathMean[c]));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // The density of the directions that forward next event estimation picks integrates to one over the sphere, from
+        // inside the bounds of the medium and from outside, and the sampled directions follow it
+        [TEST("ChromaticMedia", "FneeDirectionDensity")]
+        public static void ChromaticMedia_FneeDirectionDensity()
+        {
+            try
+            {
+                TextureMedium.ClearEmissionLights();
+                NamedTextures textures = MakeTextures();
+                textures.floatTextures["wavy"] = new WavyDensityTexture();
+                textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), new ConstantSpectrum(1), "wavy", 0f, 1f, "blob", 1f,
+                                                         textures);
+                medium.EnableEmissionSampling(8, true);
+                VolumeEmissionLight light = medium.EmissionLight();
+                foreach (Point3f x in new Point3f[] { new Point3f(0, 0, 0), new Point3f(-1.2f, .7f, .3f), new Point3f(.3f, .1f, .2f) })
+                {
+                    // The integral over the sphere by stratified sampling
+                    int n = 400;
+                    double integral = 0;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        for (int j = 0; j < n; ++j)
+                        {
+                            Vector3f w = SampleUniformSphere(new Point2f((i + .5f) / n, (j + .5f) / n));
+                            integral += light.PdfDirection(x, w);
+                        }
+                    }
+                    integral *= 4 * Math.PI / (n * n);
+                    Console.WriteLine($"PROBE fnee direction density from {x}: integral {integral:F5}");
+                    EXPECT_LT(Math.Abs(integral - 1), 0.02);
+
+                    // 1 / pdf averages to the solid angle of the directions that can be picked, which is the whole sphere
+                    // inside the bounds. A histogram of the sampled octants checks the density against the picks.
+                    int samples = 200000;
+                    double[] octant = new double[8];
+                    double[] expected = new double[8];
+                    for (int i = 0; i < samples; ++i)
+                    {
+                        Point2f u = new Point2f(RadicalInverse(0, (uint64_t)i), RadicalInverse(1, (uint64_t)i));
+                        if (light.SampleDirection(x, u, RadicalInverse(2, (uint64_t)i), out Vector3f w, out Float pdf))
+                            octant[(w.x > 0 ? 1 : 0) + (w.y > 0 ? 2 : 0) + (w.z > 0 ? 4 : 0)] += 1.0 / samples;
+                    }
+                    for (int i = 0; i < n; ++i)
+                    {
+                        for (int j = 0; j < n; ++j)
+                        {
+                            Vector3f w = SampleUniformSphere(new Point2f((i + .5f) / n, (j + .5f) / n));
+                            expected[(w.x > 0 ? 1 : 0) + (w.y > 0 ? 2 : 0) + (w.z > 0 ? 4 : 0)] +=
+                                light.PdfDirection(x, w) * 4 * Math.PI / (n * n);
+                        }
+                    }
+                    for (int o = 0; o < 8; ++o)
+                    {
+                        Console.WriteLine($"PROBE fnee octant {o}: picked {octant[o]:F4} density {expected[o]:F4}");
+                        EXPECT_LT(Math.Abs(octant[o] - expected[o]), 0.01);
+                    }
+                }
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // Forward next event estimation only changes the variance: the invisible emitting medium, and the glowing blob in the
+        // dark compared with the image that gathers the emission at collisions alone
+        [TEST("ChromaticMedia", "FneeEquilibriumAndGathering")]
+        public static void ChromaticMedia_FneeEquilibriumAndGathering()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_s = MakeRamp(0.5f, 3.5f, false);
+            try
+            {
+                foreach (bool area in new bool[] { false, true })
+                {
+                    double[] refMean, refErr, mean, err;
+                    RenderMean(null, L, scale, area, 8, 256, Name("ref_fnee", area), out refMean, out refErr);
+                    foreach (bool perLength in new bool[] { false, true })
+                    {
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.unboundedSpectrumTextures["up"] = new SpectrumConstantTexture(MakeRamp(0.3f, 3.0f, true));
+                        textures.unboundedSpectrumTextures["down"] = new SpectrumConstantTexture(MakeRamp(0.3f, 3.0f, false));
+                        textures.illuminantSpectrumTextures["emit"] = perLength
+                            ? (SpectrumTexture)new AbsorbedEmissionTexture(MakeRamp(0.3f, 3.0f, true)) : new SpectrumConstantTexture(L);
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(1), new ConstantSpectrum(1), "wavy", 0f, 1f, "emit", scale,
+                                                                 textures, "up", "down", perLength, perLength ? 4f : 0f);
+                        medium.EnableEmissionSampling(8, true);
+                        RenderMean(medium, L, scale, area, 200, 256, Name("fnee", area), out mean, out err);
+                        Compare("line sampling equilibrium, " + (perLength ? "per-length" : "volume") + EmitterLabel(area), mean, err, refMean);
+                    }
+                }
+
+                foreach (bool perLength in new bool[] { false, true })
+                {
+                    double[] gatherMean = null, gatherErr = null;
+                    foreach (bool sampled in new bool[] { false, true })
+                    {
+                        TextureMedium.ClearEmissionLights();
+                        NamedTextures textures = MakeTextures();
+                        textures.floatTextures["wavy"] = new WavyDensityTexture();
+                        textures.illuminantSpectrumTextures["blob"] = new BlobEmissionTexture(new Point3f(.35f, .1f, .25f));
+                        TextureMedium medium = MakeTextureMedium(new ConstantSpectrum(.2f), sigma_s, "wavy", 0f, 1f, "blob", 1f, textures,
+                                                                 "", "", perLength, perLength ? 4f : 0f);
+                        if (sampled)
+                            medium.EnableEmissionSampling(8, true);
+                        double[] mean, err;
+                        RenderMean(medium, zero, 0f, true, 200, 512, Name("blob_fnee", sampled), out mean, out err);
+                        if (!sampled)
+                        {
+                            gatherMean = mean;
+                            gatherErr = err;
+                            continue;
+                        }
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            double combined = Math.Sqrt(err[c] * err[c] + gatherErr[c] * gatherErr[c]);
+                            Console.WriteLine($"PROBE line sampling {(perLength ? "per-length" : "volume")} channel {c}: sampled {mean[c]:F5} " +
                                               $"(stderr {err[c]:F5}) gathered {gatherMean[c]:F5} (stderr {gatherErr[c]:F5})");
                             EXPECT_LT(Math.Abs(mean[c] - gatherMean[c]), 4 * combined + 0.01 * Math.Abs(gatherMean[c]));
                         }

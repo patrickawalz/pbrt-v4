@@ -161,6 +161,8 @@ namespace pbrt
     {
         // CameraBase Public Methods
         public override Film GetFilm() { return film; }
+        // (not in pbrt-v4) The medium that the camera is in
+        public Medium GetMedium() { return medium; }
         public override CameraTransform GetCameraTransform() { return cameraTransform; }
 
         public override Float SampleTime(Float u) { return pbrt.Lerp(u, shutterOpen, shutterClose); }
