@@ -141,13 +141,14 @@ namespace pbrt
 
         private static TextureMedium MakeTextureMedium(Spectrum sigma_a, Spectrum sigma_s, string densityName, Float densityOffset,
                                                        Float densityScale, string emissionName, Float emissionScale,
-                                                       NamedTextures textures)
+                                                       NamedTextures textures, string sigmaAName = "", string sigmaSName = "",
+                                                       bool emissionPerLength = false, Float emissionMajorantScale = 0f)
         {
             TextureMedium medium = new TextureMedium(new Bounds3f(new Point3f(-2, -2, -2), new Point3f(2, 2, 2)), new Transform(),
                                                      sigma_a, sigma_s, 0f, null, densityOffset, densityScale, 8, false, 0.01f, 0,
                                                      false, false, false, false, false, false, 4f, .5f, 0f, false, 4, 2, .7f, false,
-                                                     4, 0f, true, densityName, "", "", "", emissionName, emissionScale, false, 0f,
-                                                     true, null);
+                                                     4, 0f, true, densityName, sigmaAName, sigmaSName, "", emissionName, emissionScale,
+                                                     emissionPerLength, emissionMajorantScale, true, null);
             medium.ResolveTextures(textures, new FileLoc());
             return medium;
         }
@@ -395,6 +396,83 @@ namespace pbrt
                                                      scale, true, 4f, boundsFloor, textures), L, scale, area, 200, 256,
                                Name("pl", area), out mean, out err);
                     Compare("progressive per-length emission equilibrium, boundsfloor " + boundsFloor + EmitterLabel(area), mean, err,
+                            refMean);
+                }
+            }
+            TextureMedium.ClearProgressive();
+        }
+
+        // sigma_s = ramp(wavy density): a color ramp driven by a density that varies along every ray scales the scattering
+        // coefficient; a furnace stays a furnace for it, with the analytic majorants and with progressive tracking
+        [TEST("ChromaticMedia", "RampDrivenScatteringFurnace")]
+        public static void ChromaticMedia_RampDrivenScatteringFurnace()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Float[] positions = { .2f, 1f, 1.8f };
+            RGB[] colors = { new RGB(.3f, 2.5f, .8f), new RGB(1.5f, .6f, 2.2f), new RGB(2.8f, 1.2f, .4f) };
+
+            foreach (bool area in new bool[] { false, true })
+            {
+                double[] refMean, refErr, mean, err;
+                RenderMean(null, L, scale, area, 8, 256, Name("ref_rf", area), out refMean, out refErr);
+
+                NamedTextures textures = MakeTextures();
+                textures.floatTextures["wavy"] = new WavyDensityTexture();
+                textures.unboundedSpectrumTextures["tint"] = new SpectrumRampTexture(new WavyDensityTexture(), positions, colors, false,
+                                                                                    SpectrumType.Unbounded, RGBColorSpace.sRGB);
+                RenderMean(MakeTextureMedium(zero, new ConstantSpectrum(1), "loose", 0f, 1f, "", 1f, textures, "", "tint"), L, scale,
+                           area, 200, 256, Name("rf", area), out mean, out err);
+                Compare("ramp-driven furnace, analytic bounds" + EmitterLabel(area), mean, err, refMean);
+
+                TextureMedium.ClearProgressive();
+                RenderMean(MakeProgressiveMedium(zero, new ConstantSpectrum(1), "loose", "", "tint", "", 1f, false, 0f, 0.9f, textures),
+                           L, scale, area, 200, 256, Name("rfp", area), out mean, out err);
+                Compare("ramp-driven furnace, progressive" + EmitterLabel(area), mean, err, refMean);
+            }
+            TextureMedium.ClearProgressive();
+        }
+
+        // A blackbody emitter in a chromatic absorber, with nothing but its own emission to see: the pixel is
+        // E(lambda) (1 - exp(-sigma_a(lambda) R)) / sigma_a(lambda), which a medium-free scene reproduces with a light of that
+        // spectrum
+        [TEST("ChromaticMedia", "BlackbodyEmissionMatchesAnalytic")]
+        public static void ChromaticMedia_BlackbodyEmissionMatchesAnalytic()
+        {
+            Spectrum sigma_a = MakeRamp(0.4f, 3.5f, false);
+            Spectrum zero = new ConstantSpectrum(0);
+            Float emissionScale = 0.8f;
+            Spectrum emitted = new BlackbodySpectrum(2600f);
+            List<Float> lambdas = new List<Float>(), values = new List<Float>();
+            for (Float lambda = Lambda_min; lambda <= Lambda_max; lambda += 1)
+            {
+                Float a = sigma_a.Evaluate(lambda);
+                lambdas.Add(lambda);
+                values.Add(emitted.Evaluate(lambda) * (1 - (Float)Math.Exp(-a * sphereRadius)) / a);
+            }
+            Spectrum expected = new PiecewiseLinearSpectrum(lambdas, values);
+
+            foreach (bool area in new bool[] { false, true })
+            {
+                double[] refMean, refErr, mean, err;
+                RenderMean(null, expected, emissionScale, area, 8, 256, Name("ref_bb", area), out refMean, out refErr);
+
+                foreach (bool progressive in new bool[] { false, true })
+                {
+                    TextureMedium.ClearProgressive();
+                    NamedTextures textures = MakeTextures();
+                    textures.illuminantSpectrumTextures["fire"] = new SpectrumBlackbodyTexture(new FloatConstantTexture(2600f), 1f, 0f,
+                                                                                               false, 1000f);
+                    TextureMedium medium;
+                    if (progressive)
+                        medium = MakeProgressiveMedium(sigma_a, zero, "loose", "", "", "fire", emissionScale, true, 4f, 0.5f, textures);
+                    else
+                        medium = MakeTextureMedium(sigma_a, zero, "loose", 0f, 1f, "fire", emissionScale, textures, "", "", true, 4f);
+                    // The light is switched off: the medium is the only emitter
+                    RenderMean(medium, new ConstantSpectrum(0), 0f, area, 8, 256, Name(progressive ? "bbp" : "bb", area), out mean,
+                               out err);
+                    Compare("blackbody emission " + (progressive ? "progressive" : "analytic bounds") + EmitterLabel(area), mean, err,
                             refMean);
                 }
             }

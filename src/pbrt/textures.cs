@@ -1928,6 +1928,8 @@ namespace pbrt
                 tex = FloatCompareTexture.Create(renderFromTexture, parameters, false, loc, alloc);
             else if (name == "cloud")
                 tex = FloatCloudTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "ramp")
+                tex = FloatRampTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "triplanar")
                 tex = FloatTriplanarTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "ptex")
@@ -1981,6 +1983,10 @@ namespace pbrt
                 tex = MarbleTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "densitygrid")
                 tex = SpectrumGridTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "ramp")
+                tex = SpectrumRampTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "blackbody")
+                tex = SpectrumBlackbodyTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)
