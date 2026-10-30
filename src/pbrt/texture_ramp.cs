@@ -264,8 +264,7 @@ namespace pbrt
         public static SpectrumBlackbodyTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
                                                       SpectrumType spectrumType, FileLoc loc, Allocator alloc)
         {
-            if (spectrumType != SpectrumType.Illuminant)
-                pbrt.ErrorExit(loc, "\"blackbody\" is an emission spectrum; use it as an illuminant (a medium's emission_texture).");
+            // Every named spectrum texture is created for each spectrum type; the blackbody spectrum is the same for all of them
             string mode = parameters.GetOneString("mode", "normalized");
             if (mode != "normalized" && mode != "physical")
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("blackbody: mode \"%s\" unknown; use \"normalized\" or \"physical\".", mode));
