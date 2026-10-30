@@ -1022,7 +1022,17 @@ namespace pbrt
         // or the channel average, so the extremes over all channels of level 0 bound them.
         private void ComputeTexelRange(out Float lo, out Float hi)
         {
-            pbrt.MIPMapTexelRange(mipmap, out lo, out hi);
+            // Scanning every texel is expensive and region bounds ask for this once per voxel, so it is done once
+            lock (pyramidLock)
+            {
+                if (!texelRangeKnown)
+                {
+                    pbrt.MIPMapTexelRange(mipmap, out texelLo, out texelHi);
+                    texelRangeKnown = true;
+                }
+                lo = texelLo;
+                hi = texelHi;
+            }
         }
 
         public override Float MinValue()
@@ -1076,6 +1086,8 @@ namespace pbrt
 
         private ImageRangePyramid pyramid;
         private readonly object pyramidLock = new object();
+        private bool texelRangeKnown;
+        private Float texelLo, texelHi;
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
