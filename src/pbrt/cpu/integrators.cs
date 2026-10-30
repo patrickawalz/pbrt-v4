@@ -3736,6 +3736,9 @@ namespace pbrt
                 SampledSpectrum L = new SampledSpectrum(0.0f), beta = new SampledSpectrum(1.0f),
                                 r_u = new SampledSpectrum(1.0f), r_l = new SampledSpectrum(1.0f);
                 bool specularBounce = false, anyNonSpecularBounces = false;
+                // (not in pbrt-v4) The path since its last scattering vertex went through a medium whose shadow rays use the
+                // unbiased ray-marching transmittance estimator, which has no MIS partner
+                bool throughKettunen = false;
                 int depth = 0;
                 Float etaScale = 1;
 
@@ -3750,6 +3753,8 @@ namespace pbrt
                         // Sample the participating medium
                         bool scattered = false, terminated = false;
                         Float tMax = si ? si.value().tHit : Infinity;
+                        if (ray.medium is TextureMedium kettunenMedium && kettunenMedium.UsesKettunen())
+                            throughKettunen = true;
                         // Initialize _RNG_ for sampling the majorant transmittance
                         uint64_t hash0 = Hash(sampler.Get1D());
                         uint64_t hash1 = Hash(sampler.Get1D());
@@ -3930,7 +3935,10 @@ namespace pbrt
                         if (terminated || !beta || !r_u)
                             return L;
                         if (scattered)
+                        {
+                            throughKettunen = false;
                             continue;
+                        }
 
                         if (mixtureSampling)
                         {
@@ -3957,6 +3965,10 @@ namespace pbrt
                             {
                                 if (depth == 0 || specularBounce)
                                     L += beta * Le / r_u.Average();
+                                else if (throughKettunen)
+                                {
+                                    // Light sampling alone accounts for paths through such media
+                                }
                                 else
                                 {
                                     // Add infinite light contribution using both PDFs with MIS
@@ -3977,6 +3989,10 @@ namespace pbrt
                         // Add contribution of emission from intersected surface
                         if (depth == 0 || specularBounce)
                             L += beta * LeSurf / r_u.Average();
+                        else if (throughKettunen)
+                        {
+                            // Light sampling alone accounts for paths through such media
+                        }
                         else
                         {
                             // Add surface light contribution using both PDFs with MIS
@@ -4057,6 +4073,7 @@ namespace pbrt
                     DCHECK(IsInf(beta.y(lambda)) == false);
                     // Update volumetric integrator path state after surface scattering
                     specularBounce = bs.value().IsSpecular();
+                    throughKettunen = false;
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
                     if (bs.value().IsTransmission())
                         etaScale *= Sqr(bs.value().eta);
@@ -4133,6 +4150,7 @@ namespace pbrt
                         // Don't increment depth this time...
                         DCHECK(!IsInf(beta.y(lambda)));
                         specularBounce = bsSw.value().IsSpecular();
+                        throughKettunen = false;
                         ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
                     }
 
@@ -4218,6 +4236,7 @@ namespace pbrt
             SampledSpectrum T_ray = new SampledSpectrum(1.0f), r_l = new SampledSpectrum(1.0f),
                             r_u = new SampledSpectrum(1.0f);
             RNG rng = new RNG(Hash(lightRay.o), Hash(lightRay.d));
+            bool throughKettunenShadow = false;
 
             while (lightRay.d != new Vector3f(0, 0, 0))
             {
@@ -4232,7 +4251,14 @@ namespace pbrt
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     Float uT = rng.Uniform<Float>();
-                    if (lightRay.medium is TextureMedium adaptiveMedium && adaptiveMedium.UsesAdaptiveRatio())
+                    if (lightRay.medium is TextureMedium kettunenMedium && kettunenMedium.UsesKettunen())
+                    {
+                        // Unbiased ray-marching transmittance (Kettunen et al. 2021): no null-collision vertices, so
+                        // the unidirectional strategy is dropped for this path (see _throughKettunen_)
+                        T_ray *= kettunenMedium.KettunenTransmittance(lightRay, tMax, ref rng, lambda);
+                        throughKettunenShadow = true;
+                    }
+                    else if (lightRay.medium is TextureMedium adaptiveMedium && adaptiveMedium.UsesAdaptiveRatio())
                     {
                         adaptiveMedium.AdaptiveRatioTracking(lightRay, tMax, uT, ref rng, lambda, ref T_ray, ref r_l,
                                                              ref r_u);
@@ -4321,7 +4347,7 @@ namespace pbrt
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;
             r_u *= r_p * scatterPDF;
-            if (IsDeltaLight(light.Type()))
+            if (IsDeltaLight(light.Type()) || throughKettunenShadow)
                 return beta * f_hat * T_ray * ls.value().L / r_l.Average();
             else
                 return beta * f_hat * T_ray * ls.value().L / (r_l + r_u).Average();

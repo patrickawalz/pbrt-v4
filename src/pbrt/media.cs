@@ -196,7 +196,7 @@ namespace pbrt
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             else if (m is TextureMedium)
-                return SampleT_maj<TextureMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
@@ -343,6 +343,12 @@ namespace pbrt
         public DDAMajorantIterator() { }
         public DDAMajorantIterator(Ray ray, Float tMin, Float tMax, MajorantGrid grid, SampledSpectrum sigma_t)
         {
+            Initialize(ray, tMin, tMax, grid, sigma_t);
+        }
+
+        // (not in pbrt-v4) Lets the hierarchical iterator reuse one iterator per grid level
+        public void Initialize(Ray ray, Float tMin, Float tMax, MajorantGrid grid, SampledSpectrum sigma_t)
+        {
             this.tMin = tMin;
             this.tMax = tMax;
             this.grid = grid;
@@ -393,6 +399,7 @@ namespace pbrt
             // Get _maxDensity_ for current voxel and initialize _RayMajorantSegment_, _seg_
             SampledSpectrum sigma_maj = sigma_t * grid.Lookup(voxel[0], voxel[1], voxel[2]);
             RayMajorantSegment seg = new RayMajorantSegment { tMin = tMin, tMax = tVoxelExit, sigma_maj = sigma_maj };
+            lastVoxel = voxel[0] + grid.res.x * (voxel[1] + grid.res.y * voxel[2]);
 
             // Advance to next voxel in maximum density grid
             tMin = tVoxelExit;
@@ -419,12 +426,72 @@ namespace pbrt
 
         private static readonly int[] cmpToAxisTable = { 2, 1, 2, 1, 2, 2, 0, 0 };
 
+        // (not in pbrt-v4) Index of the grid voxel that produced the segment returned by the last Next() call
+        public int lastVoxel;
+
         // DDAMajorantIterator Private Members
         private SampledSpectrum sigma_t;
         private Float tMin = Infinity, tMax = -Infinity;
         private MajorantGrid grid;
         private Float3 nextCrossingT, deltaT;
         private Int3 step, voxelLimit, voxel;
+    }
+
+    // (not in pbrt-v4) A voxel of a hierarchical majorant grid that was refined: _sub_ is the finer grid covering
+    // the voxel and _children_ holds, per sub-voxel, its own refinement (null for a leaf)
+    public sealed class MajorantNode
+    {
+        public MajorantGrid sub;
+        public MajorantNode[] children;
+    }
+
+    // (not in pbrt-v4) Traverses a hierarchical majorant grid: a DDA through the coarse grid that descends, with a nested
+    // DDA over the ray segment, into every refined voxel
+    public sealed unsafe class HierarchicalMajorantIterator : RayMajorantIterator
+    {
+        public HierarchicalMajorantIterator(Ray ray, Float tMin, Float tMax, MajorantGrid grid, MajorantNode[] nodes,
+                                            SampledSpectrum sigma_t)
+        {
+            this.ray = ray;
+            this.sigma_t = sigma_t;
+            iterators[0] = new DDAMajorantIterator(ray, tMin, tMax, grid, sigma_t);
+            levelNodes[0] = nodes;
+            depth = 1;
+        }
+
+        public override pstd.optional<RayMajorantSegment> Next()
+        {
+            while (depth > 0)
+            {
+                pstd.optional<RayMajorantSegment> seg = iterators[depth - 1].Next();
+                if (!seg)
+                {
+                    --depth;
+                    continue;
+                }
+                MajorantNode node = levelNodes[depth - 1][iterators[depth - 1].lastVoxel];
+                if (node == null)
+                    return seg;
+                RayMajorantSegment sg = seg.value();
+                if (iterators[depth] == null)
+                    iterators[depth] = new DDAMajorantIterator();
+                iterators[depth].Initialize(ray, sg.tMin, sg.tMax, node.sub, sigma_t);
+                levelNodes[depth] = node.children;
+                ++depth;
+            }
+            return default;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ HierarchicalMajorantIterator depth: %d ]", depth);
+        }
+
+        private Ray ray;
+        private SampledSpectrum sigma_t;
+        private int depth;
+        private DDAMajorantIterator[] iterators = new DDAMajorantIterator[6];
+        private MajorantNode[][] levelNodes = new MajorantNode[6][];
     }
 
     // IMajorantMedium: the "using MajorantIterator = ..." member type plus the typed SampleRay
@@ -1018,7 +1085,7 @@ namespace pbrt
     // A medium whose density is driven by a procedural FloatTexture evaluated at the medium-space point:
     // density(p) = max(0, densityOffset + densityScale * texture(frequency * p)). The majorant is the
     // per-voxel density bounds from FloatTexture.RegionBounds() in a MajorantGrid, traversed with the DDA.
-    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<DDAMajorantIterator>
+    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<RayMajorantIterator>
     {
         // TextureMedium Public Methods
         public override string ToString()
@@ -1033,7 +1100,8 @@ namespace pbrt
                              FloatTexture texture, Float densityOffset, Float densityScale, int majorantRes,
                              bool progressive, Float initialMajorant, int warmupPasses, bool decomposition,
                              bool spectral, bool adaptiveRatio, bool unclamped, bool residualRatio, bool mixture, Float mixtureLooseness,
-                             Float mixtureWeight, Allocator alloc)
+                             Float mixtureWeight, Float boundsFloor, bool hierarchical, int hierarchyRes, int hierarchyDepth,
+                             Float refineThreshold, bool kettunen, int kettunenPoints, Allocator alloc)
         {
             this.warmupPasses = warmupPasses;
             this.bounds = bounds;
@@ -1070,18 +1138,33 @@ namespace pbrt
             this.mixture = mixture && progressive;
             this.mixtureLooseness = std.max<Float>(mixtureLooseness, 1);
             this.mixtureWeight = mixtureWeight;
-            this.unclamped = (unclamped || this.mixture) && progressive;
+            this.unclamped = (unclamped || this.mixture || boundsFloor > 0) && progressive;
             this.residualRatio = residualRatio && !spectral && !progressive;
             this.adaptiveRatio = (adaptiveRatio || this.residualRatio) && !spectral;
             this.decomposition = decomposition && !progressive && !spectral && !this.adaptiveRatio && maxControl > 0;
+
+            this.kettunen = kettunen && !progressive;
+            this.kettunenPoints = std.max(kettunenPoints, 1);
+
+            // (not in pbrt-v4) Refine the majorant grid where the texture bound is loose
+            if (hierarchical && !progressive && !this.decomposition && !this.residualRatio)
+            {
+                this.hierarchyRes = std.max(hierarchyRes, 2);
+                this.hierarchyDepth = std.min(hierarchyDepth, 4);
+                this.refineThreshold = refineThreshold;
+                topNodes = RefineMajorantGrid(majorantGrid, 1);
+            }
 
             // Progressive null-tracking (Misso et al. 2023): ignore the texture bounds, start every
             // voxel at a deliberately poor majorant and learn it from the density lookups.
             this.progressive = progressive;
             if (progressive)
             {
+                // (not in pbrt-v4) With _boundsFloor_ > 0 the analytic texture bounds replace the poor initial majorant:
+                // every voxel starts at (and never drops below) boundsFloor times its bound, so that the density over the
+                // majorant is at most 1 / boundsFloor and the signed weights of unclamped tracking have bounded variance
                 for (int i = 0; i < majorantGrid.voxels.Length; ++i)
-                    majorantGrid.voxels[i] = initialMajorant;
+                    majorantGrid.voxels[i] = boundsFloor > 0 ? boundsFloor * majorantGrid.voxels[i] : initialMajorant;
                 pendingMajorants = (Float[])majorantGrid.voxels.Clone();
                 lock (progressiveMedia)
                 {
@@ -1089,6 +1172,58 @@ namespace pbrt
                 }
             }
         }
+
+        // (not in pbrt-v4) Replaces the voxels of _grid_ whose children's bounds are much tighter than their own with
+        // finer grids, recursively. Returns, per voxel of _grid_, the refinement or null.
+        private MajorantNode[] RefineMajorantGrid(MajorantGrid grid, int depth)
+        {
+            MajorantNode[] nodes = new MajorantNode[grid.voxels.Length];
+            if (depth > hierarchyDepth)
+                return nodes;
+            int n = hierarchyRes;
+            for (int z = 0; z < grid.res.z; ++z)
+            {
+                for (int y = 0; y < grid.res.y; ++y)
+                {
+                    for (int x = 0; x < grid.res.x; ++x)
+                    {
+                        Float parent = grid.Lookup(x, y, z);
+                        if (parent <= 0)
+                            continue;
+                        Bounds3f vb = grid.VoxelBounds(x, y, z);
+                        Bounds3f region = new Bounds3f(grid.bounds.Lerp(vb.pMin), grid.bounds.Lerp(vb.pMax));
+                        MajorantGrid child = new MajorantGrid(region, new Point3i(n, n, n), null);
+                        Float sum = 0;
+                        for (int cz = 0; cz < n; ++cz)
+                        {
+                            for (int cy = 0; cy < n; ++cy)
+                            {
+                                for (int cx = 0; cx < n; ++cx)
+                                {
+                                    Bounds3f cb = child.VoxelBounds(cx, cy, cz);
+                                    Bounds3f cr = new Bounds3f(region.Lerp(cb.pMin), region.Lerp(cb.pMax));
+                                    texture.RegionBounds(cr, out Float lo, out Float hi);
+                                    Float a = densityOffset + densityScale * lo;
+                                    Float b = densityOffset + densityScale * hi;
+                                    Float childMax = std.min(parent, std.max<Float>(0, std.max(a, b)));
+                                    child.Set(cx, cy, cz, childMax);
+                                    sum += childMax;
+                                }
+                            }
+                        }
+                        if (sum / (n * n * n) < refineThreshold * parent)
+                        {
+                            nodes[x + grid.res.x * (y + grid.res.y * z)] = new MajorantNode { sub = child, children = RefineMajorantGrid(child, depth + 1) };
+                        }
+                    }
+                }
+            }
+            return nodes;
+        }
+
+        // (not in pbrt-v4) Number of majorant segments and density lookups since the last reset, for benchmarking
+        public static long lookupCount;
+        public static bool countLookups;
 
         // Progressive null-tracking passes: the majorants are fixed while a pass is rendered and the
         // maxima found by the density lookups take effect when it ends.
@@ -1131,6 +1266,8 @@ namespace pbrt
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
+            if (countLookups)
+                System.Threading.Interlocked.Increment(ref lookupCount);
             TextureEvalContext ctx = new TextureEvalContext();
             ctx.p = renderFromMedium.ApplyInverse(p);
             Float density = std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
@@ -1173,7 +1310,7 @@ namespace pbrt
                                           spectralTracking = spectral, signedNull = unclamped, mixture = false };
         }
 
-        public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
+        public RayMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
         {
             // Transform ray to medium's space and compute bounds overlap
             ray = renderFromMedium.ApplyInverse(ray, &raytMax);
@@ -1186,6 +1323,8 @@ namespace pbrt
             // Spectral tracking samples distances with one majorant for all wavelengths
             if (spectral)
                 sigma_t = new SampledSpectrum(sigma_t.MaxComponentValue());
+            if (topNodes != null)
+                return new HierarchicalMajorantIterator(ray, tMin, tMax, majorantGrid, topNodes, sigma_t);
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
         }
 
@@ -1197,6 +1336,86 @@ namespace pbrt
         public bool UsesDecomposition() { return decomposition; }
 
         public bool UsesMixture() { return mixture; }
+
+        public bool UsesKettunen() { return kettunen; }
+
+        [ThreadStatic] private static Float[] kettunenTMin;
+        [ThreadStatic] private static Float[] kettunenTMax;
+        [ThreadStatic] private static Float[] kettunenCumulative;
+        [ThreadStatic] private static Float[] kettunenRate;
+
+        // (not in pbrt-v4) Unbiased ray-marching transmittance estimator (Kettunen et al. 2021). With a control
+        // optical depth c that is independent of the estimates tau_i of the optical depth,
+        //     exp(-tau) = exp(-c) sum_n prod_{i<=n} (c - tau_i) / n!
+        // is unbiased for any c, and converges after a few terms when c is close to tau. Both c and every tau_i are
+        // combs of _kettunenPoints_ evenly spaced, jointly shifted points distributed in proportion to the majorant,
+        // and the series is truncated by Russian roulette. The cost is independent of the majorant's optical depth.
+        public SampledSpectrum KettunenTransmittance(Ray ray, Float tMax, ref RNG rng, SampledWavelengths lambda)
+        {
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+            RayMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            if (kettunenTMin == null)
+            {
+                kettunenTMin = new Float[4096];
+                kettunenTMax = new Float[4096];
+                kettunenCumulative = new Float[4097];
+                kettunenRate = new Float[4096];
+            }
+            int nSegments = 0;
+            Float total = 0;
+            kettunenCumulative[0] = 0;
+            for (pstd.optional<RayMajorantSegment> seg = iter.Next(); seg; seg = iter.Next())
+            {
+                RayMajorantSegment sg = seg.value();
+                Float rate = sg.sigma_maj[0];
+                if (!(rate > 0) || nSegments == kettunenTMin.Length)
+                    continue;
+                kettunenTMin[nSegments] = sg.tMin;
+                kettunenTMax[nSegments] = sg.tMax;
+                kettunenRate[nSegments] = rate;
+                total += rate * (sg.tMax - sg.tMin);
+                kettunenCumulative[++nSegments] = total;
+            }
+            if (nSegments == 0)
+                return new SampledSpectrum(1f);
+
+            // Estimate the control and the optical depths
+            SampledSpectrum c = KettunenOpticalDepth(ray, nSegments, total, ref rng, lambda);
+            SampledSpectrum sum = new SampledSpectrum(1f), term = new SampledSpectrum(1f);
+            for (int n = 1; n < 1000; ++n)
+            {
+                SampledSpectrum a = (c - KettunenOpticalDepth(ray, nSegments, total, ref rng, lambda)) / n;
+                Float p = std.min<Float>(1, std.max<Float>(Abs(a).MaxComponentValue(), .05f));
+                if (rng.Uniform<Float>() >= p)
+                    break;
+                term *= a / p;
+                sum += term;
+            }
+            return FastExp(-c) * sum;
+        }
+
+        // Comb estimate of the optical depth: the points are evenly spaced in the majorant's optical depth, so each
+        // sample's weight is the density's ratio to the majorant at the hero wavelength
+        private SampledSpectrum KettunenOpticalDepth(Ray ray, int nSegments, Float total, ref RNG rng, SampledWavelengths lambda)
+        {
+            SampledSpectrum ratioSum = new SampledSpectrum(0f);
+            Float u = rng.Uniform<Float>();
+            int segment = 0;
+            for (int j = 0; j < kettunenPoints; ++j)
+            {
+                Float s = (j + u) / kettunenPoints * total;
+                while (segment < nSegments - 1 && s >= kettunenCumulative[segment + 1])
+                    ++segment;
+                Float t = kettunenTMin[segment] + (s - kettunenCumulative[segment]) / kettunenRate[segment];
+                t = std.min(t, kettunenTMax[segment]);
+                MediumProperties mp = SamplePoint(ray.Apply(t), lambda);
+                // sigma_t(x) / sigma_maj(x) at the hero wavelength
+                ratioSum += (mp.sigma_a + mp.sigma_s) / (kettunenRate[segment] > 0 ? kettunenRate[segment] : 1f);
+            }
+            return ratioSum * (total / kettunenPoints);
+        }
+
 
         // SampleT_maj() with mixture sampling of the collision distances (Miller et al. 2019, applied to progressive
         // null-tracking without clamping). The integrand's majorant is the loose one, _mixtureLooseness_ times the
@@ -1211,7 +1430,7 @@ namespace pbrt
         {
             tMax *= Length(ray.d);
             ray.d = Normalize(ray.d);
-            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            RayMajorantIterator iter = SampleRay(ray, tMax, lambda);
             bool useTight = rng.Uniform<Float>() < mixtureWeight;
             // Densities of the tight and loose techniques since the last vertex, per wavelength (their mixture
             // is 1 right after a vertex)
@@ -1304,7 +1523,7 @@ namespace pbrt
         {
             tMax *= Length(ray.d);
             ray.d = Normalize(ray.d);
-            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            RayMajorantIterator iter = SampleRay(ray, tMax, lambda);
             while (true)
             {
                 pstd.optional<RayMajorantSegment> seg = iter.Next();
@@ -1371,7 +1590,7 @@ namespace pbrt
         {
             tMax *= Length(ray.d);
             ray.d = Normalize(ray.d);
-            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            RayMajorantIterator iter = SampleRay(ray, tMax, lambda);
             SampledSpectrum T_maj = new SampledSpectrum(1f);
             SampledSpectrum lightAccum = new SampledSpectrum(1f);
             tailLight = new SampledSpectrum(1f);
@@ -1446,7 +1665,7 @@ namespace pbrt
             tMax *= Length(ray.d);
             ray.d = Normalize(ray.d);
 
-            DDAMajorantIterator iter = SampleRay(ray, tMax, lambda);
+            RayMajorantIterator iter = SampleRay(ray, tMax, lambda);
             SampledSpectrum sigma_a0 = sigma_a_spec.Sample(lambda), sigma_s0 = sigma_s_spec.Sample(lambda);
             SampledSpectrum sigma_t = sigma_a0 + sigma_s0;
 
@@ -1561,6 +1780,11 @@ namespace pbrt
             return controlGrid[vx + majorantGrid.res.x * (vy + majorantGrid.res.y * vz)];
         }
         private Float[] pendingMajorants;
+        private MajorantNode[] topNodes;
+        private bool kettunen;
+        private int kettunenPoints;
+        private int hierarchyRes, hierarchyDepth;
+        private Float refineThreshold;
         private const Float progressiveEpsilon = 1e-3f;
         private static readonly List<TextureMedium> progressiveMedia = new List<TextureMedium>();
 
@@ -1605,13 +1829,25 @@ namespace pbrt
             Float mixtureWeight = parameters.GetOneFloat("mixtureweight", .5f);
             int warmupPasses = parameters.GetOneInt("warmuppasses", 0);
             Float initialMajorant = parameters.GetOneFloat("initialmajorant", 0.01f);
+            Float boundsFloor = parameters.GetOneFloat("boundsfloor", 0f);
+            if (parameters.GetOneBool("countlookups", false) && !countLookups)
+            {
+                countLookups = true;
+                AppDomain.CurrentDomain.ProcessExit += (object sender, EventArgs e) => Console.Error.WriteLine($"DENSITY LOOKUPS {lookupCount}");
+            }
+            bool hierarchical = parameters.GetOneBool("hierarchical", false);
+            int hierarchyRes = parameters.GetOneInt("hierarchyres", 4);
+            int hierarchyDepth = parameters.GetOneInt("hierarchydepth", 2);
+            Float refineThreshold = parameters.GetOneFloat("refinethreshold", .7f);
+            bool kettunen = parameters.GetOneBool("kettunen", false);
+            int kettunenPoints = parameters.GetOneInt("kettunenpoints", 4);
 
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, texture, densityOffset,
                                      densityScale, majorantRes, progressive, initialMajorant, warmupPasses, decomposition, spectral, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness,
-                                     mixtureWeight, alloc);
+                                     mixtureWeight, boundsFloor, hierarchical, hierarchyRes, hierarchyDepth, refineThreshold, kettunen, kettunenPoints, alloc);
         }
     }
 

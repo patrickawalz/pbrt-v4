@@ -7,13 +7,13 @@ namespace pbrt
 {
     public static unsafe class MediaExperimentalTests
     {
-        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f, bool residualRatio = false, bool mixture = false, Float mixtureWeight = .5f, Float mixtureLooseness = 4f)
+        private static TextureMedium MakeMedium(bool progressive, bool adaptiveRatio = false, bool unclamped = false, Float initialMajorant = 0.01f, bool residualRatio = false, bool mixture = false, Float mixtureWeight = .5f, Float mixtureLooseness = 4f, Float boundsFloor = 0f, bool hierarchical = false, bool kettunen = false)
         {
             TextureMapping3D map = new PointTransformMapping(pbrt.Scale(1.6f, 1.6f, 1.6f));
             FloatTexture texture = new FBmTexture(map, 4, .5f);
             return new TextureMedium(new Bounds3f(new Point3f(-.8f, .2f, -.8f), new Point3f(.8f, 1.8f, .8f)),
                                      new Transform(), new ConstantSpectrum(0.05f), new ConstantSpectrum(2f), 0.3f, texture,
-                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, null);
+                                     0.05f, 8f, 8, progressive, initialMajorant, 0, false, false, adaptiveRatio, unclamped, residualRatio, mixture, mixtureLooseness, mixtureWeight, boundsFloor, hierarchical, 4, 2, .7f, kettunen, 4, null);
         }
 
         // Reference transmittance along a ray by quadrature of the medium's own density
@@ -265,6 +265,129 @@ namespace pbrt
                 TextureMedium.EndProgressivePass();
             }
             Console.WriteLine($"PROBE clamped (same start, same passes): mean {cSum / nPasses}");
+        }
+
+        // Progressive tracking started from the analytic texture bounds (floored at a fraction of them) needs no
+        // warm-up, stays unbiased and has bounded variance
+        [TEST("TextureMedium", "BoundsFloorUnbiased")]
+        public static void TextureMedium_BoundsFloorUnbiased()
+        {
+            TextureMedium reference = MakeMedium(false);
+            TextureMedium floored = MakeMedium(true, false, false, 0.01f, false, false, .5f, 4f, .25f);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(31);
+            for (int i = 0; i < 4; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Float refT = ReferenceTransmittance(reference, new Ray(o, d, 0, reference), 2.2f, lambda);
+                int n = 200000;
+                double sum = 0, sum2 = 0;
+                for (int s = 0; s < n; ++s)
+                {
+                    Float q = SignedRatioTracking(floored, new Ray(o, d, 0, floored), 2.2f, lambda, ref rng);
+                    sum += q;
+                    sum2 += q * q;
+                }
+                double mean = sum / n;
+                double sigma = Math.Sqrt(Math.Max(sum2 / n - mean * mean, 0) / n);
+                Console.WriteLine($"PROBE boundsfloor: mean {mean} reference {refT} stderr {sigma}");
+                EXPECT_LT(Math.Abs(mean - refT), 4 * sigma + 1e-3);
+            }
+        }
+
+        // The hierarchical majorant grid bounds the density everywhere, is never looser than the flat grid, and
+        // gives an unbiased transmittance
+        [TEST("TextureMedium", "HierarchicalGridValid")]
+        public static void TextureMedium_HierarchicalGridValid()
+        {
+            TextureMedium flat = MakeMedium(false);
+            TextureMedium tree = MakeMedium(false, false, false, 0.01f, false, false, .5f, 4f, 0f, true);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(41);
+            double flatSum = 0, treeSum = 0;
+            int violations = 0, nSegments = 0;
+            for (int i = 0; i < 200; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .6f * (rng.Uniform<Float>() - .5f), .6f * (rng.Uniform<Float>() - .5f)));
+                RayMajorantIterator it = tree.SampleRay(new Ray(o, d, 0, tree), 2.2f, lambda);
+                RayMajorantIterator itFlat = flat.SampleRay(new Ray(o, d, 0, flat), 2.2f, lambda);
+                Float tPrev = -1;
+                for (pstd.optional<RayMajorantSegment> seg = it.Next(); seg; seg = it.Next())
+                {
+                    RayMajorantSegment sg = seg.value();
+                    // segments are contiguous and ordered
+                    EXPECT_GE(sg.tMin, tPrev - 1e-4f);
+                    tPrev = sg.tMax;
+                    ++nSegments;
+                    treeSum += sg.sigma_maj[0] * (sg.tMax - sg.tMin);
+                    for (int k = 0; k < 8; ++k)
+                    {
+                        Float t = sg.tMin + (sg.tMax - sg.tMin) * rng.Uniform<Float>();
+                        MediumProperties mp = tree.SamplePoint(new Point3f(o.x + t * d.x, o.y + t * d.y, o.z + t * d.z), lambda);
+                        if (mp.sigma_a[0] + mp.sigma_s[0] > sg.sigma_maj[0] * (1 + 1e-3f) + 1e-4f)
+                            ++violations;
+                    }
+                }
+                for (pstd.optional<RayMajorantSegment> seg = itFlat.Next(); seg; seg = itFlat.Next())
+                    flatSum += seg.value().sigma_maj[0] * (seg.value().tMax - seg.value().tMin);
+            }
+            Console.WriteLine($"PROBE hierarchical: optical depth of the majorant tree {treeSum} flat {flatSum} segments {nSegments} violations {violations}");
+            EXPECT_EQ(violations, 0);
+            EXPECT_LE(treeSum, flatSum * (1 + 1e-3));
+
+            for (int i = 0; i < 3; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Float refT = ReferenceTransmittance(flat, new Ray(o, d, 0, flat), 2.2f, lambda);
+                int n = 100000;
+                double sum = 0, sum2 = 0;
+                for (int s = 0; s < n; ++s)
+                {
+                    Float q = RatioTracking(tree, new Ray(o, d, 0, tree), 2.2f, lambda, ref rng);
+                    sum += q;
+                    sum2 += q * q;
+                }
+                double mean = sum / n;
+                double sigma = Math.Sqrt(Math.Max(sum2 / n - mean * mean, 0) / n);
+                Console.WriteLine($"PROBE hierarchical: mean {mean} reference {refT} stderr {sigma}");
+                EXPECT_LT(Math.Abs(mean - refT), 4 * sigma + 1e-3);
+            }
+        }
+
+        // The unbiased ray-marching transmittance estimator matches the quadrature reference, with the stderr of
+        // ratio tracking printed for comparison
+        [TEST("TextureMedium", "KettunenUnbiased")]
+        public static void TextureMedium_KettunenUnbiased()
+        {
+            TextureMedium reference = MakeMedium(false, false, false, 0.01f, false, false, .5f, 4f, 0f, false, false);
+            TextureMedium kettunen = MakeMedium(false, false, false, 0.01f, false, false, .5f, 4f, 0f, false, true);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(51);
+            for (int i = 0; i < 4; ++i)
+            {
+                Point3f o = new Point3f(-1, .3f + 1.4f * rng.Uniform<Float>(), -.7f + 1.4f * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, .3f * (rng.Uniform<Float>() - .5f), .3f * (rng.Uniform<Float>() - .5f)));
+                Float refT = ReferenceTransmittance(reference, new Ray(o, d, 0, reference), 2.2f, lambda);
+                int n = 100000;
+                double sum = 0, sum2 = 0, rSum = 0, rSum2 = 0;
+                for (int s = 0; s < n; ++s)
+                {
+                    Float q = kettunen.KettunenTransmittance(new Ray(o, d, 0, kettunen), 2.2f, ref rng, lambda)[0];
+                    sum += q;
+                    sum2 += q * q;
+                    Float r = RatioTracking(reference, new Ray(o, d, 0, reference), 2.2f, lambda, ref rng);
+                    rSum += r;
+                    rSum2 += r * r;
+                }
+                double mean = sum / n;
+                double sigma = Math.Sqrt(Math.Max(sum2 / n - mean * mean, 0) / n);
+                double rSigma = Math.Sqrt(Math.Max(rSum2 / n - (rSum / n) * (rSum / n), 0) / n);
+                Console.WriteLine($"PROBE kettunen: mean {mean} reference {refT} stderr {sigma} (ratio tracking stderr {rSigma})");
+                EXPECT_LT(Math.Abs(mean - refT), 4 * sigma + 1e-3);
+            }
         }
 
         // One transmittance estimate with mixture sampling of the collision distances, as in volpath's shadow rays
