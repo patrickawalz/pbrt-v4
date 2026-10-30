@@ -1989,6 +1989,10 @@ namespace pbrt
             // A named illuminant spectrum texture gives the emitted radiance, scaled by "Lescale"
             string emissionTextureName = parameters.GetOneString("emission_texture", "");
             Float emissionScale = parameters.GetOneFloat("Lescale", 1f);
+            // An illuminant spectrum texture carries the color space's illuminant, so normalize it photometrically as
+            // pbrt does for the "Le" of its other media and for light sources
+            if (emissionTextureName.Length != 0)
+                emissionScale /= SpectrumToPhotometric(RGBColorSpace.sRGB.illuminant);
             // "volume": Le is weighted by sigma_a, as in pbrt-v4. "perlength": the texture is the radiance emitted per
             // unit length, as in LuxCore. "emissionmajorant" k > 0 makes the majorant at least k times the emission's
             // majorant (Huang et al. 2021); it defaults to 1 for "perlength" and to off for "volume".
