@@ -403,6 +403,10 @@ namespace pbrt
             // Return unset _BSDF_ if surface has a null material
             if (material == null)
                 return default;
+            // (not in pbrt-v4) A thin coat that the ray goes through is a null material for this ray
+            ThinCoatMaterial coat = material as ThinCoatMaterial;
+            if (coat != null && coat.PassesThrough(this, ray.d))
+                return default;
 
             // Evaluate normal or bump map, if present
             FloatTexture displacement = material.GetDisplacement();

@@ -60,6 +60,48 @@ namespace pbrt
             this.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
         }
 
+        // (not in pbrt-v4) The reflectance (Fs, Fp) of a thin slab for the two polarisations, with the retardances of the first
+        // interface: the multiple reflections inside add up incoherently, as ThinDielectricBxDF's R + T^2 R / (1 - R^2)
+        static void ThinSlab(Float cosTheta, Float eta, out Float Rs, out Float Rp, out Float Ds, out Float Dp)
+        {
+            pbrt.FrDielectricPolarised(std.abs(cosTheta), eta, out Float Fs, out Float Fp, out Ds, out Dp);
+            Rs = Fs < 1 ? Fs + Sqr(1 - Fs) * Fs / (1 - Sqr(Fs)) : Fs;
+            Rp = Fp < 1 ? Fp + Sqr(1 - Fp) * Fp / (1 - Sqr(Fp)) : Fp;
+        }
+
+        // (not in pbrt-v4) The Mueller matrix of the mirror reflection of a thin coat: the scalar reflection that was chosen with
+        // the probability coat.Reflectance() has the weight one, so the polarised one is relative to that probability
+        internal static bool CoatReflection(ThinCoatBxDF coat, Vector3f wo, Vector3f wi, Vector3f normal, TransportMode mode,
+                                            out Attenuation A)
+        {
+            Float cosTheta = Dot(wo, normal);
+            ThinSlab(cosTheta, coat.Eta(), out Float Rs, out Float Rp, out Float Ds, out Float Dp);
+            Float R = FrDielectric(std.abs(cosTheta), coat.Eta());
+            if (R < 1)
+                R += Sqr(1 - R) * R / (1 - Sqr(R));
+            A = default;
+            if (R <= 0)
+                return false;
+            A = Attenuation.Fresnel(new SampledSpectrum(1 / R), Rs, Rp, Ds, Dp);
+            A = A.Scattered(wo, wi, normal, mode == TransportMode.Radiance);
+            return true;
+        }
+
+        // (not in pbrt-v4) The Mueller matrix of the light that goes through a thin coat in direction d
+        internal static bool CoatPassThrough(ThinCoatMaterial coat, Vector3f wo, Vector3f normal, TransportMode mode,
+                                             out Attenuation A)
+        {
+            Float cosTheta = Dot(wo, normal);
+            ThinSlab(cosTheta, coat.Eta(), out Float Rs, out Float Rp, out Float Ds, out Float Dp);
+            Float T = 1 - coat.Reflectance(cosTheta);
+            A = default;
+            if (T <= 0)
+                return false;
+            A = Attenuation.Fresnel(new SampledSpectrum(1 / T), 1 - Rs, 1 - Rp, 0, 0);
+            A = A.Scattered(wo, -wo, normal, mode == TransportMode.Radiance);
+            return true;
+        }
+
         // The Mueller matrix of a specular interface for a sampled direction, or false when the scattering depolarises
         internal static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode,
                                                  out Attenuation A)
@@ -90,6 +132,11 @@ namespace pbrt
                     A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T / Sqr(bs.eta) : 1 / T), 1 - Fs, 1 - Fp, 0, 0);
                 }
             }
+            else if (bxdf is ThinCoatBxDF coat)
+            {
+                return CoatReflection(coat, wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z),
+                                      mode, out A);
+            }
             else if (bxdf is ConductorBxDF conductor)
             {
                 SampledSpectrum eta = conductor.Eta(), k = conductor.K();
@@ -108,6 +155,16 @@ namespace pbrt
 
             A = A.Scattered(wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z), mode == TransportMode.Radiance);
             return true;
+        }
+
+        // (not in pbrt-v4) The Mueller matrix of a thin coat that the ray passed through (the surface has no BSDF then)
+        internal static bool PassedCoat(SurfaceInteraction isect, Vector3f wo, TransportMode mode, out Attenuation A)
+        {
+            A = default;
+            ThinCoatMaterial coat = isect.material as ThinCoatMaterial;
+            if (coat == null)
+                return false;
+            return CoatPassThrough(coat, wo, new Vector3f(isect.n.x, isect.n.y, isect.n.z), mode, out A);
         }
 
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler,
@@ -159,6 +216,8 @@ namespace pbrt
                 BSDF bsdf = isect.GetBSDF(ray, ref lambda, camera, scratchBuffer, sampler);
                 if (!bsdf)
                 {
+                    if (PassedCoat(isect, -ray.d, TransportMode.Radiance, out Attenuation Ac))
+                        beta *= Ac;
                     specularBounce = true;
                     isect.SkipIntersection(ref ray, si.value().tHit);
                     continue;

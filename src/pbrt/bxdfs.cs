@@ -445,6 +445,54 @@ namespace pbrt
         private Float eta;
     }
 
+    // (not in pbrt-v4) ThinCoatBxDF Definition: the reflection of a thin clear coat. The light that goes through the coat is
+    // not a BSDF event (see ThinCoatMaterial), so what is left is a perfect mirror whose throughput of one is the probability of
+    // reflection that was already used to choose it.
+    public sealed unsafe class ThinCoatBxDF : BxDF
+    {
+        // ThinCoatBxDF Public Methods
+        public ThinCoatBxDF() { }
+        public ThinCoatBxDF(Float eta) { this.eta = eta; }
+
+        // (not in pbrt-v4) For the polarised integrators
+        public Float Eta() { return eta; }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            return new SampledSpectrum(0);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                return default;
+            Vector3f wi = new Vector3f(-wo.x, -wo.y, wo.z);
+            return new BSDFSample(new SampledSpectrum(1 / AbsCosTheta(wi)), wi, 1, BxDFFlags.SpecularReflection);
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            return 0;
+        }
+
+        public static string Name() { return "ThinCoatBxDF"; }
+
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags()
+        {
+            return BxDFFlags.SpecularReflection;
+        }
+
+        public override string ToString()
+        {
+            return "[ ThinCoatBxDF ]";
+        }
+
+        private Float eta = 1.5f;
+    }
+
     // ConductorBxDF Definition
     public sealed unsafe class ConductorBxDF : BxDF
     {

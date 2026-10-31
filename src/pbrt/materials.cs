@@ -281,6 +281,92 @@ namespace pbrt
         private Spectrum eta;
     }
 
+    // (not in pbrt-v4) ThinCoatMaterial Definition: a thin clear dielectric coat over whatever is behind it (a medium, usually).
+    // Like ThinDielectricMaterial, light goes straight through it or is mirrored, with the reflectance of a thin slab. Unlike
+    // it, the choice is made once for the surface point and the direction, by a hash: the surface acts as a null interface for
+    // the rays that pass (see SurfaceInteraction.GetBSDF()) and the shadow rays that pass, so light sampling still works through it.
+    // The probabilities of a path and of a shadow ray going through are the same, so the multiple importance sampling weights,
+    // which do not contain them, stay consistent, and the estimate is unbiased.
+    public sealed unsafe class ThinCoatMaterial : Material
+    {
+        // Set when a coat is created, so that scenes without one keep the plain shadow ray test
+        public static bool anyInScene;
+
+        public ThinCoatMaterial(Float eta, FloatTexture displacement, Image normalMap)
+        {
+            this.eta = eta; this.displacement = displacement; this.normalMap = normalMap;
+            anyInScene = true;
+        }
+
+        // The reflectance of a thin slab, as ThinDielectricBxDF computes it
+        public Float Reflectance(Float cosTheta)
+        {
+            Float R = FrDielectric(std.abs(cosTheta), eta), T = 1 - R;
+            if (R < 1)
+            {
+                R += Sqr(T) * R / (1 - Sqr(R));
+            }
+            return R;
+        }
+
+        public Float Eta() { return eta; }
+
+        // Whether the ray or shadow ray that arrives with direction w goes through the coat at this point
+        public bool PassesThrough(SurfaceInteraction intr, Vector3f w)
+        {
+            w = Normalize(w);
+            RNG rng = new RNG(Hash(intr.p()), Hash(w));
+            return rng.Uniform<Float>() >= Reflectance(Dot(w, intr.n));
+        }
+
+        // Whether a shadow ray with direction d is stopped by the surface that it hit
+        public static bool Blocks(SurfaceInteraction intr, Vector3f d)
+        {
+            Material material = intr.material;
+            if (material == null)
+                return false;
+            ThinCoatMaterial coat = material as ThinCoatMaterial;
+            return coat == null || !coat.PassesThrough(intr, d);
+        }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval) { return true; }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(new ThinCoatBxDF(eta)));
+        }
+
+        public static string Name() { return "ThinCoatMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return displacement; }
+        public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ThinCoatMaterial eta: %f ]", eta);
+        }
+
+        public static ThinCoatMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
+        {
+            Float eta = parameters.GetOneFloat("eta", 1.5f);
+            FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+            return new ThinCoatMaterial(eta, displacement, normalMap);
+        }
+
+        // ThinCoatMaterial Private Data
+        private Float eta;
+        private FloatTexture displacement;
+        private Image normalMap;
+    }
+
     // ThinDielectricMaterial Definition
     public sealed unsafe class ThinDielectricMaterial : Material
     {
@@ -1375,6 +1461,8 @@ namespace pbrt
                 material = DiffuseTransmissionMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "dielectric")
                 material = DielectricMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "thincoat")
+                material = ThinCoatMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "thindielectric")
                 material = ThinDielectricMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "hair")
