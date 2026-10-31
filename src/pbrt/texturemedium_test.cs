@@ -29,7 +29,7 @@ namespace pbrt
         {
             Bounds3f box = new Bounds3f(new Point3f(-1, 0, -1), new Point3f(1, 2, 1));
             return new TextureMedium(box, new Transform(), new ConstantSpectrum(0.5f), new ConstantSpectrum(1.5f), 1.0f, 0.3f,
-                                     texture, 0.6f, 1.0f, majorantRes, 4, hierarchyDepth, 0.5f, null);
+                                     texture, 0.6f, 1.0f, majorantRes, 4, hierarchyDepth, 0.5f, null, 1.0f, null);
         }
 
         [TEST("TextureMedium", "MajorantsCoverDensity")]

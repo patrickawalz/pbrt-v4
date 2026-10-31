@@ -18,8 +18,11 @@ namespace pbrt
         // TextureMedium Public Methods
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
                              Float g, string densityTextureName, Float densityOffset, Float densityScale, int majorantRes,
-                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, Allocator alloc)
+                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, string emissionTextureName,
+                             Float emissionScale, Allocator alloc)
         {
+            this.emissionTextureName = emissionTextureName;
+            this.emissionScale = emissionScale;
             this.hierarchyRes = hierarchyRes;
             this.hierarchyDepth = hierarchyDepth;
             this.refineThreshold = refineThreshold;
@@ -38,10 +41,12 @@ namespace pbrt
 
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
                              Float g, FloatTexture density, Float densityOffset, Float densityScale, int majorantRes,
-                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, Allocator alloc)
+                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, SpectrumTexture emission,
+                             Float emissionScale, Allocator alloc)
             : this(bounds, renderFromMedium, sigma_a, sigma_s, sigmaScale, g, "", densityOffset, densityScale, majorantRes,
-                   hierarchyRes, hierarchyDepth, refineThreshold, alloc)
+                   hierarchyRes, hierarchyDepth, refineThreshold, "", emissionScale, alloc)
         {
+            emissionTexture = emission;
             SetTexture(density);
         }
 
@@ -50,6 +55,10 @@ namespace pbrt
         {
             if (densityTextureName.Length == 0)
                 return;
+            if (emissionTextureName.Length != 0 &&
+                !textures.illuminantSpectrumTextures.TryGetValue(emissionTextureName, out emissionTexture))
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: spectrum texture not defined (emission of a \"texture\" medium)",
+                                                      emissionTextureName));
             if (!textures.floatTextures.TryGetValue(densityTextureName, out FloatTexture density))
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (density of a \"texture\" medium)",
                                                       densityTextureName));
@@ -150,7 +159,90 @@ namespace pbrt
             return densityScale * texture.Gradient(ctx);
         }
 
-        public override bool IsEmissive() { return false; }
+        public override bool IsEmissive() { return emissionTextureName.Length != 0 || emissionTexture != null; }
+
+        public Bounds3f MediumBounds() { return bounds; }
+        public Transform RenderFromMedium() { return renderFromMedium; }
+
+        // Emitted radiance per length at the render-space point p (the emission texture times sigma_a, as in pbrt-v4's media)
+        public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda)
+        {
+            MediumProperties mp = SamplePoint(p, lambda);
+            return mp.sigma_a * mp.Le;
+        }
+
+        // An upper bound of EmissionAt() over a box of render space, over all wavelengths
+        public Float EmissionBound(Bounds3f renderBox)
+        {
+            if (emissionTexture == null)
+                return 0;
+            texture.RegionBounds(renderBox, out Float lo, out Float hi);
+            Float density = std.max<Float>(0, std.max(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
+            return emissionScale * emissionTexture.RegionMax(renderBox) * density * sigma_a_spec.MaxValue();
+        }
+
+        // The majorant that the tracking of a ray uses at the render-space point p (the finest grid cell that holds it)
+        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda)
+        {
+            Point3f pMedium = renderFromMedium.ApplyInverse(p);
+            if (!pbrt.Inside(pMedium, bounds))
+                return new SampledSpectrum(0f);
+            SampledSpectrum sigma_t = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+            MajorantGrid grid = majorantGrid;
+            MajorantNode[] nodes = topNodes;
+            while (true)
+            {
+                Vector3f o = grid.bounds.Offset(pMedium);
+                int x = std.min(std.max((int)(o.x * grid.res.x), 0), grid.res.x - 1);
+                int y = std.min(std.max((int)(o.y * grid.res.y), 0), grid.res.y - 1);
+                int z = std.min(std.max((int)(o.z * grid.res.z), 0), grid.res.z - 1);
+                MajorantNode node = nodes != null ? nodes[x + grid.res.x * (y + grid.res.y * z)] : null;
+                if (node == null)
+                    return sigma_t * grid.Lookup(x, y, z);
+                grid = node.sub;
+                nodes = node.children;
+            }
+        }
+
+        // Next event estimation of the emission: the light that samples it, added to the scene's lights by the integrators
+        public void EnableEmissionSampling(int res, bool fnee)
+        {
+            lock (emissionMedia)
+            {
+                if (emissionLight == null)
+                {
+                    emissionLight = new VolumeEmissionLight(this, res);
+                    emissionLight.SetFnee(fnee);
+                    emissionMedia.Add(this);
+                }
+            }
+        }
+
+        public VolumeEmissionLight EmissionLight() { return emissionLight; }
+
+        // The lights plus the emission lights of the media that ask for them
+        public static List<Light> AddEmissionLights(List<Light> lights)
+        {
+            List<Light> all = new List<Light>(lights);
+            lock (emissionMedia)
+            {
+                foreach (TextureMedium medium in emissionMedia)
+                {
+                    if (medium.emissionLight.HasEmission() && !all.Contains(medium.emissionLight))
+                        all.Add(medium.emissionLight);
+                }
+            }
+            return all;
+        }
+
+        // Forgets the media that ask for emission sampling, for tests that build several in one process
+        public static void ClearEmissionLights()
+        {
+            lock (emissionMedia)
+            {
+                emissionMedia.Clear();
+            }
+        }
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
@@ -159,7 +251,14 @@ namespace pbrt
             Float d = Density(p);
             sigma_a *= d;
             sigma_s *= d;
-            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
+            SampledSpectrum Le = new SampledSpectrum(0f);
+            if (emissionTexture != null && d > 0)
+            {
+                TextureEvalContext ectx = new TextureEvalContext();
+                ectx.p = p;
+                Le = emissionScale * ClampZero(emissionTexture.Evaluate(ectx, lambda));
+            }
+            return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = Le };
         }
 
         public RayMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
@@ -205,12 +304,29 @@ namespace pbrt
             Float densityOffset = parameters.GetOneFloat("densityoffset", 0f);
             Float densityScale = parameters.GetOneFloat("densityscale", 1f);
             int majorantRes = parameters.GetOneInt("majorantres", 16);
+            // A named illuminant spectrum texture gives the emitted radiance, scaled by "Lescale" and normalized photometrically
+            // as pbrt does for the "Le" of its other media
+            string emissionTextureName = parameters.GetOneString("emission_texture", "");
+            Float emissionScale = parameters.GetOneFloat("Lescale", 1f);
+            if (emissionTextureName.Length != 0)
+                emissionScale /= SpectrumToPhotometric(RGBColorSpace.sRGB.illuminant);
+            bool emissionNee = parameters.GetOneBool("emission_nee", false);
+            bool emissionFnee = parameters.GetOneBool("emission_fnee", false);
+            int emissionNeeRes = parameters.GetOneInt("emission_nee_res", 16);
+            if (emissionNee && emissionTextureName.Length == 0)
+                pbrt.ErrorExit(loc, "\"emission_nee\" needs an emission_texture.");
+            if (emissionFnee && !emissionNee)
+                pbrt.ErrorExit(loc, "\"emission_fnee\" needs \"emission_nee\" (it chooses how the emission is sampled).");
             int hierarchyRes = parameters.GetOneInt("hierarchyres", 4);
             int hierarchyDepth = parameters.GetOneInt("hierarchydepth", 0);
             Float refineThreshold = parameters.GetOneFloat("refinethreshold", 0.5f);
-            return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g,
-                                     densityTextureName, densityOffset, densityScale, majorantRes, hierarchyRes,
-                                     hierarchyDepth, refineThreshold, alloc);
+            TextureMedium created = new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g,
+                                                      densityTextureName, densityOffset, densityScale, majorantRes,
+                                                      hierarchyRes, hierarchyDepth, refineThreshold, emissionTextureName,
+                                                      emissionScale, alloc);
+            if (emissionNee)
+                created.EnableEmissionSampling(emissionNeeRes, emissionFnee);
+            return created;
         }
 
         // TextureMedium Private Members
@@ -226,6 +342,11 @@ namespace pbrt
         private int hierarchyRes, hierarchyDepth;
         private Float refineThreshold;
         private MajorantNode[] topNodes;
+        private string emissionTextureName;
+        private Float emissionScale;
+        private SpectrumTexture emissionTexture;
+        private VolumeEmissionLight emissionLight;
+        private static readonly List<TextureMedium> emissionMedia = new List<TextureMedium>();
     }
 
 }  // namespace pbrt

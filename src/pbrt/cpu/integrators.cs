@@ -3685,10 +3685,11 @@ namespace pbrt
                                  List<Light> lights,
                                  string lightSampleStrategy = "bvh",
                                  bool regularize = false)
-            : base(camera, sampler, aggregate, lights)
+            : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
             this.maxDepth = maxDepth;
-            this.lightSampler = LightSampler.Create(lightSampleStrategy, lights.ToArray(), new Allocator());
+            this.lightSampler = LightSampler.Create(lightSampleStrategy, TextureMedium.AddEmissionLights(lights).ToArray(),
+                                                    new Allocator());
             this.regularize = regularize;
         }
 
@@ -3721,6 +3722,11 @@ namespace pbrt
 
                 LightSampleContext prevIntrContext = default;
                 BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
+                // (not in pbrt-v4) For the line sampling of emission (see SampleLdFnee): the density that the last scattering
+                // vertex had for the direction of the ray, and the ratio of the density of sampling the direction toward
+                // the emission to it, which is looked up when the emission is first found along the ray
+                Float fneeScatterPdf = 0, fneeRatio = -1;
+                Point3f fneeOrigin = default;
 
                 while (true)
                 {
@@ -3762,7 +3768,41 @@ namespace pbrt
 
                                     // Update _L_ for medium emission
                                     if ((bool)r_e)
-                                        L += betap * mp.sigma_a * mp.Le / r_e.Average();
+                                    {
+                                        // (not in pbrt-v4) A medium whose emission is also sampled from the previous scattering
+                                        // vertex: the light strategy would have chosen this point with probability density
+                                        // pmf * pdfPoint * t^2 per direction and length, where the density of this strategy
+                                        // is sigma_maj T_maj per length (hero values), and the light strategy's null
+                                        // collisions on the way are already in r_l, with the tail of T_maj added here
+                                        SampledSpectrum r_sum = r_e;
+                                        VolumeEmissionLight emissionLight = (rayMedium as TextureMedium)?.EmissionLight();
+                                        if (emissionLight != null && emissionLight.UsesFnee())
+                                        {
+                                            // The strategy that samples the direction toward the emission integrates along the
+                                            // same ray with the same tracking, so the two differ by the densities of the
+                                            // direction alone
+                                            if (depth > 0 && !specularBounce && fneeScatterPdf > 0)
+                                            {
+                                                if (fneeRatio < 0)
+                                                {
+                                                    Float pmfDirection = lightSampler.PMF(prevIntrContext, emissionLight);
+                                                    fneeRatio = pmfDirection * emissionLight.PdfDirection(fneeOrigin, ray.d) / fneeScatterPdf;
+                                                }
+                                                r_sum = r_e * (1 + fneeRatio);
+                                            }
+                                        }
+                                        else if (emissionLight != null && depth > 0 && !specularBounce)
+                                        {
+                                            Float pmf = lightSampler.PMF(prevIntrContext, emissionLight);
+                                            if (pmf > 0)
+                                            {
+                                                Float t2 = DistanceSquared(prevIntrContext.p(), p);
+                                                Float densityRatio = pmf * emissionLight.PdfPoint(p) * t2 / sigma_maj[0];
+                                                r_sum = r_e + r_l * (T_maj_ / T_maj_[0]) * densityRatio;
+                                            }
+                                        }
+                                        L += betap * mp.sigma_a * mp.Le / r_sum.Average();
+                                    }
                                 }
 
                                 // Compute medium event probabilities for interaction
@@ -3796,7 +3836,7 @@ namespace pbrt
                                         // Sample direct lighting at volume-scattering event
                                         MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium,
                                                                                        mp.phase);
-                                        L += SampleLd(intr, null, lambdaCap, sampler, beta, r_u, stack);
+                                        L += SampleLd(intr, null, lambdaCap, sampler, beta, r_u, stack, depth < maxDepth);
 
                                         // Sample new direction at real-scattering event
                                         Point2f u = sampler.Get2D();
@@ -3810,6 +3850,9 @@ namespace pbrt
                                             beta *= ps.value().f / ps.value().pdf;
                                             r_l = r_u / ps.value().pdf;
                                             prevIntrContext = new LightSampleContext(intr);
+                                            fneeScatterPdf = ps.value().pdf;
+                                            fneeRatio = -1;
+                                            fneeOrigin = p;
                                             scattered = true;
                                             ray.o = p;
                                             ray.d = ps.value().wi;
@@ -3935,7 +3978,7 @@ namespace pbrt
                     // Sample illumination from lights to find attenuated path contribution
                     if (IsNonSpecular(bsdf.Flags()))
                     {
-                        L += SampleLd(isect, bsdf, lambda, sampler, beta, r_u, stack);
+                        L += SampleLd(isect, bsdf, lambda, sampler, beta, r_u, stack, depth < maxDepth);
                         DCHECK(IsInf(L.y(lambda)) == false);
                     }
                     prevIntrContext = new LightSampleContext(isect);
@@ -3954,6 +3997,9 @@ namespace pbrt
                         r_l = r_u / bs.value().pdf;
 
                     DCHECK(IsInf(beta.y(lambda)) == false);
+                    fneeScatterPdf = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
+                    fneeRatio = -1;
+                    fneeOrigin = isect.p();
                     // Update volumetric integrator path state after surface scattering
                     specularBounce = bs.value().IsSpecular();
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
@@ -4021,7 +4067,7 @@ namespace pbrt
                             ++totalBSDFs;
 
                         // Account for attenuated direct illumination subsurface scattering
-                        L += SampleLd(pi, Sw, lambda, sampler, beta, r_u, stack);
+                        L += SampleLd(pi, Sw, lambda, sampler, beta, r_u, stack, depth < maxDepth);
 
                         // Sample ray for indirect subsurface scattering
                         Float uSw = sampler.Get1D();
@@ -4058,10 +4104,108 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) Forward next event estimation of the emission of a medium (after "Line Integration for Rendering
+        // Heterogeneous Emissive Volumes", Simon et al. 2017). A direction from the vertex toward the emission is
+        // sampled, and the emission is integrated along the whole ray in that direction by the tracking that a path would
+        // use for it: it is gathered at every collision, and the ray goes on through null collisions only. The strategy
+        // and the sampling of the scattering direction find the same ray integral, so their weights differ by the
+        // densities of the direction alone: (P_f + P_s) goes into the denominator, as for the other strategy.
+        // stack is the BoundaryStack of the path on arrival at intr.
+        SampledSpectrum SampleLdFnee(Interaction intr, BSDF? bsdf, VolumeEmissionLight volumeLight, Float pmf,
+                                     SampledWavelengths lambda, Sampler sampler, SampledSpectrum beta, SampledSpectrum r_p,
+                                     Point2f uLight, BoundaryStack stack)
+        {
+            if (!volumeLight.SampleDirection(intr.p(), uLight, sampler.Get1D(), out Vector3f wi, out Float pdfDirection))
+                return new SampledSpectrum(0.0f);
+
+            // Evaluate BSDF or phase function for the direction
+            Float scatterPDF;
+            SampledSpectrum f_hat;
+            Vector3f wo = intr.wo;
+            if (bsdf.HasValue)
+            {
+                f_hat = bsdf.Value.f(wo, wi) * AbsDot(wi, intr.AsSurface().shading.n);
+                scatterPDF = bsdf.Value.PDF(wo, wi);
+            }
+            else
+            {
+                CHECK(intr.IsMediumInteraction());
+                BSDF phaseBSDF = intr.AsMedium().GetBSDF();
+                f_hat = phaseBSDF.f(wo, wi);
+                scatterPDF = phaseBSDF.PDF(wo, wi);
+            }
+            if (!f_hat)
+                return new SampledSpectrum(0.0f);
+            Float directionPdfs = pmf * pdfDirection + scatterPDF;
+
+            Ray ray = new Ray(intr.SpawnRay(wi));
+            MediumTracking.CrossSurface(ref stack, intr, ray.d);
+            SampledSpectrum L = new SampledSpectrum(0.0f), lineBeta = beta * f_hat, r_u = r_p;
+            RNG rng = new RNG(Hash(sampler.Get1D()), Hash(sampler.Get1D()));
+            for (int segment = 0; segment < 256; ++segment)
+            {
+                pstd.optional<ShapeIntersection> si = Intersect(ray);
+                bool terminated = false;
+                Medium rayMedium = MediumTracking.Current(stack);
+                if (rayMedium != null)
+                {
+                    Float tMax = si ? si.value().tHit : Infinity;
+                    bool emitting = rayMedium == volumeLight.Medium();
+                    SampledSpectrum betaCap = lineBeta, r_uCap = r_u;
+                    SampledSpectrum T_maj = SampleT_maj(ray, rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
+                        (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                        {
+                            if (!betaCap || !r_uCap)
+                            {
+                                terminated = true;
+                                return false;
+                            }
+                            // Add the emission at the collision
+                            if (emitting && (bool)mp.Le)
+                            {
+                                Float pdf = sigma_maj[0] * T_maj_[0];
+                                SampledSpectrum r_e = r_uCap * sigma_maj * T_maj_ / pdf;
+                                if ((bool)r_e)
+                                    L += betaCap * T_maj_ / pdf * mp.sigma_a * mp.Le / (directionPdfs * r_e.Average());
+                            }
+                            // Only null collisions let the ray go on
+                            Float um = sampler.Get1D();
+                            if (MediumEvents.SampleEvent(mp, sigma_maj, um) != MediumEventType.Null)
+                            {
+                                terminated = true;
+                                return false;
+                            }
+                            SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                            Float pdfN = T_maj_[0] * sigma_n[0];
+                            if (pdfN == 0)
+                                betaCap = new SampledSpectrum(0.0f);
+                            else
+                            {
+                                betaCap *= T_maj_ * sigma_n / pdfN;
+                                r_uCap *= T_maj_ * sigma_n / pdfN;
+                            }
+                            return (bool)betaCap && (bool)r_uCap;
+                        });
+                    if (terminated || !betaCap || !r_uCap)
+                        return L;
+                    lineBeta = betaCap * T_maj / T_maj[0];
+                    r_u = r_uCap * T_maj / T_maj[0];
+                }
+                // The ray ends at a surface that isn't an interface between media
+                if (!si || si.value().intr.material != null)
+                    break;
+                ray = new Ray(si.value().intr.SpawnRay(ray.d));
+                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
+            }
+            return L;
+        }
+
         // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at intr, before it leaves towards the light
+        // volumeEmissionAllowed is not in pbrt-v4: the emission of a medium is sampled as a light inside the volume; a point
+        // there is only reached by the other strategy while the depth allows an emission vertex, so the two stay a pair
         SampledSpectrum SampleLd(Interaction intr, BSDF? bsdf,
                                  SampledWavelengths lambda, Sampler sampler,
-                                 SampledSpectrum beta, SampledSpectrum r_p, BoundaryStack stack)
+                                 SampledSpectrum beta, SampledSpectrum r_p, BoundaryStack stack, bool volumeEmissionAllowed)
         {
             // Estimate light-sampled direct illumination at _intr_
             // Initialize _LightSampleContext_ for volumetric light sampling
@@ -4089,7 +4233,20 @@ namespace pbrt
             DCHECK(light != null && sampledLight.value().p != 0);
 
             // Sample a point on the light source
-            pstd.optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+            // (not in pbrt-v4) The emission of a medium is sampled as a light inside the volume
+            pstd.optional<LightLiSample> ls;
+            VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
+            if (volumeLight != null)
+            {
+                if (!volumeEmissionAllowed)
+                    return new SampledSpectrum(0.0f);
+                if (volumeLight.UsesFnee())
+                    return SampleLdFnee(intr, bsdf, volumeLight, sampledLight.value().p, lambda, sampler, beta, r_p, uLight,
+                                        stack);
+                ls = volumeLight.SampleLiVolume(ctx, uLight, sampler.Get1D(), lambda);
+            }
+            else
+                ls = light.SampleLi(ctx, uLight, lambda, true);
             if (!ls || !ls.value().L || ls.value().pdf == 0)
                 return new SampledSpectrum(0.0f);
             Float p_l = sampledLight.value().p * ls.value().pdf;
@@ -4174,6 +4331,14 @@ namespace pbrt
                     break;
                 lightRay = si.value().intr.SpawnRayTo(ls.value().pLight);
                 MediumTracking.CrossSurface(ref stack, si.value().intr, lightRay.d);
+            }
+            // (not in pbrt-v4) The point has to lie in the medium that emits, and the other strategy reaches it with the
+            // density of a collision there: the majorant at the point, per length
+            if (volumeLight != null)
+            {
+                if (MediumTracking.Current(stack) != volumeLight.Medium())
+                    return new SampledSpectrum(0.0f);
+                r_u *= volumeLight.Medium().MajorantAt(ls.value().pLight.p(), lambda);
             }
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;
