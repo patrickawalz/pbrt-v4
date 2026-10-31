@@ -70,7 +70,7 @@ namespace pbrt
             }
 
             // Initialize _SurfaceInteraction_ after _Shape_ intersection
-            si.value().intr.SetIntersectionProperties(material, areaLight, mediumInterface, r.medium);
+            si.value().intr.SetIntersectionProperties(material, areaLight, mediumInterface);
 
             return si;
         }
@@ -117,7 +117,7 @@ namespace pbrt
             if (!si)
                 return default;
 
-            si.value().intr.SetIntersectionProperties(material, null, null, r.medium);
+            si.value().intr.SetIntersectionProperties(material, null, null);
 
             return si;
         }

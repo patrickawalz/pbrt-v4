@@ -77,13 +77,15 @@ namespace pbrt
     // LightLeSample Definition
     public unsafe struct LightLeSample
     {
-        public LightLeSample(SampledSpectrum L, Ray ray, Float pdfPos, Float pdfDir)
+        public LightLeSample(SampledSpectrum L, Ray ray, Float pdfPos, Float pdfDir, Medium medium = null)
         {
             this.L = L; this.ray = ray; this.intr = default; this.pdfPos = pdfPos; this.pdfDir = pdfDir;
+            this.medium = medium;
         }
         public LightLeSample(SampledSpectrum L, Ray ray, Interaction intr, Float pdfPos, Float pdfDir)
         {
             this.L = L; this.ray = ray; this.intr = intr; this.pdfPos = pdfPos; this.pdfDir = pdfDir;
+            medium = intr.GetMedium(ray.d);
             pbrt.CHECK(this.intr.value().n != new Normal3f(0, 0, 0));
         }
 
@@ -99,6 +101,8 @@ namespace pbrt
         public Ray ray;
         public pstd.optional<Interaction> intr;
         public Float pdfPos, pdfDir;
+        // (not in pbrt-v4) The medium the ray starts in; pbrt-v4 stores it in the Ray
+        public Medium medium;
     }
 
     // LightSampleContext Definition
@@ -338,8 +342,8 @@ namespace pbrt
                                                               Float time)
         {
             Point3f p = renderFromLight.Apply(new Point3f(0, 0, 0));
-            Ray ray = new Ray(p, pbrt.SampleUniformSphere(u1), time, mediumInterface.outside);
-            return new LightLeSample(scale * I.Sample(lambda), ray, 1, pbrt.UniformSpherePDF());
+            Ray ray = new Ray(p, pbrt.SampleUniformSphere(u1), time);
+            return new LightLeSample(scale * I.Sample(lambda), ray, 1, pbrt.UniformSpherePDF(), mediumInterface.outside);
         }
 
         public override string ToString()
@@ -645,9 +649,8 @@ namespace pbrt
                 rgb[c] = image.LookupNearestChannel(p, c);
             SampledSpectrum L = scale * new RGBIlluminantSpectrum(imageColorSpace, rgb).Sample(lambda);
 
-            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), pbrt.Normalize(w), time,
-                                                    mediumInterface.outside));
-            return new LightLeSample(L, ray, 1, pdfDir);
+            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), pbrt.Normalize(w), time));
+            return new LightLeSample(L, ray, 1, pdfDir, mediumInterface.outside);
         }
 
         public static ProjectionLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
@@ -806,8 +809,8 @@ namespace pbrt
             Vector3f wLight = pbrt.EqualAreaSquareToSphere(uv);
             Float pdfDir = pdf / (4 * Pi);
 
-            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
-            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
+            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time));
+            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir, mediumInterface.outside);
         }
 
         public override string ToString()
@@ -1878,8 +1881,8 @@ namespace pbrt
             }
 
             // Return sampled spotlight ray
-            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time, mediumInterface.outside));
-            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir);
+            Ray ray = renderFromLight.Apply(new Ray(new Point3f(0, 0, 0), wLight, time));
+            return new LightLeSample(I(wLight, lambda), ray, 1, pdfDir, mediumInterface.outside);
         }
 
         public override string ToString()

@@ -104,21 +104,17 @@ namespace pbrt
 
         public RayDifferential SpawnRay(Vector3f d)
         {
-            return new RayDifferential(OffsetRayOrigin(d), d, time, GetMedium(d));
+            return new RayDifferential(OffsetRayOrigin(d), d, time);
         }
 
         public Ray SpawnRayTo(Point3f p2)
         {
-            Ray r = pbrt.SpawnRayTo(pi, n, time, p2);
-            r.medium = GetMedium(r.d);
-            return r;
+            return pbrt.SpawnRayTo(pi, n, time, p2);
         }
 
         public Ray SpawnRayTo(Interaction it)
         {
-            Ray r = pbrt.SpawnRayTo(pi, n, time, it.pi, it.n);
-            r.medium = GetMedium(r.d);
-            return r;
+            return pbrt.SpawnRayTo(pi, n, time, it.pi, it.n);
         }
 
         public Medium GetMedium(Vector3f w)
@@ -246,8 +242,7 @@ namespace pbrt
             }
         }
 
-        public void SetIntersectionProperties(Material mtl, Light area, MediumInterface primMediumInterface,
-                                              Medium rayMedium)
+        public void SetIntersectionProperties(Material mtl, Light area, MediumInterface primMediumInterface)
         {
             material = mtl;
             areaLight = area;
@@ -255,8 +250,6 @@ namespace pbrt
             // Set medium properties at surface intersection
             if (primMediumInterface != null && primMediumInterface.IsMediumTransition())
                 mediumInterface = primMediumInterface;
-            else
-                medium = rayMedium;
         }
 
         public void ComputeDifferentials(RayDifferential ray, Camera camera, int samplesPerPixel)
@@ -321,7 +314,6 @@ namespace pbrt
             ray.o = spawned.o;
             ray.d = spawned.d;
             ray.time = spawned.time;
-            ray.medium = spawned.medium;
             if (ray.hasDifferentials)
             {
                 ray.rxOrigin = ray.rxOrigin + t * ray.rxDirection;

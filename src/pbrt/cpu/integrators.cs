@@ -58,7 +58,8 @@ namespace pbrt
                 return false;
         }
 
-        public SampledSpectrum Tr(Interaction p0, Interaction p1, SampledWavelengths lambda)
+        // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at p0, before it leaves p0 towards p1
+        public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda)
         {
             RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
 
@@ -68,6 +69,7 @@ namespace pbrt
             SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f);
             if (LengthSquared(ray.d) == 0)
                 return Tr;
+            MediumTracking.CrossSurface(ref stack, p0, ray.d);
 
             while (true)
             {
@@ -77,13 +79,14 @@ namespace pbrt
                     return new SampledSpectrum(0.0f);
 
                 // Update transmittance for current ray segment
-                if (ray.medium != null)
+                Medium rayMedium = MediumTracking.Current(stack);
+                if (rayMedium != null)
                 {
                     Point3f pExit = ray.Apply(si ? si.value().tHit : (1 - ShadowEpsilon));
                     ray.d = pExit - ray.o;
 
                     SampledSpectrum T_maj =
-                        SampleT_maj(ray, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
+                        SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj_) =>
                                     {
@@ -108,6 +111,7 @@ namespace pbrt
                 if (!si)
                     break;
                 ray = si.value().intr.SpawnRayTo(p1);
+                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
             }
             return Tr / inv_w.Average();
         }
@@ -1070,13 +1074,15 @@ namespace pbrt
 
                 // Terminate secondary wavelengths before starting random walk
                 lambda.TerminateSecondary();
+                BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
 
                 while (true)
                 {
                     // Estimate radiance for ray path using delta tracking
                     pstd.optional<ShapeIntersection> si = Intersect(new Ray(ray));
                     bool scattered = false, terminated = false;
-                    if (ray.medium != null)
+                    Medium rayMedium = MediumTracking.Current(stack);
+                    if (rayMedium != null)
                     {
                         // Initialize _RNG_ for sampling the majorant transmittance
                         uint64_t hash0 = Hash(sampler.Get1D());
@@ -1094,7 +1100,7 @@ namespace pbrt
                         bool scatteredCap = false, terminatedCap = false;
                         Vector3f newD = default;
                         Point3f newO = default;
-                        SampleT_maj(new Ray(ray), tMax, u, ref rng, lambda,
+                        SampleT_maj(new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj) =>
                                     {
@@ -1176,7 +1182,10 @@ namespace pbrt
                     SurfaceInteraction sIntr = si.value().intr;
                     BSDF bsdf = sIntr.GetBSDF(ray, ref lambda, camera, buf, sampler);
                     if (!bsdf)
+                    {
                         sIntr.SkipIntersection(ref ray, si.value().tHit);
+                        MediumTracking.CrossSurface(ref stack, sIntr, ray.d);
+                    }
                     else
                     {
                         // Report error if BSDF returns a valid sample
@@ -1371,7 +1380,7 @@ namespace pbrt
             this.camera = camera;
         }
 
-        public EndpointInteraction(Camera camera, Ray ray) : base(ray.o, ray.time, ray.medium)
+        public EndpointInteraction(Camera camera, Ray ray) : base(ray.o, ray.time, (Medium)null)
         {
             this.camera = camera;
         }
@@ -1389,13 +1398,13 @@ namespace pbrt
             this.light = light;
         }
 
-        public EndpointInteraction(Light light, Ray r) : base(r.o, r.time, r.medium)
+        public EndpointInteraction(Light light, Ray r) : base(r.o, r.time, (Medium)null)
         {
             this.light = light;
         }
 
         public EndpointInteraction(Ray ray)
-            : base(ray.o + ray.d, new Normal3f(-ray.d.x, -ray.d.y, -ray.d.z), ray.time, ray.medium)
+            : base(ray.o + ray.d, new Normal3f(-ray.d.x, -ray.d.y, -ray.d.z), ray.time, (Medium)null)
         {
             light = null;
         }
@@ -1413,6 +1422,8 @@ namespace pbrt
         public BSDF bsdf;
         public bool delta = false;
         public Float pdfFwd = 0, pdfRev = 0;
+        // (not in pbrt-v4) The media the path is inside of on arrival at the vertex; pbrt-v4 stores the medium in the Ray
+        public BoundaryStack stack;
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1436,7 +1447,7 @@ namespace pbrt
         public void Assign(Vertex v)
         {
             type = v.type; beta = v.beta; ei = v.ei; mi = v.mi; si = v.si; bsdf = v.bsdf;
-            delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev;
+            delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -1745,9 +1756,11 @@ namespace pbrt
             SampledSpectrum beta = new SampledSpectrum(1.0f);
             // Generate first vertex on camera subpath and start random walk
             Float pdfPos, pdfDir;
+            BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
             path[0] = Vertex.CreateCamera(camera, new Ray(ray), beta);
+            path[0].stack = stack;
             camera.PDF_We(new Ray(ray), &pdfPos, &pdfDir);
-            return RandomWalk(integrator, ref lambda, ray, sampler, camera, scratchBuffer, beta, pdfDir,
+            return RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta, pdfDir,
                               maxDepth - 1, TransportMode.Radiance, path, 1, regularize) + 1;
         }
 
@@ -1781,7 +1794,9 @@ namespace pbrt
 
             // Follow light subpath random walk
             SampledSpectrum beta = les.value().L * les.value().AbsCosTheta(ray.d) / (p_l * les.value().pdfDir);
-            int nVertices = RandomWalk(integrator, ref lambda, ray, sampler, camera, scratchBuffer, beta,
+            BoundaryStack stack = MediumTracking.Start(les.value().medium);
+            path[0].stack = stack;
+            int nVertices = RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta,
                                        les.value().pdfDir, maxDepth - 1, TransportMode.Importance, path, 1,
                                        regularize);
             // Correct subpath sampling densities for infinite area lights
@@ -1805,7 +1820,7 @@ namespace pbrt
         // (C++ passes "path + 1": here the array plus the offset of the first vertex to fill.
         //  path[off - 1] is the predecessor, path[off + bounces] the current vertex.)
         public static int RandomWalk(Integrator integrator, ref SampledWavelengths lambdaRef, RayDifferential ray,
-                                     Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
+                                     BoundaryStack stack, Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
                                      SampledSpectrum beta, Float pdf, int maxDepth, TransportMode mode,
                                      Vertex[] path, int off, bool regularize)
         {
@@ -1828,14 +1843,15 @@ namespace pbrt
                     // Trace a ray and sample the medium, if any
                     int vIdx = off + bounces;
                     pstd.optional<ShapeIntersection> si = integrator.Intersect(new Ray(ray));
-                    if (ray.medium != null)
+                    Medium rayMedium = MediumTracking.Current(stack);
+                    if (rayMedium != null)
                     {
                         // Sample participating medium for _RandomWalk()_ ray
                         Float tMax = si ? si.value().tHit : Infinity;
                         RNG rng = new RNG(Hash(ray.o, tMax), Hash(ray.d));
                         Float u = sampler.Get1D();
                         SampledSpectrum Tmaj = SampleT_maj(
-                            new Ray(ray), tMax, u, ref rng, lambda,
+                            new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
                             {
                                 // Compute medium event probabilities for interaction
@@ -1857,8 +1873,9 @@ namespace pbrt
                                     // Handle scattering for _RandomWalk()_ ray
                                     beta *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
                                     // Record medium interaction in _path_ and compute forward density
-                                    MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, ray.medium, mp.phase);
+                                    MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium, mp.phase);
                                     path[vIdx] = Vertex.CreateMedium(intr, beta, pdfFwd, path[vIdx - 1]);
+                                    path[vIdx].stack = stack;
                                     if (++bounces >= maxDepth)
                                     {
                                         terminated = true;
@@ -1923,6 +1940,7 @@ namespace pbrt
                     if (!bsdf)
                     {
                         isect.SkipIntersection(ref ray, si.value().tHit);
+                        MediumTracking.CrossSurface(ref stack, isect, ray.d);
                         continue;
                     }
 
@@ -1936,6 +1954,7 @@ namespace pbrt
                     ++PathIntegrator.totalBSDFs;
                     // Initialize _vertex_ with surface intersection information
                     path[vIdx] = Vertex.CreateSurface(isect, bsdf, beta, pdfFwd, path[vIdx - 1]);
+                    path[vIdx].stack = stack;
 
                     if (++bounces >= maxDepth)
                         break;
@@ -1949,6 +1968,7 @@ namespace pbrt
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
                     beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
+                    MediumTracking.CrossSurface(ref stack, isect, ray.d);
 
                     // Compute path probabilities at surface vertex
                     Float pdfRev = bsdf.PDF(bs.value().wi, wo, !mode, BxDFReflTransFlags.All);
@@ -1977,7 +1997,7 @@ namespace pbrt
                 g *= AbsDot(v0.ns(), d);
             if (v1.IsOnSurface())
                 g *= AbsDot(v1.ns(), d);
-            return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), lambda);
+            return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), v0.stack, lambda);
         }
 
         static Float remap0(Float f) { return f != 0 ? f : 1; }
@@ -2124,7 +2144,7 @@ namespace pbrt
                         DCHECK(!L.HasNaNs());
                         if ((bool)L)
                         {
-                            L *= integrator.Tr(cs.value().pRef, cs.value().pLens, lambda);
+                            L *= integrator.Tr(cs.value().pRef, cs.value().pLens, qs.stack, lambda);
 
                             // See https://github.com/mmp/pbrt-v4/issues/347
                             Film film = camera.GetFilm();
@@ -2172,7 +2192,7 @@ namespace pbrt
                                 L *= AbsDot(lightWeight.value().wi, pt.ns());
                             // Only check visibility if the path would carry radiance.
                             if ((bool)L)
-                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, lambda);
+                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda);
                         }
                     }
                 }
@@ -3709,12 +3729,14 @@ namespace pbrt
                 Float etaScale = 1;
 
                 LightSampleContext prevIntrContext = default;
+                BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
 
                 while (true)
                 {
                     // Sample segment of volumetric scattering path
                     pstd.optional<ShapeIntersection> si = Intersect(new Ray(ray));
-                    if (ray.medium != null)
+                    Medium rayMedium = MediumTracking.Current(stack);
+                    if (rayMedium != null)
                     {
                         // Sample the participating medium
                         bool scattered = false, terminated = false;
@@ -3726,7 +3748,7 @@ namespace pbrt
 
                         SampledWavelengths lambdaCap = lambda;
                         SampledSpectrum T_maj = SampleT_maj(
-                            new Ray(ray), tMax, sampler.Get1D(), ref rng, lambda,
+                            new Ray(ray), rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                              SampledSpectrum T_maj_) =>
                             {
@@ -3785,9 +3807,9 @@ namespace pbrt
                                     if ((bool)beta && (bool)r_u)
                                     {
                                         // Sample direct lighting at volume-scattering event
-                                        MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, ray.medium,
+                                        MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium,
                                                                                        mp.phase);
-                                        L += SampleLd(intr, null, lambdaCap, sampler, beta, r_u);
+                                        L += SampleLd(intr, null, lambdaCap, sampler, beta, r_u, stack);
 
                                         // Sample new direction at real-scattering event
                                         Point2f u = sampler.Get2D();
@@ -3882,6 +3904,7 @@ namespace pbrt
                     if (!bsdf)
                     {
                         isect.SkipIntersection(ref ray, si.value().tHit);
+                        MediumTracking.CrossSurface(ref stack, isect, ray.d);
                         continue;
                     }
 
@@ -3925,7 +3948,7 @@ namespace pbrt
                     // Sample illumination from lights to find attenuated path contribution
                     if (IsNonSpecular(bsdf.Flags()))
                     {
-                        L += SampleLd(isect, bsdf, lambda, sampler, beta, r_u);
+                        L += SampleLd(isect, bsdf, lambda, sampler, beta, r_u, stack);
                         DCHECK(IsInf(L.y(lambda)) == false);
                     }
                     prevIntrContext = new LightSampleContext(isect);
@@ -3950,6 +3973,7 @@ namespace pbrt
                     if (bs.value().IsTransmission())
                         etaScale *= Sqr(bs.value().eta);
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
+                    MediumTracking.CrossSurface(ref stack, isect, ray.d);
 
                     // Account for attenuated subsurface scattering, if applicable
                     BSSRDF bssrdf = isect.GetBSSRDF(ray, ref lambda, camera, scratchBuffer);
@@ -4010,7 +4034,7 @@ namespace pbrt
                             ++totalBSDFs;
 
                         // Account for attenuated direct illumination subsurface scattering
-                        L += SampleLd(pi, Sw, lambda, sampler, beta, r_u);
+                        L += SampleLd(pi, Sw, lambda, sampler, beta, r_u, stack);
 
                         // Sample ray for indirect subsurface scattering
                         Float uSw = sampler.Get1D();
@@ -4023,6 +4047,7 @@ namespace pbrt
                         DCHECK(!IsInf(beta.y(lambda)));
                         specularBounce = bsSw.value().IsSpecular();
                         ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
+                        MediumTracking.CrossSurface(ref stack, pi, ray.d);
                     }
 
                     // Possibly terminate volumetric path with Russian roulette
@@ -4046,9 +4071,10 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at intr, before it leaves towards the light
         SampledSpectrum SampleLd(Interaction intr, BSDF? bsdf,
                                  SampledWavelengths lambda, Sampler sampler,
-                                 SampledSpectrum beta, SampledSpectrum r_p)
+                                 SampledSpectrum beta, SampledSpectrum r_p, BoundaryStack stack)
         {
             // Estimate light-sampled direct illumination at _intr_
             // Initialize _LightSampleContext_ for volumetric light sampling
@@ -4104,6 +4130,7 @@ namespace pbrt
 
             // Declare path state variables for ray to light source
             Ray lightRay = intr.SpawnRayTo(ls.value().pLight);
+            MediumTracking.CrossSurface(ref stack, intr, lightRay.d);
             SampledSpectrum T_ray = new SampledSpectrum(1.0f), r_l = new SampledSpectrum(1.0f),
                             r_u = new SampledSpectrum(1.0f);
             RNG rng = new RNG(Hash(lightRay.o), Hash(lightRay.d));
@@ -4117,12 +4144,13 @@ namespace pbrt
                     return new SampledSpectrum(0.0f);
 
                 // Update transmittance for current ray segment
-                if (lightRay.medium != null)
+                Medium lightMedium = MediumTracking.Current(stack);
+                if (lightMedium != null)
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     Float uT = rng.Uniform<Float>();
                     SampledSpectrum T_maj =
-                        SampleT_maj(lightRay, tMax, uT, ref rng, lambda,
+                        SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj_) =>
                                     {
@@ -4163,6 +4191,7 @@ namespace pbrt
                 if (!si)
                     break;
                 lightRay = si.value().intr.SpawnRayTo(ls.value().pLight);
+                MediumTracking.CrossSurface(ref stack, si.value().intr, lightRay.d);
             }
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;

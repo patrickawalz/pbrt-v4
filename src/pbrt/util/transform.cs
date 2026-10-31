@@ -316,13 +316,13 @@ namespace pbrt
                     *tMax -= dt;
             }
 
-            return new Ray((Point3f)o, d, r.time, r.medium);
+            return new Ray((Point3f)o, d, r.time);
         }
 
         public unsafe RayDifferential Apply(RayDifferential r, Float* tMax = null)
         {
             Ray tr = Apply(new Ray(r), tMax);
-            RayDifferential ret = new RayDifferential(tr.o, tr.d, tr.time, tr.medium);
+            RayDifferential ret = new RayDifferential(tr.o, tr.d, tr.time);
             ret.hasDifferentials = r.hasDifferentials;
             ret.rxOrigin = Apply(r.rxOrigin);
             ret.ryOrigin = Apply(r.ryOrigin);
@@ -684,13 +684,13 @@ namespace pbrt
                 if (tMax != null)
                     *tMax -= dt;
             }
-            return new Ray((Point3f)o, d, r.time, r.medium);
+            return new Ray((Point3f)o, d, r.time);
         }
 
         public unsafe RayDifferential ApplyInverse(RayDifferential r, Float* tMax = null)
         {
             Ray tr = ApplyInverse(new Ray(r), tMax);
-            RayDifferential ret = new RayDifferential(tr.o, tr.d, tr.time, tr.medium);
+            RayDifferential ret = new RayDifferential(tr.o, tr.d, tr.time);
             ret.hasDifferentials = r.hasDifferentials;
             ret.rxOrigin = ApplyInverse(r.rxOrigin);
             ret.ryOrigin = ApplyInverse(r.ryOrigin);

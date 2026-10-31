@@ -171,4 +171,60 @@ namespace pbrt
         int size;
     }
 
+    // MediumTracking Definition
+    //
+    // The code that VolPathIntegrator and BDPTIntegrator share to know which medium a segment of a path is in, in place of
+    // the medium that a Ray carries in pbrt-v4.
+    public static class MediumTracking
+    {
+        // The priority of the entries made from a MediumInterface or from the medium a camera or a light starts in. All
+        // of them have the same priority, so the entry made last is on top; priorities arrive with the materials that own a volume.
+        public const int interfacePriority = 0;
+
+        // The stack of a path that starts in the medium (the camera medium, the medium of a light)
+        public static BoundaryStack Start(Medium medium)
+        {
+            BoundaryStack stack = default;
+            if (medium != null)
+                stack.Push(new BoundaryStackElement(null, medium), interfacePriority);
+            return stack;
+        }
+
+        // The medium the next segment of the path is in
+        public static Medium Current(in BoundaryStack stack)
+        {
+            return stack.IsEmpty() ? null : stack.Top().medium;
+        }
+
+        // Updates the stack when a path leaves a surface in direction wi. Only the surfaces with a MediumInterface that is a
+        // transition change anything, and only when the path goes through them: it leaves the medium of the side it came from
+        // and enters the medium of the side it goes to. On a reflection the sides are the same and nothing changes.
+        public static void CrossSurface(ref BoundaryStack stack, Interaction intr, Vector3f wi)
+        {
+            MediumInterface mediumInterface = intr.mediumInterface;
+            if (mediumInterface == null || !mediumInterface.IsMediumTransition())
+                return;
+            bool cameFromOutside = pbrt.Dot(intr.wo, intr.n) > 0;
+            bool goesToOutside = pbrt.Dot(wi, intr.n) > 0;
+            if (cameFromOutside == goesToOutside)
+                return;
+            Medium left = goesToOutside ? mediumInterface.inside : mediumInterface.outside;
+            Medium entered = goesToOutside ? mediumInterface.outside : mediumInterface.inside;
+            bool popped = false;
+            if (left != null)
+                popped = stack.Pop(new BoundaryStackElement(null, left), interfacePriority);
+            if (entered != null)
+            {
+                // A path can be inside a medium without having crossed its boundary when a collision is sampled at the very
+                // end of a segment (the next ray then starts a rounding error short of the boundary and misses the entry).
+                // Leaving that medium finds the medium it enters already on top: nothing is added, as pbrt-v4, which names
+                // the medium at every crossing, ends up in that medium too.
+                bool alreadyEntered = left != null && !popped && !stack.IsEmpty() &&
+                                      stack.Top() == new BoundaryStackElement(null, entered);
+                if (!alreadyEntered)
+                    stack.Push(new BoundaryStackElement(null, entered), interfacePriority);
+            }
+        }
+    }
+
 }  // namespace pbrt

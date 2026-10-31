@@ -104,7 +104,7 @@ namespace pbrt
 
         // SampleT_maj<ConcreteMedium>
         public static SampledSpectrum SampleT_maj<ConcreteMedium, MajorantIterator>(
-            Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+            Ray ray, Medium rayMedium, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
             Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
             where ConcreteMedium : Medium, IMajorantMedium<MajorantIterator>
             where MajorantIterator : RayMajorantIterator
@@ -114,7 +114,7 @@ namespace pbrt
             ray.d = Normalize(ray.d);
 
             // Initialize _MajorantIterator_ for ray majorant sampling
-            ConcreteMedium medium = (ConcreteMedium)ray.medium;
+            ConcreteMedium medium = (ConcreteMedium)rayMedium;
             MajorantIterator iter = medium.SampleRay(ray, tMax, lambda);
 
             // Generate ray majorant samples until termination
@@ -177,21 +177,21 @@ namespace pbrt
             return new SampledSpectrum(1f);
         }
 
-        // SampleT_maj(): dispatch on the ray's medium type (ray.medium.Dispatch)
-        public static SampledSpectrum SampleT_maj(Ray ray, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
+        // SampleT_maj(): dispatch on the type of the medium the ray is in (the top of the path's BoundaryStack)
+        public static SampledSpectrum SampleT_maj(Ray ray, Medium rayMedium, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
                                                   Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback)
         {
-            Medium m = ray.medium;
+            Medium m = rayMedium;
             if (m is HomogeneousMedium)
-                return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is GridMedium)
-                return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is RGBGridMedium)
-                return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CloudMedium)
-                return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
-                return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }

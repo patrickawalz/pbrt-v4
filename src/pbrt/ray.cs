@@ -60,12 +60,11 @@ namespace pbrt
         // Ray Public Methods
         public bool HasNaN() { return (o.HasNaN() || d.HasNaN()); }
 
-        public Ray(Point3f o, Vector3f d, Float time = 0f, Medium medium = null)
+        public Ray(Point3f o, Vector3f d, Float time = 0f)
         {
             this.o = o;
             this.d = d;
             this.time = time;
-            this.medium = medium;
         }
 
         public Point3f Apply(Float t) { return o + d * t; }
@@ -75,31 +74,28 @@ namespace pbrt
             o = r.o;
             d = r.d;
             time = r.time;
-            medium = r.medium;
         }
 
         public override string ToString()
         {
-            return StringPrintf("[ o: %s d: %s time: %f, medium: %s ]", o, d, time, medium);
+            return StringPrintf("[ o: %s d: %s time: %f ]", o, d, time);
         }
 
         // Ray Public Members
         public Point3f o;
         public Vector3f d;
         public Float time;
-        public Medium medium;
     }
 
     // RayDifferential Definition
     public unsafe struct RayDifferential
     {
         // RayDifferential Public Methods
-        public RayDifferential(Point3f o, Vector3f d, Float time = 0f, Medium medium = null)
+        public RayDifferential(Point3f o, Vector3f d, Float time = 0f)
         {
             this.o = o;
             this.d = d;
             this.time = time;
-            this.medium = medium;
             hasDifferentials = false;
             rxOrigin = default;
             ryOrigin = default;
@@ -108,7 +104,7 @@ namespace pbrt
         }
 
         public RayDifferential(Ray ray)
-            : this(ray.o, ray.d, ray.time, ray.medium)
+            : this(ray.o, ray.d, ray.time)
         { }
 
         public static implicit operator Ray(RayDifferential r) { return new Ray(r); }
@@ -141,7 +137,6 @@ namespace pbrt
         public Point3f o;
         public Vector3f d;
         public Float time;
-        public Medium medium;
         public bool hasDifferentials;
         public Point3f rxOrigin, ryOrigin;
         public Vector3f rxDirection, ryDirection;

@@ -54,8 +54,12 @@ is reproduced exactly with the same seed.
 ## Phases
 
 1. **BoundaryStack** (done): `boundarystack.cs`, ported from `StaticPriorityStack2`, with tests against a reference model.
-2. Carry a `BoundaryStack` in `VolPathIntegrator` and in the BDPT vertices next to `Ray.medium` and check that both give
-   the same medium at every segment on the existing media scenes; then remove `Ray.medium`.
+2. (done) `BoundaryStack` carried in `VolPathIntegrator`, in the BDPT vertices and in the shadow-ray code; `Ray.medium` removed.
+   Same-seed renders of a one-medium and a nested-media scene are bit-identical to `main` for volpath and bdpt.
+   One robustness rule came out of it: a collision sampled at the very end of a segment can leave the next ray a rounding
+   error short of the boundary, so it misses the entry and later meets the exit; `MediumTracking.CrossSurface` then finds
+   the medium it enters already on top and does not push it again (pbrt-v4 names the medium at every crossing and is not
+   affected).
 3. Add a priority parameter to materials / shapes and the entry / exit logic at interfaces, with nested and overlapping scenes.
 4. `Volume` modules for the existing media (homogeneous, grid, RGB grid, cloud, NanoVDB), each with its integrator and estimator.
 5. `Material.CreateVolume`, then phase function as `BSDF`.

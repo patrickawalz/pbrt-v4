@@ -17,6 +17,8 @@ namespace pbrt
         public abstract pstd.optional<CameraRay> GenerateRay(CameraSample sample, ref SampledWavelengths lambda);
         public abstract pstd.optional<CameraRayDifferential> GenerateRayDifferential(CameraSample sample, ref SampledWavelengths lambda);
         public abstract Film GetFilm();
+        // (not in pbrt-v4) The medium the camera rays start in; pbrt-v4 stores it in every Ray
+        public abstract Medium GetMedium();
         public abstract Float SampleTime(Float u);
         public abstract void InitMetadata(ImageMetadata metadata);
         public abstract CameraTransform GetCameraTransform();

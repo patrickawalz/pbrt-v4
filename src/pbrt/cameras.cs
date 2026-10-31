@@ -161,6 +161,7 @@ namespace pbrt
     {
         // CameraBase Public Methods
         public override Film GetFilm() { return film; }
+        public override Medium GetMedium() { return medium; }
         public override CameraTransform GetCameraTransform() { return cameraTransform; }
 
         public override Float SampleTime(Float u) { return pbrt.Lerp(u, shutterOpen, shutterClose); }
@@ -443,7 +444,7 @@ namespace pbrt
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
 
-            Ray ray = new Ray(pCamera, new Vector3f(0, 0, 1), SampleTime(sample.time), medium);
+            Ray ray = new Ray(pCamera, new Vector3f(0, 0, 1), SampleTime(sample.time));
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
@@ -470,7 +471,7 @@ namespace pbrt
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
 
-            RayDifferential ray = new RayDifferential(pCamera, new Vector3f(0, 0, 1), SampleTime(sample.time), medium);
+            RayDifferential ray = new RayDifferential(pCamera, new Vector3f(0, 0, 1), SampleTime(sample.time));
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
@@ -612,7 +613,7 @@ namespace pbrt
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
 
-            Ray ray = new Ray(new Point3f(0, 0, 0), pbrt.Normalize((Vector3f)pCamera), SampleTime(sample.time), medium);
+            Ray ray = new Ray(new Point3f(0, 0, 0), pbrt.Normalize((Vector3f)pCamera), SampleTime(sample.time));
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
@@ -638,7 +639,7 @@ namespace pbrt
             Point3f pFilm = new Point3f(sample.pFilm.x, sample.pFilm.y, 0);
             Point3f pCamera = cameraFromRaster.Apply(pFilm);
             Vector3f dir = pbrt.Normalize(new Vector3f(pCamera.x, pCamera.y, pCamera.z));
-            RayDifferential ray = new RayDifferential(new Point3f(0, 0, 0), dir, SampleTime(sample.time), medium);
+            RayDifferential ray = new RayDifferential(new Point3f(0, 0, 0), dir, SampleTime(sample.time));
             // Modify ray for depth of field
             if (lensRadius > 0)
             {
@@ -890,7 +891,7 @@ namespace pbrt
             }
             pstd.swap(ref dir.y, ref dir.z);
 
-            Ray ray = new Ray(new Point3f(0, 0, 0), dir, SampleTime(sample.time), medium);
+            Ray ray = new Ray(new Point3f(0, 0, 0), dir, SampleTime(sample.time));
             return new CameraRay(RenderFromCamera(ray));
         }
 
@@ -1329,7 +1330,6 @@ namespace pbrt
 
             // Finish initialization of _RealisticCamera_ ray
             ray.time = SampleTime(sample.time);
-            ray.medium = medium;
             ray = RenderFromCamera(ray);
             ray.d = pbrt.Normalize(ray.d);
 

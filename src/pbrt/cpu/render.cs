@@ -145,7 +145,7 @@ namespace pbrt
                         ++depth;
                         {
                             RayDifferential rd = intr.SpawnRay(ray.d);
-                            ray = new Ray(rd.o, rd.d, rd.time, rd.medium);
+                            ray = new Ray(rd.o, rd.d, rd.time);
                         }
                     }
                 }
