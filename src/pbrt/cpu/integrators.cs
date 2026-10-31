@@ -2015,17 +2015,7 @@ namespace pbrt
                                     }
                                     // Update path state and previous path vertex after medium scattering
                                     pdfFwd = ps.value().pdf;
-                                    st.beta *= ps.value().f / ps.value().pdf;
-                                    if (polarised)
-                                    {
-                                        // Only the Rayleigh part of the phase function polarises
-                                        SampledSpectrum w = ps.value().f / ps.value().pdf;
-                                        PAttenuation M;
-                                        if (!PolarisedPathIntegrator.PhaseAttenuation(mp.phase, -ray.d, ps.value().wi, fromCamera, out M))
-                                            M = PAttenuation.Lambert(new SampledSpectrum(1.0f));
-                                        M *= w;
-                                        st.Apply(M);
-                                    }
+                                    st.ScatterPhase(mp.phase, -ray.d, ps.value());
                                     ray = intr.SpawnRay(ps.value().wi);
                                     anyNonSpecularBounces = true;
                                     path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.value().pdf, path[vIdx - 1]);
@@ -2102,14 +2092,7 @@ namespace pbrt
                         break;
                     pdfFwd = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi, mode, BxDFReflTransFlags.All) : bs.value().pdf;
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
-                    st.beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
-                    if (polarised)
-                    {
-                        // Smooth dielectrics and conductors polarise, every other scattering depolarises
-                        if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), mode, out PAttenuation A))
-                            A = PAttenuation.Lambert(bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf);
-                        st.Apply(A);
-                    }
+                    st.ScatterSurface(bsdf, isect, wo, bs.value(), mode);
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
                     MediumTracking.CrossSurface(ref stack, isect, ray.d);
 
@@ -4139,14 +4122,7 @@ namespace pbrt
                                         else
                                         {
                                             // Update ray path state for indirect volume scattering
-                                            st.beta *= ps.value().f / ps.value().pdf;
-                                            // The phase functions do not polarise
-                                            if (polarised)
-                                            {
-                                                if (!PolarisedPathIntegrator.PhaseAttenuation(mp.phase, -ray.d, ps.value().wi, true, out PAttenuation Mp))
-                                                    Mp = PAttenuation.Lambert(ps.value().f / ps.value().pdf);
-                                                st.Apply(Mp);
-                                            }
+                                            st.ScatterPhase(mp.phase, -ray.d, ps.value());
                                             st.r_l = st.r_u / ps.value().pdf;
                                             prevIntrContext = new LightSampleContext(intr);
                                             fneeScatterPdf = ps.value().pdf;
@@ -4299,15 +4275,7 @@ namespace pbrt
                     if (!bs)
                         break;
                     // Update _beta_ and rescaled path probabilities for BSDF scattering
-                    st.beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
-                    if (polarised)
-                    {
-                        // Smooth dielectrics and conductors polarise, every other scattering depolarises
-                        if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out PAttenuation A))
-                            A = PAttenuation.Lambert(bs.value().f * AbsDot(bs.value().wi, isect.shading.n) /
-                                                     bs.value().pdf);
-                        st.Apply(A);
-                    }
+                    st.ScatterSurface(bsdf, isect, wo, bs.value(), TransportMode.Radiance);
                     if (bs.value().pdfIsProportional)
                         st.r_l = st.r_u / bsdf.PDF(wo, bs.value().wi);
                     else

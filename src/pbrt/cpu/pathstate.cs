@@ -6,6 +6,7 @@
 // polarised state mirrors every scalar factor of the throughput, so these updates are written once for both.
 
 using System;
+using static pbrt.pbrt;
 using PLight = pbrt.PolarisedLightSystem.Light;
 using PAttenuation = pbrt.PolarisedLightSystem.Attenuation;
 
@@ -133,6 +134,38 @@ namespace pbrt
             {
                 r_u *= T_maj / T_maj[0];
                 r_l *= T_maj / T_maj[0];
+            }
+        }
+
+        // The scattering of a sampled BSDF direction at a surface: the scalar weight, and the Mueller matrix, which smooth
+        // dielectrics and conductors polarise and every other scattering depolarises
+        public void ScatterSurface(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode)
+        {
+            SampledSpectrum w = bs.f * AbsDot(bs.wi, isect.shading.n) / bs.pdf;
+            beta *= w;
+            if (polarised)
+            {
+                if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs, mode, out PAttenuation A))
+                {
+                    A = PAttenuation.Lambert(w);
+                }
+                Apply(A);
+            }
+        }
+
+        // The scattering of a sampled phase function direction in a medium: only the Rayleigh part polarises
+        public void ScatterPhase(PhaseFunction phase, Vector3f wo, BSDFSample ps)
+        {
+            SampledSpectrum w = ps.f / ps.pdf;
+            beta *= w;
+            if (polarised)
+            {
+                if (!PolarisedPathIntegrator.PhaseAttenuation(phase, wo, ps.wi, fromCamera, out PAttenuation M))
+                {
+                    M = PAttenuation.Lambert(new SampledSpectrum(1.0f));
+                }
+                M *= w;
+                Apply(M);
             }
         }
 
