@@ -23,6 +23,11 @@ namespace pbrt
             NamedTextures textures = parsedScene.CreateTextures();
             LOG_VERBOSE("Finished textures");
 
+            // (not in pbrt-v4) Texture media driven by a named texture get it now that the textures exist
+            foreach (KeyValuePair<string, Medium> m in media)
+                if (m.Value is TextureMedium textureMedium)
+                    textureMedium.ResolveTextures(textures, new FileLoc());
+
             // Lights
             Dictionary<int, List<Light>> shapeIndexToAreaLights = new Dictionary<int, List<Light>>();
             List<Light> lights = parsedScene.CreateLights(textures, shapeIndexToAreaLights);

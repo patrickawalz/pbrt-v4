@@ -190,6 +190,8 @@ namespace pbrt
                 return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is TextureMedium)
+                return SampleT_maj<TextureMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
@@ -1295,6 +1297,10 @@ namespace pbrt
             else if (name == "nanovdb")
             {
                 m = NanoVDBMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "texture")
+            {
+                m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else
                 ErrorExit(loc, $"{name}: medium unknown.");

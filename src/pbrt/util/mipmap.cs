@@ -154,6 +154,8 @@ namespace pbrt
         }
         public RGBColorSpace GetRGBColorSpace() { return colorSpace; }
         public Image GetLevel(int level) { return pyramid[level]; }
+        // (not in pbrt-v4)
+        public WrapMode GetWrapMode() { return wrapMode; }
 
         // T is Float or RGB
         public T Filter<T>(Point2f st, Vector2f dst0, Vector2f dst1) where T : struct

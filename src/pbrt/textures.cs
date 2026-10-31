@@ -230,6 +230,14 @@ namespace pbrt
         public abstract TexCoord2D Map(TextureEvalContext ctx);
         public abstract override string ToString();
 
+        // (not in pbrt-v4) Rectangle of (s,t) that the points in _region_ (in the space of TextureEvalContext::p, with
+        // no uv) map to, or false if there is no bound better than the whole plane
+        public virtual bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            st = new Bounds2f();
+            return false;
+        }
+
         public static TextureMapping2D Create(ParameterDictionary parameters, Transform renderFromTexture, FileLoc loc,
                                               Allocator alloc)
         {
@@ -276,6 +284,14 @@ namespace pbrt
 
             Point2f st = new Point2f(su * ctx.uv[0] + du, sv * ctx.uv[1] + dv);
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
+        }
+
+        // Media have no uv, so every point maps to the same (s,t)
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            TexCoord2D c = Map(new TextureEvalContext());
+            st = new Bounds2f(c.st);
+            return true;
         }
 
         public override string ToString()
@@ -345,6 +361,20 @@ namespace pbrt
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
         }
 
+        // t is the height in texture space; s is the angle, which can be anything in [0,1]
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            Float zMin = Infinity, zMax = -Infinity;
+            for (int i = 0; i < 8; ++i)
+            {
+                Point3f pt = textureFromRender.Apply(region.Corner(i));
+                zMin = std.min(zMin, pt.z);
+                zMax = std.max(zMax, pt.z);
+            }
+            st = new Bounds2f(new Point2f(0, zMin), new Point2f(1, zMax));
+            return true;
+        }
+
         public override string ToString()
         {
             return pbrt.StringPrintf("[ CylindricalMapping textureFromRender: %s ]", textureFromRender);
@@ -375,6 +405,19 @@ namespace pbrt
 
             Point2f st = new Point2f(ds + pbrt.Dot(vec, vs), dt + pbrt.Dot(vec, vt));
             return new TexCoord2D { st = st, dsdx = dsdx, dsdy = dsdy, dtdx = dtdx, dtdy = dtdy };
+        }
+
+        // (s,t) is affine in the point, so the extremes over the region are at its corners
+        public override bool RegionST(Bounds3f region, out Bounds2f st)
+        {
+            st = new Bounds2f();
+            for (int i = 0; i < 8; ++i)
+            {
+                Vector3f vec = (Vector3f)textureFromRender.Apply(region.Corner(i));
+                Point2f p = new Point2f(ds + pbrt.Dot(vec, vs), dt + pbrt.Dot(vec, vt));
+                st = (i == 0) ? new Bounds2f(p) : pbrt.Union(st, p);
+            }
+            return true;
         }
 
         public override string ToString()
@@ -428,6 +471,8 @@ namespace pbrt
     {
         public FloatConstantTexture(Float value) { this.value = value; }
         public override Float Evaluate(TextureEvalContext ctx) { return value; }
+        public override Float MinValue() { return value; }
+        public override Float MaxValue() { return value; }
 
         public override string ToString() { return pbrt.StringPrintf("[ FloatConstantTexture value: %f ]", value); }
         // FloatConstantTexture Public Methods
@@ -445,6 +490,8 @@ namespace pbrt
     {
         // SpectrumConstantTexture Public Methods
         public SpectrumConstantTexture(Spectrum value) { this.value = value; }
+
+        public override Float MaxValue() { return value.MaxValue(); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -469,6 +516,16 @@ namespace pbrt
         public FloatBilerpTexture(TextureMapping2D mapping, Float v00, Float v01, Float v10, Float v11)
         {
             this.mapping = mapping; this.v00 = v00; this.v01 = v01; this.v10 = v10; this.v11 = v11;
+        }
+
+        public override Float MinValue()
+        {
+            return std.min(std.min(v00, v01), std.min(v10, v11));
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(std.max(v00, v01), std.max(v10, v11));
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -505,6 +562,11 @@ namespace pbrt
         public SpectrumBilerpTexture(TextureMapping2D mapping, Spectrum v00, Spectrum v01, Spectrum v10, Spectrum v11)
         {
             this.mapping = mapping; this.v00 = v00; this.v01 = v01; this.v10 = v10; this.v11 = v11;
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(std.max(v00.MaxValue(), v01.MaxValue()), std.max(v10.MaxValue(), v11.MaxValue()));
         }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
@@ -546,6 +608,16 @@ namespace pbrt
         public FloatCheckerboardTexture(TextureMapping2D map2D, TextureMapping3D map3D, FloatTexture tex1, FloatTexture tex2)
         {
             this.map2D = map2D; this.map3D = map3D; tex = new FloatTexture[] { tex1, tex2 };
+        }
+
+        public override Float MinValue()
+        {
+            return std.min(tex[0].MinValue(), tex[1].MinValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(tex[0].MaxValue(), tex[1].MaxValue());
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -606,6 +678,8 @@ namespace pbrt
         {
             this.map2D = map2D; this.map3D = map3D; tex = new SpectrumTexture[] { tex1, tex2 };
         }
+
+        public override Float MaxValue() { return std.max(tex[0].MaxValue(), tex[1].MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -668,6 +742,16 @@ namespace pbrt
             this.mapping = mapping; this.outsideDot = outsideDot; this.insideDot = insideDot;
         }
 
+        public override Float MinValue()
+        {
+            return std.min(insideDot.MinValue(), outsideDot.MinValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return std.max(insideDot.MaxValue(), outsideDot.MaxValue());
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord2D c = mapping.Map(ctx);
@@ -703,6 +787,8 @@ namespace pbrt
         {
             this.mapping = mapping; this.outsideDot = outsideDot; this.insideDot = insideDot;
         }
+
+        public override Float MaxValue() { return std.max(insideDot.MaxValue(), outsideDot.MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -740,6 +826,25 @@ namespace pbrt
         public FBmTexture(TextureMapping3D mapping, int octaves, Float omega)
         {
             this.mapping = mapping; this.omega = omega; this.octaves = octaves;
+        }
+
+        public override Float MinValue() { return -pbrt.FBmBound(omega, octaves); }
+        public override Float MaxValue() { return pbrt.FBmBound(omega, octaves); }
+
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            // Map the region's corners and bound the mapped points
+            Bounds3f mapped = new Bounds3f();
+            for (int i = 0; i < 8; ++i)
+            {
+                TextureEvalContext ctx = new TextureEvalContext();
+                ctx.p = region.Corner(i);
+                TexCoord3D c = mapping.Map(ctx);
+                mapped = (i == 0) ? new Bounds3f(c.p) : pbrt.Union(mapped, c.p);
+            }
+            pbrt.FBmBounds(mapped, omega, octaves, out lo, out hi);
+            lo = std.max(lo, MinValue());
+            hi = std.min(hi, MaxValue());
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -852,6 +957,45 @@ namespace pbrt
         private static readonly Dictionary<TexInfo, MIPMap> textureCache = new Dictionary<TexInfo, MIPMap>();
     }
 
+    public static unsafe partial class pbrt
+    {
+        // (not in pbrt-v4) Min/max over every channel of every level 0 texel
+        public static void MIPMapTexelRange(MIPMap mipmap, out Float lo, out Float hi)
+        {
+            Image image = mipmap.GetLevel(0);
+            Point2i res = image.Resolution();
+            lo = Infinity; hi = -Infinity;
+            for (int y = 0; y < res.y; ++y)
+            {
+                for (int x = 0; x < res.x; ++x)
+                {
+                    for (int c = 0; c < image.NChannels(); ++c)
+                    {
+                        Float v = image.GetChannel(new Point2i(x, y), c);
+                        lo = std.min(lo, v);
+                        hi = std.max(hi, v);
+                    }
+                }
+            }
+        }
+
+        // (not in pbrt-v4) Bound on the spectrum an RGB texel with every component <= maxComponent
+        // produces. The sigmoid polynomial is <= 1, so unbounded spectra are <= 2 * m and illuminant
+        // spectra are <= 2 * m * illuminant; albedo spectra are <= 1.
+        public static Float RGBSpectrumBound(SpectrumType spectrumType, RGBColorSpace cs, Float maxComponent)
+        {
+            if (maxComponent <= 0)
+                return 0;
+            if (cs == null)
+                return maxComponent;
+            if (spectrumType == SpectrumType.Unbounded)
+                return 2 * maxComponent;
+            if (spectrumType == SpectrumType.Albedo)
+                return 1;
+            return 2 * maxComponent * cs.illuminant.MaxValue();
+        }
+    }
+
     // FloatImageTexture Definition
     public sealed unsafe class FloatImageTexture : FloatTexture
     {
@@ -873,8 +1017,77 @@ namespace pbrt
             mipmap = pbrt.GetImageTextureMIPMap(b);
         }
 
+        // Range of the (pre-scale) filtered texel values: every filter is a convex combination of
+        // level 0 texels (the coarser levels are averages of it), and Float lookups read channel 0
+        // or the channel average, so the extremes over all channels of level 0 bound them.
+        private void ComputeTexelRange(out Float lo, out Float hi)
+        {
+            // Scanning every texel is expensive and region bounds ask for this once per voxel, so it is done once
+            lock (pyramidLock)
+            {
+                if (!texelRangeKnown)
+                {
+                    pbrt.MIPMapTexelRange(mipmap, out texelLo, out texelHi);
+                    texelRangeKnown = true;
+                }
+                lo = texelLo;
+                hi = texelHi;
+            }
+        }
+
+        public override Float MinValue()
+        {
+            ComputeTexelRange(out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            if (invert)
+                return std.max<Float>(0, 1 - std.max(a, b));
+            return std.min(a, b);
+        }
+
+        public override Float MaxValue()
+        {
+            ComputeTexelRange(out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            if (invert)
+                return std.max<Float>(0, 1 - std.min(a, b));
+            return std.max(a, b);
+        }
+
         public void MultiplyScale(Float s) { scale *= s; }
         public FloatImageTexture Clone() { return (FloatImageTexture)MemberwiseClone(); }
+
+        // (not in pbrt-v4) Bounds of the texels a lookup in the region can read, from a min/max pyramid
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            lo = MinValue();
+            hi = MaxValue();
+            if (!mapping.RegionST(region, out Bounds2f st))
+                return;
+            lock (pyramidLock)
+            {
+                if (pyramid == null)
+                    pyramid = new ImageRangePyramid(mipmap.GetLevel(0));
+            }
+            // Image rows run top to bottom
+            if (!pbrt.ImageRegionRange(pyramid, mipmap.GetWrapMode(), st.pMin.x, st.pMax.x, 1 - st.pMax.y, 1 - st.pMin.y,
+                                       out Float tlo, out Float thi))
+                return;
+            Float a = scale * tlo, b = scale * thi;
+            Float vlo = std.min(a, b), vhi = std.max(a, b);
+            if (invert)
+            {
+                Float ilo = std.max<Float>(0, 1 - vhi), ihi = std.max<Float>(0, 1 - vlo);
+                vlo = ilo;
+                vhi = ihi;
+            }
+            lo = std.max(lo, vlo);
+            hi = std.min(hi, vhi);
+        }
+
+        private ImageRangePyramid pyramid;
+        private readonly object pyramidLock = new object();
+        private bool texelRangeKnown;
+        private Float texelLo, texelHi;
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
@@ -949,6 +1162,15 @@ namespace pbrt
 
         public void MultiplyScale(Float s) { scale *= s; }
         public SpectrumImageTexture Clone() { return (SpectrumImageTexture)MemberwiseClone(); }
+
+        // (see FloatImageTexture.MinValue/MaxValue for the texel range argument)
+        public override Float MaxValue()
+        {
+            pbrt.MIPMapTexelRange(mipmap, out Float lo, out Float hi);
+            Float a = scale * lo, b = scale * hi;
+            Float m = invert ? 1 - std.min(a, b) : std.max(a, b);
+            return pbrt.RGBSpectrumBound(spectrumType, mipmap.GetRGBColorSpace(), m);
+        }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -1031,6 +1253,9 @@ namespace pbrt
             new RGB(.58f, .58f, .6f), new RGB(.2f, .2f, .33f),  new RGB(.58f, .58f, .6f),
         };
 
+        // the result is an RGBAlbedoSpectrum, which is <= 1
+        public override Float MaxValue() { return 1; }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             TexCoord3D c = mapping.Map(ctx);
@@ -1084,6 +1309,28 @@ namespace pbrt
             this.tex1 = tex1; this.tex2 = tex2; this.amount = amount;
         }
 
+        // The mix amount is not clamped, so bound the blend over the amount's range.
+        public override Float MinValue()
+        {
+            return pbrt.BlendMin(tex1.MinValue(), tex1.MaxValue(), tex2.MinValue(), tex2.MaxValue(),
+                                 amount.MinValue(), amount.MaxValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex1.MaxValue(), -tex1.MinValue(), -tex2.MaxValue(), -tex2.MinValue(),
+                                  amount.MinValue(), amount.MaxValue());
+        }
+
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            tex1.RegionBounds(region, out Float a0, out Float a1);
+            tex2.RegionBounds(region, out Float b0, out Float b1);
+            amount.RegionBounds(region, out Float t0, out Float t1);
+            lo = pbrt.BlendMin(a0, a1, b0, b1, t0, t1);
+            hi = -pbrt.BlendMin(-a1, -a0, -b1, -b0, t0, t1);
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             Float amt = amount.Evaluate(ctx);
@@ -1118,6 +1365,17 @@ namespace pbrt
         public FloatDirectionMixTexture(FloatTexture tex1, FloatTexture tex2, Vector3f dir)
         {
             this.tex1 = tex1; this.tex2 = tex2; this.dir = dir;
+        }
+
+        // amt = AbsDot(n, dir) lies in [0, 1] for unit vectors
+        public override Float MinValue()
+        {
+            return pbrt.BlendMin(tex2.MinValue(), tex2.MaxValue(), tex1.MinValue(), tex1.MaxValue(), 0, 1);
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex2.MaxValue(), -tex2.MinValue(), -tex1.MaxValue(), -tex1.MinValue(), 0, 1);
         }
 
         public override Float Evaluate(TextureEvalContext ctx)
@@ -1158,6 +1416,11 @@ namespace pbrt
             this.tex1 = tex1; this.tex2 = tex2; this.amount = amount;
         }
 
+        public override Float MaxValue()
+        {
+            return -pbrt.BlendMin(-tex1.MaxValue(), 0, -tex2.MaxValue(), 0, amount.MinValue(), amount.MaxValue());
+        }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             Float amt = amount.Evaluate(ctx);
@@ -1196,6 +1459,8 @@ namespace pbrt
         {
             this.tex1 = tex1; this.tex2 = tex2; this.dir = dir;
         }
+
+        public override Float MaxValue() { return std.max(tex1.MaxValue(), tex2.MaxValue()); }
 
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
@@ -1343,6 +1608,10 @@ namespace pbrt
             b = new PtexTextureBase(filename, encoding, scale);
         }
         public override string ToString() { return pbrt.StringPrintf("[ FloatPtexTexture %s ]", BaseToStringPublic()); }
+        // Ptex face data can't be bounded without reading the whole file
+        public override Float MinValue() { return -pbrt.Infinity; }
+        public override Float MaxValue() { return pbrt.Infinity; }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             float* result = stackalloc float[3];
@@ -1374,6 +1643,8 @@ namespace pbrt
             this.spectrumType = spectrumType;
         }
         public override string ToString() { return pbrt.StringPrintf("[ SpectrumPtexTexture %s ]", b.BaseToStringInternal()); }
+        public override Float MaxValue() { return pbrt.Infinity; }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             float* result = stackalloc float[3];
@@ -1405,6 +1676,24 @@ namespace pbrt
     {
         // FloatScaledTexture Public Methods
         public FloatScaledTexture(FloatTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
+
+        public override Float MinValue()
+        {
+            return pbrt.ProductMin(tex.MinValue(), tex.MaxValue(), scale.MinValue(), scale.MaxValue());
+        }
+
+        public override Float MaxValue()
+        {
+            return -pbrt.ProductMin(-tex.MaxValue(), -tex.MinValue(), scale.MinValue(), scale.MaxValue());
+        }
+
+        public override void RegionBounds(Bounds3f region, out Float lo, out Float hi)
+        {
+            tex.RegionBounds(region, out Float t0, out Float t1);
+            scale.RegionBounds(region, out Float s0, out Float s1);
+            lo = pbrt.ProductMin(t0, t1, s0, s1);
+            hi = -pbrt.ProductMin(-t1, -t0, s0, s1);
+        }
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
@@ -1460,6 +1749,8 @@ namespace pbrt
         // SpectrumScaledTexture Public Methods
         public SpectrumScaledTexture(SpectrumTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
 
+        public override Float MaxValue() { return tex.MaxValue() * std.max<Float>(0, scale.MaxValue()); }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             Float sc = scale.Evaluate(ctx);
@@ -1508,6 +1799,13 @@ namespace pbrt
         // WindyTexture Public Methods
         public WindyTexture(TextureMapping3D mapping) { this.mapping = mapping; }
 
+        public override Float MinValue() { return -MaxValue(); }
+
+        public override Float MaxValue()
+        {
+            return pbrt.FBmBound(.5f, 3) * pbrt.FBmBound(.5f, 6);
+        }
+
         public override Float Evaluate(TextureEvalContext ctx)
         {
             TexCoord3D c = mapping.Map(ctx);
@@ -1537,6 +1835,13 @@ namespace pbrt
         {
             this.mapping = mapping; this.octaves = octaves; this.omega = omega;
         }
+
+        public override Float MinValue()
+        {
+            return omega >= 0 ? 0 : -MaxValue();
+        }
+
+        public override Float MaxValue() { return pbrt.TurbulenceBound(omega, octaves); }
 
         public override Float Evaluate(TextureEvalContext ctx)
         {
@@ -1597,6 +1902,36 @@ namespace pbrt
                 tex = WrinkledTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "windy")
                 tex = WindyTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "densitygrid")
+                tex = FloatGridTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "add")
+                tex = FloatAddTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "subtract")
+                tex = FloatSubtractTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "abs")
+                tex = FloatAbsTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "clamp")
+                tex = FloatClampTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "divide")
+                tex = FloatDivideTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "power")
+                tex = FloatPowerTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "remap")
+                tex = FloatRemapTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "rounding")
+                tex = FloatRoundingTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "modulo")
+                tex = FloatModuloTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "greaterthan")
+                tex = FloatCompareTexture.Create(renderFromTexture, parameters, true, loc, alloc);
+            else if (name == "lessthan")
+                tex = FloatCompareTexture.Create(renderFromTexture, parameters, false, loc, alloc);
+            else if (name == "cloud")
+                tex = FloatCloudTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "ramp")
+                tex = FloatRampTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "triplanar")
+                tex = FloatTriplanarTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)
@@ -1646,6 +1981,12 @@ namespace pbrt
                 tex = SpectrumDotsTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "marble")
                 tex = MarbleTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "densitygrid")
+                tex = SpectrumGridTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "ramp")
+                tex = SpectrumRampTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "blackbody")
+                tex = SpectrumBlackbodyTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)

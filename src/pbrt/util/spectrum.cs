@@ -91,6 +91,14 @@ namespace pbrt
             return ret;
         }
 
+        public static SampledSpectrum Abs(SampledSpectrum s)
+        {
+            SampledSpectrum ret = new SampledSpectrum();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                ret[i] = std.abs(s[i]);
+            return ret;
+        }
+
         public static SampledSpectrum Sqr(SampledSpectrum s) { return s * s; }
 
         public static SampledSpectrum Sqrt(SampledSpectrum s)
@@ -492,6 +500,22 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
                 swl.pdf[i] = 1 / (lambda_max - lambda_min);
 
+            return swl;
+        }
+
+        // (not in pbrt-v4) Wavelengths that follow an arbitrary density over the visible range, stratified like SampleVisible()
+        public static SampledWavelengths Sample(Float u, PiecewiseConstant1D distribution)
+        {
+            SampledWavelengths swl = new SampledWavelengths();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float up = u + (Float)i / NSpectrumSamples;
+                if (up > 1)
+                    up -= 1;
+                Float pdfValue;
+                swl.lambda[i] = distribution.Sample(up, &pdfValue);
+                swl.pdf[i] = pdfValue;
+            }
             return swl;
         }
 
