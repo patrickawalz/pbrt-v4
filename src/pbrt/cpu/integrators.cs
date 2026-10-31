@@ -20,6 +20,8 @@ namespace pbrt
 
         // (not in pbrt-v4) Russian roulette on the transmittance estimate of Tr() when it gets small, as VolPathIntegrator does
         public bool shadowRoulette;
+        // (not in pbrt-v4) Whether BDPT connects two subpath vertices when one of them is in a medium (see BDPT.ConnectionAllowed())
+        public bool volumeConnections = true;
 
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
@@ -2257,6 +2259,25 @@ namespace pbrt
 
         static Float remap0(Float f) { return f != 0 ? f : 1; }
 
+        // (not in pbrt-v4) With volumeConnections off, the strategies that connect two subpath vertices (s >= 2) are only used
+        // when both vertices are on surfaces. Whether a strategy is allowed depends only on the vertices of the path, so the
+        // weights of the allowed strategies of a path still sum to one. The strategies s = 0 and s = 1 are always allowed.
+        static bool ConnectionAllowed(Integrator integrator, Vertex[] lightVertices, Vertex[] cameraVertices, int s, int t)
+        {
+            if (integrator.volumeConnections || s < 2)
+                return true;
+            if (lightVertices[s - 1].type == VertexType.Medium)
+                return false;
+            if (t >= 2 && cameraVertices[t - 1].type == VertexType.Medium)
+                return false;
+            return true;
+        }
+
+        public static bool StrategyAllowed(Integrator integrator, Vertex[] lightVertices, Vertex[] cameraVertices, int s, int t)
+        {
+            return ConnectionAllowed(integrator, lightVertices, cameraVertices, s, t);
+        }
+
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
                                       LightSampler lightSampler, SampledSpectrum? edgeRatio = null)
@@ -2333,7 +2354,11 @@ namespace pbrt
                     ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
                     // See https://github.com/mmp/pbrt-v4/issues/347
                     if (i == 1) ri /= splatScale;
-                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
+                    // The strategy with i camera vertices has s + t - i light vertices
+                    bool cameraStrategyAllowed = integrator.volumeConnections || s + t - i < 2 ||
+                                                 (cameraVertices[i].type != VertexType.Medium &&
+                                                  (i < 2 || cameraVertices[i - 1].type != VertexType.Medium));
+                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && cameraStrategyAllowed)
                     {
                         if (s == 0 && i == t - 1 && i > 1 && FneeLightOf(cameraVertices[i]) != null &&
                             cameraVertices[i - 1].IsConnectible())
@@ -2355,7 +2380,11 @@ namespace pbrt
                 {
                     ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
                     bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
-                    if (!lightVertices[i].delta && !deltaLightvertex)
+                    // The strategy with i light vertices connects vertex i - 1 of the light subpath to vertex i
+                    bool lightStrategyAllowed = integrator.volumeConnections || i < 2 ||
+                                                (lightVertices[i].type != VertexType.Medium &&
+                                                 lightVertices[i - 1].type != VertexType.Medium);
+                    if (!lightVertices[i].delta && !deltaLightvertex && lightStrategyAllowed)
                     {
                         // (not in pbrt-v4) With only the point of emission left on the light subpath, the strategy would sample
                         // its direction from vertex 1
@@ -2537,6 +2566,8 @@ namespace pbrt
             // Ignore invalid connections related to infinite area lights
             if (t > 1 && s != 0 && cameraVertices[t - 1].type == VertexType.Light)
                 return new SampledSpectrum(0.0f);
+            if (!ConnectionAllowed(integrator, lightVertices, cameraVertices, s, t))
+                return new SampledSpectrum(0.0f);
 
             // Perform connection and write contribution to _L_
             Vertex sampled = new Vertex();
@@ -2675,11 +2706,13 @@ namespace pbrt
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false, bool spectralMIS = true, bool randomConnections = false,
-                              bool pathRoulette = false, bool shadowRoulette = false)
+                              bool pathRoulette = false, bool shadowRoulette = false,
+                              bool volumeConnections = true)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
             this.pathRoulette = pathRoulette;
             this.shadowRoulette = shadowRoulette;
+            this.volumeConnections = volumeConnections;
             this.spectralMIS = spectralMIS;
             this.randomConnections = randomConnections;
             this.maxDepth = maxDepth;
@@ -2782,7 +2815,8 @@ namespace pbrt
                     for (int s = 2; s <= nLight; ++s)
                     {
                         int candidateDepth = t + s - 2;
-                        if (candidateDepth >= 0 && candidateDepth <= maxDepth)
+                        if (candidateDepth >= 0 && candidateDepth <= maxDepth &&
+                            BDPT.StrategyAllowed(this, lightVertices, cameraVertices, s, t))
                             ++candidates;
                     }
                     if (candidates > 0)
@@ -2791,7 +2825,8 @@ namespace pbrt
                         for (int s = 2; s <= nLight; ++s)
                         {
                             int candidateDepth = t + s - 2;
-                            if (candidateDepth >= 0 && candidateDepth <= maxDepth && pick-- == 0)
+                            if (candidateDepth >= 0 && candidateDepth <= maxDepth &&
+                                BDPT.StrategyAllowed(this, lightVertices, cameraVertices, s, t) && pick-- == 0)
                             {
                                 chosenS = s;
                                 break;
@@ -2805,6 +2840,8 @@ namespace pbrt
                     if ((s == 1 && t == 1) || depth < 0 || depth > maxDepth)
                         continue;
                     if (randomConnections && s >= 2 && s != chosenS)
+                        continue;
+                    if (!BDPT.StrategyAllowed(this, lightVertices, cameraVertices, s, t))
                         continue;
                     // Execute the $(s, t)$ connection strategy and update _L_
                     pstd.optional<Point2f> pFilmNew = default;
@@ -2876,8 +2913,10 @@ namespace pbrt
             bool randomConnections = parameters.GetOneBool("randomconnections", false);
             bool pathRoulette = parameters.GetOneBool("pathroulette", false);
             bool shadowRoulette = parameters.GetOneBool("shadowroulette", false);
+            bool volumeConnections = parameters.GetOneBool("volumeconnections", true);
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, spectralMIS, randomConnections, pathRoulette, shadowRoulette);
+                                      visualizeWeights, regularize, spectralMIS, randomConnections, pathRoulette, shadowRoulette,
+                                      volumeConnections);
         }
 
         // BDPTIntegrator Private Members
