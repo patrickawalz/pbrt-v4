@@ -60,6 +60,11 @@ namespace pbrt
                 return false;
         }
 
+        // (not in pbrt-v4) Russian roulette for the subpaths of BDPT and for the transmittance of its connections: the walk
+        // stops with a probability that grows as its throughput drops below 1, and the transmittance estimate that has dropped
+        // below 0.05 survives with probability 0.25 (as in the shadow rays of the volumetric path integrator)
+        public bool russianRoulette = false;
+
         // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at p0, before it leaves p0 towards p1
         public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda)
         {
@@ -108,6 +113,17 @@ namespace pbrt
 
                                         // ratio-tracking: only evaluate null scattering
                                         MediumEvents.RatioTrackingStep(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n);
+
+                                        // Possibly terminate the transmittance computation using Russian roulette
+                                        if (russianRoulette && (bool)Tr && (bool)inv_w &&
+                                            (Tr / inv_w.Average()).MaxComponentValue() < 0.05f)
+                                        {
+                                            Float q = 0.75f;
+                                            if (rng.Uniform<Float>() < q)
+                                                Tr = new SampledSpectrum(0.0f);
+                                            else
+                                                Tr /= 1 - q;
+                                        }
 
                                         if (!Tr || !inv_w)
                                             return false;
@@ -1919,6 +1935,20 @@ namespace pbrt
                     // Attempt to create the next subpath vertex in _path_
                     if (!beta)
                         break;
+                    // (not in pbrt-v4) Possibly terminate the subpath with Russian roulette. The vertices keep their densities:
+                    // the roulette changes the estimate and not the density that the MIS weights are made for.
+                    if (integrator.russianRoulette && bounces > 1 && beta.MaxComponentValue() < 1)
+                    {
+                        Float q = std.max<Float>(0, 1 - beta.MaxComponentValue());
+                        if (sampler.Get1D() < q)
+                            break;
+                        beta /= 1 - q;
+                        if (polarised)
+                        {
+                            pa *= new SampledSpectrum(1 / (1 - q));
+                            pl *= new SampledSpectrum(1 / (1 - q));
+                        }
+                    }
                     bool scattered = false, terminated = false;
                     // Trace a ray and sample the medium, if any
                     int vIdx = off + bounces;
@@ -2447,11 +2477,13 @@ namespace pbrt
         // BDPTIntegrator Public Methods
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
-                              bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null)
+                              bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null,
+                              bool russianRoulette = false)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
             // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
             this.sensor = sensor;
+            this.russianRoulette = russianRoulette;
             if (sensor != null)
                 sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
             this.maxDepth = maxDepth;
@@ -2600,6 +2632,7 @@ namespace pbrt
             }
 
             bool regularize = parameters.GetOneBool("regularize", false);
+            bool russianRoulette = parameters.GetOneBool("russianroulette", false);
             PolarisedPathIntegrator.Sensor sensor = null;
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
                                                 out PolarisedPathIntegrator.Measurement measurement);
@@ -2612,7 +2645,7 @@ namespace pbrt
             }
 
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, sensor);
+                                      visualizeWeights, regularize, sensor, russianRoulette);
         }
 
         // BDPTIntegrator Private Members

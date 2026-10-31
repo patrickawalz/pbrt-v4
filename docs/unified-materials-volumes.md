@@ -149,3 +149,10 @@ is reproduced exactly with the same seed.
   as a two-sided interface entry and reports it, instead of silently changing it.
 * Camera and light-subpath starting media come from the stack the path starts with (the camera medium pushed at the
   global-medium priority).
+
+## Polarised integrators (phase 7 follow-up)
+
+- `polpath` (surface path), `volpath` and `bdpt` take `"bool polarised"` (`polpath` is always polarised), `"float analyser"` (angle in degrees of a linear polariser in front of the sensor, 0 = image vertical; the factor 2 keeps the unpolarised brightness) and `"string measure"` (`intensity`, `s1`, `s2`, `s3`). The unpolarised render is untouched.
+- Smooth dielectrics and conductors apply the Mitsuba 3 Fresnel Mueller matrices; every other BSDF depolarises. Media take `"float rayleigh"` (fraction of Rayleigh scattering in the phase function, as PolarisedUPBP's Rayleigh coefficient); the Henyey-Greenstein part depolarises. The Rayleigh Mueller matrix has the sign of Mitsuba's Stokes convention (PolarisedUPBP writes the opposite one: its Stokes vectors measure I_y - I_x).
+- BDPT keeps a Mueller matrix (camera subpath) or Stokes vector (light subpath) per vertex next to beta, and measures the polarisation relative to the scalar throughputs at the connection. It matches `polpath` on a water plane (0.6400 vs 0.6401 at an analyser of 0 degrees) and `volpath` on Rayleigh fog.
+- `bdpt` takes `"bool russianroulette"` (default off): roulette on the subpaths and on the transmittance of the connections. Unbiased, but it made no difference in noise or time on the test scenes (their throughput stays near 1).
