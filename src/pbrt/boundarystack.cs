@@ -202,11 +202,26 @@ namespace pbrt
         public static void CrossSurface(ref BoundaryStack stack, Interaction intr, Vector3f wi)
         {
             MediumInterface mediumInterface = intr.mediumInterface;
-            if (mediumInterface == null || !mediumInterface.IsMediumTransition())
+            if (mediumInterface == null)
                 return;
             bool cameFromOutside = pbrt.Dot(intr.wo, intr.n) > 0;
             bool goesToOutside = pbrt.Dot(wi, intr.n) > 0;
             if (cameFromOutside == goesToOutside)
+                return;
+            if (mediumInterface.HasPriority())
+            {
+                // A volume boundary: only the medium inside the shape is entered or left, with the priority of the shape
+                if (mediumInterface.inside != null)
+                {
+                    BoundaryStackElement element = new BoundaryStackElement(null, mediumInterface.inside);
+                    if (goesToOutside)
+                        stack.Pop(element, mediumInterface.priority);
+                    else
+                        stack.Push(element, mediumInterface.priority);
+                }
+                return;
+            }
+            if (!mediumInterface.IsMediumTransition())
                 return;
             Medium left = goesToOutside ? mediumInterface.inside : mediumInterface.outside;
             Medium entered = goesToOutside ? mediumInterface.outside : mediumInterface.inside;

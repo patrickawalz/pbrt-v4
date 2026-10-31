@@ -248,7 +248,7 @@ namespace pbrt
             areaLight = area;
             pbrt.CHECK_GE(pbrt.Dot(n, shading.n), 0f);
             // Set medium properties at surface intersection
-            if (primMediumInterface != null && primMediumInterface.IsMediumTransition())
+            if (primMediumInterface != null && (primMediumInterface.IsMediumTransition() || primMediumInterface.HasPriority()))
                 mediumInterface = primMediumInterface;
         }
 

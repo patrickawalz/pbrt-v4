@@ -60,7 +60,13 @@ is reproduced exactly with the same seed.
    error short of the boundary, so it misses the entry and later meets the exit; `MediumTracking.CrossSurface` then finds
    the medium it enters already on top and does not push it again (pbrt-v4 names the medium at every crossing and is not
    affected).
-3. Add a priority parameter to materials / shapes and the entry / exit logic at interfaces, with nested and overlapping scenes.
+3. (first slice done) A shape takes `"integer mediumpriority"`; with it, `MediumInterface` is a volume boundary: crossing into the
+   shape pushes the inside medium at that priority, crossing out pops it, the outside medium is ignored, and the medium of
+   highest priority decides the segment (equal priority: entered last wins). Shapes without it keep pbrt's transition
+   semantics. The nested test scene written with priorities is bit-identical to the same scene written with transitions;
+   two overlapping spheres agree between volpath and bdpt (0.2-0.8 %) and change when the priorities are swapped.
+   Still open: the priority on the material rather than the shape, camera / light starting media at a priority, and
+   the summed-extinction overlap of Fong listing 17.
 4. `Volume` modules for the existing media (homogeneous, grid, RGB grid, cloud, NanoVDB), each with its integrator and estimator.
 5. `Material.CreateVolume`, then phase function as `BSDF`.
 6. Volume aggregate with texture-supplied min / max.

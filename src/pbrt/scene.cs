@@ -800,7 +800,8 @@ namespace pbrt
                 FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
 
                 MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                         findMedium(sh.outsideMedium, sh.loc));
+                                                         findMedium(sh.outsideMedium, sh.loc),
+                                                         sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority));
 
                 List<Light> shapeLights = new List<Light>();
                 SceneEntity areaLightEntity = areaLights[sh.lightIndex];
@@ -894,6 +895,7 @@ namespace pbrt
                             continue;
 
                         FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
+                        int mediumPriority = sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority);
                         sh.parameters.ReportUnused();  // do now so can grab alpha...
 
                         Material mtl = null;
@@ -909,7 +911,7 @@ namespace pbrt
                         }
 
                         MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                                 findMedium(sh.outsideMedium, sh.loc));
+                                                                 findMedium(sh.outsideMedium, sh.loc), mediumPriority);
 
                         shapeIndexToAreaLights.TryGetValue(i, out List<Light> areaList);
                         for (ulong j = 0; j < shapeObjs.size(); ++j)
@@ -951,6 +953,7 @@ namespace pbrt
                             continue;
 
                         FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
+                        int mediumPriority = sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority);
                         sh.parameters.ReportUnused();  // do now so can grab alpha...
 
                         // Create initial shape or shapes for animated shape
@@ -968,7 +971,7 @@ namespace pbrt
                         }
 
                         MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                                 findMedium(sh.outsideMedium, sh.loc));
+                                                                 findMedium(sh.outsideMedium, sh.loc), mediumPriority);
 
                         List<Primitive> prims = new List<Primitive>();
                         for (ulong k = 0; k < shapeObjs.size(); ++k)

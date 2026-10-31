@@ -176,6 +176,40 @@ namespace pbrt
             EXPECT_TRUE(stack.IsEmpty());
         }
 
+        static Interaction MakeVolume(Medium medium, int priority)
+        {
+            Interaction intr = new Interaction();
+            intr.n = new Normal3f(0, 0, 1);
+            intr.mediumInterface = new MediumInterface(medium, null, priority);
+            return intr;
+        }
+
+        [TEST("MediumTracking", "OverlappingVolumesFollowPriority")]
+        public static void MediumTracking_OverlappingVolumesFollowPriority()
+        {
+            // Two overlapping volumes entered and left in an interleaved order: the medium on top follows the priorities
+            Medium a = MakeMedium(1.0f), b = MakeMedium(2.0f);
+            Interaction volumeA = MakeVolume(a, 2);
+            Interaction volumeB = MakeVolume(b, 1);
+            BoundaryStack stack = default;
+            Vector3f into = new Vector3f(0, 0, -1), outOf = new Vector3f(0, 0, 1);
+
+            volumeA.wo = new Vector3f(0, 0, 1);
+            volumeB.wo = new Vector3f(0, 0, 1);
+            MediumTracking.CrossSurface(ref stack, volumeA, into);
+            MediumTracking.CrossSurface(ref stack, volumeB, into);
+            EXPECT_EQ(stack.Size(), 2);
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), a));
+
+            // Leaving A exposes B, leaving B empties the stack
+            volumeA.wo = new Vector3f(0, 0, -1);
+            volumeB.wo = new Vector3f(0, 0, -1);
+            MediumTracking.CrossSurface(ref stack, volumeA, outOf);
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), b));
+            MediumTracking.CrossSurface(ref stack, volumeB, outOf);
+            EXPECT_TRUE(stack.IsEmpty());
+        }
+
         [TEST("BoundaryStack", "RandomAgainstReference")]
         public static void BoundaryStack_RandomAgainstReference()
         {

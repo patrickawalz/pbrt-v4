@@ -78,10 +78,24 @@ namespace pbrt
         public MediumInterface(Medium medium) { inside = medium; outside = medium; }
         public MediumInterface(Medium inside, Medium outside) { this.inside = inside; this.outside = outside; }
 
+        // (not in pbrt-v4) A shape with a priority is a volume boundary (Fong et al., section 3.9): crossing it into the
+        // shape enters the inside medium and crossing it out leaves it, whatever medium surrounds the shape, and the medium
+        // of highest priority among those a path is in decides the medium of a segment. The outside medium is not used.
+        public MediumInterface(Medium inside, Medium outside, int priority)
+        {
+            this.inside = inside;
+            this.outside = outside;
+            this.priority = priority;
+        }
+
         public bool IsMediumTransition() { return inside != outside; }
 
+        public bool HasPriority() { return priority != noPriority; }
+
         // MediumInterface Public Members
+        public const int noPriority = int.MinValue;
         public Medium inside, outside;
+        public int priority = noPriority;
     }
 
 }  // namespace pbrt
