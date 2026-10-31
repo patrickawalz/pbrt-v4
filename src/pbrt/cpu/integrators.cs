@@ -61,6 +61,14 @@ namespace pbrt
         // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at p0, before it leaves p0 towards p1
         public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda)
         {
+            return Tr(p0, p1, stack, lambda, out Medium endMedium);
+        }
+
+        // (not in pbrt-v4) endMedium is the medium that the path is in on arrival at p1
+        public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda,
+                                  out Medium endMedium)
+        {
+            endMedium = null;
             RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
 
             // :-(
@@ -68,7 +76,10 @@ namespace pbrt
                 p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
             SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f);
             if (LengthSquared(ray.d) == 0)
+            {
+                endMedium = MediumTracking.Current(stack);
                 return Tr;
+            }
             MediumTracking.CrossSurface(ref stack, p0, ray.d);
 
             while (true)
@@ -110,6 +121,7 @@ namespace pbrt
                 ray = si.value().intr.SpawnRayTo(p1);
                 MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
             }
+            endMedium = MediumTracking.Current(stack);
             return Tr / inv_w.Average();
         }
         // Integrator Public Methods
@@ -1531,6 +1543,11 @@ namespace pbrt
                 return bsdf.f(si.wo, wi, mode);
             case VertexType.Medium:
                 return bsdf.f(mi.wo, wi, mode);
+            case VertexType.Light:
+                // (not in pbrt-v4) The emission of a volume is the same in all directions
+                if (ei.light is VolumeEmissionLight)
+                    return new SampledSpectrum(1.0f);
+                goto default;
             default:
                 LOG_FATAL("Vertex::f(): Unimplemented");
                 return new SampledSpectrum(0.0f);
@@ -1734,6 +1751,31 @@ namespace pbrt
     // BDPT Utility Functions
     public static unsafe class BDPT
     {
+        // (not in pbrt-v4) A light vertex inside an emissive volume
+        public static bool IsVolumeEmission(Vertex v)
+        {
+            return v != null && v.type == VertexType.Light && v.ei.light is VolumeEmissionLight;
+        }
+
+        // (not in pbrt-v4) The media that a path is in at p, from the boundaries between the camera and p. Opaque surfaces are
+        // passed like the interfaces, since the stack follows the geometry.
+        public static BoundaryStack StackAtPoint(Integrator integrator, Camera camera, Point3f p, Float time)
+        {
+            Point3f o = camera.GetCameraTransform().RenderFromCamera(new Point3f(0, 0, 0), time);
+            BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
+            Ray ray = new Ray(o, p - o, time);
+            Interaction target = new Interaction(p, time, (Medium)null);
+            for (int i = 0; i < 256 && LengthSquared(ray.d) > 0; ++i)
+            {
+                pstd.optional<ShapeIntersection> si = integrator.Intersect(ray, 1 - ShadowEpsilon);
+                if (!si)
+                    break;
+                ray = si.value().intr.SpawnRayTo(target);
+                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
+            }
+            return stack;
+        }
+
         public static int BufferIndex(int s, int t)
         {
             int above = s + t - 2;
@@ -1776,9 +1818,37 @@ namespace pbrt
 
             Point2f ul0 = sampler.Get2D();
             Point2f ul1 = sampler.Get2D();
-            pstd.optional<LightLeSample> les = light.SampleLe(ul0, ul1, ref lambda, time);
-            if (!les || les.value().pdfPos == 0 || les.value().pdfDir == 0 || !les.value().L)
-                return 0;
+            // (not in pbrt-v4) The point of an emissive volume has a third coordinate
+            VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
+            pstd.optional<LightLeSample> les = volumeLight != null
+                ? volumeLight.SampleLeVolume(ul0, ul1, sampler.Get1D(), lambda, time)
+                : light.SampleLe(ul0, ul1, ref lambda, time);
+            BoundaryStack stack = default;
+            if (volumeLight != null)
+            {
+                // The point only emits if the surfaces around it say that it is in the medium. A sample that misses is a light
+                // subpath without throughput and not the absence of one: the s = 1 strategies take samples of their own, and
+                // only run if the light subpath has a vertex.
+                bool valid = les && les.value().pdfPos != 0 && les.value().pdfDir != 0 && (bool)les.value().L;
+                if (valid)
+                {
+                    stack = StackAtPoint(integrator, camera, les.value().ray.o, time);
+                    valid = MediumTracking.Current(stack) == volumeLight.Medium();
+                }
+                if (!valid)
+                {
+                    path[0] = Vertex.CreateLight(light, new Ray(new Point3f(0, 0, 0), new Vector3f(0, 0, 1), time),
+                                                 new SampledSpectrum(0.0f), lightSamplePDF);
+                    path[0].stack = stack;
+                    return 1;
+                }
+            }
+            else
+            {
+                if (!les || les.value().pdfPos == 0 || les.value().pdfDir == 0 || !les.value().L)
+                    return 0;
+                stack = MediumTracking.Start(les.value().medium);
+            }
             RayDifferential ray = new RayDifferential(les.value().ray);
 
             // Generate first vertex of light subpath
@@ -1788,7 +1858,6 @@ namespace pbrt
 
             // Follow light subpath random walk
             SampledSpectrum beta = les.value().L * les.value().AbsCosTheta(ray.d) / (p_l * les.value().pdfDir);
-            BoundaryStack stack = MediumTracking.Start(les.value().medium);
             path[0].stack = stack;
             int nVertices = RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta,
                                        les.value().pdfDir, maxDepth - 1, TransportMode.Importance, path, 1,
@@ -2066,6 +2135,9 @@ namespace pbrt
                 {
                     ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
                     bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
+                    // (not in pbrt-v4) The camera subpath does not gather the emission of volumes: there is no s = 0 strategy
+                    if (i == 0 && IsVolumeEmission(lightVertices[0]))
+                        continue;
                     if (!lightVertices[i].delta && !deltaLightvertex)
                         sumRi += ri;
                 }
@@ -2130,6 +2202,10 @@ namespace pbrt
                         // Initialize dynamically sampled vertex and _L_ for $t=1$ case
                         sampled = Vertex.CreateCamera(camera, cs.value().pLens, cs.value().Wi / cs.value().pdf);
                         L = qs.beta * qs.f(sampled, TransportMode.Importance) * sampled.beta;
+                        // (not in pbrt-v4) The throughput of the emission vertex is the emission: divide by the density of
+                        // the point and of the choice of the light
+                        if (BDPT.IsVolumeEmission(qs))
+                            L = qs.pdfFwd > 0 ? L / qs.pdfFwd : new SampledSpectrum(0.0f);
                         if (qs.IsOnSurface())
                             L *= AbsDot(cs.value().wi, qs.ns());
                         DCHECK(!L.HasNaNs());
@@ -2172,7 +2248,11 @@ namespace pbrt
                         }
                         else
                             ctx = new LightSampleContext(pt.GetInteraction());
-                        pstd.optional<LightLiSample> lightWeight = light.SampleLi(ctx, sampler.Get2D(), lambda);
+                        // (not in pbrt-v4) The point of an emissive volume has a third coordinate
+                        VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
+                        pstd.optional<LightLiSample> lightWeight = volumeLight != null
+                            ? volumeLight.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda)
+                            : light.SampleLi(ctx, sampler.Get2D(), lambda);
                         if (lightWeight && (bool)lightWeight.value().L && lightWeight.value().pdf > 0)
                         {
                             EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
@@ -2183,7 +2263,13 @@ namespace pbrt
                                 L *= AbsDot(lightWeight.value().wi, pt.ns());
                             // Only check visibility if the path would carry radiance.
                             if ((bool)L)
-                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda);
+                            {
+                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
+                                                   out Medium endMedium);
+                                // The point has to lie in the medium that emits
+                                if (volumeLight != null && endMedium != volumeLight.Medium())
+                                    L = new SampledSpectrum(0.0f);
+                            }
                         }
                     }
                 }
@@ -2225,13 +2311,21 @@ namespace pbrt
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false)
-            : base(camera, sampler, aggregate, lights)
+            : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
             this.maxDepth = maxDepth;
             this.regularize = regularize;
-            this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
+            // (not in pbrt-v4) Media with emission are lights too
+            this.lightSampler = new PowerLightSampler(TextureMedium.AddEmissionLights(lights).ToArray(), new Allocator());
             this.visualizeStrategies = visualizeStrategies;
             this.visualizeWeights = visualizeWeights;
+        }
+
+        // (not in pbrt-v4) Camera subpaths do not gather emission, so every emissive medium is sampled as a light
+        static List<Light> EmissionLightsForBDPT(List<Light> lights)
+        {
+            TextureMedium.EnableEmissionSamplingForAll(16);
+            return TextureMedium.AddEmissionLights(lights);
         }
 
         // BDPT Method Definitions
@@ -2300,7 +2394,7 @@ namespace pbrt
                 for (int s = 0; s <= nLight; ++s)
                 {
                     int depth = t + s - 2;
-                    if ((s == 1 && t == 1) || depth < 0 || depth > maxDepth)
+                    if ((s == 1 && t == 1 && !BDPT.IsVolumeEmission(lightVertices[0])) || depth < 0 || depth > maxDepth)
                         continue;
                     // Execute the $(s, t)$ connection strategy and update _L_
                     pstd.optional<Point2f> pFilmNew = default;

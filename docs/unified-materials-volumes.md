@@ -35,8 +35,7 @@ Shared helpers      the code both VolPath and BDPT call (below)
 ```
 
 Area lights and volume lights share the `Light` interface that `VolumeEmissionLight` already uses on
-`experimental/procedural-media` (point sampling and forward NEE along a line); it is brought over once the volume
-interface exists.
+(point sampling and forward NEE along a line). It is on this branch: see phase 6.
 
 ## Parity between VolPath and BDPT
 
@@ -99,7 +98,15 @@ is reproduced exactly with the same seed.
      its own is replaced by a `hierarchyres`^3 grid, recursively; the traversal is nested DDA. Measured on the fbm cloud scene
      (96x96, 64 spp, volpath): depth 1 renders about 10 % faster than the flat grid, depth 2 about 10 % slower and its setup takes
      3 s, so the default is 0.
-   * Volume light NEE / FNEE for area and volume lights, and emission of a `TextureMedium`, are not on this branch yet.
+   * Emission of a `TextureMedium` (`emission_texture`, `Lescale`) is a `VolumeEmissionLight` when `emission_nee` is set. VolPath
+     samples it as a light: points of the volume by the emission bound (NEE), or with `emission_fnee` along a line through the
+     medium (FNEE, Simon et al.), with the spectral MIS between the sampled emission and the collisions of tracking.
+   * BDPT starts light subpaths in the emissive volume (the start stack is found from the boundaries between the camera and the
+     point; a point outside the medium is a light subpath without throughput), and connects to it for s = 1 (including s = 1,
+     t = 1). Camera subpaths do not gather emission, so there is no s = 0 strategy for volumes and MISWeight leaves it out of the
+     sum; every emissive medium becomes a light in BDPT whether or not `emission_nee` is set, and `emission_fnee` is ignored there.
+     Checked against the free-path estimator of VolPath (absorbing and scattering emitter, with floor and point light): means agree
+     within 1 %.
 7. Polarised light-system types.
 
 ## Decisions taken without asking

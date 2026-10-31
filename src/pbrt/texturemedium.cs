@@ -220,6 +220,18 @@ namespace pbrt
 
         public VolumeEmissionLight EmissionLight() { return emissionLight; }
 
+        // The bidirectional path tracer only finds emission by sampling it, so every medium with emission gets its light
+        public static void EnableEmissionSamplingForAll(int res)
+        {
+            List<TextureMedium> all;
+            lock (emissionMedia)
+            {
+                all = new List<TextureMedium>(emissiveMedia);
+            }
+            foreach (TextureMedium medium in all)
+                medium.EnableEmissionSampling(res, false);
+        }
+
         // The lights plus the emission lights of the media that ask for them
         public static List<Light> AddEmissionLights(List<Light> lights)
         {
@@ -241,6 +253,7 @@ namespace pbrt
             lock (emissionMedia)
             {
                 emissionMedia.Clear();
+                emissiveMedia.Clear();
             }
         }
 
@@ -324,6 +337,13 @@ namespace pbrt
                                                       densityTextureName, densityOffset, densityScale, majorantRes,
                                                       hierarchyRes, hierarchyDepth, refineThreshold, emissionTextureName,
                                                       emissionScale, alloc);
+            if (emissionTextureName.Length > 0)
+            {
+                lock (emissionMedia)
+                {
+                    emissiveMedia.Add(created);
+                }
+            }
             if (emissionNee)
                 created.EnableEmissionSampling(emissionNeeRes, emissionFnee);
             return created;
@@ -347,6 +367,7 @@ namespace pbrt
         private SpectrumTexture emissionTexture;
         private VolumeEmissionLight emissionLight;
         private static readonly List<TextureMedium> emissionMedia = new List<TextureMedium>();
+        private static readonly List<TextureMedium> emissiveMedia = new List<TextureMedium>();
     }
 
 }  // namespace pbrt
