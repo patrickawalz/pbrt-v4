@@ -2618,10 +2618,6 @@ namespace pbrt
                              PolarisedPathIntegrator.Sensor sensor = null)
             : base(aggregate, lights)
         {
-            this.sensor = sensor;
-            if (sensor != null)
-                sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
-            this.volpath = volpath;
             this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
             this.camera = camera;
             this.maxDepth = maxDepth;
@@ -2631,13 +2627,12 @@ namespace pbrt
             this.sigma = sigma;
             this.largeStepProbability = largeStepProbability;
             this.regularize = regularize;
+            // (not in pbrt-v4) What a state of the chains is: a strategy of bdpt or a walk of volpath
+            if (volpath != null)
+                this.evaluator = new VolPathPathEvaluator(volpath, camera);
+            else
+                this.evaluator = new BDPTPathEvaluator(this, camera, lightSampler, maxDepth, regularize, sensor);
         }
-
-        // MLTIntegrator Constants
-        const int cameraStreamIndex = 0;
-        const int lightStreamIndex = 1;
-        const int connectionStreamIndex = 2;
-        const int nSampleStreams = 3;
 
         // MLTIntegrator Method Definitions
         SampledSpectrum L(ScratchBuffer scratchBuffer, MLTSampler sampler, int depth, out Point2f pRaster,
@@ -2647,107 +2642,7 @@ namespace pbrt
             lambda = default;
             if (lights.Count == 0)
                 return new SampledSpectrum(0.0f);
-            sampler.StartStream(cameraStreamIndex);
-            if (volpath != null)
-                return LVolPath(scratchBuffer, sampler, out pRaster, out lambda);
-            // Determine the number of available strategies and pick a specific one
-            int s, t, nStrategies;
-            if (depth == 0)
-            {
-                nStrategies = 1;
-                s = 0;
-                t = 2;
-            }
-            else
-            {
-                nStrategies = depth + 2;
-                s = std.min<int>((int)(sampler.Get1D() * nStrategies), nStrategies - 1);
-                t = nStrategies - s;
-            }
-
-            // Sample wavelengths for MLT path
-            if (Options.disableWavelengthJitter)
-                lambda = camera.GetFilm().SampleWavelengths(0.5f);
-            else
-                lambda = camera.GetFilm().SampleWavelengths(sampler.Get1D());
-
-            // Generate a camera subpath with exactly _t_ vertices
-            Vertex[] cameraVertices = new Vertex[t];
-            for (int i = 0; i < t; ++i) cameraVertices[i] = new Vertex();
-            // Compute camera sample for MLT camera path
-            Bounds2f sampleBounds = camera.GetFilm().SampleBounds();
-            pRaster = sampleBounds.Lerp(sampler.GetPixel2D());
-            CameraSample cameraSample = new CameraSample();
-            cameraSample.pFilm = pRaster;
-            cameraSample.time = sampler.Get1D();
-            cameraSample.pLens = sampler.Get2D();
-
-            // Generate camera ray for MLT camera path
-            pstd.optional<CameraRayDifferential> crd = camera.GenerateRayDifferential(cameraSample, ref lambda);
-            if (!crd || !crd.value().weight)
-                return new SampledSpectrum(0.0f);
-            Float rayDiffScale = std.max<Float>(.125f, 1 / std.sqrt((Float)sampler.SamplesPerPixel()));
-            RayDifferential crdRay = crd.value().ray;
-            crdRay.ScaleDifferentials(rayDiffScale);
-
-            if (BDPT.GenerateCameraSubpath(this, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
-                                           cameraVertices, regularize, sensor != null) != t)
-                return new SampledSpectrum(0.0f);
-
-            // Generate a light subpath with exactly _s_ vertices
-            sampler.StartStream(lightStreamIndex);
-            Vertex[] lightVertices = new Vertex[s];
-            for (int i = 0; i < s; ++i) lightVertices[i] = new Vertex();
-            if (BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer, s,
-                                          cameraVertices[0].time(), lightSampler, lightVertices,
-                                          regularize, sensor != null) != s)
-                return new SampledSpectrum(0.0f);
-
-            // Execute connection strategy and return the radiance estimate
-            sampler.StartStream(connectionStreamIndex);
-            pstd.optional<Point2f> pRasterNew = default;
-            Float misWeight = 0;
-            SampledSpectrum Lval = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, t,
-                                                   lightSampler, camera, sampler, ref pRasterNew,
-                                                   ref misWeight, sensor, -crdRay.d) * (Float)nStrategies;
-            if (pRasterNew)
-                pRaster = pRasterNew.value();
-            return Lval;
-        }
-
-        // (not in pbrt-v4) The same state space driven by volpath: a path is a function of the sampler alone, the camera
-        // sample first and then every value of the walk, so a mutation of the sampler is a mutation of the path. The weight of
-        // a path is the radiance volpath estimates for it (its own MIS between phase function and light sampling included),
-        // and there is no choice of a strategy, so the bootstrap has a single state in place of one for each depth.
-        SampledSpectrum LVolPath(ScratchBuffer scratchBuffer, MLTSampler sampler, out Point2f pRaster,
-                                 out SampledWavelengths lambda)
-        {
-            // Sample wavelengths for MLT path
-            if (Options.disableWavelengthJitter)
-                lambda = camera.GetFilm().SampleWavelengths(0.5f);
-            else
-                lambda = camera.GetFilm().SampleWavelengths(sampler.Get1D());
-
-            // Compute camera sample for MLT camera path
-            Bounds2f sampleBounds = camera.GetFilm().SampleBounds();
-            pRaster = sampleBounds.Lerp(sampler.GetPixel2D());
-            CameraSample cameraSample = new CameraSample();
-            cameraSample.pFilm = pRaster;
-            cameraSample.time = sampler.Get1D();
-            cameraSample.pLens = sampler.Get2D();
-
-            // Generate camera ray for MLT camera path
-            pstd.optional<CameraRayDifferential> crd = camera.GenerateRayDifferential(cameraSample, ref lambda);
-            if (!crd || !crd.value().weight)
-                return new SampledSpectrum(0.0f);
-            Float rayDiffScale = std.max<Float>(.125f, 1 / std.sqrt((Float)sampler.SamplesPerPixel()));
-            RayDifferential crdRay = crd.value().ray;
-            crdRay.ScaleDifferentials(rayDiffScale);
-
-            SampledSpectrum Lval = crd.value().weight * volpath.Li(crdRay, ref lambda, sampler, scratchBuffer, null);
-            if (Lval.HasNaNs() || IsInf(Lval.y(lambda)))
-                return new SampledSpectrum(0.0f);
-            return Lval;
+            return evaluator.Evaluate(scratchBuffer, sampler, depth, out pRaster, out lambda);
         }
 
         static Float c(SampledSpectrum L, SampledWavelengths lambda) { return L.y(lambda); }
@@ -2773,7 +2668,7 @@ namespace pbrt
 
                 string[] rest = new string[cc.Length - 1];
                 Array.Copy(cc, 1, rest, 0, rest.Length);
-                DebugMLTSampler dsampler = DebugMLTSampler.Create(new pstd.span<string>(rest), nSampleStreams);
+                DebugMLTSampler dsampler = DebugMLTSampler.Create(new pstd.span<string>(rest), MLTPathEvaluator.nSampleStreams);
 
                 Point2f pRasterDbg;
                 SampledWavelengths lambdaDbg;
@@ -2801,7 +2696,7 @@ namespace pbrt
                     {
                         int rngIndex = (int)(i * nDepths + depth);
                         MLTSampler sampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma,
-                                                            largeStepProbability, nSampleStreams);
+                                                            largeStepProbability, MLTPathEvaluator.nSampleStreams);
                         // Evaluate path radiance using _sampler_ and update _bootstrapWeights_
                         Point2f pRaster;
                         SampledWavelengths lambda;
@@ -2847,7 +2742,7 @@ namespace pbrt
 
                 // Initialize local variables for selected state
                 MLTSampler sampler = new MLTSampler(mutationsPerPixel, bootstrapIndex, sigma, largeStepProbability,
-                                                    nSampleStreams);
+                                                    MLTPathEvaluator.nSampleStreams);
                 Point2f pCurrent;
                 SampledWavelengths lambdaCurrent;
                 SampledSpectrum LCurrent = L(scratchBuffer, sampler, depth, out pCurrent, out lambdaCurrent);
@@ -2957,9 +2852,8 @@ namespace pbrt
 
         // MLTIntegrator Private Members
         // The number of states of the bootstrap: one for each depth of bdpt, one for volpath
-        int nDepths { get { return volpath != null ? 1 : maxDepth + 1; } }
-        VolPathIntegrator volpath;
-        PolarisedPathIntegrator.Sensor sensor;
+        int nDepths { get { return evaluator.StateCount; } }
+        MLTPathEvaluator evaluator;
         Camera camera;
         bool regularize;
         LightSampler lightSampler;
