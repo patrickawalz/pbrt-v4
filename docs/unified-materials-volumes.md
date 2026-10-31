@@ -174,3 +174,16 @@ As in Fong et al., every medium carries its own integrator, built from two share
 New modules subclass the abstract classes and are chosen in `VolumeIntegrator.Create`. Defaults are bit-identical to the
 previous build (six volpath/bdpt regression scenes). Checks, 256 spp homogeneous scene: analytic vs ratio means 0.12183 vs
 0.12175, 11% lower noise at equal time; `global` vs `majorant` on a uniform-density texture medium: means 0.57827 vs 0.57873.
+
+## Shared path framework (`cpu/pathstate.cs`, `cpu/pathwalk.cs`, `cpu/mltevaluator.cs`)
+
+After LuxCore's PathTracer and pbrt-v4's `BDPT::RandomWalk()`: the integrators share the walk and the throughput updates, and keep their own estimators.
+
+- `PathState` holds the scalar throughput, the rescaled probabilities `r_u`/`r_l` of volpath, and the polarised mirror (Mueller matrix of a camera path, Stokes vector of a light path). Null collisions, real scattering, the end of a segment, surface and phase scattering, Russian roulette and the pass through a coat are written once, for scalar and polarised paths.
+- `PathWalk.Run(WalkContext, PathWalkHook)` is the loop: intersect, follow the medium with the tracker of that medium, handle absorption, real scattering and null collisions, skip boundaries, sample the BSDF. The order in which it draws from the sampler is fixed, so a path stays a function of its sampler (what Metropolis needs). `BDPT.RandomWalk` (`BDPTWalkHook`) and `VolPathIntegrator.Li` (`VolPathWalkHook`) are hooks on it; the medium collision stream is seeded from the ray, with the event drawn from the sampler.
+- `MLTPathEvaluator` is what Metropolis light transport mutates: `BDPTPathEvaluator` (a strategy of a given depth, one chain state per depth, polarised with the same sensor as `bdpt`) and `VolPathPathEvaluator` (a whole walk, one state). They share the draw of wavelengths and the camera ray. `Integrator "mlt" "string pathestimator" "bdpt"|"volpath"`.
+- Still two formalisms: volpath's rescaled probabilities and bdpt's vertex densities (unifying them is future work).
+
+Checks (96x96 and 96x96 volumetric Cornell scenes): volpath on the shared walk and bdpt on the shared walk are bit-identical to the previous builds (11 and 6 scenes, scalar, polarised, Rayleigh, emission). Volumetric Cornell box with a thin-coated marble sphere, 64 spp: volpath and bdpt agree to 0.01% polarised (analyser 0 and 90, with and without Rayleigh) and scalar. Both MLT estimators agree with them in luminance: ratio 0.9999 (volpath) and 1.003 (bdpt) with 6.4M bootstrap samples; with 100k bootstrap samples the ratio moves by about 1% from the noise of the normalisation constant, so MLT means need a large bootstrap to be compared.
+
+Efficiency on that scene (rmse against 1024 spp volpath, error^2 x time, lower is better): volpath 0.065, bdpt 0.154, MLT volpath 0.147, MLT bdpt 0.411. bdpt has 2.1x lower variance per sample than volpath but costs 5x as much (all s,t connections); MLT driven by bdpt needs more chains and bootstrap samples than MLT driven by volpath (96x96 wax scene, rmse 0.137 -> 0.0925 with 4x the bootstrap samples).
