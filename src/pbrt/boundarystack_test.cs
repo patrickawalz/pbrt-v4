@@ -1,0 +1,178 @@
+// (not in pbrt-v4) boundarystack_test.cs
+
+using System;
+using testing;
+
+namespace pbrt
+{
+    public static unsafe class BoundaryStackTests
+    {
+        static Medium MakeMedium(Float sigma)
+        {
+            ConstantSpectrum sigmaSpectrum = new ConstantSpectrum(sigma);
+            ConstantSpectrum zero = new ConstantSpectrum(0.0f);
+            return new HomogeneousMedium(sigmaSpectrum, sigmaSpectrum, 1.0f, zero, 0.0f, 0.0f, null);
+        }
+
+        [TEST("BoundaryStack", "PriorityOrder")]
+        public static void BoundaryStack_PriorityOrder()
+        {
+            Medium air = MakeMedium(0.1f), glass = MakeMedium(0.2f), water = MakeMedium(0.3f);
+            BoundaryStack stack = default;
+            EXPECT_TRUE(stack.IsEmpty());
+
+            // The scene's medium is below everything else
+            stack.Push(new BoundaryStackElement(null, air), BoundaryStack.globalMediumPriority);
+            // A high priority element pushed first stays on top of a later one with a lower priority
+            stack.Push(new BoundaryStackElement(null, glass), 3);
+            stack.Push(new BoundaryStackElement(null, water), 1);
+
+            EXPECT_EQ(stack.Size(), 3);
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, glass));
+            EXPECT_EQ(stack.TopPriority(), 3);
+            EXPECT_TRUE(ReferenceEquals(stack.SecondFromTop().medium, water));
+
+            // Leaving the glass exposes the water, then the air
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, glass), 3));
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, water));
+            stack.PopTop();
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, air));
+            EXPECT_EQ(stack.TopPriority(), BoundaryStack.globalMediumPriority);
+        }
+
+        [TEST("BoundaryStack", "EqualPriorityLastPushedOnTop")]
+        public static void BoundaryStack_EqualPriorityLastPushedOnTop()
+        {
+            Medium a = MakeMedium(1.0f), b = MakeMedium(2.0f), c = MakeMedium(3.0f);
+            BoundaryStack stack = default;
+            stack.Push(new BoundaryStackElement(null, a), 2);
+            stack.Push(new BoundaryStackElement(null, b), 2);
+            stack.Push(new BoundaryStackElement(null, c), 1);
+
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, b));
+            EXPECT_TRUE(ReferenceEquals(stack.SecondFromTop().medium, a));
+
+            // Removing an element from the middle keeps the order of the others
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, a), 2));
+            EXPECT_EQ(stack.Size(), 2);
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, b));
+            EXPECT_TRUE(ReferenceEquals(stack.SecondFromTop().medium, c));
+        }
+
+        [TEST("BoundaryStack", "PopMissingDoesNothing")]
+        public static void BoundaryStack_PopMissingDoesNothing()
+        {
+            Medium a = MakeMedium(1.0f), b = MakeMedium(2.0f);
+            BoundaryStack stack = default;
+            stack.Push(new BoundaryStackElement(null, a), 2);
+
+            // The right element with the wrong priority, and the wrong element with the right priority
+            EXPECT_FALSE(stack.Pop(new BoundaryStackElement(null, a), 3));
+            EXPECT_FALSE(stack.Pop(new BoundaryStackElement(null, b), 2));
+            EXPECT_EQ(stack.Size(), 1);
+            EXPECT_TRUE(stack.Contains(new BoundaryStackElement(null, a), 2));
+            EXPECT_FALSE(stack.Contains(new BoundaryStackElement(null, b), 2));
+        }
+
+        [TEST("BoundaryStack", "CopyIsIndependent")]
+        public static void BoundaryStack_CopyIsIndependent()
+        {
+            // A shadow ray starts with a copy of the stack of the path it was spawned from
+            Medium a = MakeMedium(1.0f), b = MakeMedium(2.0f);
+            BoundaryStack stack = default;
+            stack.Push(new BoundaryStackElement(null, a), 0);
+            BoundaryStack copy = stack;
+            copy.Push(new BoundaryStackElement(null, b), 1);
+
+            EXPECT_EQ(stack.Size(), 1);
+            EXPECT_EQ(copy.Size(), 2);
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, a));
+            EXPECT_TRUE(ReferenceEquals(copy.Top().medium, b));
+        }
+
+        [TEST("BoundaryStack", "NestedVolumes")]
+        public static void BoundaryStack_NestedVolumes()
+        {
+            // The ray of figure 13 in Fong et al.: an outer volume V_O around an inner volume V_I, crossing V_I at the
+            // intervals [p1, p3] and leaving V_I again. The inner volume has the higher priority.
+            Medium outer = MakeMedium(1.0f), inner = MakeMedium(2.0f);
+            BoundaryStack stack = default;
+            stack.Push(new BoundaryStackElement(null, outer), 1);       // p0: enter V_O
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, outer));
+            stack.Push(new BoundaryStackElement(null, inner), 2);       // p1: enter V_I
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, inner));
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, inner), 2));   // p3: leave V_I
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, outer));
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, outer), 1));   // p5: leave V_O
+            EXPECT_TRUE(stack.IsEmpty());
+        }
+
+        [TEST("BoundaryStack", "InterleavedEntryAndExit")]
+        public static void BoundaryStack_InterleavedEntryAndExit()
+        {
+            // Overlapping, not nested: the ray enters A, enters B, leaves A, leaves B. The medium on top has to follow
+            // the priorities and not the order of the events.
+            Medium a = MakeMedium(1.0f), b = MakeMedium(2.0f);
+            BoundaryStack stack = default;
+            stack.Push(new BoundaryStackElement(null, a), 5);
+            stack.Push(new BoundaryStackElement(null, b), 3);
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, a));
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, a), 5));
+            EXPECT_TRUE(ReferenceEquals(stack.Top().medium, b));
+            EXPECT_TRUE(stack.Pop(new BoundaryStackElement(null, b), 3));
+            EXPECT_TRUE(stack.IsEmpty());
+        }
+
+        [TEST("BoundaryStack", "RandomAgainstReference")]
+        public static void BoundaryStack_RandomAgainstReference()
+        {
+            // Random pushes and pops are compared with a plain list sorted the way the stack is documented to be
+            Medium[] media = new Medium[6];
+            for (int i = 0; i < media.Length; ++i)
+                media[i] = MakeMedium(1.0f + i);
+            RNG rng = new RNG();
+            for (int trial = 0; trial < 200; ++trial)
+            {
+                BoundaryStack stack = default;
+                System.Collections.Generic.List<(int medium, int priority)> reference =
+                    new System.Collections.Generic.List<(int medium, int priority)>();
+                for (int step = 0; step < 60; ++step)
+                {
+                    int medium = (int)(rng.Uniform<Float>() * media.Length);
+                    int priority = (int)(rng.Uniform<Float>() * 4);
+                    bool push = rng.Uniform<Float>() < 0.55f && reference.Count < BoundaryStack.capacity - 1;
+                    if (push)
+                    {
+                        stack.Push(new BoundaryStackElement(null, media[medium]), priority);
+                        int index = reference.Count;
+                        while (index > 0 && reference[index - 1].priority > priority)
+                            --index;
+                        reference.Insert(index, (medium, priority));
+                    }
+                    else
+                    {
+                        bool popped = stack.Pop(new BoundaryStackElement(null, media[medium]), priority);
+                        int found = -1;
+                        for (int i = reference.Count - 1; i >= 0; --i)
+                        {
+                            if (reference[i].medium == medium && reference[i].priority == priority)
+                            {
+                                found = i;
+                                break;
+                            }
+                        }
+                        EXPECT_EQ(popped, found >= 0);
+                        if (found >= 0)
+                            reference.RemoveAt(found);
+                    }
+                    EXPECT_EQ(stack.Size(), reference.Count);
+                    if (reference.Count > 0)
+                    {
+                        EXPECT_TRUE(ReferenceEquals(stack.Top().medium, media[reference[reference.Count - 1].medium]));
+                        EXPECT_EQ(stack.TopPriority(), reference[reference.Count - 1].priority);
+                    }
+                }
+            }
+        }
+    }
+}

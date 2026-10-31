@@ -1,0 +1,74 @@
+# Unified materials and volumes (branch `experimental/unified-materials-volumes`)
+
+Baseline: `main`, i.e. pbrt-v4's `VolPathIntegrator` and `BDPTIntegrator` with the medium carried in the `Ray` and a
+`MediumInterface` on primitives. Nothing from `experimental/procedural-media` is assumed; textures drive volumes later
+through the interface below.
+
+References: Fong et al., *Production Volume Rendering* (SIGGRAPH 2017 course) sections 3.1-3.9 and 6; PolarisedUPBP
+(`Scene/Media.hxx`, `Scene/Materials.hxx`, `Path/Bsdf.hxx`, `Path/BoundaryStack.hxx`, `Path/PriorityStack.hxx`,
+`Path/PolarisedLightSystems.hxx`). LuxCoreRender's volume-as-material design is not re-read for this document.
+
+## What the references agree on
+
+| Idea | Fong et al. | PolarisedUPBP | Magi consequence |
+| --- | --- | --- | --- |
+| A material owns both the surface response and the volume | `Material::CreateBSDF`, `HasVolume`, `CreateVolume` (listing 1, 4) | `Material` plus per-id `AbstractMedium`; one `BSDF_LS` covers surface and medium (`kScatter` event) | `Material` gets `HasVolume()` / `CreateVolume(ctx)`; phase functions become a `BSDF` |
+| The path knows which volumes it is inside of | `Ray::EnterMaterial` / `ExitMaterial` list, most capable volume on top (listing 5, section 3.9) | `BoundaryStack` priority stack, copied for shadow rays | `BoundaryStack` (done, see below) replaces `Ray.medium` |
+| Volume integration is an interval query | `Volume::Integrate`, `Volume::Transmittance` (listing 1) | `SampleRay` / `RaySamplePdf` / `EvalAttenuation` / `EvalEmission` | one `Volume` per medium type with its own integrator module (see below) |
+| Transmittance rays inherit the stack | section 3.4 | `Occluded(..., aBoundaryStack, ...)` | shadow rays take a copy of the stack |
+| Overlap is resolved by priority and, if allowed, by summing extinction | `CanOverlap`, `GetOverlapPriority`, listing 17 | priority only | priority first; summed-extinction overlap later |
+| Many volumes are aggregated into a spatial structure of integration intervals | octree with min/max per node (section 6.8) | none | procedural textures supply min/max per cell; one aggregate per scene |
+| Polarisation is a change of the carried quantity, not of the algorithm | n/a | `Light`, `Importance`, `Attenuation` trio over Stokes / Mueller | keep every throughput product behind three small types so a Mueller version can replace them |
+
+## Target interfaces (names follow pbrt-v4 where an equivalent exists)
+
+```
+Material            CreateBSDF(ctx) / HasVolume() / CreateVolume(ctx) / GetBoundaryPriority() / CanOverlap()
+BSDF                one type for surface and phase: f, Sample_f, PDF, Flags (a phase BSDF has no shading frame normal)
+Interaction         one struct for surface and medium points
+Volume (per type)   integrator module: SampleCollision(ray, tMax, u, rng) -> event + weights
+                    estimator modules: Transmittance(p0, p1), Density(p), Attenuation(p), Emission(p)
+                    bounds: RegionBounds(box) -> (min, max) and optionally Gradient(p), used by textures
+VolumeAggregate     octree of canonical cells, each with its overlapping volumes and (min, max); iterator yields intervals
+BoundaryStack       the priority stack, one per path and per shadow ray
+Shared helpers      the code both VolPath and BDPT call (below)
+```
+
+Area lights and volume lights share the `Light` interface that `VolumeEmissionLight` already uses on
+`experimental/procedural-media` (point sampling and forward NEE along a line); it is brought over once the volume
+interface exists.
+
+## Parity between VolPath and BDPT
+
+The integrators differ only in how they combine events, so everything that decides *what an event is* moves into
+shared helpers. PolarisedUPBP's renderers already share `Scene::Intersect`, the `BoundaryStack` and `BSDF_LS` this way:
+
+1. `BoundaryStack` update at an interface (enter / exit / reflect), one function used by every path walk and by shadow rays.
+2. Collision sampling in a volume interval (`Volume.SampleCollision`), including the ratio-tracking weights `r_u`, `r_l`.
+3. Transmittance between two points (`Volume.Transmittance`), used by `SampleLd`, the BDPT connection and the light tracer.
+4. Phase `BSDF` creation at a real scattering event.
+
+A change is accepted when VolPath and BDPT still agree on a test scene within noise and the render before the change
+is reproduced exactly with the same seed.
+
+## Phases
+
+1. **BoundaryStack** (done): `boundarystack.cs`, ported from `StaticPriorityStack2`, with tests against a reference model.
+2. Carry a `BoundaryStack` in `VolPathIntegrator` and in the BDPT vertices next to `Ray.medium` and check that both give
+   the same medium at every segment on the existing media scenes; then remove `Ray.medium`.
+3. Add a priority parameter to materials / shapes and the entry / exit logic at interfaces, with nested and overlapping scenes.
+4. `Volume` modules for the existing media (homogeneous, grid, RGB grid, cloud, NanoVDB), each with its integrator and estimator.
+5. `Material.CreateVolume`, then phase function as `BSDF`.
+6. Volume aggregate with texture-supplied min / max.
+7. Polarised light-system types.
+
+## Decisions taken without asking
+
+* Branch name `experimental/unified-materials-volumes`, from `main` at 9e6754a; nothing is pushed.
+* `BoundaryStack` is a value type with inline storage (20 entries, as in PolarisedUPBP) so a shadow-ray copy needs no allocation.
+* Stack overflow drops the top entry with a warning, as PolarisedUPBP does; this is a limit to revisit.
+
+## Open questions for the owner
+
+* Should `Ray.medium` be removed in phase 2 at once, or kept as a derived cache until the shadow-ray path is converted?
+* Keep pbrt's `MediumInterface` on primitives as the way scenes bind volumes, or move to a material-owned volume only?
