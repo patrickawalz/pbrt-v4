@@ -107,7 +107,10 @@ is reproduced exactly with the same seed.
      sum; every emissive medium becomes a light in BDPT whether or not `emission_nee` is set, and `emission_fnee` is ignored there.
      Checked against the free-path estimator of VolPath (absorbing and scattering emitter, with floor and point light): means agree
      within 1 %.
-7. Polarised light-system types.
+7. Polarised light-system types (first slice, `polarised.cs`): `StokesLight` (I, Q, U, V per wavelength) and `MuellerAttenuation`
+   (4x4 per wavelength: identity, scalar, frame rotator, linear polariser, Rayleigh), tested against Malus's law, rotator
+   composition and the Rayleigh normalisation. They are not used by the integrators: replacing the SampledSpectrum products of
+   a path by this pair (and a Mueller version of `BSDF`/`PhaseBxDF`) is the next step.
 
 ## Decisions taken without asking
 
