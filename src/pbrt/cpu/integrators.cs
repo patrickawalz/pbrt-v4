@@ -1124,8 +1124,8 @@ namespace pbrt
 
                                             // Sample phase function for medium scattering event
                                             Point2f u2 = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
-                                            pstd.optional<PhaseFunctionSample> ps =
-                                                mp.phase.Sample_p(-rayCap.d, u2);
+                                            pstd.optional<BSDFSample> ps =
+                                                new BSDF(mp.phase).Sample_f(-rayCap.d, 0.0f, u2);
                                             if (!ps)
                                             {
                                                 terminatedCap = true;
@@ -1133,7 +1133,7 @@ namespace pbrt
                                             }
 
                                             // Update state for recursive evaluation of $L_\roman{i}$
-                                            betaCap *= ps.value().p / ps.value().pdf;
+                                            betaCap *= ps.value().f[0] / ps.value().pdf;
                                             newO = p;
                                             newD = ps.value().wi;
                                             scatteredCap = true;
@@ -1434,7 +1434,7 @@ namespace pbrt
 
         public Vertex(MediumInteraction mi, SampledSpectrum beta)
         {
-            this.type = VertexType.Medium; this.beta = beta; this.mi = mi;
+            this.type = VertexType.Medium; this.beta = beta; this.mi = mi; this.bsdf = mi.GetBSDF();
         }
 
         // (C++ copies Vertex objects by value with memcpy)
@@ -1530,7 +1530,7 @@ namespace pbrt
             case VertexType.Surface:
                 return bsdf.f(si.wo, wi, mode);
             case VertexType.Medium:
-                return new SampledSpectrum(mi.phase.p(mi.wo, wi));
+                return bsdf.f(mi.wo, wi, mode);
             default:
                 LOG_FATAL("Vertex::f(): Unimplemented");
                 return new SampledSpectrum(0.0f);
@@ -1657,7 +1657,7 @@ namespace pbrt
             else if (type == VertexType.Surface)
                 pdf = bsdf.PDF(wp, wn);
             else if (type == VertexType.Medium)
-                pdf = mi.phase.p(wp, wn);
+                pdf = bsdf.PDF(wp, wn);
             else
                 LOG_FATAL("Vertex::PDF(): Unimplemented");
 
@@ -1874,7 +1874,7 @@ namespace pbrt
                                     }
 
                                     // Sample direction and compute reverse density at preceding vertex
-                                    pstd.optional<PhaseFunctionSample> ps = intr.phase.Sample_p(-ray.d, sampler.Get2D());
+                                    pstd.optional<BSDFSample> ps = path[vIdx].bsdf.Sample_f(-ray.d, 0.0f, sampler.Get2D());
                                     if (!ps || ps.value().pdf == 0)
                                     {
                                         terminated = true;
@@ -1882,7 +1882,7 @@ namespace pbrt
                                     }
                                     // Update path state and previous path vertex after medium scattering
                                     pdfFwd = ps.value().pdf;
-                                    beta *= ps.value().p / ps.value().pdf;
+                                    beta *= ps.value().f / ps.value().pdf;
                                     ray = intr.SpawnRay(ps.value().wi);
                                     anyNonSpecularBounces = true;
                                     path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.value().pdf, path[vIdx - 1]);
@@ -3800,14 +3800,14 @@ namespace pbrt
 
                                         // Sample new direction at real-scattering event
                                         Point2f u = sampler.Get2D();
-                                        pstd.optional<PhaseFunctionSample> ps =
-                                            intr.phase.Sample_p(-ray.d, u);
+                                        pstd.optional<BSDFSample> ps =
+                                            intr.GetBSDF().Sample_f(-ray.d, 0.0f, u);
                                         if (!ps || ps.value().pdf == 0)
                                             terminated = true;
                                         else
                                         {
                                             // Update ray path state for indirect volume scattering
-                                            beta *= ps.value().p / ps.value().pdf;
+                                            beta *= ps.value().f / ps.value().pdf;
                                             r_l = r_u / ps.value().pdf;
                                             prevIntrContext = new LightSampleContext(intr);
                                             scattered = true;
@@ -4108,9 +4108,9 @@ namespace pbrt
             {
                 // Update _f_hat_ and _scatterPDF_ accounting for the phase function
                 CHECK(intr.IsMediumInteraction());
-                PhaseFunction phase = intr.AsMedium().phase;
-                f_hat = new SampledSpectrum(phase.p(wo, wi));
-                scatterPDF = phase.PDF(wo, wi);
+                BSDF phaseBSDF = intr.AsMedium().GetBSDF();
+                f_hat = phaseBSDF.f(wo, wi);
+                scatterPDF = phaseBSDF.PDF(wo, wi);
             }
             if (!f_hat)
                 return new SampledSpectrum(0.0f);

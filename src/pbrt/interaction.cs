@@ -171,6 +171,12 @@ namespace pbrt
                 phase != null ? phase.ToString() : "(nullptr)");
         }
 
+        // (not in pbrt-v4) The scattering at the point as a BSDF, as for a SurfaceInteraction
+        public BSDF GetBSDF()
+        {
+            return new BSDF(phase);
+        }
+
         // MediumInteraction Public Members
         public PhaseFunction phase;
     }

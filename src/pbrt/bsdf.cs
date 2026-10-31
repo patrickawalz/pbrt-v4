@@ -18,6 +18,15 @@ namespace pbrt
             this.shadingFrame = Frame.FromXZ(pbrt.Normalize(dpdus), (Vector3f)ns);
         }
 
+        // (not in pbrt-v4) The BSDF of a scattering event in a medium: the phase function in the place of the BxDF and no shading
+        // frame, so the directions are not tested against a surface (a direction in the plane of a frame is not special in a medium).
+        public BSDF(PhaseFunction phase)
+        {
+            this.bxdf = new PhaseBxDF(phase);
+            this.shadingFrame = Frame.FromXZ(new Vector3f(1, 0, 0), new Vector3f(0, 0, 1));
+            this.isVolume = true;
+        }
+
         public static implicit operator bool(BSDF b) { return b.bxdf != null; }
 
         public BxDFFlags Flags() { return bxdf.Flags(); }
@@ -28,7 +37,7 @@ namespace pbrt
         public SampledSpectrum f(Vector3f woRender, Vector3f wiRender, TransportMode mode)
         {
             Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);
-            if (wo.z == 0)
+            if (wo.z == 0 && !isVolume)
                 return default;
             return bxdf.f(wo, wi, mode);
         }
@@ -41,13 +50,13 @@ namespace pbrt
                                                   BxDFReflTransFlags sampleFlags)
         {
             Vector3f wo = RenderToLocal(woRender);
-            if (wo.z == 0 || (bxdf.Flags() & sampleFlags) == 0)
+            if ((wo.z == 0 && !isVolume) || (bxdf.Flags() & sampleFlags) == 0)
                 return default;
             // Sample _bxdf_ and return _BSDFSample_
             pstd.optional<BSDFSample> bs = bxdf.Sample_f(wo, u, u2, mode, sampleFlags);
             if (bs)
                 pbrt.DCHECK_GE(bs.value().pdf, 0f);
-            if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
+            if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || (bs.value().wi.z == 0 && !isVolume))
                 return default;
             BSDFSample s = bs.value();
             s.wi = LocalToRender(s.wi);
@@ -61,7 +70,7 @@ namespace pbrt
         public Float PDF(Vector3f woRender, Vector3f wiRender, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
-            if (wo.z == 0)
+            if (wo.z == 0 && !isVolume)
                 return 0;
             return bxdf.PDF(wo, wi, mode, sampleFlags);
         }
@@ -90,6 +99,7 @@ namespace pbrt
         // BSDF Private Members
         private BxDF bxdf;
         private Frame shadingFrame;
+        private bool isVolume;
     }
 
 }  // namespace pbrt

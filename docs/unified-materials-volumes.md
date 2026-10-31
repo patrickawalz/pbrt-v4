@@ -74,7 +74,19 @@ is reproduced exactly with the same seed.
    updates (`RatioTrackingStep`, `FinishSegment`, used by the BDPT / volpath shadow-ray transmittance and by `SampleLd`).
    Same-seed renders are still bit-identical to `main`. An analytic homogeneous transmittance was left out: it changes how
    the spectral MIS weights `r_l` / `r_u` are built, which has to be validated separately.
-5. `Material.CreateVolume`, then phase function as `BSDF`.
+5. (done) Material-owned volumes and the phase function as a `BSDF`.
+   * `Material "..." "string volume" "<medium>" "integer volumepriority" N`: the material owns the volume. The `interface`
+     material is `null` in Magi, so the binding is read from the material's scene entity when the shape is built
+     (`BasicScene.MakeMediumInterface`); a shape with such a material becomes a volume boundary as in phase 3. A glass sphere
+     with `"string volume"` renders bit-identically to pbrt-v4's `MediumInterface` + `dielectric` on `main`.
+   * `MediumInterface` stays valid input and keeps pbrt's transition meaning. It is not rewritten into a material volume:
+     the two agree only when the medium named as outside is the one that surrounds the shape, and a rewrite would silently
+     change scenes where it is not. When both are given the material wins and a warning is printed.
+   * `BSDF(PhaseFunction)` / `PhaseBxDF` / `MediumInteraction.GetBSDF()`: one BSDF type for surface and medium points (no shading
+     frame, no `wo.z == 0` rejection). `Vertex.f` / `Vertex.PDF`, the volpath and simplevolpath scattering, the BDPT random walk and
+     `SampleLd` use it; same-seed renders are unchanged. `Interaction` was already one class with a surface and a medium
+     subclass.
+   Not done: `Material.HasVolume()` / `CreateVolume()` as virtual methods (the null interface material has no object to carry them).
 6. Volume aggregate with texture-supplied min / max.
 7. Polarised light-system types.
 

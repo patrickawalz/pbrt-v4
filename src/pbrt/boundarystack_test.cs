@@ -210,6 +210,32 @@ namespace pbrt
             EXPECT_TRUE(stack.IsEmpty());
         }
 
+        [TEST("PhaseBxDF", "MatchesPhaseFunction")]
+        public static void PhaseBxDF_MatchesPhaseFunction()
+        {
+            // The BSDF of a medium point is the phase function: same value, same density, same samples, and no shading frame
+            HGPhaseFunction phase = new HGPhaseFunction(0.6f);
+            BSDF bsdf = new BSDF(phase);
+            RNG rng = new RNG();
+            for (int i = 0; i < 100; ++i)
+            {
+                Vector3f wo = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
+                pstd.optional<PhaseFunctionSample> ps = phase.Sample_p(wo, u);
+                pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, 0.5f, u);
+                EXPECT_TRUE((bool)ps);
+                EXPECT_TRUE((bool)bs);
+                EXPECT_EQ(bs.value().pdf, ps.value().pdf);
+                EXPECT_EQ(bs.value().f[0], ps.value().p);
+                EXPECT_EQ(bs.value().wi.x, ps.value().wi.x);
+                EXPECT_EQ(bsdf.f(wo, ps.value().wi)[0], phase.p(wo, ps.value().wi));
+                EXPECT_EQ(bsdf.PDF(wo, ps.value().wi), phase.PDF(wo, ps.value().wi));
+            }
+            // A direction in the xy plane is a valid direction in a medium
+            Vector3f inPlane = new Vector3f(0, 1, 0);
+            EXPECT_TRUE(bsdf.f(inPlane, new Vector3f(1, 0, 0))[0] > 0);
+        }
+
         [TEST("BoundaryStack", "RandomAgainstReference")]
         public static void BoundaryStack_RandomAgainstReference()
         {
