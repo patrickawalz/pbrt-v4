@@ -2614,9 +2614,13 @@ namespace pbrt
         // MLTIntegrator Public Methods
         public MLTIntegrator(Camera camera, Primitive aggregate, List<Light> lights, int maxDepth,
                              int nBootstrap, int nChains, int mutationsPerPixel, Float sigma,
-                             Float largeStepProbability, bool regularize, VolPathIntegrator volpath = null)
+                             Float largeStepProbability, bool regularize, VolPathIntegrator volpath = null,
+                             PolarisedPathIntegrator.Sensor sensor = null)
             : base(aggregate, lights)
         {
+            this.sensor = sensor;
+            if (sensor != null)
+                sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
             this.volpath = volpath;
             this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
             this.camera = camera;
@@ -2687,7 +2691,7 @@ namespace pbrt
             crdRay.ScaleDifferentials(rayDiffScale);
 
             if (BDPT.GenerateCameraSubpath(this, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
-                                           cameraVertices, regularize) != t)
+                                           cameraVertices, regularize, sensor != null) != t)
                 return new SampledSpectrum(0.0f);
 
             // Generate a light subpath with exactly _s_ vertices
@@ -2696,7 +2700,7 @@ namespace pbrt
             for (int i = 0; i < s; ++i) lightVertices[i] = new Vertex();
             if (BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer, s,
                                           cameraVertices[0].time(), lightSampler, lightVertices,
-                                          regularize) != s)
+                                          regularize, sensor != null) != s)
                 return new SampledSpectrum(0.0f);
 
             // Execute connection strategy and return the radiance estimate
@@ -2705,7 +2709,7 @@ namespace pbrt
             Float misWeight = 0;
             SampledSpectrum Lval = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, t,
                                                    lightSampler, camera, sampler, ref pRasterNew,
-                                                   ref misWeight) * (Float)nStrategies;
+                                                   ref misWeight, sensor, -crdRay.d) * (Float)nStrategies;
             if (pRasterNew)
                 pRaster = pRasterNew.value();
             return Lval;
@@ -2932,18 +2936,30 @@ namespace pbrt
             // path tracer (which then also reads its parameters: lightsampler, polarised, the sensor)
             string pathEstimator = parameters.GetOneString("pathestimator", "bdpt");
             VolPathIntegrator volpath = null;
+            // (not in pbrt-v4) The sensor of polarised bdpt: the strategies carry the Stokes vector and the sensor measures it
+            PolarisedPathIntegrator.Sensor sensor = null;
+            if (pathEstimator == "bdpt" && parameters.GetOneBool("polarised", false))
+            {
+                PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
+                                                    out PolarisedPathIntegrator.Measurement measurement);
+                sensor = new PolarisedPathIntegrator.Sensor();
+                sensor.analyser = analyser;
+                sensor.analyserAngle = analyserAngle;
+                sensor.measurement = measurement;
+            }
             if (pathEstimator == "volpath")
                 volpath = VolPathIntegrator.Create(parameters, camera, null, aggregate, lights, loc);
             else if (pathEstimator != "bdpt")
                 ErrorExit(loc, StringPrintf("%s: unknown \"pathestimator\" for \"mlt\"; use \"bdpt\" or \"volpath\".", pathEstimator));
             return new MLTIntegrator(camera, aggregate, lights, maxDepth, nBootstrap, (int)nChains,
-                                     mutationsPerPixel, sigma, largeStepProbability, regularize, volpath);
+                                     mutationsPerPixel, sigma, largeStepProbability, regularize, volpath, sensor);
         }
 
         // MLTIntegrator Private Members
         // The number of states of the bootstrap: one for each depth of bdpt, one for volpath
         int nDepths { get { return volpath != null ? 1 : maxDepth + 1; } }
         VolPathIntegrator volpath;
+        PolarisedPathIntegrator.Sensor sensor;
         Camera camera;
         bool regularize;
         LightSampler lightSampler;
