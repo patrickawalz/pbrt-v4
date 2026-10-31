@@ -614,6 +614,8 @@ namespace pbrt
                         continue;
                     }
 
+                    mtl.parameters.GetOneString("volume", "");  // read by MakeMediumInterface()
+                    mtl.parameters.GetOneInt("volumepriority", 0);
                     string type = mtl.parameters.GetOneString("type", "");
                     if (type.Length == 0)
                     {
@@ -639,6 +641,8 @@ namespace pbrt
                 foreach (SceneEntity mtl in materials)
                 {
                     Allocator alloc = new Allocator();
+                    mtl.parameters.GetOneString("volume", "");  // read by MakeMediumInterface()
+                    mtl.parameters.GetOneInt("volumepriority", 0);
                     string fn = ResolveFilename(mtl.parameters.GetOneString("normalmap", ""));
                     Image normalMap = null;
                     if (fn.Length != 0)
@@ -728,6 +732,47 @@ namespace pbrt
             return textures;
         }
 
+        // (not in pbrt-v4) The volume of a shape comes from its material ("string volume" and "integer volumepriority" on the
+        // Material, as in Fong et al. where the material owns the volume) or, as in pbrt-v4, from the MediumInterface in
+        // effect. The material wins when it has a volume; a priority on the shape overrides the one of the material.
+        MediumInterface MakeMediumInterface(string insideName, string outsideName, int shapePriority, string materialName,
+                                            int materialIndex, Func<string, FileLoc, Medium> findMedium, FileLoc loc)
+        {
+            SceneEntity materialEntity = null;
+            if (materialName.Length != 0)
+            {
+                int idx = namedMaterials.FindIndex(((string, SceneEntity) p) => p.Item1 == materialName);
+                if (idx >= 0)
+                    materialEntity = namedMaterials[idx].Item2;
+            }
+            else if (materialIndex >= 0 && materialIndex < materials.Count)
+            {
+                materialEntity = materials[materialIndex];
+            }
+            string volumeName = materialEntity != null ? materialEntity.parameters.GetOneString("volume", "") : "";
+            if (volumeName.Length == 0)
+                return new MediumInterface(findMedium(insideName, loc), findMedium(outsideName, loc), shapePriority);
+
+            if (insideName.Length != 0 || outsideName.Length != 0)
+                Warning(loc, "Shape has a MediumInterface and a material with a volume: using the volume of the material.");
+            int priority = shapePriority != MediumInterface.noPriority
+                               ? shapePriority
+                               : materialEntity.parameters.GetOneInt("volumepriority", 0);
+            return new MediumInterface(findMedium(volumeName, loc), null, priority);
+        }
+
+        // (not in pbrt-v4) Whether a material gives the shapes that use it a volume
+        public bool HasMaterialVolumes()
+        {
+            foreach ((string name, SceneEntity mtl) in namedMaterials)
+                if (mtl.parameters.GetOneString("volume", "").Length != 0)
+                    return true;
+            foreach (SceneEntity mtl in materials)
+                if (mtl.parameters.GetOneString("volume", "").Length != 0)
+                    return true;
+            return false;
+        }
+
         public List<Light> CreateLights(NamedTextures textures,
                                         Dictionary<int, List<Light>> shapeIndexToAreaLights)
         {
@@ -799,9 +844,9 @@ namespace pbrt
 
                 FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
 
-                MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                         findMedium(sh.outsideMedium, sh.loc),
-                                                         sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority));
+                MediumInterface mi = MakeMediumInterface(sh.insideMedium, sh.outsideMedium,
+                                                         sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority),
+                                                         sh.materialName, sh.materialIndex, findMedium, sh.loc);
 
                 List<Light> shapeLights = new List<Light>();
                 SceneEntity areaLightEntity = areaLights[sh.lightIndex];
@@ -910,8 +955,8 @@ namespace pbrt
                             mtl = materialsIn[sh.materialIndex];
                         }
 
-                        MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                                 findMedium(sh.outsideMedium, sh.loc), mediumPriority);
+                        MediumInterface mi = MakeMediumInterface(sh.insideMedium, sh.outsideMedium, mediumPriority,
+                                                                 sh.materialName, sh.materialIndex, findMedium, sh.loc);
 
                         shapeIndexToAreaLights.TryGetValue(i, out List<Light> areaList);
                         for (ulong j = 0; j < shapeObjs.size(); ++j)
@@ -970,8 +1015,8 @@ namespace pbrt
                             mtl = materialsIn[sh.materialIndex];
                         }
 
-                        MediumInterface mi = new MediumInterface(findMedium(sh.insideMedium, sh.loc),
-                                                                 findMedium(sh.outsideMedium, sh.loc), mediumPriority);
+                        MediumInterface mi = MakeMediumInterface(sh.insideMedium, sh.outsideMedium, mediumPriority,
+                                                                 sh.materialName, sh.materialIndex, findMedium, sh.loc);
 
                         List<Primitive> prims = new List<Primitive>();
                         for (ulong k = 0; k < shapeObjs.size(); ++k)

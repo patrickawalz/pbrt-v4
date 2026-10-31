@@ -35,7 +35,7 @@ namespace pbrt
 
             // (CreateAggregate consumes parsedScene.shapes / animatedShapes, so the media-warning scan
             // below runs on copies taken here.)
-            bool haveScatteringMedia = false;
+            bool haveScatteringMedia = parsedScene.HasMaterialVolumes();
             foreach (ShapeSceneEntity sh in parsedScene.shapes)
                 if (sh.insideMedium.Length != 0 || sh.outsideMedium.Length != 0)
                     haveScatteringMedia = true;
