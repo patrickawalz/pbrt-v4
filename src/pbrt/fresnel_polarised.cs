@@ -32,10 +32,23 @@ namespace pbrt
                                               out Float Dp)
         {
             cosTheta_i = Clamp(cosTheta_i, 0, 1);
+            // The polarised equations assume a negative extinction coefficient (eta = n - ik), the opposite of pbrt's
+            // convention for FrComplex()
+            if (eta.im > 0)
+            {
+                eta = new pstd.complex(eta.re, -eta.im);
+            }
+
             // Compute complex $\cos\,\theta_\roman{t}$ for Fresnel equations using Snell's law
             Float sin2Theta_i = 1 - Sqr(cosTheta_i);
             pstd.complex sin2Theta_t = sin2Theta_i / Sqr(eta);
             pstd.complex cosTheta_t = pstd.sqrt(1 - sin2Theta_t);
+            // Choose the sign of the root that has a nonpositive imaginary part: it fixes the phase difference under total
+            // internal reflection (appendix A.2 of "Stellar Polarimetry" by David Clarke, as in Mitsuba 3)
+            if (cosTheta_t.im > 0)
+            {
+                cosTheta_t = new pstd.complex(cosTheta_t.re, -cosTheta_t.im);
+            }
 
             pstd.complex r_parl = (eta * cosTheta_i - cosTheta_t) / (eta * cosTheta_i + cosTheta_t);
             pstd.complex r_perp = (cosTheta_i - eta * cosTheta_t) / (cosTheta_i + eta * cosTheta_t);

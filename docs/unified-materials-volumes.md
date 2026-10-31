@@ -113,13 +113,16 @@ is reproduced exactly with the same seed.
    `FrDielectricPolarised()` / `FrComplexPolarised()` are written like `FrDielectric()` / `FrComplex()` and return UPBP's
    Fs, Fp, Ds, Dp for `Attenuation.Fresnel()`; the tests check them against UPBP's `FresnelReal()` / `FresnelComplex()` ported
    verbatim, and chains of 2-5 mixed events (Lambert, scalar, Fresnel, Rayleigh, polariser) against applying them one at a time.
-   Convention: the amplitudes and signs are Mitsuba 3's (Verdet convention, from its polarization documentation), so
-   `Attenuation.Fresnel()` reproduces Mitsuba's F_r and F_t (tested against the formulas of that page); UPBP's own
-   `FresnelReal()` differs by the handedness matrix diag(1, 1, -1, -1), i.e. a pi in Ds - Dp. Not verified: Mitsuba's source
-   was not reachable, so the choice of the Stokes x axis (s or p) for surface frames, the sign of the retardance in total
-   internal reflection, and Rayleigh scattering (not in the documentation page) are open.
-   One deviation: UPBP's `DepolarisingExit * Standard` product multiplies the unrotated first row (its rotated row is stored in
-   the second row and never used); the port uses the rotated row, which the chain test needs. The types are not used by the
+   Convention (checked against the source of Mitsuba 3, `render/fresnel.h`, `render/mueller.h`, `bsdfs/conductor.cpp`):
+   the amplitudes, their signs (Verdet), the conjugation of eta and of cos(theta_t) for total internal reflection are
+   `fresnel_polarized()`'s, and `Attenuation.Fresnel()` builds `specular_reflection()` from them (UPBP's own `FresnelReal()` differs
+   by diag(1, 1, -1, -1), a pi in Ds - Dp). The x axis of the Stokes frame of a surface event is the s axis, cross(normal,
+   propagation direction), as in Mitsuba's BSDFs; UPBP's `Scattered()` put it in the plane of incidence, which turns Q by 90 degrees
+   against the Fresnel matrix, so `Scattered()` here takes the s axis (media: the normal of the scattering plane). Not covered:
+   Rayleigh scattering (no equivalent in Mitsuba's render/ headers).
+   Two more deviations from UPBP: its `DepolarisingExit * Standard` product multiplies the unrotated first row (its rotated row
+   is stored in the second row and never used), the port uses the rotated row, which the chain test needs; and its
+   `Light::RepresentInDirection()` returns before rotating a light that has a frame, the port rotates. The types are not used by the
    integrators yet: replacing the SampledSpectrum products of a path by this trio (and a Mueller `BSDF` / `PhaseBxDF`) is the
    next step.
 

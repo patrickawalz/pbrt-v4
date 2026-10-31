@@ -251,18 +251,25 @@ namespace pbrt
                 return this;
             }
 
+            // (PolarisedUPBP returns from the Standard case before the rotation, which leaves it unreachable; a light with a
+            // frame is rotated to the new one)
             Light RotateToFrame(PolarisationFrame newFrame)
             {
                 switch (elementType)
                 {
                 case PolarisationElementType.Zero:
                 case PolarisationElementType.Plain:
-                case PolarisationElementType.Standard:
                     return this;
+                case PolarisationElementType.Standard:
+                    break;
                 default:
                     pbrt.LOG_FATAL("PolarisedLightSystem: the frame of a light is not set");
                     return this;
                 }
+
+                stokes.RotateFrame(newFrame, frame);
+                frame = newFrame;
+                return this;
             }
         }
 
@@ -770,41 +777,34 @@ namespace pbrt
                 return this;
             }
 
-            // The frames of a scattering from worldDirGen to worldDirFix (or the other way for a path from the camera), with
-            // both oriented along the normal of a surface
+            // The frames of a scattering at a surface: the light arrives along -worldDirFix and leaves along worldDirGen (the other
+            // way round for a path from the camera). As in Mitsuba 3's BSDFs the x axis of the Stokes frame at both ends is the
+            // s axis, perpendicular to the plane of the two directions and the normal: cross(normal, propagation direction).
+            // That is the axis that the Mueller matrices of Fresnel() are written for.
             public Attenuation Scattered(Vector3f worldDirFix, Vector3f worldDirGen, Vector3f worldSurfaceNormal,
                                          bool fromCamera)
             {
-                switch (elementType)
+                if (!PrepareForFrames())
                 {
-                case PolarisationElementType.Zero:
-                case PolarisationElementType.DepolarisingBoth:
-                case PolarisationElementType.DepolarisingEnter:
-                case PolarisationElementType.DepolarisingExit:
                     return this;
-                case PolarisationElementType.Plain:
-                    matrix = MuellerMatrix.Diagonal(matrix.m00);
-                    break;
                 }
 
-                if (fromCamera)
-                {
-                    exitFrame.SetFromZX(worldDirFix, worldSurfaceNormal);
-                    enterFrame.SetFromZX(-worldDirGen, worldSurfaceNormal);
-                }
-                else
-                {
-                    exitFrame.SetFromZX(worldDirGen, worldSurfaceNormal);
-                    enterFrame.SetFromZX(-worldDirFix, worldSurfaceNormal);
-                }
-
-                elementType = PolarisationElementType.Standard;
+                Vector3f directionExit = fromCamera ? worldDirFix : worldDirGen;
+                Vector3f directionEnter = fromCamera ? -worldDirGen : -worldDirFix;
+                SetFrames(directionExit, StokesAxis(worldSurfaceNormal, directionExit), directionEnter,
+                          StokesAxis(worldSurfaceNormal, directionEnter));
                 return this;
             }
 
-            // The same for a scattering in a medium: the orientation of the frames follows the plane of the two directions
+            // The same for a scattering in a medium: the x axis of the frames is the normal of the plane of the two directions,
+            // the axis that the Mueller matrices of scattering are written for
             public Attenuation Scattered(Vector3f worldDirFix, Vector3f worldDirGen, bool fromCamera)
             {
+                if (!PrepareForFrames())
+                {
+                    return this;
+                }
+
                 Vector3f normal = pbrt.Cross(worldDirFix, worldDirGen);
                 if (pbrt.LengthSquared(normal) < 1e-12f)
                 {
@@ -813,7 +813,54 @@ namespace pbrt
                 }
 
                 normal = pbrt.Normalize(normal);
-                return Scattered(worldDirFix, worldDirGen, normal, fromCamera);
+                Vector3f directionExit = fromCamera ? worldDirFix : worldDirGen;
+                Vector3f directionEnter = fromCamera ? -worldDirGen : -worldDirFix;
+                SetFrames(directionExit, normal, directionEnter, normal);
+                return this;
+            }
+
+            // Both frames along one direction with the given reference axis for x: the sensor looking along forward
+            internal Attenuation ForSensor(Vector3f direction, Vector3f reference)
+            {
+                if (!PrepareForFrames())
+                {
+                    return this;
+                }
+
+                SetFrames(direction, reference, direction, reference);
+                return this;
+            }
+
+            // Whether the attenuation takes frames (a depolariser does not), after making a scalar a matrix
+            bool PrepareForFrames()
+            {
+                switch (elementType)
+                {
+                case PolarisationElementType.Zero:
+                case PolarisationElementType.DepolarisingBoth:
+                case PolarisationElementType.DepolarisingEnter:
+                case PolarisationElementType.DepolarisingExit:
+                    return false;
+                case PolarisationElementType.Plain:
+                    matrix = MuellerMatrix.Diagonal(matrix.m00);
+                    break;
+                }
+
+                return true;
+            }
+
+            void SetFrames(Vector3f directionExit, Vector3f referenceExit, Vector3f directionEnter, Vector3f referenceEnter)
+            {
+                exitFrame.SetFromZX(directionExit, referenceExit);
+                enterFrame.SetFromZX(directionEnter, referenceEnter);
+                elementType = PolarisationElementType.Standard;
+            }
+
+            // The s axis of light that propagates along direction at a surface with the normal; any axis along the normal
+            static Vector3f StokesAxis(Vector3f normal, Vector3f direction)
+            {
+                Vector3f axis = pbrt.Cross(normal, direction);
+                return pbrt.LengthSquared(axis) == 0 ? new Vector3f(1, 0, 0) : axis;
             }
         }
 
@@ -838,7 +885,7 @@ namespace pbrt
             public static Importance Camera(SampledSpectrum value, Vector3f forward, Vector3f up)
             {
                 Importance importance = new Importance(value);
-                importance.attenuation = importance.attenuation.Scattered(-forward, forward, up, true);
+                importance.attenuation = importance.attenuation.ForSensor(-forward, up);
                 return importance;
             }
 

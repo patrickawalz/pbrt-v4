@@ -1,6 +1,7 @@
 // (not in pbrt-v4) polarised_test.cs
 
 using System;
+using System.Numerics;
 using testing;
 
 namespace pbrt
@@ -153,6 +154,102 @@ namespace pbrt
                 EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m22[0] - std.sqrt(Ts * Tp)), (Float)2e-5);
                 EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m33[0] - std.sqrt(Ts * Tp)), (Float)2e-5);
             }
+        }
+
+        // fresnel_polarized() of Mitsuba 3 (include/mitsuba/render/fresnel.h), the complex overload, for cos_theta_i >= 0
+        static void MitsubaFresnelPolarized(double cosThetaI, Complex eta, out Complex a_s, out Complex a_p)
+        {
+            if (eta.Imaginary > 0)
+            {
+                eta = Complex.Conjugate(eta);
+            }
+
+            Complex eta_it = eta;
+            Complex eta_ti = 1.0 / eta;
+            Complex cosThetaTSqr = 1.0 - eta_ti * eta_ti * (1.0 - cosThetaI * cosThetaI);
+            Complex cosThetaT = Complex.Sqrt(cosThetaTSqr);
+            if (cosThetaT.Imaginary > 0)
+            {
+                cosThetaT = Complex.Conjugate(cosThetaT);
+            }
+
+            a_s = (cosThetaI - eta_it * cosThetaT) / (cosThetaI + eta_it * cosThetaT);
+            a_p = (eta_it * cosThetaI - cosThetaT) / (eta_it * cosThetaI + cosThetaT);
+        }
+
+        [TEST("Polarised", "FresnelMatchesMitsubaSource")]
+        public static void Polarised_FresnelMatchesMitsubaSource()
+        {
+            // specular_reflection() of Mitsuba 3 (include/mitsuba/render/mueller.h) from those amplitudes:
+            //   delta = arg(a_p) - arg(a_s); [a, b, 0, 0; b, a, 0, 0; 0, 0, c cos, -c sin; 0, 0, c sin, c cos]
+            // including total internal reflection (eta < 1) and conductors (pbrt's eta + ik is Mitsuba's eta - ik)
+            RNG rng = new RNG(17);
+            for (int i = 0; i < 2000; ++i)
+            {
+                Float cosI = 0.01f + 0.99f * rng.Uniform<Float>();
+                Float eta = 0.4f + 2.5f * rng.Uniform<Float>();
+                Float k = i % 2 == 0 ? 0.0f : 0.05f + 4 * rng.Uniform<Float>();
+                MitsubaFresnelPolarized(cosI, new Complex(eta, -k), out Complex a_s, out Complex a_p);
+                double rs = a_s.Magnitude * a_s.Magnitude, rp = a_p.Magnitude * a_p.Magnitude;
+                double delta = a_p.Phase - a_s.Phase;
+                double c = Math.Sqrt(rs * rp);
+
+                Float Fs, Fp, Ds, Dp;
+                if (k == 0)
+                {
+                    pbrt.FrDielectricPolarised(cosI, eta, out Fs, out Fp, out Ds, out Dp);
+                }
+                else
+                {
+                    pbrt.FrComplexPolarised(cosI, new pstd.complex(eta, k), out Fs, out Fp, out Ds, out Dp);
+                }
+
+                MuellerMatrix F = PolarisedLightSystem.Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp).GetMuellerMatrix();
+                EXPECT_LT(Math.Abs(F.m00[0] - 0.5 * (rs + rp)), 1e-4);
+                EXPECT_LT(Math.Abs(F.m01[0] - 0.5 * (rs - rp)), 1e-4);
+                EXPECT_LT(Math.Abs(F.m22[0] - c * Math.Cos(delta)), 1e-3);
+                EXPECT_LT(Math.Abs(F.m23[0] - (-c * Math.Sin(delta))), 1e-3);
+                EXPECT_LT(Math.Abs(F.m32[0] - c * Math.Sin(delta)), 1e-3);
+                EXPECT_LT(Math.Abs(F.m33[0] - c * Math.Cos(delta)), 1e-3);
+            }
+        }
+
+        [TEST("Polarised", "SurfaceFramesAreSAxis")]
+        public static void Polarised_SurfaceFramesAreSAxis()
+        {
+            // As in Mitsuba 3's BSDFs, the x axis of the Stokes frame of a surface event is the s axis: light polarised
+            // perpendicular to the plane of incidence (Q > 0) is reflected with R_s and stays Q > 0, light polarised in the plane
+            // (Q < 0) with R_p
+            Float eta = 1.5f;
+            Vector3f normal = new Vector3f(0, 0, 1);
+            Vector3f incoming = pbrt.Normalize(new Vector3f(0.6f, 0.2f, -0.7f));
+            Vector3f outgoing = new Vector3f(incoming.x, incoming.y, -incoming.z);
+            Float cosI = std.abs(incoming.z);
+            pbrt.FrDielectricPolarised(cosI, eta, out Float Fs, out Float Fp, out Float Ds, out Float Dp);
+            PolarisedLightSystem.Attenuation reflection =
+                PolarisedLightSystem.Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp).Scattered(-incoming, outgoing, normal, false);
+
+            Vector3f sAxis = pbrt.Normalize(pbrt.Cross(normal, incoming));
+            PolarisedLightSystem.Light perpendicular =
+                new PolarisedLightSystem.Light(new StokesVector(S(1), S(1), S(0), S(0))).InDirection(incoming, sAxis);
+            StokesVector r = (reflection * perpendicular).ToStokesVector();
+            EXPECT_LT(std.abs(r.s0[0] - Fs), (Float)1e-5);
+            EXPECT_LT(std.abs(r.s1[0] - Fs), (Float)1e-5);
+
+            PolarisedLightSystem.Light parallel =
+                new PolarisedLightSystem.Light(new StokesVector(S(1), S(-1), S(0), S(0))).InDirection(incoming, sAxis);
+            r = (reflection * parallel).ToStokesVector();
+            EXPECT_LT(std.abs(r.s0[0] - Fp), (Float)1e-5);
+            EXPECT_LT(std.abs(r.s1[0] - (-Fp)), (Float)1e-5);
+
+            // The same perpendicular light described in a frame that is turned by 40 degrees reflects the same
+            Vector3f turned = pbrt.Normalize(sAxis * std.cos(0.7f) + pbrt.Cross(incoming, sAxis) * std.sin(0.7f));
+            PolarisedLightSystem.Light perpendicularTurned =
+                new PolarisedLightSystem.Light(new StokesVector(S(1), S(1), S(0), S(0))).InDirection(incoming, sAxis)
+                    .RepresentInDirection(incoming, turned);
+            StokesVector t = (reflection * perpendicularTurned).ToStokesVector();
+            EXPECT_LT(std.abs(t.s0[0] - Fs), (Float)1e-5);
+            EXPECT_LT(std.abs(t.s1[0] - Fs), (Float)1e-5);
         }
 
         [TEST("Polarised", "FresnelBrewster")]
