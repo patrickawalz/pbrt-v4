@@ -2533,7 +2533,7 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) Every emissive medium is sampled as a light, next to the gathering of its emission by the camera subpaths
-        static List<Light> EmissionLightsForBDPT(List<Light> lights)
+        public static List<Light> EmissionLightsForBDPT(List<Light> lights)
         {
             TextureMedium.EnableEmissionSamplingForAll(16);
             return TextureMedium.AddEmissionLights(lights);
@@ -2727,10 +2727,12 @@ namespace pbrt
         public MLTIntegrator(Camera camera, Primitive aggregate, List<Light> lights, int maxDepth,
                              int nBootstrap, int nChains, int mutationsPerPixel, Float sigma,
                              Float largeStepProbability, bool regularize, VolPathIntegrator volpath = null,
-                             PolarisedPathIntegrator.Sensor sensor = null)
-            : base(aggregate, lights)
+                             PolarisedPathIntegrator.Sensor sensor = null, bool gatherMediumEmission = true)
+            : base(aggregate, volpath == null ? BDPTIntegrator.EmissionLightsForBDPT(lights) : lights)
         {
-            this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
+            // (not in pbrt-v4) With bdpt the emissive media are lights too, and the camera subpaths gather their emission
+            this.gatherMediumEmission = gatherMediumEmission;
+            this.lightSampler = new PowerLightSampler(this.lights.ToArray(), new Allocator());
             this.camera = camera;
             this.maxDepth = maxDepth;
             this.nBootstrap = nBootstrap;
@@ -2958,8 +2960,10 @@ namespace pbrt
                 volpath = VolPathIntegrator.Create(parameters, camera, null, aggregate, lights, loc);
             else if (pathEstimator != "bdpt")
                 ErrorExit(loc, StringPrintf("%s: unknown \"pathestimator\" for \"mlt\"; use \"bdpt\" or \"volpath\".", pathEstimator));
+            bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
             return new MLTIntegrator(camera, aggregate, lights, maxDepth, nBootstrap, (int)nChains,
-                                     mutationsPerPixel, sigma, largeStepProbability, regularize, volpath, sensor);
+                                     mutationsPerPixel, sigma, largeStepProbability, regularize, volpath, sensor,
+                                     gatherMediumEmission);
         }
 
         // MLTIntegrator Private Members

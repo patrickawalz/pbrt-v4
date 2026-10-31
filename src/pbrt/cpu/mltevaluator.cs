@@ -6,6 +6,7 @@
 // that share how the camera sample is drawn, how the wavelengths are drawn and how the weight of the camera ray enters.
 
 using System;
+using System.Collections.Generic;
 
 namespace pbrt
 {
@@ -73,6 +74,7 @@ namespace pbrt
             this.maxDepth = maxDepth;
             this.regularize = regularize;
             this.sensor = sensor;
+            hasEmissiveMedia = integrator.lights.Exists((Light light) => light is VolumeEmissionLight);
             if (sensor != null)
                 sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
         }
@@ -87,11 +89,14 @@ namespace pbrt
             sampler.StartStream(cameraStreamIndex);
             // Determine the number of available strategies and pick a specific one
             int s, t, nStrategies;
+            // (not in pbrt-v4) With the camera subpaths gathering the emission of media, a path of length 0 has the second
+            // strategy of the light sample of a medium that connects to the camera
+            bool gather = integrator.gatherMediumEmission;
             if (depth == 0)
             {
-                nStrategies = 1;
-                s = 0;
-                t = 2;
+                nStrategies = hasEmissiveMedia ? 2 : 1;
+                s = hasEmissiveMedia ? std.min<int>((int)(sampler.Get1D() * nStrategies), nStrategies - 1) : 0;
+                t = 2 - s;
             }
             else
             {
@@ -107,8 +112,12 @@ namespace pbrt
             // Generate a camera subpath with exactly _t_ vertices
             Vertex[] cameraVertices = new Vertex[t];
             for (int i = 0; i < t; ++i) cameraVertices[i] = new Vertex();
-            if (BDPT.GenerateCameraSubpath(integrator, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
-                                           cameraVertices, regularize, sensor != null) != t)
+            // (not in pbrt-v4) The s = 0 strategy also takes the emission that the subpath gathers in a medium at its t - 1st
+            // vertex, so the subpath may end one vertex short of t
+            List<MediumEmissionEnd> emissionEnds = gather && s == 0 ? new List<MediumEmissionEnd>() : null;
+            int nCamera = BDPT.GenerateCameraSubpath(integrator, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
+                                                     cameraVertices, regularize, sensor != null, emissionEnds);
+            if (nCamera != t && !(emissionEnds != null && nCamera >= t - 1))
                 return new SampledSpectrum(0.0f);
 
             // Generate a light subpath with exactly _s_ vertices
@@ -124,9 +133,25 @@ namespace pbrt
             sampler.StartStream(connectionStreamIndex);
             pstd.optional<Point2f> pRasterNew = default;
             Float misWeight = 0;
-            SampledSpectrum Lval = BDPT.ConnectBDPT(integrator, ref lambda, lightVertices, cameraVertices, s, t,
-                                                   lightSampler, camera, sampler, ref pRasterNew,
-                                                   ref misWeight, sensor, -crdRay.d) * (Float)nStrategies;
+            SampledSpectrum Lval = new SampledSpectrum(0.0f);
+            // A light sample of a medium is the only light sample of length 0; the others are the s = 0 strategy
+            if (!(s == 1 && t == 1 && !BDPT.IsVolumeEmission(lightVertices[0])))
+            {
+                if (nCamera == t)
+                    Lval = BDPT.ConnectBDPT(integrator, ref lambda, lightVertices, cameraVertices, s, t,
+                                            lightSampler, camera, sampler, ref pRasterNew,
+                                            ref misWeight, sensor, -crdRay.d);
+                if (emissionEnds != null)
+                {
+                    foreach (MediumEmissionEnd end in emissionEnds)
+                    {
+                        if (end.index == t - 1 && end.index <= nCamera)
+                            Lval += BDPT.ConnectEmissionEnd(integrator, ref lambda, cameraVertices, end, lightSampler, camera,
+                                                            sampler, sensor, -crdRay.d);
+                    }
+                }
+            }
+            Lval *= (Float)nStrategies;
             if (pRasterNew)
                 pRaster = pRasterNew.value();
             return Lval;
@@ -137,6 +162,7 @@ namespace pbrt
         LightSampler lightSampler;
         int maxDepth;
         bool regularize;
+        bool hasEmissiveMedia;
         PolarisedPathIntegrator.Sensor sensor;
     }
 
