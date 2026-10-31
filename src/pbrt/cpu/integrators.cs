@@ -3940,436 +3940,415 @@ namespace pbrt
                                            Sampler sampler, ScratchBuffer scratchBuffer,
                                            VisibleSurface visibleSurf)
         {
-            // (Lambdas cannot capture ref parameters: work on a local copy of _lambda_ and write it
-            // back when leaving, since GetBSDF() may terminate secondary wavelengths.)
-            SampledWavelengths lambda = lambdaRef;
+            // (not in pbrt-v4) The walk is shared with bdpt (see PathWalk); what volpath does at each of its points is the hook.
+            // The walk works on its own copy of _lambda_, since GetBSDF() may terminate secondary wavelengths.
+            WalkContext ctx = new WalkContext
+            {
+                integrator = this,
+                lambda = lambdaRef,
+                ray = ray,
+                stack = MediumTracking.Start(camera.GetMedium()),
+                sampler = sampler,
+                camera = camera,
+                scratchBuffer = scratchBuffer,
+                mode = TransportMode.Radiance,
+                // The Mueller matrix of the throughput and the Stokes vector of the radiance. The matrix takes every scalar
+                // factor of beta, so its first element is beta
+                st = new PathState(new SampledSpectrum(1.0f), PAttenuation.Identity(), PLight.Zero(), true, polarised, true)
+            };
+            VolPathWalkHook hook = new VolPathWalkHook(this, visibleSurf, -ray.d);
             try
             {
-                // Declare state variables for volumetric path sampling
-                SampledSpectrum L = new SampledSpectrum(0.0f);
-                bool specularBounce = false, anyNonSpecularBounces = false;
-                int depth = 0;
-                Float etaScale = 1;
-                // (not in pbrt-v4) The Mueller matrix of the throughput and the Stokes vector of the radiance. The matrix
-                // takes every scalar factor of beta, so its first element is beta
-                PathState st = new PathState(new SampledSpectrum(1.0f), PAttenuation.Identity(), PLight.Zero(), true, polarised, true);
-                PLight pL = PLight.Zero();
-                Vector3f cameraDirection = -ray.d;
-
-                LightSampleContext prevIntrContext = default;
-                BoundaryStack stack = MediumTracking.Start(camera.GetMedium());
-                // (not in pbrt-v4) For the line sampling of emission (see SampleLdFnee): the density that the last scattering
-                // vertex had for the direction of the ray, and the ratio of the density of sampling the direction toward
-                // the emission to it, which is looked up when the emission is first found along the ray
-                Float fneeScatterPdf = 0, fneeRatio = -1;
-                Point3f fneeOrigin = default;
-
-                while (true)
-                {
-                    // Sample segment of volumetric scattering path
-                    pstd.optional<ShapeIntersection> si = Intersect(new Ray(ray));
-                    Medium rayMedium = MediumTracking.Current(stack);
-                    if (rayMedium != null)
-                    {
-                        // Sample the participating medium
-                        bool scattered = false, terminated = false;
-                        Float tMax = si ? si.value().tHit : Infinity;
-                        // Initialize _RNG_ for sampling the majorant transmittance. (not in pbrt-v4) Like bdpt, from the ray and
-                        // not from sampler values, with the event of a collision drawn from the sampler: a small change of the
-                        // sampler (a Metropolis mutation) then changes the event and not the whole stream of collisions.
-                        RNG rng = new RNG(Hash(ray.o, tMax), Hash(ray.d));
-
-                        SampledWavelengths lambdaCap = lambda;
-                        SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
-                            new Ray(ray), rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
-                            (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
-                             SampledSpectrum T_maj_) =>
-                            {
-                                // Handle medium scattering event for ray
-                                if (!st.beta)
-                                {
-                                    terminated = true;
-                                    return false;
-                                }
-                                ++volumeInteractions;
-                                // Add emission from medium scattering event
-                                if (depth < maxDepth && (bool)mp.Le)
-                                {
-                                    // Compute $\beta'$ at new path vertex
-                                    Float pdf = sigma_maj[0] * T_maj_[0];
-                                    SampledSpectrum betap = st.beta * T_maj_ / pdf;
-
-                                    // Compute rescaled path probability for absorption at path vertex
-                                    SampledSpectrum r_e = st.r_u * sigma_maj * T_maj_ / pdf;
-
-                                    // Update _L_ for medium emission
-                                    if ((bool)r_e)
-                                    {
-                                        // (not in pbrt-v4) A medium whose emission is also sampled from the previous scattering
-                                        // vertex: the light strategy would have chosen this point with probability density
-                                        // pmf * pdfPoint * t^2 per direction and length, where the density of this strategy
-                                        // is sigma_maj T_maj per length (hero values), and the light strategy's null
-                                        // collisions on the way are already in st.r_l, with the tail of T_maj added here
-                                        SampledSpectrum r_sum = r_e;
-                                        VolumeEmissionLight emissionLight = (rayMedium as TextureMedium)?.EmissionLight();
-                                        if (emissionLight != null && emissionLight.UsesFnee())
-                                        {
-                                            // The strategy that samples the direction toward the emission integrates along the
-                                            // same ray with the same tracking, so the two differ by the densities of the
-                                            // direction alone
-                                            if (depth > 0 && !specularBounce && fneeScatterPdf > 0)
-                                            {
-                                                if (fneeRatio < 0)
-                                                {
-                                                    Float pmfDirection = lightSampler.PMF(prevIntrContext, emissionLight);
-                                                    fneeRatio = pmfDirection * emissionLight.PdfDirection(fneeOrigin, ray.d) / fneeScatterPdf;
-                                                }
-                                                r_sum = r_e * (1 + fneeRatio);
-                                            }
-                                        }
-                                        else if (emissionLight != null && depth > 0 && !specularBounce)
-                                        {
-                                            Float pmf = lightSampler.PMF(prevIntrContext, emissionLight);
-                                            if (pmf > 0)
-                                            {
-                                                Float t2 = DistanceSquared(prevIntrContext.p(), p);
-                                                Float densityRatio = pmf * emissionLight.PdfPoint(p) * t2 / sigma_maj[0];
-                                                r_sum = r_e + st.r_l * (T_maj_ / T_maj_[0]) * densityRatio;
-                                            }
-                                        }
-                                        L += betap * mp.sigma_a * mp.Le / r_sum.Average();
-                                        if (polarised)
-                                            pL += st.pa * new PLight(T_maj_ / pdf * mp.sigma_a * mp.Le / r_sum.Average());
-                                    }
-                                }
-
-                                // Compute medium event probabilities for interaction
-
-                                // Sample medium scattering event type and update path
-                                Float um = sampler.Get1D();
-                                MediumEventType mode = MediumEvents.SampleEvent(mp, sigma_maj, um);
-                                if (mode == MediumEventType.Absorb)
-                                {
-                                    // Handle absorption along ray path
-                                    terminated = true;
-                                    return false;
-                                }
-                                else if (mode == MediumEventType.Scatter)
-                                {
-                                    // Handle scattering along ray path
-                                    // Stop path sampling if maximum depth has been reached
-                                    if (depth++ >= maxDepth)
-                                    {
-                                        terminated = true;
-                                        return false;
-                                    }
-
-                                    // Update _beta_ and _r_u_ for real-scattering event
-                                    st.RealScatter(T_maj_, mp.sigma_s);
-
-                                    if ((bool)st.beta && (bool)st.r_u)
-                                    {
-                                        // Sample direct lighting at volume-scattering event
-                                        MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium,
-                                                                                       mp.phase);
-                                        if (polarised)
-                                        {
-                                            SampledSpectrum Ld = SampleLd(intr, null, lambdaCap, sampler,
-                                                                          new SampledSpectrum(1.0f), st.r_u, stack,
-                                                                          depth < maxDepth, out Vector3f wiLight);
-                                            if ((bool)Ld)
-                                            {
-                                                PLight Lp = new PLight(Ld);
-                                                PAttenuation M;
-                                                if (PolarisedPathIntegrator.PhaseAttenuation(mp.phase, intr.wo, wiLight, true, out M))
-                                                    Lp = M * Lp;
-                                                pL += st.pa * Lp;
-                                            }
-                                        }
-                                        else
-                                            L += SampleLd(intr, null, lambdaCap, sampler, st.beta, st.r_u, stack, depth < maxDepth,
-                                                          out Vector3f _);
-
-                                        // Sample new direction at real-scattering event
-                                        Point2f u = sampler.Get2D();
-                                        pstd.optional<BSDFSample> ps =
-                                            intr.GetBSDF().Sample_f(-ray.d, 0.0f, u);
-                                        if (!ps || ps.value().pdf == 0)
-                                            terminated = true;
-                                        else
-                                        {
-                                            // Update ray path state for indirect volume scattering
-                                            st.ScatterPhase(mp.phase, -ray.d, ps.value());
-                                            st.r_l = st.r_u / ps.value().pdf;
-                                            prevIntrContext = new LightSampleContext(intr);
-                                            fneeScatterPdf = ps.value().pdf;
-                                            fneeRatio = -1;
-                                            fneeOrigin = p;
-                                            scattered = true;
-                                            ray.o = p;
-                                            ray.d = ps.value().wi;
-                                            specularBounce = false;
-                                            anyNonSpecularBounces = true;
-                                        }
-                                    }
-                                    return false;
-                                }
-                                else
-                                {
-                                    // Handle null scattering along ray path
-                                    SampledSpectrum sigma_n =
-                                        ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                    return st.NullCollision(T_maj_, sigma_maj, sigma_n);
-                                }
-                            });
-                        // Handle terminated, scattered, and unscattered medium rays
-                        if (terminated || !st.beta || !st.r_u)
-                            return Finish(L, pL, cameraDirection);
-                        if (scattered)
-                            continue;
-
-                        st.EndSegment(T_maj);
-                    }
-                    // Handle surviving unscattered rays
-                    // Add emitted light at volume path vertex or from the environment
-                    if (!si)
-                    {
-                        // Accumulate contributions from infinite light sources
-                        foreach (Light light in infiniteLights)
-                        {
-                            SampledSpectrum Le = light.Le(new Ray(ray), lambda);
-                            if ((bool)Le)
-                            {
-                                if (depth == 0 || specularBounce)
-                                {
-                                    L += st.beta * Le / st.r_u.Average();
-                                    if (polarised)
-                                        pL += st.pa * new PLight(Le / st.r_u.Average());
-                                }
-                                else
-                                {
-                                    // Add infinite light contribution using both PDFs with MIS
-                                    Float p_l = lightSampler.PMF(prevIntrContext, light) *
-                                                light.PDF_Li(prevIntrContext, ray.d, true);
-                                    st.r_l *= p_l;
-                                    L += st.beta * Le / (st.r_u + st.r_l).Average();
-                                    if (polarised)
-                                        pL += st.pa * new PLight(Le / (st.r_u + st.r_l).Average());
-                                }
-                            }
-                        }
-
-                        break;
-                    }
-                    SurfaceInteraction isect = si.value().intr;
-                    SampledSpectrum LeSurf = isect.Le(-ray.d, lambda);
-                    if ((bool)LeSurf)
-                    {
-                        // Add contribution of emission from intersected surface
-                        if (depth == 0 || specularBounce)
-                        {
-                            L += st.beta * LeSurf / st.r_u.Average();
-                            if (polarised)
-                                pL += st.pa * new PLight(LeSurf / st.r_u.Average());
-                        }
-                        else
-                        {
-                            // Add surface light contribution using both PDFs with MIS
-                            Light areaLight = isect.areaLight;
-                            Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
-                                        areaLight.PDF_Li(prevIntrContext, ray.d, true);
-                            st.r_l *= p_l;
-                            L += st.beta * LeSurf / (st.r_u + st.r_l).Average();
-                            if (polarised)
-                                pL += st.pa * new PLight(LeSurf / (st.r_u + st.r_l).Average());
-                        }
-                    }
-
-                    // Get BSDF and skip over medium boundaries
-                    BSDF bsdf = isect.GetBSDF(ray, ref lambda, camera, scratchBuffer, sampler);
-                    if (!bsdf)
-                    {
-                        if (polarised && PolarisedPathIntegrator.PassedCoat(isect, -ray.d, TransportMode.Radiance, out PAttenuation Ac))
-                            st.Apply(Ac);
-                        isect.SkipIntersection(ref ray, si.value().tHit);
-                        MediumTracking.CrossSurface(ref stack, isect, ray.d);
-                        continue;
-                    }
-
-                    // Initialize _visibleSurf_ at first intersection
-                    if (depth == 0 && visibleSurf != null)
-                    {
-                        // Estimate BSDF's albedo
-                        // Define sample arrays _ucRho_ and _uRho_ for reflectance estimate
-                        const int nRhoSamples = 16;
-                        Float[] ucRho = ToFloats(
-                            0.75741637, 0.37870818, 0.7083487, 0.18935409, 0.9149363, 0.35417435,
-                            0.5990858, 0.09467703, 0.8578725, 0.45746812, 0.686759, 0.17708716,
-                            0.9674518, 0.2995429, 0.5083201, 0.047338516);
-                        Point2f[] uRho = new Point2f[nRhoSamples] {
-                            P2(0.855985, 0.570367), P2(0.381823, 0.851844),
-                            P2(0.285328, 0.764262), P2(0.733380, 0.114073),
-                            P2(0.542663, 0.344465), P2(0.127274, 0.414848),
-                            P2(0.964700, 0.947162), P2(0.594089, 0.643463),
-                            P2(0.095109, 0.170369), P2(0.825444, 0.263359),
-                            P2(0.429467, 0.454469), P2(0.244460, 0.816459),
-                            P2(0.756135, 0.731258), P2(0.516165, 0.152852),
-                            P2(0.180888, 0.214174), P2(0.898579, 0.503897)};
-
-                        SampledSpectrum albedo = bsdf.rho(isect.wo, ucRho, uRho);
-
-                        visibleSurf.Assign(new VisibleSurface(isect, albedo, lambda));
-                    }
-
-                    // Terminate path if maximum depth reached
-                    if (depth++ >= maxDepth)
-                        return Finish(L, pL, cameraDirection);
-
-                    ++surfaceInteractions;
-                    // Possibly regularize the BSDF
-                    if (regularize && anyNonSpecularBounces)
-                    {
-                        ++regularizedBSDFs;
-                        bsdf.Regularize();
-                    }
-
-                    // Sample illumination from lights to find attenuated path contribution
-                    if (IsNonSpecular(bsdf.Flags()))
-                    {
-                        if (polarised)
-                            pL += st.pa * new PLight(SampleLd(isect, bsdf, lambda, sampler, new SampledSpectrum(1.0f), st.r_u,
-                                                              stack, depth < maxDepth, out Vector3f _));
-                        else
-                            L += SampleLd(isect, bsdf, lambda, sampler, st.beta, st.r_u, stack, depth < maxDepth, out Vector3f _);
-                        DCHECK(IsInf(L.y(lambda)) == false);
-                    }
-                    prevIntrContext = new LightSampleContext(isect);
-
-                    // Sample BSDF to get new volumetric path direction
-                    Vector3f wo = isect.wo;
-                    Float u = sampler.Get1D();
-                    pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, u, sampler.Get2D());
-                    if (!bs)
-                        break;
-                    // Update _beta_ and rescaled path probabilities for BSDF scattering
-                    st.ScatterSurface(bsdf, isect, wo, bs.value(), TransportMode.Radiance);
-                    if (bs.value().pdfIsProportional)
-                        st.r_l = st.r_u / bsdf.PDF(wo, bs.value().wi);
-                    else
-                        st.r_l = st.r_u / bs.value().pdf;
-
-                    DCHECK(IsInf(st.beta.y(lambda)) == false);
-                    fneeScatterPdf = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
-                    fneeRatio = -1;
-                    fneeOrigin = isect.p();
-                    // Update volumetric integrator path state after surface scattering
-                    specularBounce = bs.value().IsSpecular();
-                    anyNonSpecularBounces |= !bs.value().IsSpecular();
-                    if (bs.value().IsTransmission())
-                        etaScale *= Sqr(bs.value().eta);
-                    ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
-                    MediumTracking.CrossSurface(ref stack, isect, ray.d);
-
-                    // Account for attenuated subsurface scattering, if applicable
-                    BSSRDF bssrdf = isect.GetBSSRDF(ray, ref lambda, camera, scratchBuffer);
-                    if (bssrdf != null && bs.value().IsTransmission())
-                    {
-                        // Sample BSSRDF probe segment to find exit point
-                        Float uc = sampler.Get1D();
-                        Point2f up = sampler.Get2D();
-                        pstd.optional<BSSRDFProbeSegment> probeSeg = bssrdf.SampleSp(uc, up);
-                        if (!probeSeg)
-                            break;
-
-                        // Sample random intersection along BSSRDF probe segment
-                        uint64_t seed = MixBits(FloatToBits((float)sampler.Get1D()));
-                        WeightedReservoirSampler<SubsurfaceInteraction> interactionSampler =
-                            new WeightedReservoirSampler<SubsurfaceInteraction>(seed);
-                        // Intersect BSSRDF sampling ray against the scene geometry
-                        Interaction baseIntr = new Interaction(probeSeg.value().p0, ray.time, (Medium)null);
-                        while (true)
-                        {
-                            Ray r = baseIntr.SpawnRayTo(probeSeg.value().p1);
-                            if (r.d == new Vector3f(0, 0, 0))
-                                break;
-                            pstd.optional<ShapeIntersection> siProbe = Intersect(r, 1);
-                            if (!siProbe)
-                                break;
-                            baseIntr = siProbe.value().intr;
-                            if (siProbe.value().intr.material == isect.material)
-                                interactionSampler.Add(new SubsurfaceInteraction(siProbe.value().intr), 1.0f);
-                        }
-
-                        if (interactionSampler.HasSample() == 0)
-                            break;
-
-                        // Convert probe intersection to _BSSRDFSample_
-                        SubsurfaceInteraction ssi = interactionSampler.GetSample();
-                        BSSRDFSample bssrdfSample =
-                            bssrdf.ProbeIntersectionToSample(ssi, scratchBuffer);
-                        if (!bssrdfSample.Sp || !bssrdfSample.pdf)
-                            break;
-
-                        // Update path state for subsurface scattering
-                        Float pdf = interactionSampler.SampleProbability() * bssrdfSample.pdf[0];
-                        st.beta *= bssrdfSample.Sp / pdf;
-                        st.Apply(PAttenuation.Lambert(bssrdfSample.Sp / pdf));
-                        st.r_u *= bssrdfSample.pdf / bssrdfSample.pdf[0];
-                        SurfaceInteraction pi = ssi;
-                        pi.wo = bssrdfSample.wo;
-                        prevIntrContext = new LightSampleContext(pi);
-                        // Possibly regularize subsurface BSDF
-                        BSDF Sw = bssrdfSample.Sw;
-                        anyNonSpecularBounces = true;
-                        if (regularize)
-                        {
-                            ++regularizedBSDFs;
-                            Sw.Regularize();
-                        }
-                        else
-                            ++totalBSDFs;
-
-                        // Account for attenuated direct illumination subsurface scattering
-                        if (polarised)
-                            pL += st.pa * new PLight(SampleLd(pi, Sw, lambda, sampler, new SampledSpectrum(1.0f), st.r_u, stack,
-                                                              depth < maxDepth, out Vector3f _));
-                        else
-                            L += SampleLd(pi, Sw, lambda, sampler, st.beta, st.r_u, stack, depth < maxDepth, out Vector3f _);
-
-                        // Sample ray for indirect subsurface scattering
-                        Float uSw = sampler.Get1D();
-                        pstd.optional<BSDFSample> bsSw = Sw.Sample_f(pi.wo, uSw, sampler.Get2D());
-                        if (!bsSw)
-                            break;
-                        st.beta *= bsSw.value().f * AbsDot(bsSw.value().wi, pi.shading.n) / bsSw.value().pdf;
-                        st.Apply(PAttenuation.Lambert(bsSw.value().f * AbsDot(bsSw.value().wi, pi.shading.n) /
-                                                      bsSw.value().pdf));
-                        st.r_l = st.r_u / bsSw.value().pdf;
-                        // Don't increment depth this time...
-                        DCHECK(!IsInf(st.beta.y(lambda)));
-                        specularBounce = bsSw.value().IsSpecular();
-                        ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
-                        MediumTracking.CrossSurface(ref stack, pi, ray.d);
-                    }
-
-                    // Possibly terminate volumetric path with Russian roulette
-                    if (!st.beta)
-                        break;
-                    SampledSpectrum rrBeta = st.beta * etaScale / st.r_u.Average();
-                    Float uRR = sampler.Get1D();
-                    if (rrBeta.MaxComponentValue() < 1 && depth > 1)
-                    {
-                        Float q = std.max<Float>(0, 1 - rrBeta.MaxComponentValue());
-                        if (uRR < q)
-                            break;
-                        st.SurviveRoulette(q);
-                    }
-                }
-                return Finish(L, pL, cameraDirection);
+                PathWalk.Run(ctx, hook);
+                return Finish(hook.L, hook.pL, hook.cameraDirection);
             }
             finally
             {
-                lambdaRef = lambda;
+                lambdaRef = ctx.lambda;
+            }
+        }
+
+        // The volumetric path: the radiance it gathers from emission and from sampling lights, and the Russian roulette
+        sealed class VolPathWalkHook : PathWalkHook
+        {
+            public VolPathWalkHook(VolPathIntegrator vp, VisibleSurface visibleSurf, Vector3f cameraDirection)
+            {
+                this.vp = vp;
+                this.visibleSurf = visibleSurf;
+                this.cameraDirection = cameraDirection;
+                maxDepth = vp.maxDepth;
+                lightSampler = vp.lightSampler;
+                regularize = vp.regularize;
+                polarised = vp.polarised;
+            }
+
+            VolPathIntegrator vp;
+            VisibleSurface visibleSurf;
+            int maxDepth;
+            LightSampler lightSampler;
+            bool regularize, polarised;
+
+            public SampledSpectrum L = new SampledSpectrum(0.0f);
+            public PLight pL = PLight.Zero();
+            public Vector3f cameraDirection;
+            bool specularBounce = false, anyNonSpecularBounces = false;
+            int depth = 0;
+            Float etaScale = 1;
+            LightSampleContext prevIntrContext = default;
+            // (not in pbrt-v4) For the line sampling of emission (see SampleLdFnee): the density that the last scattering
+            // vertex had for the direction of the ray, and the ratio of the density of sampling the direction toward
+            // the emission to it, which is looked up when the emission is first found along the ray
+            Float fneeScatterPdf = 0, fneeRatio = -1;
+            Point3f fneeOrigin = default;
+
+            public override bool BeginIteration(WalkContext ctx)
+            {
+                return true;
+            }
+
+            public override bool BeginCollision(WalkContext ctx, Medium rayMedium, Point3f p, MediumProperties mp,
+                                                SampledSpectrum sigma_maj, SampledSpectrum T_maj_)
+            {
+                // Handle medium scattering event for ray
+                if (!ctx.st.beta)
+                {
+                    return false;
+                }
+                ++volumeInteractions;
+                // Add emission from medium scattering event
+                if (depth < maxDepth && (bool)mp.Le)
+                {
+                    // Compute $\beta'$ at new path vertex
+                    Float pdf = sigma_maj[0] * T_maj_[0];
+                    SampledSpectrum betap = ctx.st.beta * T_maj_ / pdf;
+
+                    // Compute rescaled path probability for absorption at path vertex
+                    SampledSpectrum r_e = ctx.st.r_u * sigma_maj * T_maj_ / pdf;
+
+                    // Update _L_ for medium emission
+                    if ((bool)r_e)
+                    {
+                        // (not in pbrt-v4) A medium whose emission is also sampled from the previous scattering
+                        // vertex: the light strategy would have chosen this point with probability density
+                        // pmf * pdfPoint * t^2 per direction and length, where the density of this strategy
+                        // is sigma_maj T_maj per length (hero values), and the light strategy's null
+                        // collisions on the way are already in st.r_l, with the tail of T_maj added here
+                        SampledSpectrum r_sum = r_e;
+                        VolumeEmissionLight emissionLight = (rayMedium as TextureMedium)?.EmissionLight();
+                        if (emissionLight != null && emissionLight.UsesFnee())
+                        {
+                            // The strategy that samples the direction toward the emission integrates along the
+                            // same ray with the same tracking, so the two differ by the densities of the
+                            // direction alone
+                            if (depth > 0 && !specularBounce && fneeScatterPdf > 0)
+                            {
+                                if (fneeRatio < 0)
+                                {
+                                    Float pmfDirection = lightSampler.PMF(prevIntrContext, emissionLight);
+                                    fneeRatio = pmfDirection * emissionLight.PdfDirection(fneeOrigin, ctx.ray.d) / fneeScatterPdf;
+                                }
+                                r_sum = r_e * (1 + fneeRatio);
+                            }
+                        }
+                        else if (emissionLight != null && depth > 0 && !specularBounce)
+                        {
+                            Float pmf = lightSampler.PMF(prevIntrContext, emissionLight);
+                            if (pmf > 0)
+                            {
+                                Float t2 = DistanceSquared(prevIntrContext.p(), p);
+                                Float densityRatio = pmf * emissionLight.PdfPoint(p) * t2 / sigma_maj[0];
+                                r_sum = r_e + ctx.st.r_l * (T_maj_ / T_maj_[0]) * densityRatio;
+                            }
+                        }
+                        L += betap * mp.sigma_a * mp.Le / r_sum.Average();
+                        if (polarised)
+                            pL += ctx.st.pa * new PLight(T_maj_ / pdf * mp.sigma_a * mp.Le / r_sum.Average());
+                    }
+                }
+                return true;
+            }
+
+            public override bool BeginScatter(WalkContext ctx)
+            {
+                // Stop path sampling if maximum depth has been reached
+                return depth++ < maxDepth;
+            }
+
+            public override bool OnScatterVertex(WalkContext ctx, Medium rayMedium, Point3f p, MediumProperties mp,
+                                                 out MediumInteraction intr, out BSDF phaseBsdf)
+            {
+                phaseBsdf = default;
+                intr = default;
+                if (!((bool)ctx.st.beta && (bool)ctx.st.r_u))
+                {
+                    return false;
+                }
+                // Sample direct lighting at volume-scattering event
+                intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, rayMedium, mp.phase);
+                if (polarised)
+                {
+                    SampledSpectrum Ld = vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f), ctx.st.r_u,
+                                                     ctx.stack, depth < maxDepth, out Vector3f wiLight);
+                    if ((bool)Ld)
+                    {
+                        PLight Lp = new PLight(Ld);
+                        PAttenuation M;
+                        if (PolarisedPathIntegrator.PhaseAttenuation(mp.phase, intr.wo, wiLight, true, out M))
+                            Lp = M * Lp;
+                        pL += ctx.st.pa * Lp;
+                    }
+                }
+                else
+                    L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
+                                     out Vector3f _);
+                phaseBsdf = intr.GetBSDF();
+                return true;
+            }
+
+            public override void OnPhaseSampled(WalkContext ctx, MediumInteraction intr, Point3f p, BSDFSample ps)
+            {
+                // Update ray path state for indirect volume scattering
+                ctx.st.r_l = ctx.st.r_u / ps.pdf;
+                prevIntrContext = new LightSampleContext(intr);
+                fneeScatterPdf = ps.pdf;
+                fneeRatio = -1;
+                fneeOrigin = p;
+                ctx.ray.o = p;
+                ctx.ray.d = ps.wi;
+                specularBounce = false;
+                anyNonSpecularBounces = true;
+            }
+
+            public override bool EndAfterMedium(WalkContext ctx, bool terminated)
+            {
+                // Handle terminated, scattered, and unscattered medium rays
+                return terminated || !ctx.st.beta || !ctx.st.r_u;
+            }
+
+            public override void OnEscape(WalkContext ctx)
+            {
+                // Accumulate contributions from infinite light sources
+                foreach (Light light in vp.infiniteLights)
+                {
+                    SampledSpectrum Le = light.Le(new Ray(ctx.ray), ctx.lambda);
+                    if ((bool)Le)
+                    {
+                        if (depth == 0 || specularBounce)
+                        {
+                            L += ctx.st.beta * Le / ctx.st.r_u.Average();
+                            if (polarised)
+                                pL += ctx.st.pa * new PLight(Le / ctx.st.r_u.Average());
+                        }
+                        else
+                        {
+                            // Add infinite light contribution using both PDFs with MIS
+                            Float p_l = lightSampler.PMF(prevIntrContext, light) *
+                                        light.PDF_Li(prevIntrContext, ctx.ray.d, true);
+                            ctx.st.r_l *= p_l;
+                            L += ctx.st.beta * Le / (ctx.st.r_u + ctx.st.r_l).Average();
+                            if (polarised)
+                                pL += ctx.st.pa * new PLight(Le / (ctx.st.r_u + ctx.st.r_l).Average());
+                        }
+                    }
+                }
+            }
+
+            public override void OnSurfaceHit(WalkContext ctx, SurfaceInteraction isect)
+            {
+                SampledSpectrum LeSurf = isect.Le(-ctx.ray.d, ctx.lambda);
+                if ((bool)LeSurf)
+                {
+                    // Add contribution of emission from intersected surface
+                    if (depth == 0 || specularBounce)
+                    {
+                        L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
+                        if (polarised)
+                            pL += ctx.st.pa * new PLight(LeSurf / ctx.st.r_u.Average());
+                    }
+                    else
+                    {
+                        // Add surface light contribution using both PDFs with MIS
+                        Light areaLight = isect.areaLight;
+                        Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
+                                    areaLight.PDF_Li(prevIntrContext, ctx.ray.d, true);
+                        ctx.st.r_l *= p_l;
+                        L += ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l).Average();
+                        if (polarised)
+                            pL += ctx.st.pa * new PLight(LeSurf / (ctx.st.r_u + ctx.st.r_l).Average());
+                    }
+                }
+            }
+
+            public override bool OnBSDF(WalkContext ctx, ShapeIntersection si, SurfaceInteraction isect, BSDF bsdf)
+            {
+                // Initialize _visibleSurf_ at first intersection
+                if (depth == 0 && visibleSurf != null)
+                {
+                    // Estimate BSDF's albedo
+                    // Define sample arrays _ucRho_ and _uRho_ for reflectance estimate
+                    const int nRhoSamples = 16;
+                    Float[] ucRho = ToFloats(
+                        0.75741637, 0.37870818, 0.7083487, 0.18935409, 0.9149363, 0.35417435,
+                        0.5990858, 0.09467703, 0.8578725, 0.45746812, 0.686759, 0.17708716,
+                        0.9674518, 0.2995429, 0.5083201, 0.047338516);
+                    Point2f[] uRho = new Point2f[nRhoSamples] {
+                        P2(0.855985, 0.570367), P2(0.381823, 0.851844),
+                        P2(0.285328, 0.764262), P2(0.733380, 0.114073),
+                        P2(0.542663, 0.344465), P2(0.127274, 0.414848),
+                        P2(0.964700, 0.947162), P2(0.594089, 0.643463),
+                        P2(0.095109, 0.170369), P2(0.825444, 0.263359),
+                        P2(0.429467, 0.454469), P2(0.244460, 0.816459),
+                        P2(0.756135, 0.731258), P2(0.516165, 0.152852),
+                        P2(0.180888, 0.214174), P2(0.898579, 0.503897)};
+
+                    SampledSpectrum albedo = bsdf.rho(isect.wo, ucRho, uRho);
+
+                    visibleSurf.Assign(new VisibleSurface(isect, albedo, ctx.lambda));
+                }
+
+                // Terminate path if maximum depth reached
+                if (depth++ >= maxDepth)
+                    return false;
+
+                ++surfaceInteractions;
+                // Possibly regularize the BSDF
+                if (regularize && anyNonSpecularBounces)
+                {
+                    ++regularizedBSDFs;
+                    bsdf.Regularize();
+                }
+
+                // Sample illumination from lights to find attenuated path contribution
+                if (IsNonSpecular(bsdf.Flags()))
+                {
+                    if (polarised)
+                        pL += ctx.st.pa * new PLight(vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
+                                                                 ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f _));
+                    else
+                        L += vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack,
+                                         depth < maxDepth, out Vector3f _);
+                    DCHECK(IsInf(L.y(ctx.lambda)) == false);
+                }
+                prevIntrContext = new LightSampleContext(isect);
+                return true;
+            }
+
+            public override bool OnSurfaceScattered(WalkContext ctx, ShapeIntersection si, SurfaceInteraction isect, BSDF bsdf,
+                                                    BSDFSample bs)
+            {
+                Vector3f wo = isect.wo;
+                // Update rescaled path probabilities for BSDF scattering
+                if (bs.pdfIsProportional)
+                    ctx.st.r_l = ctx.st.r_u / bsdf.PDF(wo, bs.wi);
+                else
+                    ctx.st.r_l = ctx.st.r_u / bs.pdf;
+
+                DCHECK(IsInf(ctx.st.beta.y(ctx.lambda)) == false);
+                fneeScatterPdf = bs.pdfIsProportional ? bsdf.PDF(wo, bs.wi) : bs.pdf;
+                fneeRatio = -1;
+                fneeOrigin = isect.p();
+                // Update volumetric integrator path state after surface scattering
+                specularBounce = bs.IsSpecular();
+                anyNonSpecularBounces |= !bs.IsSpecular();
+                if (bs.IsTransmission())
+                    etaScale *= Sqr(bs.eta);
+
+                // Account for attenuated subsurface scattering, if applicable
+                BSSRDF bssrdf = isect.GetBSSRDF(ctx.ray, ref ctx.lambda, ctx.camera, ctx.scratchBuffer);
+                if (bssrdf != null && bs.IsTransmission())
+                {
+                    // Sample BSSRDF probe segment to find exit point
+                    Float uc = ctx.sampler.Get1D();
+                    Point2f up = ctx.sampler.Get2D();
+                    pstd.optional<BSSRDFProbeSegment> probeSeg = bssrdf.SampleSp(uc, up);
+                    if (!probeSeg)
+                        return false;
+
+                    // Sample random intersection along BSSRDF probe segment
+                    uint64_t seed = MixBits(FloatToBits((float)ctx.sampler.Get1D()));
+                    WeightedReservoirSampler<SubsurfaceInteraction> interactionSampler =
+                        new WeightedReservoirSampler<SubsurfaceInteraction>(seed);
+                    // Intersect BSSRDF sampling ray against the scene geometry
+                    Interaction baseIntr = new Interaction(probeSeg.value().p0, ctx.ray.time, (Medium)null);
+                    while (true)
+                    {
+                        Ray r = baseIntr.SpawnRayTo(probeSeg.value().p1);
+                        if (r.d == new Vector3f(0, 0, 0))
+                            break;
+                        pstd.optional<ShapeIntersection> siProbe = vp.Intersect(r, 1);
+                        if (!siProbe)
+                            break;
+                        baseIntr = siProbe.value().intr;
+                        if (siProbe.value().intr.material == isect.material)
+                            interactionSampler.Add(new SubsurfaceInteraction(siProbe.value().intr), 1.0f);
+                    }
+
+                    if (interactionSampler.HasSample() == 0)
+                        return false;
+
+                    // Convert probe intersection to _BSSRDFSample_
+                    SubsurfaceInteraction ssi = interactionSampler.GetSample();
+                    BSSRDFSample bssrdfSample =
+                        bssrdf.ProbeIntersectionToSample(ssi, ctx.scratchBuffer);
+                    if (!bssrdfSample.Sp || !bssrdfSample.pdf)
+                        return false;
+
+                    // Update path state for subsurface scattering
+                    Float pdf = interactionSampler.SampleProbability() * bssrdfSample.pdf[0];
+                    ctx.st.beta *= bssrdfSample.Sp / pdf;
+                    ctx.st.Apply(PAttenuation.Lambert(bssrdfSample.Sp / pdf));
+                    ctx.st.r_u *= bssrdfSample.pdf / bssrdfSample.pdf[0];
+                    SurfaceInteraction pi = ssi;
+                    pi.wo = bssrdfSample.wo;
+                    prevIntrContext = new LightSampleContext(pi);
+                    // Possibly regularize subsurface BSDF
+                    BSDF Sw = bssrdfSample.Sw;
+                    anyNonSpecularBounces = true;
+                    if (regularize)
+                    {
+                        ++regularizedBSDFs;
+                        Sw.Regularize();
+                    }
+                    else
+                        ++totalBSDFs;
+
+                    // Account for attenuated direct illumination subsurface scattering
+                    if (polarised)
+                        pL += ctx.st.pa * new PLight(vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
+                                                                 ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f _));
+                    else
+                        L += vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
+                                         out Vector3f _);
+
+                    // Sample ray for indirect subsurface scattering
+                    Float uSw = ctx.sampler.Get1D();
+                    pstd.optional<BSDFSample> bsSw = Sw.Sample_f(pi.wo, uSw, ctx.sampler.Get2D());
+                    if (!bsSw)
+                        return false;
+                    ctx.st.beta *= bsSw.value().f * AbsDot(bsSw.value().wi, pi.shading.n) / bsSw.value().pdf;
+                    ctx.st.Apply(PAttenuation.Lambert(bsSw.value().f * AbsDot(bsSw.value().wi, pi.shading.n) /
+                                                      bsSw.value().pdf));
+                    ctx.st.r_l = ctx.st.r_u / bsSw.value().pdf;
+                    // Don't increment depth this time...
+                    DCHECK(!IsInf(ctx.st.beta.y(ctx.lambda)));
+                    specularBounce = bsSw.value().IsSpecular();
+                    ctx.ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
+                    MediumTracking.CrossSurface(ref ctx.stack, pi, ctx.ray.d);
+                }
+
+                // Possibly terminate volumetric path with Russian roulette
+                if (!ctx.st.beta)
+                    return false;
+                SampledSpectrum rrBeta = ctx.st.beta * etaScale / ctx.st.r_u.Average();
+                Float uRR = ctx.sampler.Get1D();
+                if (rrBeta.MaxComponentValue() < 1 && depth > 1)
+                {
+                    Float q = std.max<Float>(0, 1 - rrBeta.MaxComponentValue());
+                    if (uRR < q)
+                        return false;
+                    ctx.st.SurviveRoulette(q);
+                }
+                return true;
             }
         }
 
