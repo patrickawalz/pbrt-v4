@@ -160,3 +160,17 @@ is reproduced exactly with the same seed.
 - Smooth dielectrics and conductors apply the Mitsuba 3 Fresnel Mueller matrices; every other BSDF depolarises. Media take `"float rayleigh"` (fraction of Rayleigh scattering in the phase function, as PolarisedUPBP's Rayleigh coefficient); the Henyey-Greenstein part depolarises. The Rayleigh Mueller matrix has the sign of Mitsuba's Stokes convention (PolarisedUPBP writes the opposite one: its Stokes vectors measure I_y - I_x).
 - BDPT keeps a Mueller matrix (camera subpath) or Stokes vector (light subpath) per vertex next to beta, and measures the polarisation relative to the scalar throughputs at the connection. It matches `polpath` on a water plane (0.6400 vs 0.6401 at an analyser of 0 degrees) and `volpath` on Rayleigh fog.
 - `bdpt` takes `"bool russianroulette"` (default off): roulette on the subpaths and on the transmittance of the connections. Unbiased, but it made no difference in noise or time on the test scenes (their throughput stays near 1).
+
+## Per-volume integrators (`volumeintegrator.cs`)
+
+As in Fong et al., every medium carries its own integrator, built from two shareable modules. The path estimators
+(`volpath`, `bdpt`, the transmittance of `Integrator.Tr`) call `medium.volumeIntegrator` instead of a type switch.
+
+| Module | Parameter | Choices |
+|---|---|---|
+| `VolumeTracker` (collision sampling) | `"string tracker"` | `majorant` (default, pbrt-v4 majorant iteration), `global` (one majorant for the whole ray) |
+| `TransmittanceEstimator` (shadow rays) | `"string transmittance"` | `ratio` (default, ratio tracking), `analytic` (Beer-Lambert for homogeneous media, ratio tracking otherwise) |
+
+New modules subclass the abstract classes and are chosen in `VolumeIntegrator.Create`. Defaults are bit-identical to the
+previous build (six volpath/bdpt regression scenes). Checks, 256 spp homogeneous scene: analytic vs ratio means 0.12183 vs
+0.12175, 11% lower noise at equal time; `global` vs `majorant` on a uniform-density texture medium: means 0.57827 vs 0.57873.

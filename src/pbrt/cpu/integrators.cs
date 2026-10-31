@@ -115,8 +115,13 @@ namespace pbrt
                     Point3f pExit = ray.Apply(si ? si.value().tHit : (1 - ShadowEpsilon));
                     ray.d = pExit - ray.o;
 
+                    SampledSpectrum T_closed;
+                    if (rayMedium.volumeIntegrator.transmittance.TryClosedForm(ray, rayMedium, 1.0f, lambda, out T_closed))
+                        Tr *= T_closed;
+                    else
+                    {
                     SampledSpectrum T_maj =
-                        SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
+                        rayMedium.volumeIntegrator.tracker.SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj_) =>
                                     {
@@ -124,7 +129,7 @@ namespace pbrt
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
 
                                         // ratio-tracking: only evaluate null scattering
-                                        MediumEvents.RatioTrackingStep(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n);
+                                        rayMedium.volumeIntegrator.transmittance.Step(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n);
 
                                         // Possibly terminate the transmittance computation using Russian roulette
                                         if (russianRoulette && (bool)Tr && (bool)inv_w &&
@@ -142,7 +147,8 @@ namespace pbrt
 
                                         return true;
                                     });
-                    MediumEvents.FinishSegment(ref Tr, ref inv_w, T_maj);
+                    rayMedium.volumeIntegrator.transmittance.Finish(ref Tr, ref inv_w, T_maj);
+                    }
                 }
 
                 // Generate next ray segment or return final transmittance
@@ -1141,7 +1147,7 @@ namespace pbrt
                         bool scatteredCap = false, terminatedCap = false;
                         Vector3f newD = default;
                         Point3f newO = default;
-                        SampleT_maj(new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
+                        rayMedium.volumeIntegrator.tracker.SampleT_maj(new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj) =>
                                     {
@@ -1972,7 +1978,7 @@ namespace pbrt
                         Float tMax = si ? si.value().tHit : Infinity;
                         RNG rng = new RNG(Hash(ray.o, tMax), Hash(ray.d));
                         Float u = sampler.Get1D();
-                        SampledSpectrum Tmaj = SampleT_maj(
+                        SampledSpectrum Tmaj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
                             new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
                             {
@@ -4057,7 +4063,7 @@ namespace pbrt
                         RNG rng = new RNG(hash0, hash1);
 
                         SampledWavelengths lambdaCap = lambda;
-                        SampledSpectrum T_maj = SampleT_maj(
+                        SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
                             new Ray(ray), rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                              SampledSpectrum T_maj_) =>
@@ -4537,7 +4543,7 @@ namespace pbrt
                     Float tMax = si ? si.value().tHit : Infinity;
                     bool emitting = rayMedium == volumeLight.Medium();
                     SampledSpectrum betaCap = lineBeta, r_uCap = r_u;
-                    SampledSpectrum T_maj = SampleT_maj(ray, rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
+                    SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(ray, rayMedium, tMax, sampler.Get1D(), ref rng, lambda,
                         (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
                         {
                             if (!betaCap || !r_uCap)
@@ -4682,8 +4688,13 @@ namespace pbrt
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     Float uT = rng.Uniform<Float>();
+                    SampledSpectrum T_closed;
+                    if (lightMedium.volumeIntegrator.transmittance.TryClosedForm(lightRay, lightMedium, tMax, lambda, out T_closed))
+                        T_ray *= T_closed;
+                    else
+                    {
                     SampledSpectrum T_maj =
-                        SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
+                        lightMedium.volumeIntegrator.tracker.SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
                                     (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                      SampledSpectrum T_maj_) =>
                                     {
@@ -4691,7 +4702,7 @@ namespace pbrt
                                         // Update _T_ray_ and PDFs using ratio-tracking estimator
                                         SampledSpectrum sigma_n =
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                        MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n);
+                                        lightMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n);
 
                                         // Possibly terminate transmittance computation using
                                         // Russian roulette
@@ -4710,7 +4721,8 @@ namespace pbrt
                                         return true;
                                     });
                     // Update transmittance estimate for final segment
-                    MediumEvents.FinishSegment(ref T_ray, ref r_l, ref r_u, T_maj);
+                    lightMedium.volumeIntegrator.transmittance.Finish(ref T_ray, ref r_l, ref r_u, T_maj);
+                    }
                 }
 
                 // Generate next ray segment or return final transmittance

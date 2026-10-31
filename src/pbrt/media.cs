@@ -1386,6 +1386,9 @@ namespace pbrt
     // Medium Method Definitions
     public abstract unsafe partial class Medium
     {
+        // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
+        public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
+
         public static Medium Create(string name, ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                     Allocator alloc)
         {
@@ -1420,6 +1423,8 @@ namespace pbrt
             HGPhaseFunction.creationRayleigh = 0;
             if (m == null)
                 ErrorExit(loc, $"{name}: unable to create medium.");
+            // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
+            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
 
             parameters.ReportUnused();
             return m;
