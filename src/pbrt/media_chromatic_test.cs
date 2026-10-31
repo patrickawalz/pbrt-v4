@@ -69,7 +69,7 @@ namespace pbrt
 
         private static void RenderMean(Medium medium, Spectrum lightSpectrum, Float lightScale, bool areaEmitter, int maxDepth, int spp, string filename,
                                        out double[] mean, out double[] stderr, bool bidirectional = false, bool lightWavelengths = false, bool spectralMIS = true,
-                                       Material boundary = null)
+                                       Material boundary = null, bool randomConnections = false)
         {
             Transform id = new Transform();
             Point2i resolution = new Point2i(16, 16);
@@ -107,7 +107,7 @@ namespace pbrt
             Primitive bvh = new BVHAggregate(prims);
 
             Sampler sampler = new IndependentSampler(spp, 3);
-            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false, false, spectralMIS)
+            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false, false, spectralMIS, randomConnections)
                                                   : new VolPathIntegrator(maxDepth, camera, sampler, bvh, lights);
             if (lightWavelengths)
                 rgbFilm.SetWavelengthDistribution(WavelengthDistribution.FromLights(lights));
@@ -1041,6 +1041,38 @@ namespace pbrt
                 {
                     double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
                     Console.WriteLine($"PROBE exterior light channel {c}: bidirectional {mean[c]:F5} (stderr {err[c]:F5}) path tracing {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                }
+            }
+        }
+
+        // Random connections replace the sum over the strategies that connect two subpaths by one of them chosen at random, scaled
+        // by the number of candidates: the image must stay the one of the bidirectional integrator and of path tracing.
+        [TEST("ChromaticMedia", "BidirectionalRandomConnections")]
+        public static void ChromaticMedia_BidirectionalRandomConnections()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_a = new ConstantSpectrum(0.3f);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.0f, false);
+            double[] refMean = null, refErr = null;
+            for (int variant = 0; variant < 2; ++variant)
+            {
+                Medium medium = new HomogeneousMedium(sigma_a, sigma_s, 1f, zero, 0f, 0.3f, null);
+                double[] mean, err;
+                RenderMean(medium, L, scale, true, 60, 2048, Name("randconn" + variant, true), out mean, out err, true, false, true, null,
+                           variant == 1);
+                if (variant == 0)
+                {
+                    refMean = mean;
+                    refErr = err;
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
+                    Console.WriteLine($"PROBE random connections channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) all connections {refMean[c]:F5} (stderr {refErr[c]:F5})");
                     EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
                 }
             }

@@ -2629,10 +2629,11 @@ namespace pbrt
         // BDPTIntegrator Public Methods
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
-                              bool regularize = false, bool spectralMIS = true)
+                              bool regularize = false, bool spectralMIS = true, bool randomConnections = false)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
             this.spectralMIS = spectralMIS;
+            this.randomConnections = randomConnections;
             this.maxDepth = maxDepth;
             this.regularize = regularize;
             // (not in pbrt-v4) Media that ask for their emission to be sampled are lights too
@@ -2722,10 +2723,40 @@ namespace pbrt
             // Execute all BDPT connection strategies
             for (int t = 1; t <= nCamera; ++t)
             {
+                // (not in pbrt-v4) With random connections, the strategies that connect two subpath vertices (s >= 2) are
+                // reduced to one of them per camera vertex count t, chosen uniformly, and its contribution is scaled by the number
+                // of candidates. The expected value is that of the sum of all of them, so the estimate stays unbiased, and
+                // the cost of the connections grows linearly with the path length instead of quadratically. The weights
+                // of the strategies do not change. The strategies s = 0 (path tracing) and s = 1 (light sampling) always run.
+                int chosenS = -1, candidates = 0;
+                if (randomConnections)
+                {
+                    for (int s = 2; s <= nLight; ++s)
+                    {
+                        int candidateDepth = t + s - 2;
+                        if (candidateDepth >= 0 && candidateDepth <= maxDepth)
+                            ++candidates;
+                    }
+                    if (candidates > 0)
+                    {
+                        int pick = std.min<int>((int)(sampler.Get1D() * candidates), candidates - 1);
+                        for (int s = 2; s <= nLight; ++s)
+                        {
+                            int candidateDepth = t + s - 2;
+                            if (candidateDepth >= 0 && candidateDepth <= maxDepth && pick-- == 0)
+                            {
+                                chosenS = s;
+                                break;
+                            }
+                        }
+                    }
+                }
                 for (int s = 0; s <= nLight; ++s)
                 {
                     int depth = t + s - 2;
                     if ((s == 1 && t == 1) || depth < 0 || depth > maxDepth)
+                        continue;
+                    if (randomConnections && s >= 2 && s != chosenS)
                         continue;
                     // Execute the $(s, t)$ connection strategy and update _L_
                     pstd.optional<Point2f> pFilmNew = default;
@@ -2733,6 +2764,8 @@ namespace pbrt
                     SampledSpectrum Lpath = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, t,
                                                             lightSampler, camera, sampler, ref pFilmNew,
                                                             ref misWeight);
+                    if (randomConnections && s >= 2)
+                        Lpath *= (Float)candidates;
                     if ((bool)Lpath && (visualizeStrategies || visualizeWeights))
                     {
                         SampledSpectrum value = default;
@@ -2792,12 +2825,15 @@ namespace pbrt
             bool regularize = parameters.GetOneBool("regularize", false);
             // (not in pbrt-v4) Whether the weights also compare the wavelengths, which matters for media with a chromatic extinction
             bool spectralMIS = parameters.GetOneBool("spectralmis", true);
+            bool randomConnections = parameters.GetOneBool("randomconnections", false);
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, spectralMIS);
+                                      visualizeWeights, regularize, spectralMIS, randomConnections);
         }
 
         // BDPTIntegrator Private Members
         public bool spectralMIS = true;
+        // (not in pbrt-v4) Connect each camera vertex count to one random light subpath length (see Li())
+        public bool randomConnections;
         int maxDepth;
         bool regularize;
         LightSampler lightSampler;
