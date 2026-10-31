@@ -132,6 +132,8 @@ namespace pbrt
             Integrator integrator = null;
             if (name == "path")
                 integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "polpath")
+                integrator = PolarisedPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "simplepath")
                 integrator = SimplePathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "lightpath")

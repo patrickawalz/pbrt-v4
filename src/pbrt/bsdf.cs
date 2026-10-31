@@ -31,6 +31,9 @@ namespace pbrt
 
         public BxDFFlags Flags() { return bxdf.Flags(); }
 
+        // (not in pbrt-v4) For the polarised integrator
+        public BxDF GetBxDF() { return bxdf; }
+
         public Vector3f RenderToLocal(Vector3f v) { return shadingFrame.ToLocal(v); }
         public Vector3f LocalToRender(Vector3f v) { return shadingFrame.FromLocal(v); }
 

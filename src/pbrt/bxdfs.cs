@@ -159,6 +159,11 @@ namespace pbrt
             this.mfDistrib = mfDistrib;
         }
 
+        // (not in pbrt-v4) For the polarised integrator: the interface that scatters specularly
+        public bool IsSpecular() { return eta == 1 || mfDistrib.EffectivelySmooth(); }
+
+        public Float Eta() { return eta; }
+
         public override BxDFFlags Flags()
         {
             BxDFFlags flags = (eta == 1) ? BxDFFlags.Transmission : (BxDFFlags.Reflection | BxDFFlags.Transmission);
@@ -451,6 +456,13 @@ namespace pbrt
             this.eta = eta;
             this.k = k;
         }
+
+        // (not in pbrt-v4) For the polarised integrator: the interface that scatters specularly
+        public bool IsSpecular() { return mfDistrib.EffectivelySmooth(); }
+
+        public SampledSpectrum Eta() { return eta; }
+
+        public SampledSpectrum K() { return k; }
 
         public override BxDFFlags Flags()
         {

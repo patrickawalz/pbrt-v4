@@ -339,13 +339,24 @@ namespace pbrt
             // Fs and Fp are the reflectances of the perpendicular and parallel polarisations, Ds and Dp their retardances
             public static Attenuation Fresnel(SampledSpectrum multipliedBy, Float Fs, Float Fp, Float Ds, Float Dp)
             {
-                Float D = Ds - Dp;
-                Float sqrtFsFp = std.sqrt(Fs * Fp);
+                return Fresnel(multipliedBy, new SampledSpectrum(Fs), new SampledSpectrum(Fp), new SampledSpectrum(Ds),
+                               new SampledSpectrum(Dp));
+            }
 
-                SampledSpectrum A = new SampledSpectrum((Fs + Fp) * 0.5f) * multipliedBy;
-                SampledSpectrum B = new SampledSpectrum((Fs - Fp) * 0.5f) * multipliedBy;
-                SampledSpectrum C = new SampledSpectrum(std.cos(D) * sqrtFsFp) * multipliedBy;
-                SampledSpectrum S = new SampledSpectrum(std.sin(D) * sqrtFsFp) * multipliedBy;
+            // The same for terms that differ between the wavelengths, as those of a conductor
+            public static Attenuation Fresnel(SampledSpectrum multipliedBy, SampledSpectrum Fs, SampledSpectrum Fp,
+                                              SampledSpectrum Ds, SampledSpectrum Dp)
+            {
+                SampledSpectrum A = (Fs + Fp) * 0.5f * multipliedBy;
+                SampledSpectrum B = (Fs - Fp) * 0.5f * multipliedBy;
+                SampledSpectrum C = new SampledSpectrum(0.0f), S = new SampledSpectrum(0.0f);
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    Float D = Ds[i] - Dp[i];
+                    Float sqrtFsFp = std.sqrt(Fs[i] * Fp[i]);
+                    C[i] = std.cos(D) * sqrtFsFp * multipliedBy[i];
+                    S[i] = std.sin(D) * sqrtFsFp * multipliedBy[i];
+                }
 
                 SampledSpectrum zero = new SampledSpectrum(0.0f);
                 return new Attenuation(new MuellerMatrix(
