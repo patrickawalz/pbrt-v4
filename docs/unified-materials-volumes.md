@@ -67,7 +67,13 @@ is reproduced exactly with the same seed.
    two overlapping spheres agree between volpath and bdpt (0.2-0.8 %) and change when the priorities are swapped.
    Still open: the priority on the material rather than the shape, camera / light starting media at a priority, and
    the summed-extinction overlap of Fong listing 17.
-4. `Volume` modules for the existing media (homogeneous, grid, RGB grid, cloud, NanoVDB), each with its integrator and estimator.
+4. (done) The volume module of a medium type is pbrt's `Medium` subclass already: `SamplePoint` is its density / attenuation /
+   emission estimator and `SampleRay` its integration (the majorant intervals: one for homogeneous, DDA for grid / RGB grid /
+   cloud / NanoVDB). What was written out several times in the integrators moved to `mediumevents.cs`: the collision
+   type (`MediumEvents.SampleEvent`, used by `SimpleVolPath`, `VolPath` and the BDPT random walk) and the ratio-tracking
+   updates (`RatioTrackingStep`, `FinishSegment`, used by the BDPT / volpath shadow-ray transmittance and by `SampleLd`).
+   Same-seed renders are still bit-identical to `main`. An analytic homogeneous transmittance was left out: it changes how
+   the spectral MIS weights `r_l` / `r_u` are built, which has to be validated separately.
 5. `Material.CreateVolume`, then phase function as `BSDF`.
 6. Volume aggregate with texture-supplied min / max.
 7. Polarised light-system types.

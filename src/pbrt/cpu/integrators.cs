@@ -94,17 +94,14 @@ namespace pbrt
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
 
                                         // ratio-tracking: only evaluate null scattering
-                                        Float pr = T_maj_[0] * sigma_maj[0];
-                                        Tr *= T_maj_ * sigma_n / pr;
-                                        inv_w *= T_maj_ * sigma_maj / pr;
+                                        MediumEvents.RatioTrackingStep(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n);
 
                                         if (!Tr || !inv_w)
                                             return false;
 
                                         return true;
                                     });
-                    Tr *= T_maj / T_maj[0];
-                    inv_w *= T_maj / T_maj[0];
+                    MediumEvents.FinishSegment(ref Tr, ref inv_w, T_maj);
                 }
 
                 // Generate next ray segment or return final transmittance
@@ -1105,20 +1102,17 @@ namespace pbrt
                                      SampledSpectrum T_maj) =>
                                     {
                                         // Compute medium event probabilities for interaction
-                                        Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
-                                        Float pScatter = mp.sigma_s[0] / sigma_maj[0];
-                                        Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
 
                                         // Randomly sample medium scattering event for delta tracking
-                                        int mode = SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, uMode);
-                                        if (mode == 0)
+                                        MediumEventType mode = MediumEvents.SampleEvent(mp, sigma_maj, uMode);
+                                        if (mode == MediumEventType.Absorb)
                                         {
                                             // Handle absorption event for medium sample
                                             Lcap += betaCap * mp.Le;
                                             terminatedCap = true;
                                             return false;
                                         }
-                                        else if (mode == 1)
+                                        else if (mode == MediumEventType.Scatter)
                                         {
                                             // Handle regular scattering event for medium sample
                                             // Stop path sampling if maximum depth has been reached
@@ -1855,20 +1849,17 @@ namespace pbrt
                             (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
                             {
                                 // Compute medium event probabilities for interaction
-                                Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
-                                Float pScatter = mp.sigma_s[0] / sigma_maj[0];
-                                Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
 
                                 // Randomly sample medium event for _RandomRalk()_ ray
                                 Float um = sampler.Get1D();
-                                int evt = SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, um);
-                                if (evt == 0)
+                                MediumEventType evt = MediumEvents.SampleEvent(mp, sigma_maj, um);
+                                if (evt == MediumEventType.Absorb)
                                 {
                                     // Handle absorption for _RandomWalk()_ ray
                                     terminated = true;
                                     return false;
                                 }
-                                else if (evt == 1)
+                                else if (evt == MediumEventType.Scatter)
                                 {
                                     // Handle scattering for _RandomWalk()_ ray
                                     beta *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
@@ -3775,21 +3766,17 @@ namespace pbrt
                                 }
 
                                 // Compute medium event probabilities for interaction
-                                Float pAbsorb = mp.sigma_a[0] / sigma_maj[0];
-                                Float pScatter = mp.sigma_s[0] / sigma_maj[0];
-                                Float pNull = std.max<Float>(0, 1 - pAbsorb - pScatter);
 
-                                CHECK_GE(1 - pAbsorb - pScatter, (Float)(-1e-6));
                                 // Sample medium scattering event type and update path
                                 Float um = rng.Uniform<Float>();
-                                int mode = SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, um);
-                                if (mode == 0)
+                                MediumEventType mode = MediumEvents.SampleEvent(mp, sigma_maj, um);
+                                if (mode == MediumEventType.Absorb)
                                 {
                                     // Handle absorption along ray path
                                     terminated = true;
                                     return false;
                                 }
-                                else if (mode == 1)
+                                else if (mode == MediumEventType.Scatter)
                                 {
                                     // Handle scattering along ray path
                                     // Stop path sampling if maximum depth has been reached
@@ -4158,10 +4145,7 @@ namespace pbrt
                                         // Update _T_ray_ and PDFs using ratio-tracking estimator
                                         SampledSpectrum sigma_n =
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                        Float pdf = T_maj_[0] * sigma_maj[0];
-                                        T_ray *= T_maj_ * sigma_n / pdf;
-                                        r_l *= T_maj_ * sigma_maj / pdf;
-                                        r_u *= T_maj_ * sigma_n / pdf;
+                                        MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n);
 
                                         // Possibly terminate transmittance computation using
                                         // Russian roulette
@@ -4180,9 +4164,7 @@ namespace pbrt
                                         return true;
                                     });
                     // Update transmittance estimate for final segment
-                    T_ray *= T_maj / T_maj[0];
-                    r_l *= T_maj / T_maj[0];
-                    r_u *= T_maj / T_maj[0];
+                    MediumEvents.FinishSegment(ref T_ray, ref r_l, ref r_u, T_maj);
                 }
 
                 // Generate next ray segment or return final transmittance
