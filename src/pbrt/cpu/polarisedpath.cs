@@ -17,6 +17,35 @@ namespace pbrt
     {
         public enum Measurement { Intensity, S1, S2, S3 }
 
+        // What the polarised integrators measure
+        public sealed class Sensor
+        {
+            public bool analyser;
+            public Float analyserAngle;
+            public Measurement measurement;
+            public Vector3f cameraUp;
+        }
+
+        // The Mueller matrix of the scattering in a medium whose phase function has a Rayleigh part, with the scalar phase
+        // function divided out: its first element is 1. wo points back along the path, wi on along it. False for the phase
+        // functions that scatter all polarisations the same (they depolarise). fromCamera is whether the path is a camera path.
+        internal static bool PhaseAttenuation(PhaseFunction phase, Vector3f wo, Vector3f wi, bool fromCamera,
+                                              out Attenuation attenuation)
+        {
+            attenuation = default;
+            HGPhaseFunction hg = phase as HGPhaseFunction;
+            if (hg == null || hg.Rayleigh() == 0)
+                return false;
+            Float cosTheta = Dot(wo, wi);
+            Float f = hg.p(wo, wi);
+            if (f <= 0)
+                return false;
+            Float rayleigh = hg.Rayleigh() * HGPhaseFunction.RayleighPhase(cosTheta);
+            attenuation = Attenuation.Rayleigh(new SampledSpectrum(rayleigh / f), new SampledSpectrum(1 - rayleigh / f), cosTheta);
+            attenuation = attenuation.Scattered(wo, wi, fromCamera);
+            return true;
+        }
+
         public PolarisedPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                                        List<Light> lights, string lightSampleStrategy, bool analyser, Float analyserAngle,
                                        Measurement measurement)
@@ -32,7 +61,8 @@ namespace pbrt
         }
 
         // The Mueller matrix of a specular interface for a sampled direction, or false when the scattering depolarises
-        internal static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, out Attenuation A)
+        internal static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode,
+                                                 out Attenuation A)
         {
             A = default;
             if (!bs.IsSpecular())
@@ -57,7 +87,7 @@ namespace pbrt
                         return false;
                     // The scalar weight of the transmission is 1 / eta^2 in the radiance mode, bs.eta being the relative
                     // index of the side that is entered
-                    A = Attenuation.Fresnel(new SampledSpectrum(1 / T / Sqr(bs.eta)), 1 - Fs, 1 - Fp, 0, 0);
+                    A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T / Sqr(bs.eta) : 1 / T), 1 - Fs, 1 - Fp, 0, 0);
                 }
             }
             else if (bxdf is ConductorBxDF conductor)
@@ -76,7 +106,7 @@ namespace pbrt
             else
                 return false;
 
-            A = A.Scattered(wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z), true);
+            A = A.Scattered(wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z), mode == TransportMode.Radiance);
             return true;
         }
 
@@ -150,7 +180,7 @@ namespace pbrt
                 if (!bs)
                     break;
                 SampledSpectrum scalar = bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
-                if (SpecularAttenuation(bsdf, isect, wo, bs.value(), out Attenuation A))
+                if (SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out Attenuation A))
                     beta *= A;
                 else
                     beta *= Attenuation.Lambert(scalar);

@@ -1432,6 +1432,11 @@ namespace pbrt
         public BSDF bsdf;
         public bool delta = false;
         public Float pdfFwd = 0, pdfRev = 0;
+        // (not in pbrt-v4) The polarisation of the throughput on arrival at the vertex: a Mueller matrix from the camera for
+        // a camera subpath, the Stokes vector of the light that has come from the light for a light subpath. Their first
+        // elements are beta.
+        public PAttenuation pbeta;
+        public PLight plight;
         // (not in pbrt-v4) The media the path is inside of on arrival at the vertex; pbrt-v4 stores the medium in the Ray
         public BoundaryStack stack;
 
@@ -1441,23 +1446,26 @@ namespace pbrt
         public Vertex(VertexType type, EndpointInteraction ei, SampledSpectrum beta)
         {
             this.type = type; this.beta = beta; this.ei = ei;
+            pbeta = new PAttenuation(beta); plight = new PLight(beta);
         }
 
         public Vertex(SurfaceInteraction si, BSDF bsdf, SampledSpectrum beta)
         {
             this.type = VertexType.Surface; this.beta = beta; this.si = si; this.bsdf = bsdf;
+            pbeta = new PAttenuation(beta); plight = new PLight(beta);
         }
 
         public Vertex(MediumInteraction mi, SampledSpectrum beta)
         {
             this.type = VertexType.Medium; this.beta = beta; this.mi = mi; this.bsdf = mi.GetBSDF();
+            pbeta = new PAttenuation(beta); plight = new PLight(beta);
         }
 
         // (C++ copies Vertex objects by value with memcpy)
         public void Assign(Vertex v)
         {
             type = v.type; beta = v.beta; ei = v.ei; mi = v.mi; si = v.si; bsdf = v.bsdf;
-            delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack;
+            delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -1789,7 +1797,7 @@ namespace pbrt
         public static int GenerateCameraSubpath(Integrator integrator, RayDifferential ray,
                                                 ref SampledWavelengths lambda, Sampler sampler,
                                                 ScratchBuffer scratchBuffer, int maxDepth, Camera camera,
-                                                Vertex[] path, bool regularize)
+                                                Vertex[] path, bool regularize, bool polarised = false)
         {
             if (maxDepth == 0)
                 return 0;
@@ -1801,13 +1809,13 @@ namespace pbrt
             path[0].stack = stack;
             camera.PDF_We(new Ray(ray), &pdfPos, &pdfDir);
             return RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta, pdfDir,
-                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize) + 1;
+                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised) + 1;
         }
 
         public static int GenerateLightSubpath(Integrator integrator, ref SampledWavelengths lambda,
                                                Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
                                                int maxDepth, Float time, LightSampler lightSampler,
-                                               Vertex[] path, bool regularize)
+                                               Vertex[] path, bool regularize, bool polarised = false)
         {
             // Generate light subpath and initialize _path_ vertices
             if (maxDepth == 0)
@@ -1865,7 +1873,7 @@ namespace pbrt
             path[0].stack = stack;
             int nVertices = RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta,
                                        les.value().pdfDir, maxDepth - 1, TransportMode.Importance, path, 1,
-                                       regularize);
+                                       regularize, polarised);
             // Correct subpath sampling densities for infinite area lights
             if (path[0].IsInfiniteLight())
             {
@@ -1889,10 +1897,15 @@ namespace pbrt
         public static int RandomWalk(Integrator integrator, ref SampledWavelengths lambdaRef, RayDifferential ray,
                                      BoundaryStack stack, Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
                                      SampledSpectrum beta, Float pdf, int maxDepth, TransportMode mode,
-                                     Vertex[] path, int off, bool regularize)
+                                     Vertex[] path, int off, bool regularize, bool polarised = false)
         {
             if (maxDepth == 0)
                 return 0;
+            // (not in pbrt-v4) The polarisation of the throughput: pa for a camera subpath (Mueller matrix, applied to
+            // what comes later), pl for a light subpath (Stokes vector). Each takes every factor of beta.
+            bool fromCamera = mode == TransportMode.Radiance;
+            PAttenuation pa = new PAttenuation(beta);
+            PLight pl = new PLight(beta);
             // (Lambdas cannot capture ref parameters: work on a local copy and write back.)
             SampledWavelengths lambda = lambdaRef;
             try
@@ -1936,10 +1949,19 @@ namespace pbrt
                                 {
                                     // Handle scattering for _RandomWalk()_ ray
                                     beta *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
+                                    if (polarised)
+                                    {
+                                        if (fromCamera)
+                                            pa *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
+                                        else
+                                            pl *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
+                                    }
                                     // Record medium interaction in _path_ and compute forward density
                                     MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium, mp.phase);
                                     path[vIdx] = Vertex.CreateMedium(intr, beta, pdfFwd, path[vIdx - 1]);
                                     path[vIdx].stack = stack;
+                                    path[vIdx].pbeta = pa;
+                                    path[vIdx].plight = pl;
                                     if (++bounces >= maxDepth)
                                     {
                                         terminated = true;
@@ -1956,6 +1978,19 @@ namespace pbrt
                                     // Update path state and previous path vertex after medium scattering
                                     pdfFwd = ps.value().pdf;
                                     beta *= ps.value().f / ps.value().pdf;
+                                    if (polarised)
+                                    {
+                                        // Only the Rayleigh part of the phase function polarises
+                                        SampledSpectrum w = ps.value().f / ps.value().pdf;
+                                        PAttenuation M;
+                                        if (!PolarisedPathIntegrator.PhaseAttenuation(mp.phase, -ray.d, ps.value().wi, fromCamera, out M))
+                                            M = PAttenuation.Lambert(new SampledSpectrum(1.0f));
+                                        M *= w;
+                                        if (fromCamera)
+                                            pa *= M;
+                                        else
+                                            pl = M * pl;
+                                    }
                                     ray = intr.SpawnRay(ps.value().wi);
                                     anyNonSpecularBounces = true;
                                     path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.value().pdf, path[vIdx - 1]);
@@ -1971,13 +2006,31 @@ namespace pbrt
                                     if (pdfN == 0)
                                         beta = new SampledSpectrum(0.0f);
                                     else
+                                    {
                                         beta *= T_maj * sigma_n / pdfN;
+                                        if (polarised)
+                                        {
+                                            if (fromCamera)
+                                                pa *= T_maj * sigma_n / pdfN;
+                                            else
+                                                pl *= T_maj * sigma_n / pdfN;
+                                        }
+                                    }
                                     return (bool)beta;
                                 }
                             });
                         // Update _beta_ for medium transmittance
                         if (!scattered)
+                        {
                             beta *= Tmaj / Tmaj[0];
+                            if (polarised)
+                            {
+                                if (fromCamera)
+                                    pa *= Tmaj / Tmaj[0];
+                                else
+                                    pl *= Tmaj / Tmaj[0];
+                            }
+                        }
                     }
 
                     if (terminated)
@@ -1991,6 +2044,7 @@ namespace pbrt
                         if (mode == TransportMode.Radiance)
                         {
                             path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ray)), beta, pdfFwd);
+                            path[vIdx].pbeta = pa;
                             ++bounces;
                         }
 
@@ -2019,6 +2073,8 @@ namespace pbrt
                     // Initialize _vertex_ with surface intersection information
                     path[vIdx] = Vertex.CreateSurface(isect, bsdf, beta, pdfFwd, path[vIdx - 1]);
                     path[vIdx].stack = stack;
+                    path[vIdx].pbeta = pa;
+                    path[vIdx].plight = pl;
 
                     if (++bounces >= maxDepth)
                         break;
@@ -2031,6 +2087,16 @@ namespace pbrt
                     pdfFwd = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi, mode, BxDFReflTransFlags.All) : bs.value().pdf;
                     anyNonSpecularBounces |= !bs.value().IsSpecular();
                     beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
+                    if (polarised)
+                    {
+                        // Smooth dielectrics and conductors polarise, every other scattering depolarises
+                        if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), mode, out PAttenuation A))
+                            A = PAttenuation.Lambert(bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf);
+                        if (fromCamera)
+                            pa *= A;
+                        else
+                            pl = A * pl;
+                    }
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
                     MediumTracking.CrossSurface(ref stack, isect, ray.d);
 
@@ -2172,13 +2238,39 @@ namespace pbrt
             return pdf;
         }
 
+        // (not in pbrt-v4) The beta of a vertex where the wavelengths without throughput do not divide by zero
+        static SampledSpectrum SafeBeta(SampledSpectrum beta)
+        {
+            SampledSpectrum safe = beta;
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                if (safe[i] == 0)
+                    safe[i] = 1;
+            }
+            return safe;
+        }
+
+        // (not in pbrt-v4) The Mueller matrix of the scattering at a connection vertex toward wi, with the scalar BSDF or phase
+        // function divided out: a Rayleigh scattering in a medium polarises, every other scattering depolarises
+        static PAttenuation ConnectionMueller(Vertex v, Vector3f wi, bool fromCamera)
+        {
+            if (v.type == VertexType.Medium &&
+                PolarisedPathIntegrator.PhaseAttenuation(v.mi.phase, v.mi.wo, wi, fromCamera, out PAttenuation M))
+                return M;
+            return PAttenuation.Lambert(new SampledSpectrum(1.0f));
+        }
+
         public static SampledSpectrum ConnectBDPT(Integrator integrator, ref SampledWavelengths lambdaRef,
                                                   Vertex[] lightVertices, Vertex[] cameraVertices, int s, int t,
                                                   LightSampler lightSampler, Camera camera, Sampler sampler,
-                                                  ref pstd.optional<Point2f> pRaster, ref Float misWeightOut)
+                                                  ref pstd.optional<Point2f> pRaster, ref Float misWeightOut,
+                                                  PolarisedPathIntegrator.Sensor pol = null,
+                                                  Vector3f cameraDirection = default)
         {
             SampledWavelengths lambda = lambdaRef;
             SampledSpectrum L = new SampledSpectrum(0.0f);
+            // (not in pbrt-v4) The direction of the light at the sensor for a connection to the camera
+            Vector3f toCamera = default;
             // Ignore invalid connections related to infinite area lights
             if (t > 1 && s != 0 && cameraVertices[t - 1].type == VertexType.Light)
                 return new SampledSpectrum(0.0f);
@@ -2205,6 +2297,7 @@ namespace pbrt
                         pRaster = new pstd.optional<Point2f>(cs.value().pRaster);
                         // Initialize dynamically sampled vertex and _L_ for $t=1$ case
                         sampled = Vertex.CreateCamera(camera, cs.value().pLens, cs.value().Wi / cs.value().pdf);
+                        toCamera = Normalize(cs.value().pLens.p() - qs.p());
                         L = qs.beta * qs.f(sampled, TransportMode.Importance) * sampled.beta;
                         // (not in pbrt-v4) The throughput of the emission vertex is the emission: divide by the density of
                         // the point and of the choice of the light
@@ -2303,6 +2396,46 @@ namespace pbrt
             L *= misWeight;
             misWeightOut = misWeight;
 
+            // (not in pbrt-v4) What the sensor measures of the polarised light of the path. The scalar contribution has all the
+            // factors of the strategy, so the polarisation is taken relative to the scalar throughputs of the two subpaths: the
+            // Mueller matrix of the camera subpath and the Stokes vector of the light subpath, each divided by its beta,
+            // with the Mueller matrices of the scattering at the two connection vertices between.
+            lambdaRef = lambda;
+            if (pol != null && (bool)L)
+            {
+                PLight lightSide = new PLight(new SampledSpectrum(1.0f));
+                PAttenuation cameraSide = PAttenuation.Identity();
+                if (s > 0)
+                {
+                    Vertex qs = s == 1 && t > 1 ? sampled : lightVertices[s - 1];
+                    lightSide = qs.plight;
+                    lightSide /= SafeBeta(qs.beta);
+                    if (s > 1 && t > 0)
+                    {
+                        Vector3f toVertex = t == 1 ? toCamera : Normalize(cameraVertices[t - 1].p() - qs.p());
+                        lightSide = ConnectionMueller(qs, toVertex, false) * lightSide;
+                    }
+                }
+                if (t > 1)
+                {
+                    Vertex pt = cameraVertices[t - 1];
+                    cameraSide = pt.pbeta;
+                    cameraSide /= SafeBeta(pt.beta);
+                    Vector3f toVertex = s == 0 ? default : Normalize(s == 1 ? sampled.p() - pt.p() : lightVertices[s - 1].p() - pt.p());
+                    if (s > 0)
+                        lightSide = ConnectionMueller(pt, toVertex, true) * lightSide;
+                }
+                else if (s > 1)
+                {
+                    // t = 1: the sampled vertex is the camera, nothing scatters
+                }
+
+                PLight Lp = cameraSide * lightSide;
+                Lp *= L;
+                return PolarisedPathIntegrator.Measure(Lp, pol.analyser, pol.analyserAngle, pol.measurement,
+                                                       t == 1 ? toCamera : cameraDirection, pol.cameraUp);
+            }
+
             lambdaRef = lambda;
             return L;
         }
@@ -2314,9 +2447,13 @@ namespace pbrt
         // BDPTIntegrator Public Methods
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
-                              bool regularize = false)
+                              bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
+            // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
+            this.sensor = sensor;
+            if (sensor != null)
+                sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
             this.maxDepth = maxDepth;
             this.regularize = regularize;
             // (not in pbrt-v4) Media with emission are lights too
@@ -2384,12 +2521,12 @@ namespace pbrt
             Vertex[] cameraVertices = new Vertex[maxDepth + 2];
             for (int i = 0; i < cameraVertices.Length; ++i) cameraVertices[i] = new Vertex();
             int nCamera = BDPT.GenerateCameraSubpath(this, ray, ref lambda, sampler, scratchBuffer, maxDepth + 2,
-                                                     camera, cameraVertices, regularize);
+                                                     camera, cameraVertices, regularize, sensor != null);
             Vertex[] lightVertices = new Vertex[maxDepth + 1];
             for (int i = 0; i < lightVertices.Length; ++i) lightVertices[i] = new Vertex();
             int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer, maxDepth + 1,
                                                    cameraVertices[0].time(), lightSampler, lightVertices,
-                                                   regularize);
+                                                   regularize, sensor != null);
 
             SampledSpectrum L = new SampledSpectrum(0.0f);
             // Execute all BDPT connection strategies
@@ -2405,7 +2542,7 @@ namespace pbrt
                     Float misWeight = 0.0f;
                     SampledSpectrum Lpath = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, t,
                                                             lightSampler, camera, sampler, ref pFilmNew,
-                                                            ref misWeight);
+                                                            ref misWeight, sensor, -ray.d);
                     if ((bool)Lpath && (visualizeStrategies || visualizeWeights))
                     {
                         SampledSpectrum value = default;
@@ -2463,8 +2600,19 @@ namespace pbrt
             }
 
             bool regularize = parameters.GetOneBool("regularize", false);
+            PolarisedPathIntegrator.Sensor sensor = null;
+            PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
+                                                out PolarisedPathIntegrator.Measurement measurement);
+            if (parameters.GetOneBool("polarised", false))
+            {
+                sensor = new PolarisedPathIntegrator.Sensor();
+                sensor.analyser = analyser;
+                sensor.analyserAngle = analyserAngle;
+                sensor.measurement = measurement;
+            }
+
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize);
+                                      visualizeWeights, regularize, sensor);
         }
 
         // BDPTIntegrator Private Members
@@ -2473,6 +2621,7 @@ namespace pbrt
         LightSampler lightSampler;
         bool visualizeStrategies, visualizeWeights;
         Film[] weightFilms;
+        PolarisedPathIntegrator.Sensor sensor;
     }
 
     // MLTIntegrator Definition
@@ -3960,7 +4109,7 @@ namespace pbrt
                                             {
                                                 PLight Lp = new PLight(Ld);
                                                 PAttenuation M;
-                                                if (PhaseAttenuation(mp.phase, intr.wo, wiLight, out M))
+                                                if (PolarisedPathIntegrator.PhaseAttenuation(mp.phase, intr.wo, wiLight, true, out M))
                                                     Lp = M * Lp;
                                                 pL += pbeta * Lp;
                                             }
@@ -3980,7 +4129,7 @@ namespace pbrt
                                             // Update ray path state for indirect volume scattering
                                             beta *= ps.value().f / ps.value().pdf;
                                             // The phase functions do not polarise
-                                            if (polarised && PhaseAttenuation(mp.phase, -ray.d, ps.value().wi, out PAttenuation Mp))
+                                            if (polarised && PolarisedPathIntegrator.PhaseAttenuation(mp.phase, -ray.d, ps.value().wi, true, out PAttenuation Mp))
                                                 pbeta *= Mp;
                                             else
                                                 pbeta *= PAttenuation.Lambert(ps.value().f / ps.value().pdf);
@@ -4149,7 +4298,7 @@ namespace pbrt
                     if (polarised)
                     {
                         // Smooth dielectrics and conductors polarise, every other scattering depolarises
-                        if (PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), out PAttenuation A))
+                        if (PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out PAttenuation A))
                             pbeta *= A;
                         else
                             pbeta *= PAttenuation.Lambert(bs.value().f * AbsDot(bs.value().wi, isect.shading.n) /
@@ -4274,27 +4423,6 @@ namespace pbrt
             {
                 lambdaRef = lambda;
             }
-        }
-
-        // (not in pbrt-v4) The Mueller matrix of the scattering in a medium whose phase function has a Rayleigh part, with
-        // the scalar phase function as its first element. wo points back along the path, wi on along it. False for the
-        // phase functions that scatter all polarisations the same (they depolarise).
-        static bool PhaseAttenuation(PhaseFunction phase, Vector3f wo, Vector3f wi, out PAttenuation attenuation)
-        {
-            attenuation = default;
-            HGPhaseFunction hg = phase as HGPhaseFunction;
-            if (hg == null || hg.Rayleigh() == 0)
-                return false;
-            Float cosTheta = Dot(wo, wi);
-            Float f = hg.p(wo, wi);
-            if (f <= 0)
-                return false;
-            Float rayleigh = hg.Rayleigh() * HGPhaseFunction.RayleighPhase(cosTheta);
-            // Relative to the scalar phase function: the matrix has f as its first element, and the weight of the path
-            // that the scalar throughput has already taken is f / pdf
-            attenuation = PAttenuation.Rayleigh(new SampledSpectrum(rayleigh / f), new SampledSpectrum(1 - rayleigh / f), cosTheta);
-            attenuation = attenuation.Scattered(wo, wi, true);
-            return true;
         }
 
         // (not in pbrt-v4) The radiance of the path: the scalar one, or what the sensor measures of the Stokes vector
