@@ -32,7 +32,7 @@ namespace pbrt
             sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
             sigma_a_spec.Scale(sigmaScale);
             sigma_s_spec.Scale(sigmaScale);
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             this.densityTextureName = densityTextureName;
             this.densityOffset = densityOffset;
             this.densityScale = densityScale;

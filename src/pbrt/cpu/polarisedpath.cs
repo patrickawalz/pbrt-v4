@@ -32,7 +32,7 @@ namespace pbrt
         }
 
         // The Mueller matrix of a specular interface for a sampled direction, or false when the scattering depolarises
-        bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, out Attenuation A)
+        internal static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, out Attenuation A)
         {
             A = default;
             if (!bs.IsSpecular())
@@ -173,7 +173,13 @@ namespace pbrt
                 }
             }
 
-            // What the sensor measures
+            return Measure(L, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+        }
+
+        // What the sensor measures of the light that arrives from the direction toward the camera
+        internal static SampledSpectrum Measure(PLight L, bool analyser, Float analyserAngle, Measurement measurement,
+                                                Vector3f cameraDirection, Vector3f cameraUp)
+        {
             if (!analyser && measurement == Measurement.Intensity)
                 return L.GetIntensity();
             Attenuation sensor = analyser ? Attenuation.LinearPolariser(analyserAngle) : Attenuation.Identity();
@@ -191,6 +197,21 @@ namespace pbrt
                 // A linear polariser passes half of the unpolarised light: the factor 2 keeps the brightness
                 return analyser ? 2 * measured.s0 : measured.s0;
             }
+        }
+
+        // The sensor parameters of the integrators: "analyser" (angle in degrees of a linear polariser in front of the sensor,
+        // from the up of the image) and "measure" (intensity, s1, s2 or s3)
+        internal static void ParseSensor(ParameterDictionary parameters, FileLoc loc, out bool analyser,
+                                         out Float analyserAngle, out Measurement measurement)
+        {
+            Float angle = parameters.GetOneFloat("analyser", -1000);
+            string mode = parameters.GetOneString("measure", "intensity");
+            measurement = mode == "s1" ? Measurement.S1 : mode == "s2" ? Measurement.S2 :
+                          mode == "s3" ? Measurement.S3 : Measurement.Intensity;
+            if (mode != "intensity" && measurement == Measurement.Intensity)
+                ErrorExit(loc, StringPrintf("%s: unknown \"measure\", expected intensity, s1, s2 or s3.", mode));
+            analyser = angle > -999;
+            analyserAngle = Radians(analyser ? angle : 0);
         }
 
         SampledSpectrum SampleLd(SurfaceInteraction intr, BSDF bsdf, ref SampledWavelengths lambda, Sampler sampler)
@@ -236,16 +257,9 @@ namespace pbrt
         {
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
-            // The angle in degrees of the linear polariser in front of the sensor, from the up of the image; none by default
-            Float angle = parameters.GetOneFloat("analyser", -1000);
-            string mode = parameters.GetOneString("measure", "intensity");
-            Measurement measurement = mode == "s1" ? Measurement.S1 : mode == "s2" ? Measurement.S2 :
-                                      mode == "s3" ? Measurement.S3 : Measurement.Intensity;
-            if (mode != "intensity" && measurement == Measurement.Intensity)
-                ErrorExit(loc, StringPrintf("%s: unknown \"measure\", expected intensity, s1, s2 or s3.", mode));
-            bool analyser = angle > -999;
+            ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle, out Measurement measurement);
             return new PolarisedPathIntegrator(maxDepth, camera, sampler, aggregate, lights, lightStrategy, analyser,
-                                               Radians(analyser ? angle : 0), measurement);
+                                               analyserAngle, measurement);
         }
 
         int maxDepth;

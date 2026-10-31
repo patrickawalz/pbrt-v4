@@ -207,12 +207,54 @@ namespace pbrt
         public HGPhaseFunction() { }
         public HGPhaseFunction(Float g) { this.g = g; }
 
-        public override Float p(Vector3f wo, Vector3f wi) { return HenyeyGreenstein(Dot(wo, wi), g); }
+        // (not in pbrt-v4) A part of the scattering can be Rayleigh scattering, the part that polarises the light (the "rayleigh"
+        // parameter of the media: the fraction of the phase function, as the Rayleigh coefficient of PolarisedUPBP next to
+        // its scattering coefficient). Without it this is Henyey-Greenstein scattering.
+        public HGPhaseFunction(Float g, Float rayleigh)
+        {
+            this.g = g;
+            this.rayleigh = rayleigh;
+        }
+
+        // The media that are being created take this fraction of Rayleigh scattering for their phase function
+        [ThreadStatic] public static Float creationRayleigh;
+
+        public Float Rayleigh() { return rayleigh; }
+
+        public Float G() { return g; }
+
+        public static Float RayleighPhase(Float cosTheta) { return 3 / (16 * Pi) * (1 + Sqr(cosTheta)); }
+
+        public override Float p(Vector3f wo, Vector3f wi)
+        {
+            if (rayleigh == 0)
+                return HenyeyGreenstein(Dot(wo, wi), g);
+            return (1 - rayleigh) * HenyeyGreenstein(Dot(wo, wi), g) + rayleigh * RayleighPhase(Dot(wo, wi));
+        }
 
         public override pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u)
         {
             Float pdf;
-            Vector3f wi = SampleHenyeyGreenstein(wo, g, u, &pdf);
+            Vector3f wi;
+            if (rayleigh == 0)
+                wi = SampleHenyeyGreenstein(wo, g, u, &pdf);
+            else
+            {
+                // Choose the component with u[0], and use it again after the choice
+                if (u.x < rayleigh)
+                {
+                    Float a = std.pow(std.sqrt(16 * (u.x / rayleigh) * (u.x / rayleigh - 1) + 5) + 4 * (u.x / rayleigh) - 2,
+                                      1.0f / 3);
+                    Float cosTheta = Clamp(-(a - 1 / a), -1, 1);
+                    Float sinTheta = SafeSqrt(1 - Sqr(cosTheta));
+                    Float phi = 2 * Pi * u.y;
+                    wi = Frame.FromZ(wo).FromLocal(new Vector3f(std.cos(phi) * sinTheta, std.sin(phi) * sinTheta, cosTheta));
+                }
+                else
+                    wi = SampleHenyeyGreenstein(wo, g, new Point2f((u.x - rayleigh) / (1 - rayleigh), u.y), &pdf);
+                pdf = p(wo, wi);
+            }
+
             PhaseFunctionSample s = new PhaseFunctionSample();
             s.p = pdf;
             s.wi = wi;
@@ -231,6 +273,7 @@ namespace pbrt
 
         // HGPhaseFunction Private Members
         private Float g;
+        private Float rayleigh;
     }
 
     // MediumProperties Definition
@@ -487,7 +530,7 @@ namespace pbrt
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
             sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
             Le_spec = new DenselySampledSpectrum(Le, alloc);
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             sigma_a_spec.Scale(sigmaScale);
             sigma_s_spec.Scale(sigmaScale);
             Le_spec.Scale(LeScale);
@@ -647,7 +690,7 @@ namespace pbrt
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
             sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
             densityGrid = d;
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             temperatureGrid = temperature;
             this.temperatureScale = temperatureScale;
             this.temperatureOffset = temperatureOffset;
@@ -819,7 +862,7 @@ namespace pbrt
         {
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             sigma_aGrid = rgbA;
             sigma_sGrid = rgbS;
             this.sigmaScale = sigmaScale;
@@ -958,7 +1001,7 @@ namespace pbrt
             this.renderFromMedium = renderFromMedium;
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
             sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             this.density = density;
             this.wispiness = wispiness;
             this.frequency = frequency;
@@ -1200,7 +1243,7 @@ namespace pbrt
             this.renderFromMedium = renderFromMedium;
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
             sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
-            phase = new HGPhaseFunction(g);
+            phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             majorantGrid = new MajorantGrid(new Bounds3f(), new Point3i(64, 64, 64), alloc);
             densityGrid = dg;
             temperatureGrid = tg;
@@ -1347,6 +1390,8 @@ namespace pbrt
                                     Allocator alloc)
         {
             Medium m = null;
+            // (not in pbrt-v4) The fraction of Rayleigh scattering of the phase function
+            HGPhaseFunction.creationRayleigh = parameters.GetOneFloat("rayleigh", 0);
             if (name == "homogeneous")
                 m = HomogeneousMedium.Create(parameters, loc, alloc);
             else if (name == "uniformgrid")
@@ -1372,6 +1417,7 @@ namespace pbrt
             else
                 ErrorExit(loc, $"{name}: medium unknown.");
 
+            HGPhaseFunction.creationRayleigh = 0;
             if (m == null)
                 ErrorExit(loc, $"{name}: unable to create medium.");
 

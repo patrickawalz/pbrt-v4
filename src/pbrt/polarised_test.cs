@@ -287,6 +287,28 @@ namespace pbrt
             }
         }
 
+        [TEST("Polarised", "RayleighPolarisation")]
+        public static void Polarised_RayleighPolarisation()
+        {
+            // Unpolarised light that is scattered by Rayleigh scattering is completely polarised at 90 degrees, perpendicular to
+            // the plane of the two directions, and not at all forwards or backwards
+            Vector3f wo = new Vector3f(0, 0, 1);
+            for (int i = 0; i <= 4; ++i)
+            {
+                Float angle = i * pbrt.Pi / 4;
+                Vector3f wi = new Vector3f(std.sin(angle), 0, -std.cos(angle));
+                // The light arrives along -wi... the scattering angle is that between the direction of the light and the new one
+                PolarisedLightSystem.Attenuation a = PolarisedLightSystem.Attenuation.Rayleigh(S(1), pbrt.Dot(wo, wi));
+                a = a.Scattered(wo, wi, true);
+                StokesVector o = (a * new PolarisedLightSystem.Light(S(1))).ToStokesVector();
+                Float expected = std.sin(angle) * std.sin(angle) / (1 + std.cos(angle) * std.cos(angle));
+                // The axis of the frame is the normal of the plane: +y here, with the sign of cross(wo, wi) up to the frame
+                EXPECT_LT(std.abs(std.abs(o.s1[0]) - expected), (Float)1e-5);
+                EXPECT_LT(std.abs(o.s1[0] - expected), (Float)1e-5);
+                EXPECT_LT(std.abs(o.s0[0] - 1), (Float)1e-5);
+            }
+        }
+
         [TEST("Polarised", "RotateFrame")]
         public static void Polarised_RotateFrame()
         {

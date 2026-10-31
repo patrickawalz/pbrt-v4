@@ -372,7 +372,11 @@ namespace pbrt
                 Float cosPhi2 = cosPhi * cosPhi;
                 Float sinPhi2 = 1.0f - cosPhi * cosPhi;
 
-                SampledSpectrum f00 = d0 * (-sinPhi2) / (1.0f + cosPhi2);
+                // PolarisedUPBP writes -sin^2 here: its media frames have the x axis along the normal of the scattering plane,
+                // as the ones of this port, but its Stokes vectors measure I_y - I_x (its surface frames take the plane of
+                // incidence as x). With the Stokes vectors of Mitsuba, I_x - I_y, the light that is scattered at 90 degrees is
+                // polarised perpendicular to the scattering plane, along the x axis of the frame: s1 = +I
+                SampledSpectrum f00 = d0 * sinPhi2 / (1.0f + cosPhi2);
                 SampledSpectrum f01 = d0 * (2.0f * cosPhi) / (1.0f + cosPhi2);
 
                 SampledSpectrum zero = new SampledSpectrum(0.0f);
@@ -381,6 +385,15 @@ namespace pbrt
                     f00, d0, zero, zero,
                     zero, zero, f01, zero,
                     zero, zero, zero, f01));
+            }
+
+            // Rayleigh scattering next to a part that scatters all polarisations the same, as the sum of Rayleigh() and Lambert()
+            // of PolarisedUPBP's phase functions: the depolarised part only adds to the first element
+            public static Attenuation Rayleigh(SampledSpectrum d0, SampledSpectrum depolarised, Float cosPhi)
+            {
+                Attenuation attenuation = Rayleigh(d0, cosPhi);
+                attenuation.matrix.m00 = attenuation.matrix.m00 + depolarised;
+                return attenuation;
             }
 
             public SampledSpectrum GetIntensity()
