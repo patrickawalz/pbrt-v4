@@ -123,6 +123,59 @@ namespace pbrt
             EXPECT_TRUE(stack.IsEmpty());
         }
 
+        static Interaction MakeInterface(Medium inside, Medium outside)
+        {
+            Interaction intr = new Interaction();
+            intr.n = new Normal3f(0, 0, 1);
+            intr.mediumInterface = new MediumInterface(inside, outside);
+            return intr;
+        }
+
+        [TEST("MediumTracking", "EnterAndLeave")]
+        public static void MediumTracking_EnterAndLeave()
+        {
+            Medium outer = MakeMedium(1.0f), inner = MakeMedium(2.0f);
+            // A sphere interface with inner inside and outer outside; the normal points outwards
+            Interaction intr = MakeInterface(inner, outer);
+            BoundaryStack stack = MediumTracking.Start(outer);
+
+            // Coming from outside (wo along +n) and going in (wi along -n)
+            intr.wo = new Vector3f(0, 0, 1);
+            MediumTracking.CrossSurface(ref stack, intr, new Vector3f(0, 0, -1));
+            EXPECT_EQ(stack.Size(), 1);
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), inner));
+
+            // A reflection changes nothing
+            intr.wo = new Vector3f(0, 0, -1);
+            MediumTracking.CrossSurface(ref stack, intr, new Vector3f(0, 0, -1));
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), inner));
+
+            // Coming from inside and going out
+            MediumTracking.CrossSurface(ref stack, intr, new Vector3f(0, 0, 1));
+            EXPECT_EQ(stack.Size(), 1);
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), outer));
+        }
+
+        [TEST("MediumTracking", "MissedEntryDoesNotDuplicate")]
+        public static void MediumTracking_MissedEntryDoesNotDuplicate()
+        {
+            // A collision sampled on the boundary leaves the path in the inner medium with the outer one on the stack. Leaving
+            // the inner medium must give the outer medium once, as pbrt-v4 does.
+            Medium outer = MakeMedium(1.0f), inner = MakeMedium(2.0f);
+            Interaction intr = MakeInterface(inner, outer);
+            BoundaryStack stack = MediumTracking.Start(outer);
+            intr.wo = new Vector3f(0, 0, -1);
+            MediumTracking.CrossSurface(ref stack, intr, new Vector3f(0, 0, 1));
+            EXPECT_EQ(stack.Size(), 1);
+            EXPECT_TRUE(ReferenceEquals(MediumTracking.Current(stack), outer));
+
+            // Leaving the outer medium (a sphere around it) then empties the stack
+            Interaction outerShell = MakeInterface(outer, null);
+            outerShell.wo = new Vector3f(0, 0, -1);
+            MediumTracking.CrossSurface(ref stack, outerShell, new Vector3f(0, 0, 1));
+            EXPECT_TRUE(stack.IsEmpty());
+        }
+
         [TEST("BoundaryStack", "RandomAgainstReference")]
         public static void BoundaryStack_RandomAgainstReference()
         {
