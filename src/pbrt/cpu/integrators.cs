@@ -19,6 +19,9 @@ namespace pbrt
     // Integrator Definition
     public abstract unsafe class Integrator
     {
+        // (not in pbrt-v4) Whether the camera subpaths of bdpt gather the emission of media at their collisions (a strategy with
+        // s = 0 whose last vertex is in the emissive medium), next to the strategies that sample the medium as a light
+        public bool gatherMediumEmission = false;
 
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
@@ -1476,6 +1479,10 @@ namespace pbrt
         public PLight plight;
         // (not in pbrt-v4) The media the path is inside of on arrival at the vertex; pbrt-v4 stores the medium in the Ray
         public BoundaryStack stack;
+        // (not in pbrt-v4) A vertex in an emissive medium: the emission per length at the point, and the extinction of the hero
+        // wavelength there (the density of a collision at the point, per length, that the MIS weights use)
+        public SampledSpectrum emission;
+        public Float sigmaT0 = 0;
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1503,6 +1510,7 @@ namespace pbrt
         {
             type = v.type; beta = v.beta; ei = v.ei; mi = v.mi; si = v.si; bsdf = v.bsdf;
             delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
+            emission = v.emission; sigmaT0 = v.sigmaT0;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -1653,6 +1661,9 @@ namespace pbrt
                     Le += light.Le(new Ray(p(), -w), lambda);
                 return Le;
             }
+            // (not in pbrt-v4) The emission of a medium is the same in all directions
+            else if (type == VertexType.Light && ei.light is VolumeEmissionLight)
+                return emission;
             else if (si.areaLight != null)
                 return si.areaLight.L(si.p(), si.n, si.uv, w, lambda);
             else
@@ -1797,6 +1808,20 @@ namespace pbrt
         }
     }
 
+    // (not in pbrt-v4) The emission of a medium that a camera subpath gathers at a collision: the vertex that ends the path and the
+    // index that it has in the camera subpath (the vertices before it are the vertices of the subpath with lower indices)
+    public sealed class MediumEmissionEnd
+    {
+        public MediumEmissionEnd(Vertex vertex, int index)
+        {
+            this.vertex = vertex;
+            this.index = index;
+        }
+
+        public Vertex vertex;
+        public int index;
+    }
+
     // BDPT Utility Functions
     public static unsafe class BDPT
     {
@@ -1834,7 +1859,8 @@ namespace pbrt
         public static int GenerateCameraSubpath(Integrator integrator, RayDifferential ray,
                                                 ref SampledWavelengths lambda, Sampler sampler,
                                                 ScratchBuffer scratchBuffer, int maxDepth, Camera camera,
-                                                Vertex[] path, bool regularize, bool polarised = false)
+                                                Vertex[] path, bool regularize, bool polarised = false,
+                                                List<MediumEmissionEnd> emissionEnds = null)
         {
             if (maxDepth == 0)
                 return 0;
@@ -1846,7 +1872,7 @@ namespace pbrt
             path[0].stack = stack;
             camera.PDF_We(new Ray(ray), &pdfPos, &pdfDir);
             return RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta, pdfDir,
-                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised) + 1;
+                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised, emissionEnds) + 1;
         }
 
         public static int GenerateLightSubpath(Integrator integrator, ref SampledWavelengths lambda,
@@ -1905,6 +1931,13 @@ namespace pbrt
             path[0] = les.value().intr ? Vertex.CreateLight(light, les.value().intr.value(), les.value().L, p_l)
                                        : Vertex.CreateLight(light, new Ray(ray), les.value().L, p_l);
 
+            // (not in pbrt-v4) The extinction at the point of an emissive medium, for the weight of a camera subpath that gathers it
+            if (path[0].ei.light is VolumeEmissionLight emissiveMedium)
+            {
+                MediumProperties mpEmission = emissiveMedium.Medium().SamplePoint(ray.o, lambda);
+                path[0].sigmaT0 = (mpEmission.sigma_a + mpEmission.sigma_s)[0];
+            }
+
             // Follow light subpath random walk
             SampledSpectrum beta = les.value().L * les.value().AbsCosTheta(ray.d) / (p_l * les.value().pdfDir);
             path[0].stack = stack;
@@ -1934,7 +1967,8 @@ namespace pbrt
         public static int RandomWalk(Integrator integrator, ref SampledWavelengths lambdaRef, RayDifferential ray,
                                      BoundaryStack stack, Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
                                      SampledSpectrum beta, Float pdf, int maxDepth, TransportMode mode,
-                                     Vertex[] path, int off, bool regularize, bool polarised = false)
+                                     Vertex[] path, int off, bool regularize, bool polarised = false,
+                                     List<MediumEmissionEnd> emissionEnds = null)
         {
             if (maxDepth == 0)
                 return 0;
@@ -1951,7 +1985,7 @@ namespace pbrt
             ctx.scratchBuffer = scratchBuffer;
             ctx.mode = mode;
             ctx.st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
-            BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize);
+            BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize, emissionEnds);
             try
             {
                 // Follow random walk to initialize BDPT path vertices
@@ -1967,8 +2001,10 @@ namespace pbrt
         // The vertices of a bdpt subpath, with their forward and reverse densities
         sealed class BDPTWalkHook : PathWalkHook
         {
-            public BDPTWalkHook(Vertex[] path, int off, int maxDepth, Float pdfFwd, bool regularize)
+            public BDPTWalkHook(Vertex[] path, int off, int maxDepth, Float pdfFwd, bool regularize,
+                                List<MediumEmissionEnd> emissionEnds = null)
             {
+                this.emissionEnds = emissionEnds;
                 this.path = path;
                 this.off = off;
                 this.maxDepth = maxDepth;
@@ -1982,6 +2018,7 @@ namespace pbrt
             Float pdfFwd;
             bool regularize;
             bool anyNonSpecularBounces = false;
+            List<MediumEmissionEnd> emissionEnds;
 
             public override bool BeginIteration(WalkContext ctx)
             {
@@ -2004,6 +2041,29 @@ namespace pbrt
             public override bool BeginCollision(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
                                                 SampledSpectrum sigma_maj, SampledSpectrum T_maj)
             {
+                // (not in pbrt-v4) A camera subpath gathers the emission of the medium at each of its collisions, like volpath does:
+                // the collision is the last vertex of a path with no light subpath, and the strategies that sample the medium as a
+                // light share the weight (see MISWeight). The emission end is kept next to the subpath: the walk goes on.
+                if (emissionEnds != null && ctx.mode == TransportMode.Radiance && (bool)mp.Le && (bool)ctx.st.beta)
+                {
+                    VolumeEmissionLight emissionLight = (medium as TextureMedium)?.EmissionLight();
+                    if (emissionLight != null)
+                    {
+                        Float pdfCollision = sigma_maj[0] * T_maj[0];
+                        SampledSpectrum w = T_maj / pdfCollision;
+                        Vertex end = Vertex.CreateLight(emissionLight, new Interaction(p, ctx.ray.time, medium),
+                                                        ctx.st.beta * w, 0);
+                        end.emission = mp.sigma_a * mp.Le;
+                        end.sigmaT0 = (mp.sigma_a + mp.sigma_s)[0];
+                        // The density of a collision at the point, per volume: the density of the direction at the previous
+                        // vertex, as for the vertices of real scatterings, and the extinction for the distance along the ray
+                        end.pdfFwd = path[vIdx - 1].ConvertDensity(pdfFwd, end) * end.sigmaT0;
+                        end.pbeta = ctx.st.pa;
+                        end.pbeta *= w;
+                        end.stack = ctx.stack;
+                        emissionEnds.Add(new MediumEmissionEnd(end, vIdx));
+                    }
+                }
                 return true;
             }
 
@@ -2109,7 +2169,11 @@ namespace pbrt
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
                                       LightSampler lightSampler)
         {
-            if (s + t == 2)
+            // (not in pbrt-v4) With a camera subpath that gathers the emission of a medium, a path of length 0 has two strategies: the
+            // gathered emission (s = 0, t = 2) and the light sample of the medium that connects to the camera (s = 1, t = 1)
+            bool mediumEmissionPair = integrator.gatherMediumEmission &&
+                ((s == 0 && t == 2 && IsVolumeEmission(cameraVertices[1])) || (s == 1 && t == 1 && IsVolumeEmission(lightVertices[0])));
+            if (s + t == 2 && !mediumEmissionPair)
                 return 1;
             Float sumRi = 0;
 
@@ -2133,10 +2197,11 @@ namespace pbrt
             ScopedAssignment<Float> a7 = default;
             try
             {
-                if (s == 1)
-                    a1 = new ScopedAssignment<Vertex>(ref lightVertices[s - 1], sampled);
-                else if (t == 1)
+                // (not in pbrt-v4) The strategy s = 1, t = 1 samples the camera: its sampled vertex is the camera vertex
+                if (t == 1)
                     a1 = new ScopedAssignment<Vertex>(ref cameraVertices[t - 1], sampled);
+                else if (s == 1)
+                    a1 = new ScopedAssignment<Vertex>(ref lightVertices[s - 1], sampled);
 
                 if (pt != null)
                     a2 = new ScopedAssignment<bool>(ref pt.delta, false);
@@ -2178,9 +2243,15 @@ namespace pbrt
                 {
                     ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
                     bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
-                    // (not in pbrt-v4) The camera subpath does not gather the emission of volumes: there is no s = 0 strategy
+                    // (not in pbrt-v4) A camera subpath that gathers the emission of volumes has the s = 0 strategy with the
+                    // density of a collision at the point (per volume: the extinction times the density of the direction);
+                    // one that does not has no such strategy
                     if (i == 0 && IsVolumeEmission(lightVertices[0]))
-                        continue;
+                    {
+                        if (!integrator.gatherMediumEmission)
+                            continue;
+                        ri *= lightVertices[0].sigmaT0;
+                    }
                     if (!lightVertices[i].delta && !deltaLightvertex)
                         sumRi += ri;
                 }
@@ -2231,6 +2302,24 @@ namespace pbrt
                 PolarisedPathIntegrator.PhaseAttenuation(v.mi.phase, v.mi.wo, wi, fromCamera, out PAttenuation M))
                 return M;
             return PAttenuation.Lambert(new SampledSpectrum(1.0f));
+        }
+
+        // (not in pbrt-v4) The path that a camera subpath makes with the emission that it gathered in a medium: the vertices
+        // of the subpath before the collision, then the collision as a light vertex. A complete path, so s = 0.
+        public static SampledSpectrum ConnectEmissionEnd(Integrator integrator, ref SampledWavelengths lambdaRef,
+                                                         Vertex[] cameraVertices, MediumEmissionEnd end,
+                                                         LightSampler lightSampler, Camera camera, Sampler sampler,
+                                                         PolarisedPathIntegrator.Sensor pol, Vector3f cameraDirection)
+        {
+            Vertex[] path = new Vertex[end.index + 1];
+            for (int i = 0; i < end.index; ++i)
+                path[i] = cameraVertices[i];
+            path[end.index] = end.vertex;
+            pstd.optional<Point2f> pRaster = default;
+            Float misWeight = 0;
+            SampledSpectrum Lend = ConnectBDPT(integrator, ref lambdaRef, new Vertex[0], path, 0, end.index + 1, lightSampler, camera,
+                               sampler, ref pRaster, ref misWeight, pol, cameraDirection);
+            return Lend;
         }
 
         public static SampledSpectrum ConnectBDPT(Integrator integrator, ref SampledWavelengths lambdaRef,
@@ -2328,6 +2417,11 @@ namespace pbrt
                             EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
                             sampled = Vertex.CreateLight(ei, lightWeight.value().L / (lightWeight.value().pdf * p_l), 0);
                             sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
+                            if (volumeLight != null)
+                            {
+                                MediumProperties mpEmission = volumeLight.Medium().SamplePoint(lightWeight.value().pLight.p(), lambda);
+                                sampled.sigmaT0 = (mpEmission.sigma_a + mpEmission.sigma_s)[0];
+                            }
                             L = pt.beta * pt.f(sampled, TransportMode.Radiance) * sampled.beta;
                             if (pt.IsOnSurface())
                                 L *= AbsDot(lightWeight.value().wi, pt.ns());
@@ -2421,9 +2515,10 @@ namespace pbrt
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null,
-                              bool russianRoulette = false)
+                              bool russianRoulette = false, bool gatherMediumEmission = true)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
+            this.gatherMediumEmission = gatherMediumEmission;
             // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
             this.sensor = sensor;
             this.russianRoulette = russianRoulette;
@@ -2437,7 +2532,7 @@ namespace pbrt
             this.visualizeWeights = visualizeWeights;
         }
 
-        // (not in pbrt-v4) Camera subpaths do not gather emission, so every emissive medium is sampled as a light
+        // (not in pbrt-v4) Every emissive medium is sampled as a light, next to the gathering of its emission by the camera subpaths
         static List<Light> EmissionLightsForBDPT(List<Light> lights)
         {
             TextureMedium.EnableEmissionSamplingForAll(16);
@@ -2495,8 +2590,9 @@ namespace pbrt
             // (index 0 of the arrays is the first vertex; RandomWalk is given offset 1)
             Vertex[] cameraVertices = new Vertex[maxDepth + 2];
             for (int i = 0; i < cameraVertices.Length; ++i) cameraVertices[i] = new Vertex();
+            List<MediumEmissionEnd> emissionEnds = gatherMediumEmission ? new List<MediumEmissionEnd>() : null;
             int nCamera = BDPT.GenerateCameraSubpath(this, ray, ref lambda, sampler, scratchBuffer, maxDepth + 2,
-                                                     camera, cameraVertices, regularize, sensor != null);
+                                                     camera, cameraVertices, regularize, sensor != null, emissionEnds);
             Vertex[] lightVertices = new Vertex[maxDepth + 1];
             for (int i = 0; i < lightVertices.Length; ++i) lightVertices[i] = new Vertex();
             int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer, maxDepth + 1,
@@ -2548,6 +2644,19 @@ namespace pbrt
                 }
             }
 
+            // (not in pbrt-v4) The emission that the camera subpath gathered in media: each end is a path of its own, with the
+            // vertices of the subpath before it, and its MIS weight against the strategies that sample the medium as a light
+            if (emissionEnds != null)
+            {
+                foreach (MediumEmissionEnd end in emissionEnds)
+                {
+                    int depth = end.index - 1;
+                    if (end.index > nCamera || depth < 0 || depth > maxDepth)
+                        continue;
+                    L += BDPT.ConnectEmissionEnd(this, ref lambda, cameraVertices, end, lightSampler, camera, sampler, sensor, -ray.d);
+                }
+            }
+
             return L;
         }
 
@@ -2576,6 +2685,9 @@ namespace pbrt
 
             bool regularize = parameters.GetOneBool("regularize", false);
             bool russianRoulette = parameters.GetOneBool("russianroulette", false);
+            // (not in pbrt-v4) Camera subpaths gather the emission of media at their collisions, with MIS against the strategies
+            // that sample the media as lights; false leaves the emission to those strategies alone
+            bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
             PolarisedPathIntegrator.Sensor sensor = null;
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
                                                 out PolarisedPathIntegrator.Measurement measurement);
@@ -2588,7 +2700,7 @@ namespace pbrt
             }
 
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, sensor, russianRoulette);
+                                      visualizeWeights, regularize, sensor, russianRoulette, gatherMediumEmission);
         }
 
         // BDPTIntegrator Private Members
