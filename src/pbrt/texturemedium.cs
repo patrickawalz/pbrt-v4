@@ -13,13 +13,16 @@ namespace pbrt
 {
 
     // TextureMedium Definition
-    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<DDAMajorantIterator>
+    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<RayMajorantIterator>
     {
         // TextureMedium Public Methods
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
                              Float g, string densityTextureName, Float densityOffset, Float densityScale, int majorantRes,
-                             Allocator alloc)
+                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, Allocator alloc)
         {
+            this.hierarchyRes = hierarchyRes;
+            this.hierarchyDepth = hierarchyDepth;
+            this.refineThreshold = refineThreshold;
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
             sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
@@ -35,9 +38,9 @@ namespace pbrt
 
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
                              Float g, FloatTexture density, Float densityOffset, Float densityScale, int majorantRes,
-                             Allocator alloc)
+                             int hierarchyRes, int hierarchyDepth, Float refineThreshold, Allocator alloc)
             : this(bounds, renderFromMedium, sigma_a, sigma_s, sigmaScale, g, "", densityOffset, densityScale, majorantRes,
-                   alloc)
+                   hierarchyRes, hierarchyDepth, refineThreshold, alloc)
         {
             SetTexture(density);
         }
@@ -65,13 +68,65 @@ namespace pbrt
                         majorantGrid.Set(x, y, z, MaxDensity(majorantGrid.VoxelBounds(x, y, z)));
                 }
             }
+            topNodes = hierarchyDepth > 0 ? RefineMajorantGrid(majorantGrid, 1) : null;
+        }
+
+        // The volume aggregate: a voxel of a majorant grid whose densities are on average well below its majorant is replaced
+        // by a finer grid (hierarchyRes^3) over the voxel, down to hierarchyDepth levels, with the bounds that the texture gives
+        // for each sub-voxel. Voxels of zero density are skipped by the traversal and never refined.
+        private MajorantNode[] RefineMajorantGrid(MajorantGrid grid, int depth)
+        {
+            MajorantNode[] nodes = new MajorantNode[grid.voxels.Length];
+            if (depth > hierarchyDepth)
+                return nodes;
+            int n = hierarchyRes;
+            for (int z = 0; z < grid.res.z; ++z)
+            {
+                for (int y = 0; y < grid.res.y; ++y)
+                {
+                    for (int x = 0; x < grid.res.x; ++x)
+                    {
+                        Float parent = grid.Lookup(x, y, z);
+                        if (parent <= 0)
+                            continue;
+                        Bounds3f vb = grid.VoxelBounds(x, y, z);
+                        Bounds3f region = new Bounds3f(grid.bounds.Lerp(vb.pMin), grid.bounds.Lerp(vb.pMax));
+                        MajorantGrid child = new MajorantGrid(region, new Point3i(n, n, n), null);
+                        Float sum = 0;
+                        for (int cz = 0; cz < n; ++cz)
+                        {
+                            for (int cy = 0; cy < n; ++cy)
+                            {
+                                for (int cx = 0; cx < n; ++cx)
+                                {
+                                    Float childMax = std.min(parent, MaxDensity(region, child.VoxelBounds(cx, cy, cz)));
+                                    child.Set(cx, cy, cz, childMax);
+                                    sum += childMax;
+                                }
+                            }
+                        }
+                        if (sum / (n * n * n) < refineThreshold * parent)
+                        {
+                            nodes[x + grid.res.x * (y + grid.res.y * z)] =
+                                new MajorantNode { sub = child, children = RefineMajorantGrid(child, depth + 1) };
+                        }
+                    }
+                }
+            }
+            return nodes;
         }
 
         // The largest density in a box given in the coordinates of the bounds (0 to 1 over the bounds), from the bounds that the
         // texture gives for the box in render space
         public Float MaxDensity(Bounds3f unitBox)
         {
-            Point3f p0 = bounds.Lerp(unitBox.pMin), p1 = bounds.Lerp(unitBox.pMax);
+            return MaxDensity(bounds, unitBox);
+        }
+
+        // The same for a box given in the coordinates (0 to 1) of a region of the medium
+        private Float MaxDensity(Bounds3f region, Bounds3f unitBox)
+        {
+            Point3f p0 = region.Lerp(unitBox.pMin), p1 = region.Lerp(unitBox.pMax);
             Bounds3f renderBox = renderFromMedium.Apply(new Bounds3f(p0, p1));
             texture.RegionBounds(renderBox, out Float lo, out Float hi);
             return std.max<Float>(0, std.max(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
@@ -107,7 +162,7 @@ namespace pbrt
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
         }
 
-        public DDAMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
+        public RayMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
         {
             // Transform ray to medium's space and compute bounds overlap
             ray = renderFromMedium.ApplyInverse(ray, &raytMax);
@@ -115,12 +170,14 @@ namespace pbrt
             if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
                 return new DDAMajorantIterator();
             SampledSpectrum sigma_t = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+            if (topNodes != null)
+                return new HierarchicalMajorantIterator(ray, tMin, tMax, majorantGrid, topNodes, sigma_t);
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
         }
 
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
-            return buf.Alloc(SampleRay(ray, tMax, lambda));
+            return SampleRay(ray, tMax, lambda);
         }
 
         public override string ToString()
@@ -148,8 +205,12 @@ namespace pbrt
             Float densityOffset = parameters.GetOneFloat("densityoffset", 0f);
             Float densityScale = parameters.GetOneFloat("densityscale", 1f);
             int majorantRes = parameters.GetOneInt("majorantres", 16);
+            int hierarchyRes = parameters.GetOneInt("hierarchyres", 4);
+            int hierarchyDepth = parameters.GetOneInt("hierarchydepth", 0);
+            Float refineThreshold = parameters.GetOneFloat("refinethreshold", 0.5f);
             return new TextureMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, sigmaScale, g,
-                                     densityTextureName, densityOffset, densityScale, majorantRes, alloc);
+                                     densityTextureName, densityOffset, densityScale, majorantRes, hierarchyRes,
+                                     hierarchyDepth, refineThreshold, alloc);
         }
 
         // TextureMedium Private Members
@@ -162,6 +223,9 @@ namespace pbrt
         private Float densityOffset, densityScale;
         private int majorantRes;
         private MajorantGrid majorantGrid;
+        private int hierarchyRes, hierarchyDepth;
+        private Float refineThreshold;
+        private MajorantNode[] topNodes;
     }
 
 }  // namespace pbrt

@@ -191,7 +191,7 @@ namespace pbrt
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is TextureMedium)
-                return SampleT_maj<TextureMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
@@ -318,6 +318,12 @@ namespace pbrt
         public DDAMajorantIterator() { }
         public DDAMajorantIterator(Ray ray, Float tMin, Float tMax, MajorantGrid grid, SampledSpectrum sigma_t)
         {
+            Initialize(ray, tMin, tMax, grid, sigma_t);
+        }
+
+        // (not in pbrt-v4) Lets the hierarchical iterator reuse one iterator per grid level
+        public void Initialize(Ray ray, Float tMin, Float tMax, MajorantGrid grid, SampledSpectrum sigma_t)
+        {
             this.tMin = tMin;
             this.tMax = tMax;
             this.grid = grid;
@@ -368,6 +374,7 @@ namespace pbrt
             // Get _maxDensity_ for current voxel and initialize _RayMajorantSegment_, _seg_
             SampledSpectrum sigma_maj = sigma_t * grid.Lookup(voxel[0], voxel[1], voxel[2]);
             RayMajorantSegment seg = new RayMajorantSegment { tMin = tMin, tMax = tVoxelExit, sigma_maj = sigma_maj };
+            lastVoxel = voxel[0] + grid.res.x * (voxel[1] + grid.res.y * voxel[2]);
 
             // Advance to next voxel in maximum density grid
             tMin = tVoxelExit;
@@ -392,6 +399,9 @@ namespace pbrt
                                 voxelLimit[2], voxel[0], voxel[1], voxel[2], grid != null ? "(grid)" : "(nullptr)");
         }
 
+        // (not in pbrt-v4) Index of the grid voxel that produced the segment returned by the last Next() call
+        public int lastVoxel;
+
         private static readonly int[] cmpToAxisTable = { 2, 1, 2, 1, 2, 2, 0, 0 };
 
         // DDAMajorantIterator Private Members
@@ -400,6 +410,63 @@ namespace pbrt
         private MajorantGrid grid;
         private Float3 nextCrossingT, deltaT;
         private Int3 step, voxelLimit, voxel;
+    }
+
+    // (not in pbrt-v4) A voxel of a hierarchical majorant grid that was refined: _sub_ is the finer grid covering
+    // the voxel and _children_ holds, per sub-voxel, its own refinement (null for a leaf)
+    public sealed class MajorantNode
+    {
+        public MajorantGrid sub;
+        public MajorantNode[] children;
+    }
+
+    // (not in pbrt-v4) Traverses a hierarchical majorant grid: a DDA through the coarse grid that descends, with a nested
+    // DDA over the ray segment, into every refined voxel
+    public sealed unsafe class HierarchicalMajorantIterator : RayMajorantIterator
+    {
+        public HierarchicalMajorantIterator(Ray ray, Float tMin, Float tMax, MajorantGrid grid, MajorantNode[] nodes,
+                                            SampledSpectrum sigma_t)
+        {
+            this.ray = ray;
+            this.sigma_t = sigma_t;
+            iterators[0] = new DDAMajorantIterator(ray, tMin, tMax, grid, sigma_t);
+            levelNodes[0] = nodes;
+            depth = 1;
+        }
+
+        public override pstd.optional<RayMajorantSegment> Next()
+        {
+            while (depth > 0)
+            {
+                pstd.optional<RayMajorantSegment> seg = iterators[depth - 1].Next();
+                if (!seg)
+                {
+                    --depth;
+                    continue;
+                }
+                MajorantNode node = levelNodes[depth - 1][iterators[depth - 1].lastVoxel];
+                if (node == null)
+                    return seg;
+                RayMajorantSegment sg = seg.value();
+                if (iterators[depth] == null)
+                    iterators[depth] = new DDAMajorantIterator();
+                iterators[depth].Initialize(ray, sg.tMin, sg.tMax, node.sub, sigma_t);
+                levelNodes[depth] = node.children;
+                ++depth;
+            }
+            return default;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ HierarchicalMajorantIterator depth: %d ]", depth);
+        }
+
+        private Ray ray;
+        private SampledSpectrum sigma_t;
+        private int depth;
+        private DDAMajorantIterator[] iterators = new DDAMajorantIterator[6];
+        private MajorantNode[][] levelNodes = new MajorantNode[6][];
     }
 
     // IMajorantMedium: the "using MajorantIterator = ..." member type plus the typed SampleRay

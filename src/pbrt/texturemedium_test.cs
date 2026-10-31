@@ -25,11 +25,11 @@ namespace pbrt
             }
         }
 
-        static TextureMedium MakeMedium(FloatTexture texture, int majorantRes)
+        static TextureMedium MakeMedium(FloatTexture texture, int majorantRes, int hierarchyDepth = 0)
         {
             Bounds3f box = new Bounds3f(new Point3f(-1, 0, -1), new Point3f(1, 2, 1));
             return new TextureMedium(box, new Transform(), new ConstantSpectrum(0.5f), new ConstantSpectrum(1.5f), 1.0f, 0.3f,
-                                     texture, 0.6f, 1.0f, majorantRes, null);
+                                     texture, 0.6f, 1.0f, majorantRes, 4, hierarchyDepth, 0.5f, null);
         }
 
         [TEST("TextureMedium", "MajorantsCoverDensity")]
@@ -59,8 +59,50 @@ namespace pbrt
         [TEST("TextureMedium", "RatioTrackingMatchesQuadrature")]
         public static void TextureMedium_RatioTrackingMatchesQuadrature()
         {
+            RatioTrackingMatchesQuadrature(0);
+        }
+
+        [TEST("TextureMedium", "HierarchicalRatioTrackingMatchesQuadrature")]
+        public static void TextureMedium_HierarchicalRatioTrackingMatchesQuadrature()
+        {
+            RatioTrackingMatchesQuadrature(2);
+        }
+
+        [TEST("TextureMedium", "HierarchicalMajorantsCoverDensity")]
+        public static void TextureMedium_HierarchicalMajorantsCoverDensity()
+        {
             TextureMapping3D map = new PointTransformMapping(new Transform());
-            TextureMedium medium = MakeMedium(new FBmTexture(map, 5, .5f), 8);
+            TextureMedium medium = MakeMedium(new FBmTexture(map, 6, .5f), 4, 2);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            RNG rng = new RNG(9);
+            int segments = 0;
+            for (int i = 0; i < 300; ++i)
+            {
+                Point3f o = new Point3f(-2, 2 * rng.Uniform<Float>(), -1 + 2 * rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, -.3f + .6f * rng.Uniform<Float>(), -.3f + .6f * rng.Uniform<Float>()));
+                Ray ray = new Ray(o, d);
+                ScratchBuffer buf = new ScratchBuffer();
+                RayMajorantIterator iterator = medium.SampleRay(ray, 5, lambda, buf);
+                for (pstd.optional<RayMajorantSegment> seg = iterator.Next(); seg; seg = iterator.Next())
+                {
+                    ++segments;
+                    for (int k = 0; k < 8; ++k)
+                    {
+                        Float t = seg.value().tMin + (k + .5f) / 8 * (seg.value().tMax - seg.value().tMin);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                        EXPECT_LE(mp.sigma_a[0] + mp.sigma_s[0], seg.value().sigma_maj[0] * (1 + 1e-4f) + 1e-5f);
+                    }
+                }
+            }
+            EXPECT_GT(segments, 300);
+        }
+
+        private static Vector3f Normalize(Vector3f v) { return pbrt.Normalize(v); }
+
+        private static void RatioTrackingMatchesQuadrature(int hierarchyDepth)
+        {
+            TextureMapping3D map = new PointTransformMapping(new Transform());
+            TextureMedium medium = MakeMedium(new FBmTexture(map, 5, .5f), 8, hierarchyDepth);
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
             Ray ray = new Ray(new Point3f(-2, 1.1f, 0.15f), new Vector3f(1, 0.05f, 0.02f));
             Float tMax = 4;

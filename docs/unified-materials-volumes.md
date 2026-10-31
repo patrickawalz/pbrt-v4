@@ -87,7 +87,19 @@ is reproduced exactly with the same seed.
      `SampleLd` use it; same-seed renders are unchanged. `Interaction` was already one class with a surface and a medium
      subclass.
    Not done: `Material.HasVolume()` / `CreateVolume()` as virtual methods (the null interface material has no object to carry them).
-6. Volume aggregate with texture-supplied min / max.
+6. (done, apart from emission) Texture-driven volumes.
+   * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
+     and `Gradient(ctx)` (default: central difference) gives the derivative, which a texture can override with the analytic one.
+     Noise bounds, the image range pyramid and the volume textures (grid, triplanar, cloud, ramp, math) come from
+     `experimental/procedural-media`.
+   * `MakeNamedMedium "m" "string type" "texture" "string density" "<float texture>" ...` is a `TextureMedium`: density = offset +
+     scale * texture, clamped at zero, empty outside its bounds; the majorant grid (`majorantres`) is built from `RegionBounds`
+     of each voxel, so nothing is stored per voxel.
+   * The volume aggregate is optional (`hierarchydepth` > 0): a voxel whose sub-voxel majorants average below `refinethreshold` of
+     its own is replaced by a `hierarchyres`^3 grid, recursively; the traversal is nested DDA. Measured on the fbm cloud scene
+     (96x96, 64 spp, volpath): depth 1 renders about 10 % faster than the flat grid, depth 2 about 10 % slower and its setup takes
+     3 s, so the default is 0.
+   * Volume light NEE / FNEE for area and volume lights, and emission of a `TextureMedium`, are not on this branch yet.
 7. Polarised light-system types.
 
 ## Decisions taken without asking
