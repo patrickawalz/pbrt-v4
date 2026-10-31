@@ -68,7 +68,20 @@ is reproduced exactly with the same seed.
 * `BoundaryStack` is a value type with inline storage (20 entries, as in PolarisedUPBP) so a shadow-ray copy needs no allocation.
 * Stack overflow drops the top entry with a warning, as PolarisedUPBP does; this is a limit to revisit.
 
-## Open questions for the owner
+## Decided by the owner
 
-* Should `Ray.medium` be removed in phase 2 at once, or kept as a derived cache until the shadow-ray path is converted?
-* Keep pbrt's `MediumInterface` on primitives as the way scenes bind volumes, or move to a material-owned volume only?
+* `Ray.medium` is dropped (phase 2), not kept as a cache.
+* Volumes are bound by the material (Fong / PolarisedUPBP). pbrt's `MediumInterface` syntax stays as input: the parser
+  rewrites it into the equivalent material volume, so existing scenes still load.
+
+## Notes for phase 2 and 3
+
+* Phase 2 carries the stack in the integrators (a local `BoundaryStack` in `VolPathIntegrator.Li`, in the BDPT random walks and
+  in the shadow-ray / connection code) and gives every `SurfaceInteraction` the media on its two sides, computed from the
+  stack at the hit (Fong's incident and opposite volumes), so `Interaction.GetMedium(w)` keeps its signature and the code
+  that calls it does not change.
+* The `MediumInterface` rewrite is exact for closed watertight shapes. A shape that separates two different media without
+  enclosing either (an open sheet with different media on its sides) has no stack equivalent; the parser keeps that case
+  as a two-sided interface entry and reports it, instead of silently changing it.
+* Camera and light-subpath starting media come from the stack the path starts with (the camera medium pushed at the
+  global-medium priority).
