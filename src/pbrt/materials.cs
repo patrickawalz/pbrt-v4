@@ -367,6 +367,34 @@ namespace pbrt
         private Image normalMap;
     }
 
+    // (not in pbrt-v4) InterfaceMaterial Definition: the material of a surface that only separates media. pbrt-v4 has no object for
+    // it (the primitive's material is null); this one carries the volume of the material while the scene is built, and the
+    // primitives get a null material again (see BasicScene.CreateAggregate()).
+    public sealed unsafe class InterfaceMaterial : Material
+    {
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval) { return true; }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return default;
+        }
+
+        public static string Name() { return "InterfaceMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return null; }
+        public override Image GetNormalMap() { return null; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString() { return "[ InterfaceMaterial ]"; }
+    }
+
     // ThinDielectricMaterial Definition
     public sealed unsafe class ThinDielectricMaterial : Material
     {
@@ -1440,6 +1468,28 @@ namespace pbrt
     // Material factory (materials.cpp)
     public abstract unsafe partial class Material
     {
+        // (not in pbrt-v4) The volume that the material owns (Fong et al., Production Volume Rendering, listing 1): the shapes
+        // that use the material are the boundary of the medium named by "string volume", with the priority "integer
+        // volumepriority". Crossing into such a shape enters the volume and crossing out of it leaves it.
+        public void SetVolume(string name, int priority)
+        {
+            volumeName = name;
+            volumePriority = priority;
+        }
+
+        public bool HasVolume() { return volumeName.Length != 0; }
+
+        public int VolumePriority() { return volumePriority; }
+
+        // The volume of the material, found by name among the media of the scene
+        public Medium CreateVolume(Func<string, FileLoc, Medium> findMedium, FileLoc loc)
+        {
+            return HasVolume() ? findMedium(volumeName, loc) : null;
+        }
+
+        string volumeName = "";
+        int volumePriority;
+
         public static Material Create(string name, TextureParameterDictionary parameters, Image normalMap,
                                       SortedDictionary<string, Material> namedMaterials, FileLoc loc, Allocator alloc)
         {
@@ -1447,10 +1497,10 @@ namespace pbrt
             if (name.Length == 0 || name == "none")
             {
                 pbrt.Warning(loc, pbrt.StringPrintf("Material \"%s\" is deprecated; use \"interface\" instead.", name));
-                return null;
+                return new InterfaceMaterial();
             }
             else if (name == "interface")
-                return null;
+                return new InterfaceMaterial();
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "coateddiffuse")

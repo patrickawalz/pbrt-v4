@@ -85,7 +85,12 @@ is reproduced exactly with the same seed.
      frame, no `wo.z == 0` rejection). `Vertex.f` / `Vertex.PDF`, the volpath and simplevolpath scattering, the BDPT random walk and
      `SampleLd` use it; same-seed renders are unchanged. `Interaction` was already one class with a surface and a medium
      subclass.
-   Not done: `Material.HasVolume()` / `CreateVolume()` as virtual methods (the null interface material has no object to carry them).
+   * `Material.HasVolume()` / `CreateVolume(findMedium, loc)` / `VolumePriority()` (Fong listing 1) are on the `Material` class; the scene sets
+     them from `"string volume"` / `"integer volumepriority"` when it makes the material, and `MakeMediumInterface` asks the material.
+     The `interface` material is an `InterfaceMaterial` object now (it only carries the volume while the scene is built); the
+     primitives of an interface still get a null material, so nothing changes at render time (same-seed renders of the material,
+     glass, priority, overlap volpath and bdpt scenes are bit-identical to before).
+   Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
      and `Gradient(ctx)` (default: central difference) gives the derivative, which a texture can override with the analytic one.
@@ -122,21 +127,20 @@ is reproduced exactly with the same seed.
    Rayleigh scattering (no equivalent in Mitsuba's render/ headers).
    Two more deviations from UPBP: its `DepolarisingExit * Standard` product multiplies the unrotated first row (its rotated row
    is stored in the second row and never used), the port uses the rotated row, which the chain test needs; and its
-   `Light::RepresentInDirection()` returns before rotating a light that has a frame, the port rotates. The types are not used by the
-   integrators yet: replacing the SampledSpectrum products of a path by this trio (and a Mueller `BSDF` / `PhaseBxDF`) is the
-   next step.
+   `Light::RepresentInDirection()` returns before rotating a light that has a frame, the port rotates. The integrators that use them
+   (`polpath`, `volpath`, `bdpt`) are described under "Polarised integrators" below.
 
 ## Decisions taken without asking
 
-* Branch name `experimental/unified-materials-volumes`, from `main` at 9e6754a; nothing is pushed.
+* Branch name `experimental/unified-materials-volumes`, from `main` at 9e6754a.
 * `BoundaryStack` is a value type with inline storage (20 entries, as in PolarisedUPBP) so a shadow-ray copy needs no allocation.
 * Stack overflow drops the top entry with a warning, as PolarisedUPBP does; this is a limit to revisit.
 
 ## Decided by the owner
 
 * `Ray.medium` is dropped (phase 2), not kept as a cache.
-* Volumes are bound by the material (Fong / PolarisedUPBP). pbrt's `MediumInterface` syntax stays as input: the parser
-  rewrites it into the equivalent material volume, so existing scenes still load.
+* Volumes are bound by the material (Fong / PolarisedUPBP). pbrt's `MediumInterface` syntax stays as input with its
+  transition meaning (it is not rewritten into a material volume, see phase 5), so existing scenes still load.
 
 ## Notes for phase 2 and 3
 
