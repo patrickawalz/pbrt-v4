@@ -92,10 +92,11 @@ namespace pbrt
                 UPBPFresnelReal(cosTheta, eta, out Float rFs, out Float rFp, out Float rDs, out Float rDp);
                 EXPECT_LT(std.abs(Fs - rFs), (Float)1e-4);
                 EXPECT_LT(std.abs(Fp - rFp), (Float)1e-4);
-                // Only the relative retardance enters the matrix, and it is not defined where a reflectance is zero
+                // Only the relative retardance enters the matrix, and it is not defined where a reflectance is zero. UPBP's
+                // convention is Mitsuba's with the handedness matrix diag(1, 1, -1, -1): the retardances differ by pi
                 if (std.min(Fs, Fp) > 1e-3f)
                 {
-                    EXPECT_LT(WrappedDifference(Ds - Dp, rDs - rDp), (Float)1e-3);
+                    EXPECT_LT(WrappedDifference(Ds - Dp + pbrt.Pi, rDs - rDp), (Float)1e-3);
                 }
 
                 // Conductor: the reflectances agree
@@ -104,6 +105,53 @@ namespace pbrt
                 UPBPFresnelComplex(cosTheta, new pstd.complex(eta, k), out rFs, out rFp, out rDs, out rDp);
                 EXPECT_LT(std.abs(Fs - rFs), (Float)2e-4);
                 EXPECT_LT(std.abs(Fp - rFp), (Float)2e-4);
+            }
+        }
+
+        [TEST("Polarised", "FresnelMatchesMitsubaDocumentation")]
+        public static void Polarised_FresnelMatchesMitsubaDocumentation()
+        {
+            // The reflection and transmission Mueller matrices of the polarization documentation of Mitsuba 3, from the
+            // amplitudes r_perp, r_parl, t_perp, t_parl (eta = n_t / n_i, Verdet convention):
+            //   F_r = 1/2 [R_s + R_p, R_s - R_p, 0, 0; R_s - R_p, R_s + R_p, 0, 0;
+            //              0, 0, 2 sqrt(R_s R_p) cos(D), -2 sqrt(R_s R_p) sin(D); 0, 0, 2 sqrt(R_s R_p) sin(D), 2 sqrt(R_s R_p) cos(D)]
+            //   F_t = 1/2 [T_s + T_p, T_s - T_p, 0, 0; T_s - T_p, T_s + T_p, 0, 0; 0, 0, 2 sqrt(T_s T_p), 0; 0, 0, 0, 2 sqrt(T_s T_p)]
+            //   D = arg(r_parl) - arg(r_perp), T = eta cos(theta_t) / cos(theta_i) |t|^2
+            RNG rng = new RNG(11);
+            for (int i = 0; i < 500; ++i)
+            {
+                Float cosI = 0.02f + 0.98f * rng.Uniform<Float>();
+                Float eta = 1.05f + 2.0f * rng.Uniform<Float>();
+                Float sinT = std.sqrt(1 - cosI * cosI) / eta;
+                Float cosT = std.sqrt(1 - sinT * sinT);
+                Float r_perp = (cosI - eta * cosT) / (cosI + eta * cosT);
+                Float r_parl = (eta * cosI - cosT) / (eta * cosI + cosT);
+                Float t_perp = 2 * cosI / (cosI + eta * cosT);
+                Float t_parl = 2 * cosI / (eta * cosI + cosT);
+                Float Rs = r_perp * r_perp, Rp = r_parl * r_parl;
+                Float delta = (r_parl < 0 ? pbrt.Pi : 0.0f) - (r_perp < 0 ? pbrt.Pi : 0.0f);
+                Float Ts = eta * cosT / cosI * t_perp * t_perp, Tp = eta * cosT / cosI * t_parl * t_parl;
+
+                pbrt.FrDielectricPolarised(cosI, eta, out Float Fs, out Float Fp, out Float Ds, out Float Dp);
+                PolarisedLightSystem.Attenuation reflection = PolarisedLightSystem.Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp);
+                MuellerMatrix F = reflection.GetMuellerMatrix();
+                Float c = std.sqrt(Rs * Rp);
+                EXPECT_LT(std.abs(F.m00[0] - 0.5f * (Rs + Rp)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m01[0] - 0.5f * (Rs - Rp)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m10[0] - 0.5f * (Rs - Rp)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m11[0] - 0.5f * (Rs + Rp)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m22[0] - c * std.cos(delta)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m23[0] - (-c * std.sin(delta))), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m32[0] - c * std.sin(delta)), (Float)2e-5);
+                EXPECT_LT(std.abs(F.m33[0] - c * std.cos(delta)), (Float)2e-5);
+
+                // UPBP builds the transmission from the same function with 1 - F and no retardance; the power in the
+                // documentation is the same
+                PolarisedLightSystem.Attenuation transmission = PolarisedLightSystem.Attenuation.Fresnel(S(1), 1 - Fs, 1 - Fp, 0, 0);
+                EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m00[0] - 0.5f * (Ts + Tp)), (Float)2e-5);
+                EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m01[0] - 0.5f * (Ts - Tp)), (Float)2e-5);
+                EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m22[0] - std.sqrt(Ts * Tp)), (Float)2e-5);
+                EXPECT_LT(std.abs(transmission.GetMuellerMatrix().m33[0] - std.sqrt(Ts * Tp)), (Float)2e-5);
             }
         }
 

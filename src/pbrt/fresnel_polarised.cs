@@ -1,8 +1,11 @@
 // (not in pbrt-v4) Polarised Fresnel equations. They are FrDielectric() and FrComplex() with the amplitudes kept: where those
 // return the average of the two squared amplitudes, these return the reflectance (Fs, Fp) and the phase shift on reflection (Ds,
 // Dp) of the perpendicular and parallel polarisation, the terms that PolarisedUPBP's Attenuation.Fresnel() takes (its
-// FresnelReal() and FresnelComplex()). The amplitudes are those of Mitsuba 3's fresnel_polarized(). The parallel amplitude is
-// taken with the sign of the Stokes frame of PolarisedUPBP, in which the two amplitudes have the same sign at normal incidence.
+// FresnelReal() and FresnelComplex()). The amplitudes and their signs are those of Mitsuba 3 (the Verdet convention of its
+// polarization documentation: r_perp and r_parl are pbrt's), so Attenuation.Fresnel() builds Mitsuba's reflection Mueller
+// matrix from them: Delta = arg(r_parl) - arg(r_perp) = Dp - Ds, and the block of Mitsuba is [cos, -sin; sin, cos] of Delta.
+// PolarisedUPBP's own FresnelReal() has the opposite convention (Ds - Dp is 0 below the Brewster angle, where here it is pi): the
+// handedness matrix diag(1, 1, -1, -1) between the two.
 
 using System;
 
@@ -39,7 +42,7 @@ namespace pbrt
             Fs = pstd.norm(r_perp);
             Fp = pstd.norm(r_parl);
             Ds = std.atan2(r_perp.im, r_perp.re);
-            Dp = std.atan2(-r_parl.im, -r_parl.re);
+            Dp = std.atan2(r_parl.im, r_parl.re);
         }
     }
 }

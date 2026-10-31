@@ -370,6 +370,11 @@ namespace pbrt
                 return elementType == PolarisationElementType.Zero ? new SampledSpectrum(0.0f) : matrix.m00;
             }
 
+            public MuellerMatrix GetMuellerMatrix()
+            {
+                return matrix;
+            }
+
             public bool HasNaNs()
             {
                 for (int row = 0; row < 4; ++row)

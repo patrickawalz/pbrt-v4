@@ -113,6 +113,11 @@ is reproduced exactly with the same seed.
    `FrDielectricPolarised()` / `FrComplexPolarised()` are written like `FrDielectric()` / `FrComplex()` and return UPBP's
    Fs, Fp, Ds, Dp for `Attenuation.Fresnel()`; the tests check them against UPBP's `FresnelReal()` / `FresnelComplex()` ported
    verbatim, and chains of 2-5 mixed events (Lambert, scalar, Fresnel, Rayleigh, polariser) against applying them one at a time.
+   Convention: the amplitudes and signs are Mitsuba 3's (Verdet convention, from its polarization documentation), so
+   `Attenuation.Fresnel()` reproduces Mitsuba's F_r and F_t (tested against the formulas of that page); UPBP's own
+   `FresnelReal()` differs by the handedness matrix diag(1, 1, -1, -1), i.e. a pi in Ds - Dp. Not verified: Mitsuba's source
+   was not reachable, so the choice of the Stokes x axis (s or p) for surface frames, the sign of the retardance in total
+   internal reflection, and Rayleigh scattering (not in the documentation page) are open.
    One deviation: UPBP's `DepolarisingExit * Standard` product multiplies the unrotated first row (its rotated row is stored in
    the second row and never used); the port uses the rotated row, which the chain test needs. The types are not used by the
    integrators yet: replacing the SampledSpectrum products of a path by this trio (and a Mueller `BSDF` / `PhaseBxDF`) is the
