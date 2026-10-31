@@ -20,7 +20,19 @@ namespace pbrt
 
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
-            return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
+            if (!ThinCoatMaterial.anyInScene)
+                return !IntersectP(p0.SpawnRayTo(p1), 1 - ShadowEpsilon);
+            // (not in pbrt-v4) Thin coats stop only some of the shadow rays
+            Ray ray = p0.SpawnRayTo(p1);
+            while (true)
+            {
+                pstd.optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
+                if (!si)
+                    return true;
+                if (ThinCoatMaterial.Blocks(si.value().intr, ray.d))
+                    return false;
+                ray = si.value().intr.SpawnRayTo(p1);
+            }
         }
 
         public abstract void Render();
@@ -73,7 +85,7 @@ namespace pbrt
             {
                 pstd.optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
                 // Handle opaque surface along ray's path
-                if (si && si.value().intr.material != null)
+                if (si && ThinCoatMaterial.Blocks(si.value().intr, ray.d))
                     return new SampledSpectrum(0.0f);
 
                 // Update transmittance for current ray segment
@@ -2443,7 +2455,7 @@ namespace pbrt
                     lineRatio = ratioCap * Tmaj / Tmaj[0];
                 }
                 // The ray ends at a surface that isn't an interface between media
-                if (!si || si.value().intr.material != null)
+                if (!si || ThinCoatMaterial.Blocks(si.value().intr, ray.d))
                     break;
                 ray = new RayDifferential(si.value().intr.SpawnRay(ray.d));
             }
@@ -4697,7 +4709,7 @@ namespace pbrt
                     r_u = r_uCap * T_maj / T_maj[0];
                 }
                 // The ray ends at a surface that isn't an interface between media
-                if (!si || si.value().intr.material != null)
+                if (!si || ThinCoatMaterial.Blocks(si.value().intr, ray.d))
                     break;
                 ray = new Ray(si.value().intr.SpawnRay(ray.d));
             }
@@ -4785,7 +4797,7 @@ namespace pbrt
                 // Trace ray through media to estimate transmittance
                 pstd.optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
                 // Handle opaque surface along ray's path
-                if (si && si.value().intr.material != null)
+                if (si && ThinCoatMaterial.Blocks(si.value().intr, lightRay.d))
                     return new SampledSpectrum(0.0f);
 
                 // Update transmittance for current ray segment

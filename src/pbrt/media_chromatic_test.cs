@@ -68,7 +68,8 @@ namespace pbrt
         }
 
         private static void RenderMean(Medium medium, Spectrum lightSpectrum, Float lightScale, bool areaEmitter, int maxDepth, int spp, string filename,
-                                       out double[] mean, out double[] stderr, bool bidirectional = false, bool lightWavelengths = false, bool spectralMIS = true)
+                                       out double[] mean, out double[] stderr, bool bidirectional = false, bool lightWavelengths = false, bool spectralMIS = true,
+                                       Material boundary = null)
         {
             Transform id = new Transform();
             Point2i resolution = new Point2i(16, 16);
@@ -83,7 +84,7 @@ namespace pbrt
 
             Shape sphere = new Sphere(id, id, false, sphereRadius, -sphereRadius, sphereRadius, 360);
             List<Primitive> prims = new List<Primitive>();
-            prims.Add(new GeometricPrimitive(sphere, null, null, new MediumInterface(medium, null)));
+            prims.Add(new GeometricPrimitive(sphere, boundary, null, new MediumInterface(medium, null)));
 
             // Either a uniform infinite light, which only the phase function samples (its PDF_Li is zero when the
             // PDF is allowed to be incomplete), or a large black sphere that emits the spectrum toward the inside.
@@ -976,6 +977,41 @@ namespace pbrt
             finally
             {
                 TextureMedium.ClearEmissionLights();
+            }
+        }
+
+        // A thin clear coat over a scattering medium, between the camera and an area light. ThinDielectricMaterial is the reference:
+        // it blocks the shadow rays, so only sampling of the surface finds the light. The stochastic coat lets light sampling
+        // through, and must give the same image.
+        [TEST("ChromaticMedia", "ThinCoat")]
+        public static void ChromaticMedia_ThinCoat()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_a = new ConstantSpectrum(0.3f);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.0f, false);
+            double[] refMean = null, refErr = null;
+            for (int variant = 0; variant < 2; ++variant)
+            {
+                // 0: thin dielectric; 1: thin coat
+                Material boundary = variant == 0 ? (Material)new ThinDielectricMaterial(new ConstantSpectrum(1.5f), null, null)
+                                                 : new ThinCoatMaterial(1.5f, null, null);
+                Medium medium = new HomogeneousMedium(sigma_a, sigma_s, 1f, zero, 0f, 0.3f, null);
+                double[] mean, err;
+                RenderMean(medium, L, scale, true, 60, 1024, Name("coat" + variant, true), out mean, out err, false, false, true, boundary);
+                if (variant == 0)
+                {
+                    refMean = mean;
+                    refErr = err;
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
+                    Console.WriteLine($"PROBE thin coat channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) thin dielectric {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                }
             }
         }
 
