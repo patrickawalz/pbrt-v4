@@ -69,7 +69,8 @@ namespace pbrt
 
         private static void RenderMean(Medium medium, Spectrum lightSpectrum, Float lightScale, bool areaEmitter, int maxDepth, int spp, string filename,
                                        out double[] mean, out double[] stderr, bool bidirectional = false, bool lightWavelengths = false, bool spectralMIS = true,
-                                       Material boundary = null, bool randomConnections = false)
+                                       Material boundary = null, bool randomConnections = false,
+                                       bool pathRoulette = false, bool shadowRoulette = false, Float emitterReflectance = 0f)
         {
             Transform id = new Transform();
             Point2i resolution = new Point2i(16, 16);
@@ -97,7 +98,7 @@ namespace pbrt
                 Light areaLight = new DiffuseAreaLight(id, new MediumInterface(), lightSpectrum, lightScale, emitter, null,
                                                        new Image(), null, false);
                 lights.Add(areaLight);
-                Material black = new DiffuseMaterial(new SpectrumConstantTexture(new ConstantSpectrum(0)), null, null);
+                Material black = new DiffuseMaterial(new SpectrumConstantTexture(new ConstantSpectrum(emitterReflectance)), null, null);
                 prims.Add(new GeometricPrimitive(emitter, black, areaLight, new MediumInterface()));
             }
             else
@@ -107,7 +108,7 @@ namespace pbrt
             Primitive bvh = new BVHAggregate(prims);
 
             Sampler sampler = new IndependentSampler(spp, 3);
-            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false, false, spectralMIS, randomConnections)
+            Integrator integrator = bidirectional ? (Integrator)new BDPTIntegrator(camera, sampler, bvh, lights, maxDepth, false, false, false, spectralMIS, randomConnections, pathRoulette, shadowRoulette)
                                                   : new VolPathIntegrator(maxDepth, camera, sampler, bvh, lights);
             if (lightWavelengths)
                 rgbFilm.SetWavelengthDistribution(WavelengthDistribution.FromLights(lights));
@@ -1074,6 +1075,75 @@ namespace pbrt
                     double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
                     Console.WriteLine($"PROBE random connections channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) all connections {refMean[c]:F5} (stderr {refErr[c]:F5})");
                     EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                }
+            }
+        }
+
+        // Russian roulette on the subpaths and on the shadow rays of the bidirectional integrator must not change the image. The surface
+        // that emits also reflects half of the light, so that the throughput of the subpaths drops and the roulette takes part.
+        [TEST("ChromaticMedia", "BidirectionalRoulette")]
+        public static void ChromaticMedia_BidirectionalRoulette()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_a = new ConstantSpectrum(0.3f);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.0f, false);
+            double[] refMean = null, refErr = null;
+            for (int variant = 0; variant < 3; ++variant)
+            {
+                // 0: none; 1: on the subpaths; 2: on the subpaths and the shadow rays
+                Medium medium = new HomogeneousMedium(sigma_a, sigma_s, 1f, zero, 0f, 0.3f, null);
+                double[] mean, err;
+                RenderMean(medium, L, scale, true, 60, 2048, Name("roulette" + variant, true), out mean, out err, true, false, true, null,
+                           false, variant >= 1, variant >= 2, 0.5f);
+                if (variant == 0)
+                {
+                    refMean = mean;
+                    refErr = err;
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
+                    Console.WriteLine($"PROBE roulette {(variant == 1 ? "subpaths" : "subpaths and shadow rays")} channel {c}: {mean[c]:F5} " +
+                                      $"(stderr {err[c]:F5}) none {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                }
+            }
+        }
+
+        // The roulette on the shadow rays only takes part when the transmittance of a connection gets below 0.05, so this medium is dense and varies in space (the estimate of a homogeneous medium is either zero or exact)
+        [TEST("ChromaticMedia", "BidirectionalShadowRoulette")]
+        public static void ChromaticMedia_BidirectionalShadowRoulette()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_a = new ConstantSpectrum(0.5f);
+            Spectrum sigma_s = MakeRamp(2.5f, 6f, false);
+            double[] refMean = null, refErr = null;
+            for (int variant = 0; variant < 2; ++variant)
+            {
+                // A medium that varies in space, whose null coefficient makes the ratio tracking estimate fall gradually
+                NamedTextures textures = MakeTextures();
+                textures.floatTextures["wavy"] = new WavyDensityTexture();
+                Medium medium = MakeTextureMedium(sigma_a, sigma_s, "wavy", 0f, 3f, "", 1f, textures);
+                double[] mean, err;
+                RenderMean(medium, L, scale, true, 12, 2048, Name("shadowroulette" + variant, true), out mean, out err, true, false, true, null,
+                           false, false, variant == 1);
+                if (variant == 0)
+                {
+                    refMean = mean;
+                    refErr = err;
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
+                    Console.WriteLine($"PROBE shadow roulette channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) none {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                    EXPECT_NE(mean[c], refMean[c]);
                 }
             }
         }

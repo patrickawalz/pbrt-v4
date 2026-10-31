@@ -18,6 +18,9 @@ namespace pbrt
     public abstract unsafe class Integrator
     {
 
+        // (not in pbrt-v4) Russian roulette on the transmittance estimate of Tr() when it gets small, as VolPathIntegrator does
+        public bool shadowRoulette;
+
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
             if (!ThinCoatMaterial.anyInScene)
@@ -117,6 +120,19 @@ namespace pbrt
                                         Float pr = T_maj_[0] * sigma_maj[0];
                                         Tr *= T_maj_ * sigma_n / pr;
                                         inv_w *= T_maj_ * sigma_maj / pr;
+
+                                        if (shadowRoulette)
+                                        {
+                                            SampledSpectrum current = Tr / inv_w.Average();
+                                            if (Abs(current).MaxComponentValue() < 0.05f)
+                                            {
+                                                Float q = 0.75f;
+                                                if (rng.Uniform<Float>() < q)
+                                                    Tr = new SampledSpectrum(0.0f);
+                                                else
+                                                    Tr /= 1 - q;
+                                            }
+                                        }
 
                                         if (!Tr || !inv_w)
                                             return false;
@@ -1950,6 +1966,28 @@ namespace pbrt
                 // (not in pbrt-v4) Spectral MIS ratios of the segment that is being sampled, and of the subpath so far
                 SampledSpectrum segR = new SampledSpectrum(1.0f);
                 SampledSpectrum cumR = path[off - 1].rCum;
+                // (not in pbrt-v4) Russian roulette on the throughput relative to its start, normalized as VolPathIntegrator
+                // normalizes by r_u (here by the average of the spectral MIS ratios of the subpath), which keeps the weights unbiased
+                BDPTIntegrator rouletteIntegrator = integrator as BDPTIntegrator;
+                bool pathRoulette = rouletteIntegrator != null && rouletteIntegrator.pathRoulette;
+                Float rouletteReference = beta.MaxComponentValue();
+                Func<bool> survivesRoulette = () =>
+                {
+                    if (!pathRoulette || bounces <= 1 || !(rouletteReference > 0))
+                        return true;
+                    Float ratioAverage = (cumR * segR).Average();
+                    if (!(ratioAverage > 0))
+                        return true;
+                    Float rrBeta = (beta / ratioAverage).MaxComponentValue() / rouletteReference;
+                    if (rrBeta < 1)
+                    {
+                        Float q = std.max<Float>(0, 1 - rrBeta);
+                        if (sampler.Get1D() < q)
+                            return false;
+                        beta /= 1 - q;
+                    }
+                    return true;
+                };
                 while (true)
                 {
                     // Attempt to create the next subpath vertex in _path_
@@ -2049,6 +2087,11 @@ namespace pbrt
                                     ray = intr.SpawnRay(ps.value().wi);
                                     anyNonSpecularBounces = true;
                                     path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.value().pdf, path[vIdx - 1]);
+                                    if (!survivesRoulette())
+                                    {
+                                        terminated = true;
+                                        return false;
+                                    }
 
                                     scattered = true;
                                     return false;
@@ -2152,6 +2195,8 @@ namespace pbrt
                         pdfRev = pdfFwd = 0;
                     }
                     path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1]);
+                    if (!survivesRoulette())
+                        break;
                 }
                 return bounces;
             }
@@ -2629,9 +2674,12 @@ namespace pbrt
         // BDPTIntegrator Public Methods
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
-                              bool regularize = false, bool spectralMIS = true, bool randomConnections = false)
+                              bool regularize = false, bool spectralMIS = true, bool randomConnections = false,
+                              bool pathRoulette = false, bool shadowRoulette = false)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
+            this.pathRoulette = pathRoulette;
+            this.shadowRoulette = shadowRoulette;
             this.spectralMIS = spectralMIS;
             this.randomConnections = randomConnections;
             this.maxDepth = maxDepth;
@@ -2826,14 +2874,18 @@ namespace pbrt
             // (not in pbrt-v4) Whether the weights also compare the wavelengths, which matters for media with a chromatic extinction
             bool spectralMIS = parameters.GetOneBool("spectralmis", true);
             bool randomConnections = parameters.GetOneBool("randomconnections", false);
+            bool pathRoulette = parameters.GetOneBool("pathroulette", false);
+            bool shadowRoulette = parameters.GetOneBool("shadowroulette", false);
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, spectralMIS, randomConnections);
+                                      visualizeWeights, regularize, spectralMIS, randomConnections, pathRoulette, shadowRoulette);
         }
 
         // BDPTIntegrator Private Members
         public bool spectralMIS = true;
         // (not in pbrt-v4) Connect each camera vertex count to one random light subpath length (see Li())
         public bool randomConnections;
+        // (not in pbrt-v4) Russian roulette on the subpath random walks (see RandomWalk())
+        public bool pathRoulette;
         int maxDepth;
         bool regularize;
         LightSampler lightSampler;
