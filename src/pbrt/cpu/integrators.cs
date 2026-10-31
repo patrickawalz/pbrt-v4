@@ -4014,10 +4014,10 @@ namespace pbrt
                         // Sample the participating medium
                         bool scattered = false, terminated = false;
                         Float tMax = si ? si.value().tHit : Infinity;
-                        // Initialize _RNG_ for sampling the majorant transmittance
-                        uint64_t hash0 = Hash(sampler.Get1D());
-                        uint64_t hash1 = Hash(sampler.Get1D());
-                        RNG rng = new RNG(hash0, hash1);
+                        // Initialize _RNG_ for sampling the majorant transmittance. (not in pbrt-v4) Like bdpt, from the ray and
+                        // not from sampler values, with the event of a collision drawn from the sampler: a small change of the
+                        // sampler (a Metropolis mutation) then changes the event and not the whole stream of collisions.
+                        RNG rng = new RNG(Hash(ray.o, tMax), Hash(ray.d));
 
                         SampledWavelengths lambdaCap = lambda;
                         SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
@@ -4086,7 +4086,7 @@ namespace pbrt
                                 // Compute medium event probabilities for interaction
 
                                 // Sample medium scattering event type and update path
-                                Float um = rng.Uniform<Float>();
+                                Float um = sampler.Get1D();
                                 MediumEventType mode = MediumEvents.SampleEvent(mp, sigma_maj, um);
                                 if (mode == MediumEventType.Absorb)
                                 {
