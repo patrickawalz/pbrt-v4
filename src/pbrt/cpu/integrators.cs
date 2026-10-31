@@ -2614,9 +2614,10 @@ namespace pbrt
         // MLTIntegrator Public Methods
         public MLTIntegrator(Camera camera, Primitive aggregate, List<Light> lights, int maxDepth,
                              int nBootstrap, int nChains, int mutationsPerPixel, Float sigma,
-                             Float largeStepProbability, bool regularize)
+                             Float largeStepProbability, bool regularize, VolPathIntegrator volpath = null)
             : base(aggregate, lights)
         {
+            this.volpath = volpath;
             this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
             this.camera = camera;
             this.maxDepth = maxDepth;
@@ -2643,6 +2644,8 @@ namespace pbrt
             if (lights.Count == 0)
                 return new SampledSpectrum(0.0f);
             sampler.StartStream(cameraStreamIndex);
+            if (volpath != null)
+                return LVolPath(scratchBuffer, sampler, out pRaster, out lambda);
             // Determine the number of available strategies and pick a specific one
             int s, t, nStrategies;
             if (depth == 0)
@@ -2708,6 +2711,41 @@ namespace pbrt
             return Lval;
         }
 
+        // (not in pbrt-v4) The same state space driven by volpath: a path is a function of the sampler alone, the camera
+        // sample first and then every value of the walk, so a mutation of the sampler is a mutation of the path. The weight of
+        // a path is the radiance volpath estimates for it (its own MIS between phase function and light sampling included),
+        // and there is no choice of a strategy, so the bootstrap has a single state in place of one for each depth.
+        SampledSpectrum LVolPath(ScratchBuffer scratchBuffer, MLTSampler sampler, out Point2f pRaster,
+                                 out SampledWavelengths lambda)
+        {
+            // Sample wavelengths for MLT path
+            if (Options.disableWavelengthJitter)
+                lambda = camera.GetFilm().SampleWavelengths(0.5f);
+            else
+                lambda = camera.GetFilm().SampleWavelengths(sampler.Get1D());
+
+            // Compute camera sample for MLT camera path
+            Bounds2f sampleBounds = camera.GetFilm().SampleBounds();
+            pRaster = sampleBounds.Lerp(sampler.GetPixel2D());
+            CameraSample cameraSample = new CameraSample();
+            cameraSample.pFilm = pRaster;
+            cameraSample.time = sampler.Get1D();
+            cameraSample.pLens = sampler.Get2D();
+
+            // Generate camera ray for MLT camera path
+            pstd.optional<CameraRayDifferential> crd = camera.GenerateRayDifferential(cameraSample, ref lambda);
+            if (!crd || !crd.value().weight)
+                return new SampledSpectrum(0.0f);
+            Float rayDiffScale = std.max<Float>(.125f, 1 / std.sqrt((Float)sampler.SamplesPerPixel()));
+            RayDifferential crdRay = crd.value().ray;
+            crdRay.ScaleDifferentials(rayDiffScale);
+
+            SampledSpectrum Lval = crd.value().weight * volpath.Li(crdRay, ref lambda, sampler, scratchBuffer, null);
+            if (Lval.HasNaNs() || IsInf(Lval.y(lambda)))
+                return new SampledSpectrum(0.0f);
+            return Lval;
+        }
+
         static Float c(SampledSpectrum L, SampledWavelengths lambda) { return L.y(lambda); }
         static Point2i PI2(Point2f p) { return new Point2i((int)p.x, (int)p.y); }
 
@@ -2742,7 +2780,7 @@ namespace pbrt
 
             // Generate bootstrap samples and compute normalization constant $b$
             Timer timer = new Timer();
-            int nBootstrapSamples = nBootstrap * (maxDepth + 1);
+            int nBootstrapSamples = nBootstrap * nDepths;
             Float[] bootstrapWeights = new Float[nBootstrapSamples];
             // Allocate scratch buffers for MLT samples
             ThreadLocal<ScratchBuffer> threadScratchBuffers = new ThreadLocal<ScratchBuffer>(() => new ScratchBuffer());
@@ -2755,9 +2793,9 @@ namespace pbrt
                 for (long i = start; i < end; ++i)
                 {
                     // Generate _i_th bootstrap sample
-                    for (int depth = 0; depth <= maxDepth; ++depth)
+                    for (int depth = 0; depth < nDepths; ++depth)
                     {
-                        int rngIndex = (int)(i * (maxDepth + 1) + depth);
+                        int rngIndex = (int)(i * nDepths + depth);
                         MLTSampler sampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma,
                                                             largeStepProbability, nSampleStreams);
                         // Evaluate path radiance using _sampler_ and update _bootstrapWeights_
@@ -2780,7 +2818,7 @@ namespace pbrt
                 ErrorExit("No light carrying paths found during bootstrap sampling! " +
                           "Are you trying to render a black image?");
             AliasTable bootstrapTable = new AliasTable(new pstd.span<Float>(bootstrapWeights));
-            Float b = (Float)(maxDepth + 1) / bootstrapWeights.Length * (Float)bootstrapSum;
+            Float b = (Float)nDepths / bootstrapWeights.Length * (Float)bootstrapSum;
 
             // Set up connection to display server, if enabled
             if (Options.displayServer.Length != 0)
@@ -2801,7 +2839,7 @@ namespace pbrt
                 // Select initial state from the set of bootstrap samples
                 RNG rng = new RNG((uint64_t)i);
                 int bootstrapIndex = bootstrapTable.Sample(rng.Uniform<Float>());
-                int depth = bootstrapIndex % (maxDepth + 1);
+                int depth = bootstrapIndex % nDepths;
 
                 // Initialize local variables for selected state
                 MLTSampler sampler = new MLTSampler(mutationsPerPixel, bootstrapIndex, sigma, largeStepProbability,
@@ -2890,11 +2928,22 @@ namespace pbrt
                 nBootstrap = std.max(1, nBootstrap / 16);
             }
             bool regularize = parameters.GetOneBool("regularize", false);
+            // (not in pbrt-v4) "bdpt" mutates the strategies of bidirectional path tracing, "volpath" the paths of the volumetric
+            // path tracer (which then also reads its parameters: lightsampler, polarised, the sensor)
+            string pathEstimator = parameters.GetOneString("pathestimator", "bdpt");
+            VolPathIntegrator volpath = null;
+            if (pathEstimator == "volpath")
+                volpath = VolPathIntegrator.Create(parameters, camera, null, aggregate, lights, loc);
+            else if (pathEstimator != "bdpt")
+                ErrorExit(loc, StringPrintf("%s: unknown \"pathestimator\" for \"mlt\"; use \"bdpt\" or \"volpath\".", pathEstimator));
             return new MLTIntegrator(camera, aggregate, lights, maxDepth, nBootstrap, (int)nChains,
-                                     mutationsPerPixel, sigma, largeStepProbability, regularize);
+                                     mutationsPerPixel, sigma, largeStepProbability, regularize, volpath);
         }
 
         // MLTIntegrator Private Members
+        // The number of states of the bootstrap: one for each depth of bdpt, one for volpath
+        int nDepths { get { return volpath != null ? 1 : maxDepth + 1; } }
+        VolPathIntegrator volpath;
         Camera camera;
         bool regularize;
         LightSampler lightSampler;
