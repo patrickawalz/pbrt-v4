@@ -107,10 +107,16 @@ is reproduced exactly with the same seed.
      sum; every emissive medium becomes a light in BDPT whether or not `emission_nee` is set, and `emission_fnee` is ignored there.
      Checked against the free-path estimator of VolPath (absorbing and scattering emitter, with floor and point light): means agree
      within 1 %.
-7. Polarised light-system types (first slice, `polarised.cs`): `StokesLight` (I, Q, U, V per wavelength) and `MuellerAttenuation`
-   (4x4 per wavelength: identity, scalar, frame rotator, linear polariser, Rayleigh), tested against Malus's law, rotator
-   composition and the Rayleigh normalisation. They are not used by the integrators: replacing the SampledSpectrum products of
-   a path by this pair (and a Mueller version of `BSDF`/`PhaseBxDF`) is the next step.
+7. Polarised light-system types, ported from PolarisedUPBP (`polarisation.cs`, `polarisedlightsystem.cs`, `fresnel_polarised.cs`):
+   `PolarisationFrame`, `StokesVector`, `MuellerMatrix`, and the *optimised* `Light` / `Importance` / `Attenuation` of
+   `PolarisedLightSystems.hxx` (a scalar, a depolariser or a full matrix with its two frames, whichever the element needs).
+   `FrDielectricPolarised()` / `FrComplexPolarised()` are written like `FrDielectric()` / `FrComplex()` and return UPBP's
+   Fs, Fp, Ds, Dp for `Attenuation.Fresnel()`; the tests check them against UPBP's `FresnelReal()` / `FresnelComplex()` ported
+   verbatim, and chains of 2-5 mixed events (Lambert, scalar, Fresnel, Rayleigh, polariser) against applying them one at a time.
+   One deviation: UPBP's `DepolarisingExit * Standard` product multiplies the unrotated first row (its rotated row is stored in
+   the second row and never used); the port uses the rotated row, which the chain test needs. The types are not used by the
+   integrators yet: replacing the SampledSpectrum products of a path by this trio (and a Mueller `BSDF` / `PhaseBxDF`) is the
+   next step.
 
 ## Decisions taken without asking
 
