@@ -93,7 +93,7 @@ namespace pbrt
             // :-(
             Ray ray =
                 p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
-            SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f);
+            SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f), r_u_unused = new SampledSpectrum(1.0f);
             if (LengthSquared(ray.d) == 0)
             {
                 endMedium = MediumTracking.Current(stack);
@@ -118,6 +118,9 @@ namespace pbrt
                     SampledSpectrum T_closed;
                     if (rayMedium.volumeIntegrator.transmittance.TryClosedForm(ray, rayMedium, 1.0f, lambda, out T_closed))
                         Tr *= T_closed;
+                    else if (rayMedium.volumeIntegrator.transmittance.TryEstimate(ray, rayMedium, 1.0f, ref rng, lambda, ref Tr, ref inv_w, ref r_u_unused))
+                    {
+                    }
                     else
                     {
                     SampledSpectrum T_maj =
@@ -129,7 +132,7 @@ namespace pbrt
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
 
                                         // ratio-tracking: only evaluate null scattering
-                                        rayMedium.volumeIntegrator.transmittance.Step(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n);
+                                        rayMedium.volumeIntegrator.transmittance.Step(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n, ref rng);
 
                                         // Possibly terminate the transmittance computation using Russian roulette
                                         if (russianRoulette && (bool)Tr && (bool)inv_w &&
@@ -4691,6 +4694,9 @@ namespace pbrt
                     SampledSpectrum T_closed;
                     if (lightMedium.volumeIntegrator.transmittance.TryClosedForm(lightRay, lightMedium, tMax, lambda, out T_closed))
                         T_ray *= T_closed;
+                    else if (lightMedium.volumeIntegrator.transmittance.TryEstimate(lightRay, lightMedium, tMax, ref rng, lambda, ref T_ray, ref r_l, ref r_u))
+                    {
+                    }
                     else
                     {
                     SampledSpectrum T_maj =
@@ -4702,7 +4708,7 @@ namespace pbrt
                                         // Update _T_ray_ and PDFs using ratio-tracking estimator
                                         SampledSpectrum sigma_n =
                                             ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                        lightMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n);
+                                        lightMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n, ref rng);
 
                                         // Possibly terminate transmittance computation using
                                         // Russian roulette

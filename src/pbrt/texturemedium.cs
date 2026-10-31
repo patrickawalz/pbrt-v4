@@ -257,6 +257,19 @@ namespace pbrt
             }
         }
 
+        // The smallest density inside the bounds, from the bounds that the texture gives for the whole region
+        private Float minDensity = -1;
+
+        public override SampledSpectrum ControlExtinction(SampledWavelengths lambda)
+        {
+            if (minDensity < 0)
+            {
+                texture.RegionBounds(renderFromMedium.Apply(bounds), out Float lo, out Float hi);
+                minDensity = std.max<Float>(0, std.min(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
+            }
+            return minDensity * (sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda));
+        }
+
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
             SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);

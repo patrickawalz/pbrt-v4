@@ -169,7 +169,7 @@ As in Fong et al., every medium carries its own integrator, built from two share
 | Module | Parameter | Choices |
 |---|---|---|
 | `VolumeTracker` (collision sampling) | `"string tracker"` | `majorant` (default, pbrt-v4 majorant iteration), `global` (one majorant for the whole ray) |
-| `TransmittanceEstimator` (shadow rays) | `"string transmittance"` | `ratio` (default, ratio tracking), `analytic` (Beer-Lambert for homogeneous media, ratio tracking otherwise) |
+| `TransmittanceEstimator` (shadow rays) | `"string transmittance"` | `ratio` (default, ratio tracking), `analytic` (Beer-Lambert for homogeneous media, ratio tracking otherwise), `tracklength` (delta tracking: 1 without a real collision, else 0), `residual` (residual ratio tracking: the medium's minimum density, `Medium.ControlExtinction`, in closed form and ratio tracking of the rest; no control means plain ratio tracking; no Russian roulette) |
 
 New modules subclass the abstract classes and are chosen in `VolumeIntegrator.Create`. Defaults are bit-identical to the
 previous build (six volpath/bdpt regression scenes). Checks, 256 spp homogeneous scene: analytic vs ratio means 0.12183 vs

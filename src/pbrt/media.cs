@@ -1389,6 +1389,12 @@ namespace pbrt
         // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
 
+        // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
+        public virtual SampledSpectrum ControlExtinction(SampledWavelengths lambda)
+        {
+            return new SampledSpectrum(0f);
+        }
+
         public static Medium Create(string name, ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                     Allocator alloc)
         {

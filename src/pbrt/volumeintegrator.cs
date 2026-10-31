@@ -108,10 +108,18 @@ namespace pbrt
             return false;
         }
 
+        // An estimator that runs the whole segment itself (it needs a different majorant than the tracker's): updates T_ray,
+        // r_l and r_u for the segment and returns true; the standalone form passes inv_w for r_l and a dummy for r_u.
+        public virtual bool TryEstimate(Ray ray, Medium medium, Float tMax, ref RNG rng, SampledWavelengths lambda,
+                                        ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u)
+        {
+            return false;
+        }
+
         public abstract void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n);
+                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng);
         public abstract void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
-                                  SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n);
+                                  SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng);
         public abstract void Finish(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj);
         public abstract void Finish(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u, SampledSpectrum T_maj);
     }
@@ -122,13 +130,13 @@ namespace pbrt
         public override string Name() { return "ratio"; }
 
         public override void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n)
+                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
         {
             MediumEvents.RatioTrackingStep(ref Tr, ref inv_w, T_maj, sigma_maj, sigma_n);
         }
 
         public override void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
-                                  SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n)
+                                  SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
         {
             MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj, sigma_maj, sigma_n);
         }
@@ -165,6 +173,118 @@ namespace pbrt
         }
     }
 
+    // Track-length estimation (delta tracking): the estimate is 1 if no real collision happens along the segment and 0
+    // otherwise. At a collision the hero wavelength continues through a null collision with probability sigma_n / sigma_maj.
+    // Cheap per sample and binary, so it suits thin or bright-to-dark media better than dense ones.
+    public sealed unsafe class TrackLengthEstimator : RatioTrackingEstimator
+    {
+        public override string Name() { return "tracklength"; }
+
+        public override void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
+                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
+        {
+            SampledSpectrum dummy = new SampledSpectrum(1f);
+            Step(ref Tr, ref inv_w, ref dummy, T_maj, sigma_maj, sigma_n, ref rng);
+        }
+
+        public override void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
+                                  SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
+        {
+            Float pNull = sigma_n[0] / sigma_maj[0];
+            if (!(rng.Uniform<Float>() < pNull))
+            {
+                // A real collision: the ray is blocked
+                T_ray = new SampledSpectrum(0f);
+                return;
+            }
+            // The same weights as pbrt-v4 gives a null collision of a path, with the probability of choosing it included
+            Float pdf = T_maj[0] * sigma_n[0];
+            T_ray *= T_maj * sigma_n / pdf;
+            r_l *= T_maj * sigma_maj / pdf;
+            r_u *= T_maj * sigma_n / pdf;
+        }
+    }
+
+    // Residual ratio tracking (Novak et al. 2014): a control extinction that the medium guarantees everywhere (its minimum
+    // density) is integrated in closed form, and ratio tracking handles the residual with the smaller majorant
+    // sigma_maj - sigma_c. A medium without a control, or an empty one, is ratio tracked as usual.
+    public sealed unsafe class ResidualRatioEstimator : RatioTrackingEstimator
+    {
+        public override string Name() { return "residual"; }
+
+        public override bool TryEstimate(Ray ray, Medium medium, Float tMax, ref RNG rng, SampledWavelengths lambda,
+                                         ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u)
+        {
+            SampledSpectrum sigma_c = medium.ControlExtinction(lambda);
+            if (!sigma_c)
+            {
+                return false;
+            }
+            tMax *= Length(ray.d);
+            ray.d = Normalize(ray.d);
+            RayMajorantIterator iter = medium.SampleRay(ray, tMax, lambda, new ScratchBuffer());
+            Float u = rng.Uniform<Float>();
+            SampledSpectrum T_maj = new SampledSpectrum(1f);
+            while (true)
+            {
+                pstd.optional<RayMajorantSegment> seg = iter.Next();
+                if (!seg)
+                {
+                    break;
+                }
+                RayMajorantSegment sg = seg.value();
+                // The control cannot exceed the majorant of the segment
+                SampledSpectrum control = new SampledSpectrum(0f);
+                for (int c = 0; c < NSpectrumSamples; ++c)
+                {
+                    control[c] = std.min(sigma_c[c], sg.sigma_maj[c]);
+                }
+                SampledSpectrum residualMaj = sg.sigma_maj - control;
+                Float dtSegment = sg.tMax - sg.tMin;
+                if (IsInf(dtSegment))
+                {
+                    dtSegment = Float.MaxValue;
+                }
+                T_ray *= FastExp(-dtSegment * control);
+                if (!T_ray)
+                {
+                    return true;
+                }
+                if (residualMaj[0] == 0)
+                {
+                    T_maj *= FastExp(-dtSegment * residualMaj);
+                    continue;
+                }
+                Float tMin = sg.tMin;
+                while (true)
+                {
+                    Float t = tMin + SampleExponential(u, residualMaj[0]);
+                    u = rng.Uniform<Float>();
+                    if (t < sg.tMax)
+                    {
+                        T_maj *= FastExp(-(t - tMin) * residualMaj);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                        SampledSpectrum sigma_n = residualMaj - (mp.sigma_a + mp.sigma_s) + control;
+                        MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj, residualMaj, sigma_n);
+                        if (!T_ray)
+                        {
+                            return true;
+                        }
+                        T_maj = new SampledSpectrum(1f);
+                        tMin = t;
+                    }
+                    else
+                    {
+                        T_maj *= FastExp(-(sg.tMax - tMin) * residualMaj);
+                        break;
+                    }
+                }
+            }
+            MediumEvents.FinishSegment(ref T_ray, ref r_l, ref r_u, T_maj);
+            return true;
+        }
+    }
+
     // VolumeIntegrator Definition: the tracker and transmittance estimator of one medium
     public sealed unsafe class VolumeIntegrator
     {
@@ -182,6 +302,8 @@ namespace pbrt
         private static readonly GlobalMajorantTracker globalTracker = new GlobalMajorantTracker();
         private static readonly RatioTrackingEstimator ratioEstimator = new RatioTrackingEstimator();
         private static readonly AnalyticTransmittanceEstimator analyticEstimator = new AnalyticTransmittanceEstimator();
+        private static readonly TrackLengthEstimator trackLengthEstimator = new TrackLengthEstimator();
+        private static readonly ResidualRatioEstimator residualEstimator = new ResidualRatioEstimator();
 
         public static readonly VolumeIntegrator Default = new VolumeIntegrator(majorantTracker, ratioEstimator);
 
@@ -190,7 +312,7 @@ namespace pbrt
             return "[ VolumeIntegrator tracker: " + tracker.Name() + " transmittance: " + transmittance.Name() + " ]";
         }
 
-        // "string tracker" ("majorant" | "global"), "string transmittance" ("ratio" | "analytic")
+        // "string tracker" ("majorant" | "global"), "string transmittance" ("ratio" | "analytic" | "tracklength" | "residual")
         public static VolumeIntegrator Create(ParameterDictionary parameters, FileLoc loc)
         {
             string trackerName = parameters.GetOneString("tracker", "majorant");
@@ -203,6 +325,10 @@ namespace pbrt
             TransmittanceEstimator estimator = ratioEstimator;
             if (transmittanceName == "analytic")
                 estimator = analyticEstimator;
+            else if (transmittanceName == "tracklength")
+                estimator = trackLengthEstimator;
+            else if (transmittanceName == "residual")
+                estimator = residualEstimator;
             else if (transmittanceName != "ratio")
                 ErrorExit(loc, $"{transmittanceName}: transmittance estimator unknown.");
             if (tracker == majorantTracker && estimator == ratioEstimator)
