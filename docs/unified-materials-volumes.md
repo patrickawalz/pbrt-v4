@@ -108,8 +108,20 @@ is reproduced exactly with the same seed.
      medium (FNEE, Simon et al.), with the spectral MIS between the sampled emission and the collisions of tracking.
    * BDPT starts light subpaths in the emissive volume (the start stack is found from the boundaries between the camera and the
      point; a point outside the medium is a light subpath without throughput), and connects to it for s = 1 (including s = 1,
-     t = 1). Camera subpaths do not gather emission, so there is no s = 0 strategy for volumes and MISWeight leaves it out of the
-     sum; every emissive medium becomes a light in BDPT whether or not `emission_nee` is set, and `emission_fnee` is ignored there.
+     t = 1). Every emissive medium becomes a light in BDPT whether or not `emission_nee` is set, and `emission_fnee` is ignored there.
+   * BDPT camera subpaths also gather the emission of media (as VolPath does at every majorant collision, and as LuxCore and UPBP
+     do): each collision in an emissive medium ends a path with an emitter vertex (`MediumEmissionEnd`, an s = 0 strategy), and the
+     gathered emission and the light sample of the medium are two strategies of the same paths, combined by the MIS weights of
+     `BDPT.MISWeight` (the emitter vertex has the density of a collision at the point, per volume: the extinction times the density
+     of the direction, hence the factor `sigmaT0`). Option `"bool gathermediumemission"` of `bdpt` and `mlt` (default true); false
+     leaves the s = 0 strategy out as before. Gathering is what finds paths that no connection can make (camera, specular surface,
+     emissive medium): with a mirror floor the gather-off means are 13 to 15 % low and the gather-on means agree with VolPath.
+     Checks (glow scene, 64x64, scalar): means agree with VolPath at maxdepth 0, 1, 2, 3, 5, 8, and at 12 against a 2048 spp
+     reference (0.09972 vs 0.09979); error against that reference 0.0099 against 0.0129 without gathering at 256 spp for 10 % more
+     time. A (1,1) strategy was weighted with the light vertex replaced by the sampled camera vertex until the two-light scene
+     showed it (the weights then only cancel for a single light); MISWeight now replaces the camera vertex for t = 1.
+   * MLT with the bdpt estimator takes the same lights, gathers at the t - 1st vertex of the camera subpath for its s = 0 states,
+     and has the light sample of a medium as the second strategy of the paths of length 0.
      Checked against the free-path estimator of VolPath (absorbing and scattering emitter, with floor and point light): means agree
      within 1 %.
 7. Polarised light-system types, ported from PolarisedUPBP (`polarisation.cs`, `polarisedlightsystem.cs`, `fresnel_polarised.cs`):
@@ -184,6 +196,6 @@ After LuxCore's PathTracer and pbrt-v4's `BDPT::RandomWalk()`: the integrators s
 - `MLTPathEvaluator` is what Metropolis light transport mutates: `BDPTPathEvaluator` (a strategy of a given depth, one chain state per depth, polarised with the same sensor as `bdpt`) and `VolPathPathEvaluator` (a whole walk, one state). They share the draw of wavelengths and the camera ray. `Integrator "mlt" "string pathestimator" "bdpt"|"volpath"`.
 - Still two formalisms: volpath's rescaled probabilities and bdpt's vertex densities (unifying them is future work).
 
-Checks (96x96 and 96x96 volumetric Cornell scenes): volpath on the shared walk and bdpt on the shared walk are bit-identical to the previous builds (11 and 6 scenes, scalar, polarised, Rayleigh, emission). Volumetric Cornell box with a thin-coated marble sphere, 64 spp: volpath and bdpt agree to 0.01% polarised (analyser 0 and 90, with and without Rayleigh) and scalar. Both MLT estimators agree with them in luminance: ratio 0.9999 (volpath) and 1.003 (bdpt) with 6.4M bootstrap samples; with 100k bootstrap samples the ratio moves by about 1% from the noise of the normalisation constant, so MLT means need a large bootstrap to be compared.
+Checks (96x96 volumetric Cornell and wax scenes): volpath on the shared walk and bdpt on the shared walk are bit-identical to the previous builds (11 and 6 scenes, scalar, polarised, Rayleigh, emission). Volumetric Cornell box with a thin-coated marble sphere, 64 spp: volpath and bdpt agree to 0.01% polarised (analyser 0 and 90, with and without Rayleigh) and scalar. Both MLT estimators agree with them in luminance: ratio 0.9999 (volpath) and 1.003 (bdpt) with 6.4M bootstrap samples; with 100k bootstrap samples the ratio moves by about 1% from the noise of the normalisation constant, so MLT means need a large bootstrap to be compared.
 
 Efficiency on that scene (rmse against 1024 spp volpath, error^2 x time, lower is better): volpath 0.065, bdpt 0.154, MLT volpath 0.147, MLT bdpt 0.411. bdpt has 2.1x lower variance per sample than volpath but costs 5x as much (all s,t connections); MLT driven by bdpt needs more chains and bootstrap samples than MLT driven by volpath (96x96 wax scene, rmse 0.137 -> 0.0925 with 4x the bootstrap samples).
