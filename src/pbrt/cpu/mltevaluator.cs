@@ -153,7 +153,14 @@ namespace pbrt
             }
             Lval *= (Float)nStrategies;
             if (pRasterNew)
+            {
                 pRaster = pRasterNew.value();
+                // (not in pbrt-v4) The camera paths of the chains have their film position drawn from the sample bounds, which the
+                // filter radius makes larger than the pixel bounds, but a connection to the camera lands inside the pixel bounds:
+                // its density over the film is that of the pixel area, so the contribution is scaled by the ratio of the areas
+                Film film = camera.GetFilm();
+                Lval *= (Float)film.PixelBounds().Area() / (Float)film.SampleBounds().Area();
+            }
             return Lval;
         }
 
