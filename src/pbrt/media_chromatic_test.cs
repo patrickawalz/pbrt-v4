@@ -992,14 +992,14 @@ namespace pbrt
             Spectrum sigma_a = new ConstantSpectrum(0.3f);
             Spectrum sigma_s = MakeRamp(0.8f, 3.0f, false);
             double[] refMean = null, refErr = null;
-            for (int variant = 0; variant < 2; ++variant)
+            for (int variant = 0; variant < 3; ++variant)
             {
-                // 0: thin dielectric; 1: thin coat
+                // 0: thin dielectric, volumetric path tracing; 1: thin coat, volumetric path tracing; 2: thin coat, bidirectional
                 Material boundary = variant == 0 ? (Material)new ThinDielectricMaterial(new ConstantSpectrum(1.5f), null, null)
                                                  : new ThinCoatMaterial(1.5f, null, null);
                 Medium medium = new HomogeneousMedium(sigma_a, sigma_s, 1f, zero, 0f, 0.3f, null);
                 double[] mean, err;
-                RenderMean(medium, L, scale, true, 60, 1024, Name("coat" + variant, true), out mean, out err, false, false, true, boundary);
+                RenderMean(medium, L, scale, true, 60, 1024, Name("coat" + variant, true), out mean, out err, variant == 2, false, true, boundary);
                 if (variant == 0)
                 {
                     refMean = mean;
@@ -1009,7 +1009,38 @@ namespace pbrt
                 for (int c = 0; c < 3; ++c)
                 {
                     double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
-                    Console.WriteLine($"PROBE thin coat channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) thin dielectric {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    Console.WriteLine($"PROBE thin coat {(variant == 1 ? "volumetric path tracing" : "bidirectional")} channel {c}: {mean[c]:F5} (stderr {err[c]:F5}) thin dielectric {refMean[c]:F5} (stderr {refErr[c]:F5})");
+                    EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
+                }
+            }
+        }
+
+        // With the light outside of a medium whose coefficients depend on the wavelength, the bidirectional integrator must agree with
+        // the volumetric path tracer: the spectral MIS weights have to take the chromatic density of the connecting segments into account.
+        [TEST("ChromaticMedia", "BidirectionalExteriorLight")]
+        public static void ChromaticMedia_BidirectionalExteriorLight()
+        {
+            Spectrum L = new ConstantSpectrum(1);
+            Float scale = 1 / SpectrumToPhotometric(L);
+            Spectrum zero = new ConstantSpectrum(0);
+            Spectrum sigma_a = new ConstantSpectrum(0.3f);
+            Spectrum sigma_s = MakeRamp(0.8f, 3.0f, false);
+            double[] refMean = null, refErr = null;
+            for (int variant = 0; variant < 2; ++variant)
+            {
+                Medium medium = new HomogeneousMedium(sigma_a, sigma_s, 1f, zero, 0f, 0.3f, null);
+                double[] mean, err;
+                RenderMean(medium, L, scale, true, 60, 1024, Name("exterior" + variant, true), out mean, out err, variant == 1);
+                if (variant == 0)
+                {
+                    refMean = mean;
+                    refErr = err;
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c)
+                {
+                    double combined = Math.Sqrt(err[c] * err[c] + refErr[c] * refErr[c]);
+                    Console.WriteLine($"PROBE exterior light channel {c}: bidirectional {mean[c]:F5} (stderr {err[c]:F5}) path tracing {refMean[c]:F5} (stderr {refErr[c]:F5})");
                     EXPECT_LT(Math.Abs(mean[c] - refMean[c]), 4 * combined + 0.005 * Math.Abs(refMean[c]));
                 }
             }

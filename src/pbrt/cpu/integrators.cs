@@ -72,12 +72,22 @@ namespace pbrt
 
         public SampledSpectrum Tr(Interaction p0, Interaction p1, SampledWavelengths lambda)
         {
+            SampledSpectrum transmittance = Tr(p0, p1, lambda, out SampledSpectrum edge);
+            return transmittance / edge.Average();
+        }
+
+        // (not in pbrt-v4) The transmittance estimate of ratio tracking and, separately, the chromatic factor inv_w of the
+        // density with which the tracking samples the segment (relative to the first wavelength), so that a caller that combines
+        // it with other chromatic factors can average the product once
+        public SampledSpectrum Tr(Interaction p0, Interaction p1, SampledWavelengths lambda, out SampledSpectrum edgeRatio)
+        {
             RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
 
             // :-(
             Ray ray =
                 p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
             SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f);
+            edgeRatio = inv_w;
             if (LengthSquared(ray.d) == 0)
                 return Tr;
 
@@ -122,7 +132,8 @@ namespace pbrt
                     break;
                 ray = si.value().intr.SpawnRayTo(p1);
             }
-            return Tr / inv_w.Average();
+            edgeRatio = inv_w;
+            return Tr;
         }
         // Integrator Public Methods
         public static Integrator Create(string name, ParameterDictionary parameters, Camera camera,
@@ -1888,7 +1899,12 @@ namespace pbrt
             path[0] = les.value().intr ? Vertex.CreateLight(light, les.value().intr.value(), les.value().L, p_l)
                                        : Vertex.CreateLight(light, new Ray(ray), les.value().L, p_l);
             if (volumeLight != null)
-                path[0].sigmaMaj = std.max(volumeLight.Medium().MajorantAt(ray.o, lambda)[0], 1e-30f);
+            {
+                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(ray.o, lambda);
+                path[0].sigmaMaj = std.max(majorant[0], 1e-30f);
+                // The point of emission is sampled like a collision of tracking in the other strategies (see MISWeight())
+                path[0].rCum = majorant / path[0].sigmaMaj;
+            }
 
             // Follow light subpath random walk
             SampledSpectrum beta = les.value().L * les.value().AbsCosTheta(ray.d) / (p_l * les.value().pdfDir);
@@ -2005,7 +2021,6 @@ namespace pbrt
                                         SampledSpectrum densityRate = T_maj * sigma_maj;
                                         Float pdfScatter = densityRate[0] * pScatter;
                                         beta *= T_maj * mp.sigma_s / pdfScatter;
-                                        scatterVertexRatio = (sigma_maj / sigma_maj[0]) * SafeDiv(mp.sigma_s, sigma_c) / (pScatter);
                                     }
                                     else
                                         beta *= T_maj * mp.sigma_s / (T_maj[0] * mp.sigma_s[0]);
@@ -2050,7 +2065,7 @@ namespace pbrt
                                         else
                                         {
                                             beta *= T_maj * sigma_n_signed / pdfU;
-                                            segR = segR * densityRate * SafeDiv(Abs(sigma_n_signed), sigma_c) / pdfU;
+                                            segR = segR * densityRate / densityRate[0];
                                         }
                                         return (bool)beta;
                                     }
@@ -2061,7 +2076,7 @@ namespace pbrt
                                     else
                                     {
                                         beta *= T_maj * sigma_n / pdfN;
-                                        segR = segR * T_maj * sigma_n / pdfN;
+                                        segR = segR * T_maj * sigma_maj / (T_maj[0] * sigma_maj[0]);
                                     }
                                     return (bool)beta;
                                 }
@@ -2183,7 +2198,7 @@ namespace pbrt
         }
 
         public static SampledSpectrum G(Integrator integrator, Sampler sampler, Vertex v0, Vertex v1,
-                                        SampledWavelengths lambda)
+                                        SampledWavelengths lambda, out SampledSpectrum edgeRatio)
         {
             Vector3f d = v0.p() - v1.p();
             Float g = 1 / LengthSquared(d);
@@ -2192,14 +2207,14 @@ namespace pbrt
                 g *= AbsDot(v0.ns(), d);
             if (v1.IsOnSurface())
                 g *= AbsDot(v1.ns(), d);
-            return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), lambda);
+            return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), lambda, out edgeRatio);
         }
 
         static Float remap0(Float f) { return f != 0 ? f : 1; }
 
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
-                                      LightSampler lightSampler)
+                                      LightSampler lightSampler, SampledSpectrum? edgeRatio = null)
         {
             if (s + t == 2)
                 return 1;
@@ -2318,6 +2333,8 @@ namespace pbrt
                 if (bdpt == null || bdpt.spectralMIS)
                 {
                     SampledSpectrum Q = cameraVertices[t - 1].rCum * (s > 0 ? lightVertices[s - 1].rCum : new SampledSpectrum(1.0f));
+                    if (edgeRatio.HasValue)
+                        Q = Q * edgeRatio.Value;
                     Float averageRatio = Q.Average();
                     return averageRatio > 0 ? 1 / ((1 + sumRi) * averageRatio) : 0;
                 }
@@ -2445,7 +2462,7 @@ namespace pbrt
                             else
                             {
                                 betaCap *= T_maj * sigma_n / pdfN;
-                                ratioCap = ratioCap * T_maj * sigma_n / pdfN;
+                                ratioCap = ratioCap * T_maj * sigma_maj / (T_maj[0] * sigma_maj[0]);
                             }
                             return (bool)betaCap;
                         });
@@ -2470,6 +2487,8 @@ namespace pbrt
         {
             SampledWavelengths lambda = lambdaRef;
             SampledSpectrum L = new SampledSpectrum(0.0f);
+            // (not in pbrt-v4) The chromatic factor of the density with which the connecting segment is sampled by tracking
+            SampledSpectrum edgeRatio = new SampledSpectrum(1.0f);
             // Ignore invalid connections related to infinite area lights
             if (t > 1 && s != 0 && cameraVertices[t - 1].type == VertexType.Light)
                 return new SampledSpectrum(0.0f);
@@ -2502,7 +2521,7 @@ namespace pbrt
                         DCHECK(!L.HasNaNs());
                         if ((bool)L)
                         {
-                            L *= integrator.Tr(cs.value().pRef, cs.value().pLens, lambda);
+                            L *= integrator.Tr(cs.value().pRef, cs.value().pLens, lambda, out edgeRatio);
 
                             // See https://github.com/mmp/pbrt-v4/issues/347
                             Film film = camera.GetFilm();
@@ -2558,14 +2577,18 @@ namespace pbrt
                             EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
                             sampled = Vertex.CreateLight(ei, lightWeight.value().L / (lightWeight.value().pdf * p_l), 0);
                             if (volumeLight != null)
-                                sampled.sigmaMaj = std.max(volumeLight.Medium().MajorantAt(ei.p(), lambda)[0], 1e-30f);
+                            {
+                                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(ei.p(), lambda);
+                                sampled.sigmaMaj = std.max(majorant[0], 1e-30f);
+                                sampled.rCum = majorant / sampled.sigmaMaj;
+                            }
                             sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
                             L = pt.beta * pt.f(sampled, TransportMode.Radiance) * sampled.beta;
                             if (pt.IsOnSurface())
                                 L *= AbsDot(lightWeight.value().wi, pt.ns());
                             // Only check visibility if the path would carry radiance.
                             if ((bool)L)
-                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, lambda);
+                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, lambda, out edgeRatio);
                         }
                     }
                 }
@@ -2578,7 +2601,7 @@ namespace pbrt
                 {
                     L = qs.beta * qs.f(pt, TransportMode.Importance) * pt.f(qs, TransportMode.Radiance) * pt.beta;
                     if ((bool)L)
-                        L *= G(integrator, sampler, qs, pt, lambda);
+                        L *= G(integrator, sampler, qs, pt, lambda, out edgeRatio);
                 }
             }
 
@@ -2589,7 +2612,7 @@ namespace pbrt
                 PathIntegrator.pathLength = new StatIntDistribution();
             PathIntegrator.pathLength.Add(s + t - 2);
             // Compute MIS weight for connection strategy
-            Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler)
+            Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler, edgeRatio)
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;
