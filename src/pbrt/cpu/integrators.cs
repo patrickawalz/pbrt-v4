@@ -1941,175 +1941,152 @@ namespace pbrt
             // (not in pbrt-v4) The polarisation of the throughput: pa for a camera subpath (Mueller matrix, applied to
             // what comes later), pl for a light subpath (Stokes vector). Each takes every factor of beta.
             bool fromCamera = mode == TransportMode.Radiance;
-            PathState st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
-            // (Lambdas cannot capture ref parameters: work on a local copy and write back.)
-            SampledWavelengths lambda = lambdaRef;
+            WalkContext ctx = new WalkContext();
+            ctx.integrator = integrator;
+            ctx.lambda = lambdaRef;
+            ctx.ray = ray;
+            ctx.stack = stack;
+            ctx.sampler = sampler;
+            ctx.camera = camera;
+            ctx.scratchBuffer = scratchBuffer;
+            ctx.mode = mode;
+            ctx.st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
+            BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize);
             try
             {
                 // Follow random walk to initialize BDPT path vertices
-                int bounces = 0;
-                bool anyNonSpecularBounces = false;
-                Float pdfFwd = pdf;
-                while (true)
-                {
-                    // Attempt to create the next subpath vertex in _path_
-                    if (!st.beta)
-                        break;
-                    // (not in pbrt-v4) Possibly terminate the subpath with Russian roulette. The vertices keep their densities:
-                    // the roulette changes the estimate and not the density that the MIS weights are made for.
-                    if (integrator.russianRoulette && bounces > 1 && st.beta.MaxComponentValue() < 1)
-                    {
-                        Float q = std.max<Float>(0, 1 - st.beta.MaxComponentValue());
-                        if (sampler.Get1D() < q)
-                            break;
-                        st.SurviveRoulette(q);
-                    }
-                    bool scattered = false, terminated = false;
-                    // Trace a ray and sample the medium, if any
-                    int vIdx = off + bounces;
-                    pstd.optional<ShapeIntersection> si = integrator.Intersect(new Ray(ray));
-                    Medium rayMedium = MediumTracking.Current(stack);
-                    if (rayMedium != null)
-                    {
-                        // Sample participating medium for _RandomWalk()_ ray
-                        Float tMax = si ? si.value().tHit : Infinity;
-                        RNG rng = new RNG(Hash(ray.o, tMax), Hash(ray.d));
-                        Float u = sampler.Get1D();
-                        SampledSpectrum Tmaj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
-                            new Ray(ray), rayMedium, tMax, u, ref rng, lambda,
-                            (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
-                            {
-                                // Compute medium event probabilities for interaction
-
-                                // Randomly sample medium event for _RandomRalk()_ ray
-                                Float um = sampler.Get1D();
-                                MediumEventType evt = MediumEvents.SampleEvent(mp, sigma_maj, um);
-                                if (evt == MediumEventType.Absorb)
-                                {
-                                    // Handle absorption for _RandomWalk()_ ray
-                                    terminated = true;
-                                    return false;
-                                }
-                                else if (evt == MediumEventType.Scatter)
-                                {
-                                    // Handle scattering for _RandomWalk()_ ray
-                                    st.RealScatter(T_maj, mp.sigma_s);
-                                    // Record medium interaction in _path_ and compute forward density
-                                    MediumInteraction intr = new MediumInteraction(p, -ray.d, ray.time, rayMedium, mp.phase);
-                                    path[vIdx] = Vertex.CreateMedium(intr, st.beta, pdfFwd, path[vIdx - 1]);
-                                    path[vIdx].stack = stack;
-                                    path[vIdx].pbeta = st.pa;
-                                    path[vIdx].plight = st.pl;
-                                    if (++bounces >= maxDepth)
-                                    {
-                                        terminated = true;
-                                        return false;
-                                    }
-
-                                    // Sample direction and compute reverse density at preceding vertex
-                                    pstd.optional<BSDFSample> ps = path[vIdx].bsdf.Sample_f(-ray.d, 0.0f, sampler.Get2D());
-                                    if (!ps || ps.value().pdf == 0)
-                                    {
-                                        terminated = true;
-                                        return false;
-                                    }
-                                    // Update path state and previous path vertex after medium scattering
-                                    pdfFwd = ps.value().pdf;
-                                    st.ScatterPhase(mp.phase, -ray.d, ps.value());
-                                    ray = intr.SpawnRay(ps.value().wi);
-                                    anyNonSpecularBounces = true;
-                                    path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.value().pdf, path[vIdx - 1]);
-
-                                    scattered = true;
-                                    return false;
-                                }
-                                else
-                                {
-                                    // Handle null scattering for _RandomWalk()_ ray
-                                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                    return st.NullCollision(T_maj, sigma_n);
-                                }
-                            });
-                        // Update _beta_ for medium transmittance
-                        if (!scattered)
-                        {
-                            st.EndSegment(Tmaj);
-                        }
-                    }
-
-                    if (terminated)
-                        return bounces;
-                    if (scattered)
-                        continue;
-                    // Handle escaped rays after no medium scattering event
-                    if (!si)
-                    {
-                        // Capture escaped rays when tracing from the camera
-                        if (mode == TransportMode.Radiance)
-                        {
-                            path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ray)), st.beta, pdfFwd);
-                            path[vIdx].pbeta = st.pa;
-                            ++bounces;
-                        }
-
-                        break;
-                    }
-
-                    // Handle surface interaction for path generation
-                    SurfaceInteraction isect = si.value().intr;
-                    // Get BSDF and skip over medium boundaries
-                    BSDF bsdf = isect.GetBSDF(ray, ref lambda, camera, scratchBuffer, sampler);
-                    if (!bsdf)
-                    {
-                        if (polarised && PolarisedPathIntegrator.PassedCoat(isect, -ray.d, mode, out PAttenuation Ac))
-                            st.Apply(Ac);
-                        isect.SkipIntersection(ref ray, si.value().tHit);
-                        MediumTracking.CrossSurface(ref stack, isect, ray.d);
-                        continue;
-                    }
-
-                    // Possibly regularize the BSDF
-                    if (regularize && anyNonSpecularBounces)
-                    {
-                        ++PathIntegrator.regularizedBSDFs;
-                        bsdf.Regularize();
-                    }
-
-                    ++PathIntegrator.totalBSDFs;
-                    // Initialize _vertex_ with surface intersection information
-                    path[vIdx] = Vertex.CreateSurface(isect, bsdf, st.beta, pdfFwd, path[vIdx - 1]);
-                    path[vIdx].stack = stack;
-                    path[vIdx].pbeta = st.pa;
-                    path[vIdx].plight = st.pl;
-
-                    if (++bounces >= maxDepth)
-                        break;
-                    // Sample BSDF at current vertex
-                    Vector3f wo = isect.wo;
-                    Float uc = sampler.Get1D();
-                    pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, uc, sampler.Get2D(), mode, BxDFReflTransFlags.All);
-                    if (!bs)
-                        break;
-                    pdfFwd = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi, mode, BxDFReflTransFlags.All) : bs.value().pdf;
-                    anyNonSpecularBounces |= !bs.value().IsSpecular();
-                    st.ScatterSurface(bsdf, isect, wo, bs.value(), mode);
-                    ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
-                    MediumTracking.CrossSurface(ref stack, isect, ray.d);
-
-                    // Compute path probabilities at surface vertex
-                    Float pdfRev = bsdf.PDF(bs.value().wi, wo, !mode, BxDFReflTransFlags.All);
-                    if (bs.value().IsSpecular())
-                    {
-                        path[vIdx].delta = true;
-                        pdfRev = pdfFwd = 0;
-                    }
-                    path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1]);
-                }
-                return bounces;
+                PathWalk.Run(ctx, hook);
+                return hook.bounces;
             }
             finally
             {
-                lambdaRef = lambda;
+                lambdaRef = ctx.lambda;
+            }
+        }
+
+        // The vertices of a bdpt subpath, with their forward and reverse densities
+        sealed class BDPTWalkHook : PathWalkHook
+        {
+            public BDPTWalkHook(Vertex[] path, int off, int maxDepth, Float pdfFwd, bool regularize)
+            {
+                this.path = path;
+                this.off = off;
+                this.maxDepth = maxDepth;
+                this.pdfFwd = pdfFwd;
+                this.regularize = regularize;
+            }
+
+            public int bounces = 0;
+            Vertex[] path;
+            int off, maxDepth, vIdx;
+            Float pdfFwd;
+            bool regularize;
+            bool anyNonSpecularBounces = false;
+
+            public override bool BeginIteration(WalkContext ctx)
+            {
+                // Attempt to create the next subpath vertex in _path_
+                if (!ctx.st.beta)
+                    return false;
+                // (not in pbrt-v4) Possibly terminate the subpath with Russian roulette. The vertices keep their densities:
+                // the roulette changes the estimate and not the density that the MIS weights are made for.
+                if (ctx.integrator.russianRoulette && bounces > 1 && ctx.st.beta.MaxComponentValue() < 1)
+                {
+                    Float q = std.max<Float>(0, 1 - ctx.st.beta.MaxComponentValue());
+                    if (ctx.sampler.Get1D() < q)
+                        return false;
+                    ctx.st.SurviveRoulette(q);
+                }
+                vIdx = off + bounces;
+                return true;
+            }
+
+            public override bool BeginCollision(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
+                                                SampledSpectrum sigma_maj, SampledSpectrum T_maj)
+            {
+                return true;
+            }
+
+            public override bool BeginScatter(WalkContext ctx)
+            {
+                return true;
+            }
+
+            public override bool OnScatterVertex(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
+                                                 out MediumInteraction intr, out BSDF phaseBsdf)
+            {
+                // Record medium interaction in _path_ and compute forward density
+                intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, medium, mp.phase);
+                path[vIdx] = Vertex.CreateMedium(intr, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                path[vIdx].stack = ctx.stack;
+                path[vIdx].pbeta = ctx.st.pa;
+                path[vIdx].plight = ctx.st.pl;
+                phaseBsdf = path[vIdx].bsdf;
+                return ++bounces < maxDepth;
+            }
+
+            public override void OnPhaseSampled(WalkContext ctx, MediumInteraction intr, Point3f p, BSDFSample ps)
+            {
+                // Update path state and previous path vertex after medium scattering
+                pdfFwd = ps.pdf;
+                ctx.ray = intr.SpawnRay(ps.wi);
+                anyNonSpecularBounces = true;
+                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.pdf, path[vIdx - 1]);
+            }
+
+            public override bool EndAfterMedium(WalkContext ctx, bool terminated)
+            {
+                return terminated;
+            }
+
+            public override void OnEscape(WalkContext ctx)
+            {
+                // Capture escaped rays when tracing from the camera
+                if (ctx.mode == TransportMode.Radiance)
+                {
+                    path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ctx.ray)), ctx.st.beta, pdfFwd);
+                    path[vIdx].pbeta = ctx.st.pa;
+                    ++bounces;
+                }
+            }
+
+            public override void OnSurfaceHit(WalkContext ctx, SurfaceInteraction isect)
+            {
+            }
+
+            public override bool OnBSDF(WalkContext ctx, ShapeIntersection si, SurfaceInteraction isect, BSDF bsdf)
+            {
+                // Possibly regularize the BSDF
+                if (regularize && anyNonSpecularBounces)
+                {
+                    ++PathIntegrator.regularizedBSDFs;
+                    bsdf.Regularize();
+                }
+
+                ++PathIntegrator.totalBSDFs;
+                // Initialize _vertex_ with surface intersection information
+                path[vIdx] = Vertex.CreateSurface(isect, bsdf, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                path[vIdx].stack = ctx.stack;
+                path[vIdx].pbeta = ctx.st.pa;
+                path[vIdx].plight = ctx.st.pl;
+                return ++bounces < maxDepth;
+            }
+
+            public override bool OnSurfaceScattered(WalkContext ctx, ShapeIntersection si, SurfaceInteraction isect, BSDF bsdf,
+                                                    BSDFSample bs)
+            {
+                Vector3f wo = isect.wo;
+                pdfFwd = bs.pdfIsProportional ? bsdf.PDF(wo, bs.wi, ctx.mode, BxDFReflTransFlags.All) : bs.pdf;
+                anyNonSpecularBounces |= !bs.IsSpecular();
+                // Compute path probabilities at surface vertex
+                Float pdfRev = bsdf.PDF(bs.wi, wo, !ctx.mode, BxDFReflTransFlags.All);
+                if (bs.IsSpecular())
+                {
+                    path[vIdx].delta = true;
+                    pdfRev = pdfFwd = 0;
+                }
+                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1]);
+                return true;
             }
         }
 
