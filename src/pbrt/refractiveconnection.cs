@@ -45,6 +45,10 @@ namespace pbrt
         // The area on the plane perpendicular to the end direction that a unit of solid angle of start directions covers at the
         // end: dA / d(omega) (s^2 for a straight path). It converts a density on the target into one on the start direction.
         public Float areaJacobian;
+        // The derivative of the end position with respect to w at the solution, and |w| there: how a change of the start direction
+        // moves the end (SolveMultiple compares solutions with it)
+        public SquareMatrix3 derivative;
+        public Float directionScale;
         // Set by SolveMultiple when the number of searches reached maxTrials (the count is then a lower bound)
         public bool truncated;
     }
@@ -169,6 +173,8 @@ namespace pbrt
                     path.length = length;
                     path.distance = pbrt.Length(error);
                     path.areaJacobian = AreaJacobian(derivative, w, path.endDirection);
+                    path.derivative = derivative;
+                    path.directionScale = pbrt.Length(w);
                     return true;
                 }
                 if (iteration >= options.maxIterations)
@@ -257,9 +263,6 @@ namespace pbrt
         {
             path = new RefractiveConnectionPath();
             count = 0;
-            Vector3f straight = target - start;
-            Float distance = pbrt.Length(straight);
-            Float sameDirection = Math.Max(4 * options.tolerance / Math.Max(distance, 1e-6f), 1e-5f);
             for (int trial = 0; trial < options.maxTrials; ++trial)
             {
                 Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
@@ -274,7 +277,10 @@ namespace pbrt
                     count = 1;
                     continue;
                 }
-                if (ok && pbrt.Length(found.startDirection - path.startDirection) < sameDirection)
+                // The same path: the change of the start direction moves the end by no more than the two solutions can differ
+                // by (each is within the tolerance of the target), to first order
+                if (ok && pbrt.Length(path.derivative * (path.directionScale * (found.startDirection - path.startDirection))) <
+                              4 * options.tolerance)
                 {
                     return true;
                 }

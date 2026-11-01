@@ -134,5 +134,46 @@ namespace pbrt
             EXPECT_GT(found, trials / 4);
             EXPECT_LT(found, 3 * trials / 4);
         }
+
+        // The area Jacobian of a connection is that of the integrator: the end positions of paths whose start directions differ by a
+        // small angle span a parallelogram whose area, perpendicular to the end direction, is dA / d(omega). In a constant index it
+        // is the squared distance.
+        [TEST("RefractiveConnection", "AreaJacobianMatchesFiniteDifferences")]
+        public static void RefractiveConnection_AreaJacobianMatchesFiniteDifferences()
+        {
+            LinearRefractiveIndexField constant = new LinearRefractiveIndexField(1.3f, new Vector3f(0, 0, 0));
+            Point3f start = new Point3f(0.2f, -0.4f, 0.1f);
+            Point3f target = new Point3f(1.5f, 0.9f, 2.0f);
+            RefractiveConnectionOptions options = Options(0.5f);
+            EXPECT_TRUE(RefractiveConnection.Solve(constant, start, target, new Vector3f(0.3f, 0.2f, 1.0f), options, out RefractiveConnectionPath straight));
+            // Measured: 1e-6
+            EXPECT_NEAR(pbrt.LengthSquared(target - start), straight.areaJacobian, 1e-5f);
+
+            LuneburgRefractiveIndexField lens = new LuneburgRefractiveIndexField(new Point3f(0, 0, 0), 1.5f, 2.0f);
+            Point3f x = new Point3f(-0.3f, 0.1f, 0.2f);
+            Point3f[] targets = new Point3f[] { new Point3f(3.0f, 0.4f, -0.2f), new Point3f(2.5f, -1.0f, 1.2f) };
+            for (int t = 0; t < targets.Length; ++t)
+            {
+                RefractiveConnectionOptions lensOptions = Options(0.03f);
+                EXPECT_TRUE(RefractiveConnection.Solve(lens, x, targets[t], targets[t] - x, lensOptions, out RefractiveConnectionPath path));
+                Vector3f axis = Math.Abs(path.startDirection.x) < 0.6f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
+                Vector3f e1 = pbrt.Normalize(pbrt.Cross(path.startDirection, axis));
+                Vector3f e2 = pbrt.Cross(path.startDirection, e1);
+                Float delta = 0.002f;
+                Vector3f[] columns = new Vector3f[2];
+                Vector3f[] axes = new Vector3f[] { e1, e2 };
+                for (int k = 0; k < 2; ++k)
+                {
+                    SymplecticRay plus = new SymplecticRay(lens, x, path.startDirection + delta * axes[k]);
+                    SymplecticRay minus = new SymplecticRay(lens, x, path.startDirection - delta * axes[k]);
+                    plus.Advance(lens, path.length, 0.03f);
+                    minus.Advance(lens, path.length, 0.03f);
+                    columns[k] = (1 / (2 * delta)) * (plus.p - minus.p);
+                }
+                Float expected = Math.Abs(pbrt.Dot(pbrt.Cross(columns[0], columns[1]), path.endDirection));
+                // The finite difference differs by 4e-4 at most (8.69 and 8.33 against 11.1 and 10.0 for the straight line)
+                EXPECT_NEAR(expected, path.areaJacobian, 2e-3f);
+            }
+        }
     }
 }

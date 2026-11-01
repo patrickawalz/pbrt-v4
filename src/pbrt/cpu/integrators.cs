@@ -179,6 +179,14 @@ namespace pbrt
 
                 // Update transmittance for current ray segment
                 Medium lightMedium = MediumTracking.Current(stack);
+                // (not in pbrt-v4) A straight ray through a refractive medium is not a light path: the connection is blocked (volpath
+                // connects from inside such a medium with a curved path instead, see RefractiveMedium.ConnectToPoint)
+                if (lightMedium is RefractiveMedium)
+                {
+                    r_l = rl;
+                    r_u = ru;
+                    return new SampledSpectrum(0.0f);
+                }
                 if (lightMedium != null)
                 {
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
@@ -911,6 +919,7 @@ namespace pbrt
                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("lightpath");
+            MediumTracking.RequireNoRefractive("lightpath");
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
                           "\"lightpath\" integrator.");
@@ -3192,6 +3201,7 @@ namespace pbrt
                                             Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("bdpt");
+            MediumTracking.RequireNoRefractive("bdpt");
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
                           "\"bdpt\" integrator.");
@@ -4520,9 +4530,12 @@ namespace pbrt
                                  Float analyserAngle = 0,
                                  PolarisedPathIntegrator.Measurement measurement = PolarisedPathIntegrator.Measurement.Intensity,
                                  bool equiangular = false, int equiangularSamples = 1, int equiangularMultipleDepth = int.MaxValue,
-                                 bool uniformDistance = false)
+                                 bool uniformDistance = false, bool refractiveNee = true)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
+            // (not in pbrt-v4) From a scattering point inside a refractive medium, the light is found by next event estimation
+            // along a curved path (true), or only by the sampled direction (false); each is a complete estimator of that light
+            this.refractiveNee = refractiveNee;
             // (not in pbrt-v4) Several equiangular samples per segment for the first scatterings (Fong et al., 4.1)
             this.equiangularSamples = Math.Max(1, equiangularSamples);
             this.equiangularMultipleDepth = equiangularMultipleDepth;
@@ -4640,6 +4653,11 @@ namespace pbrt
             // the emission to it, which is looked up when the emission is first found along the ray
             Float fneeScatterPdf = 0, fneeRatio = -1;
             Point3f fneeOrigin = default;
+            // (not in pbrt-v4) The path since the last vertex was curved (a refractive medium), and the vertex was in a refractive
+            // medium. A curved path is found by the walk only, except from inside a refractive medium, where next event estimation
+            // finds the area lights along curved paths: such a light is then reached by that strategy only (the sampled
+            // direction's contribution would count the same paths twice), and every other light by the walk only.
+            bool curvedSegment = false, vertexInRefractive = false, scatterInRefractive = false;
 
             public override bool BeginIteration(WalkContext ctx)
             {
@@ -4692,6 +4710,13 @@ namespace pbrt
                 {
                     L += vp.SampleSegmentPoint(ctx, medium, seg, true);
                 }
+            }
+
+            public override void OnCurvedSegment(WalkContext ctx)
+            {
+                if (polarised)
+                    ErrorExit("Polarised volpath does not support refractive media yet (docs/refractive-media.md, stage 7).");
+                curvedSegment = true;
             }
 
             public override bool BeginCollision(WalkContext ctx, Medium rayMedium, Point3f p, MediumProperties mp,
@@ -4772,6 +4797,9 @@ namespace pbrt
                     return false;
                 }
                 // Sample direct lighting at volume-scattering event
+                scatterInRefractive = rayMedium is RefractiveMedium;
+                if (scatterInRefractive && polarised)
+                    ErrorExit("Polarised volpath does not support refractive media yet (docs/refractive-media.md, stage 7).");
                 intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, rayMedium, mp.phase);
                 if (polarised)
                 {
@@ -4816,6 +4844,8 @@ namespace pbrt
                 scatterRl0 = ctx.st.r_l;
                 scatterPdf = ps.pdf;
                 prevIntrContext = new LightSampleContext(intr);
+                curvedSegment = false;
+                vertexInRefractive = scatterInRefractive;
                 fneeScatterPdf = ps.pdf;
                 fneeRatio = -1;
                 fneeOrigin = p;
@@ -4839,7 +4869,7 @@ namespace pbrt
                     SampledSpectrum Le = light.Le(new Ray(ctx.ray), ctx.lambda);
                     if ((bool)Le)
                     {
-                        if (depth == 0 || specularBounce)
+                        if (depth == 0 || specularBounce || curvedSegment)
                         {
                             L += ctx.st.beta * Le / ctx.st.r_u.Average();
                             if (polarised)
@@ -4874,7 +4904,11 @@ namespace pbrt
                 if ((bool)LeSurf)
                 {
                     // Add contribution of emission from intersected surface
-                    if (depth == 0 || specularBounce)
+                    if (curvedSegment && vertexInRefractive && vp.refractiveNee && depth > 0 && !specularBounce)
+                    {
+                        // Found by next event estimation along a curved path from the vertex (SampleLdRefractive)
+                    }
+                    else if (depth == 0 || specularBounce || curvedSegment)
                     {
                         L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
                         if (polarised)
@@ -4956,6 +4990,8 @@ namespace pbrt
                 // Terminate path if maximum depth reached
                 if (depth++ >= maxDepth)
                     return false;
+                if (MediumTracking.Current(ctx.stack) is RefractiveMedium)
+                    ErrorExit("A surface inside a refractive medium is not supported (docs/refractive-media.md).");
 
                 ++surfaceInteractions;
                 // Possibly regularize the BSDF
@@ -4985,6 +5021,8 @@ namespace pbrt
                                                     BSDFSample bs)
             {
                 Vector3f wo = isect.wo;
+                curvedSegment = false;
+                vertexInRefractive = false;
                 // Update rescaled path probabilities for BSDF scattering
                 if (bs.pdfIsProportional)
                     ctx.st.r_l = ctx.st.r_u / bsdf.PDF(wo, bs.wi);
@@ -5439,6 +5477,13 @@ namespace pbrt
             Light light = sampledLight.value().light;
             DCHECK(light != null && sampledLight.value().p != 0);
 
+            // (not in pbrt-v4) From inside a refractive medium the connection to the light is a curved path
+            if (!bsdf.HasValue && MediumTracking.Current(stack) is RefractiveMedium refractiveMedium)
+            {
+                return SampleLdRefractive(intr, light, sampledLight.value().p, ctx, uLight, lambda, beta, r_p, stack,
+                                          refractiveMedium, out wiLight);
+            }
+
             // Sample a point on the light source
             // (not in pbrt-v4) The emission of a medium is sampled as a light inside the volume
             pstd.optional<LightLiSample> ls;
@@ -5542,6 +5587,102 @@ namespace pbrt
                 return beta * f_hat * T_ray * ls.value().L / (r_l + r_u + r_equiangular).Average();
         }
 
+        // (not in pbrt-v4) Next event estimation from a scattering point inside a refractive medium (docs/refractive-media.md,
+        // Pediredla et al. section 5): the path to the point sampled on an area light is found by the connection solver, with
+        // the number of searches that find it as the estimate of one over its probability, and the density of the point
+        // becomes one on the direction at the vertex through the Jacobian of the end of the path. Only this strategy finds area
+        // lights from such a vertex (the hook gives their emission seen by the sampled direction no weight), and the walk alone
+        // finds the infinite lights, so the estimate is not divided by a sum of strategies.
+        SampledSpectrum SampleLdRefractive(Interaction intr, Light light, Float pmf, LightSampleContext ctx, Point2f uLight,
+                                           SampledWavelengths lambda, SampledSpectrum beta, SampledSpectrum r_p,
+                                           BoundaryStack stack, RefractiveMedium medium, out Vector3f wiLight)
+        {
+            wiLight = default;
+            SampledSpectrum zero = new SampledSpectrum(0.0f);
+            if (!refractiveNee || light is VolumeEmissionLight || light.Type() == LightType.Infinite)
+                return zero;
+            if (IsDeltaLight(light.Type()))
+                ErrorExit("Delta lights are not supported with the next event estimation from inside a refractive medium " +
+                          "(docs/refractive-media.md): use area lights.");
+            pstd.optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
+            if (!ls || !ls.value().L || ls.value().pdf == 0)
+                return zero;
+            Point3f x = intr.p();
+            Point3f y = ls.value().pLight.p();
+            if (medium.Contains(y))
+                ErrorExit("A light inside a refractive medium is not supported (docs/refractive-media.md).");
+            Float distance2 = DistanceSquared(x, y);
+            Float cosineStraight = AbsDot(ls.value().pLight.n, ls.value().wi);
+            if (cosineStraight == 0 || distance2 == 0)
+                return zero;
+            // The density of the point on the light, per area
+            Float pdfArea = ls.value().pdf * cosineStraight / distance2;
+
+            RNG rng = new RNG(Hash(x), Hash(y));
+            RefractiveConnectionOptions options = medium.ConnectionOptions(Distance(x, y));
+            if (!medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out int count))
+                return zero;
+            Float cosineEnd = AbsDot(ls.value().pLight.n, path.endDirection);
+            if (cosineEnd == 0 || path.areaJacobian == 0)
+                return zero;
+            Vector3f wo = intr.wo, wi = path.startDirection;
+            wiLight = wi;
+            BSDF phaseBSDF = intr.AsMedium().GetBSDF();
+            SampledSpectrum f_hat = phaseBSDF.f(wo, wi);
+            if (!f_hat)
+                return zero;
+            // The emission toward the vertex, along the end of the path
+            SampledSpectrum Le = light.L(y, ls.value().pLight.n, ls.value().pLight.uv, -path.endDirection, lambda);
+            if (!Le)
+                return zero;
+
+            // The transmittance of the curved part, by the tracking of the medium along the arc length
+            SampledSpectrum T_ray = new SampledSpectrum(1.0f), rl = new SampledSpectrum(1.0f), ru = new SampledSpectrum(1.0f);
+            Float uT = rng.Uniform<Float>();
+            SampledSpectrum T_maj = medium.SampleT_majCurved(x, wi, path.length, uT, ref rng, lambda,
+                (Point3f p, Vector3f tangent, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                    medium.volumeIntegrator.transmittance.Step(ref T_ray, ref rl, ref ru, T_maj_, sigma_maj, sigma_n, ref rng);
+                    return (bool)T_ray;
+                }, out Point3f exitPoint, out Vector3f exitDirection, out Float exitLength);
+            medium.volumeIntegrator.transmittance.Finish(ref T_ray, ref rl, ref ru, T_maj);
+            if (!T_ray)
+                return zero;
+
+            // The straight part from the boundary to the light: found from the surface that bounds the medium, which the shadow ray
+            // crosses first
+            Float diagonal = Length(medium.Bounds().pMax - medium.Bounds().pMin);
+            Interaction boundaryIntr = intr;
+            Ray lightRay;
+            if (exitLength < 1e-4f * diagonal)
+            {
+                // Within a few rounding errors of the vertex: no surface to find from a distance, the medium is left here
+                stack.Pop(new BoundaryStackElement(null, medium), MediumTracking.interfacePriority);
+                lightRay = new Ray(exitPoint, ls.value().pLight.p() - exitPoint);
+            }
+            else
+            {
+                Float back = Math.Min(1e-3f * diagonal, 0.5f * exitLength);
+                pstd.optional<ShapeIntersection> boundary = Intersect(new Ray(exitPoint - back * exitDirection, exitDirection), 4 * back);
+                if (!boundary)
+                    return zero;
+                boundaryIntr = boundary.value().intr;
+                lightRay = boundaryIntr.SpawnRayTo(ls.value().pLight);
+            }
+            SampledSpectrum T_out = ShadowRay(lightRay, boundaryIntr, ls.value().pLight, ref stack, lambda, rng, true,
+                                              out SampledSpectrum ruOut, out SampledSpectrum rlOut);
+            if (!T_out)
+                return zero;
+            T_ray *= T_out;
+            rl *= rlOut;
+
+            // The density of the sample per direction at the vertex, and the count in place of the probability of the path
+            Float p_l = pmf * pdfArea * path.areaJacobian / cosineEnd / count;
+            rl *= r_p * p_l;
+            return beta * f_hat * T_ray * Le / rl.Average();
+        }
+
         public override string ToString()
         {
             return StringPrintf(
@@ -5565,7 +5706,7 @@ namespace pbrt
             return new VolPathIntegrator(maxDepth, camera, sampler, aggregate,
                                          lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement,
                                          equiangular, equiangularSamples, equiangularMultipleDepth,
-                                         parameters.GetOneBool("uniformdistance", false));
+                                         parameters.GetOneBool("uniformdistance", false), parameters.GetOneBool("refractivenee", true));
         }
 
         // VolPathIntegrator Private Members
@@ -5580,6 +5721,7 @@ namespace pbrt
         Float analyserAngle;
         PolarisedPathIntegrator.Measurement measurement;
         Vector3f cameraUp;
+        bool refractiveNee;
     }
 
 }  // namespace pbrt

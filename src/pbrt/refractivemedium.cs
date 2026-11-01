@@ -8,6 +8,7 @@
 // collision with the medium properties there, as in SampleT_maj, and the integrator does delta or ratio tracking with them.
 
 using System;
+using System.Collections.Generic;
 
 namespace pbrt
 {
@@ -22,13 +23,24 @@ namespace pbrt
         // start, independently of where the collisions fall.
         public RefractiveMedium(Medium inner, RefractiveIndexField field, Bounds3f bounds,
                                 Func<SampledWavelengths, SampledSpectrum> majorant, Float stepSize)
+            : this(inner, field, bounds, majorant, stepSize, null)
+        {
+        }
+
+        // contains tells whether a point is in the region of the medium, which has to be what the boundary shape of the scene
+        // encloses (bounds is its bounding box); without it the region is the box
+        public RefractiveMedium(Medium inner, RefractiveIndexField field, Bounds3f bounds,
+                                Func<SampledWavelengths, SampledSpectrum> majorant, Float stepSize,
+                                Func<Point3f, bool> contains)
         {
             this.inner = inner;
             this.field = field;
             this.bounds = bounds;
             this.majorant = majorant;
             this.stepSize = stepSize;
-            this.boundedField = new BoundedRefractiveIndexField(field, bounds, 1.0f);
+            this.contains = contains ?? InBox;
+            MediumTracking.hasRefractive = true;
+            this.boundedField = new BoundedRefractiveIndexField(field, this.contains, 1.0f);
             volumeIntegrator = inner.volumeIntegrator;
         }
 
@@ -70,6 +82,11 @@ namespace pbrt
 
         public bool Contains(Point3f p)
         {
+            return contains(p);
+        }
+
+        bool InBox(Point3f p)
+        {
             return p.x >= bounds.pMin.x && p.x <= bounds.pMax.x && p.y >= bounds.pMin.y && p.y <= bounds.pMax.y &&
                    p.z >= bounds.pMin.z && p.z <= bounds.pMax.z;
         }
@@ -104,7 +121,9 @@ namespace pbrt
             endPoint = p;
             endDirection = ray.Direction();
             endLength = 0;
-            if (!Contains(p) || maxLength <= 0)
+            // A path that enters at an edge of the region can start a rounding error outside it: a point a little ahead decides
+            Float nudge = 1e-4f * pbrt.Length(bounds.pMax - bounds.pMin);
+            if (!(Contains(p) || Contains(p + nudge * ray.Direction())) || maxLength <= 0)
             {
                 return new SampledSpectrum(1f);
             }
@@ -162,6 +181,18 @@ namespace pbrt
             }
         }
 
+        // The options of a connection over the given distance: the tolerance and the longest path scale with the medium
+        public RefractiveConnectionOptions ConnectionOptions(Float distance)
+        {
+            Float size = pbrt.Length(bounds.pMax - bounds.pMin);
+            RefractiveConnectionOptions options = new RefractiveConnectionOptions();
+            options.stepSize = stepSize;
+            options.tolerance = 5e-4f * size;
+            options.maxLength = 4 * (size + distance);
+            options.maxTrials = 200;
+            return options;
+        }
+
         // A path from p to a target anywhere (inside the medium, or outside it where the index is 1), by one search of algorithm 3
         // from a random direction: the count is that of the algorithm, whose expectation over finding a path is one per path.
         public bool ConnectToPoint(Point3f start, Point3f target, RefractiveConnectionOptions options, ref RNG rng,
@@ -185,12 +216,73 @@ namespace pbrt
             return RefractiveConnection.Solve(field, start, target, initialDirection, local, out path);
         }
 
+        // "refractive": the coefficients of a homogeneous medium ("sigma_a", "sigma_s", "scale", "g", "preset"), a "string field"
+        // that is "luneburg" ("point3 center", "float radius", "float exponent") or "grid" ("integer nx", "ny", "nz", "float
+        // index", "point3 p0", "p1"), and "float stepsize". The region of the medium is the sphere or the box, and has to be what
+        // the boundary shape of the scene encloses. The index must be 1 on the boundary of the region. renderFromMedium may
+        // translate and scale uniformly (a rotation is not supported).
+        public static RefractiveMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
+                                              Allocator alloc)
+        {
+            Medium inner = HomogeneousMedium.Create(parameters, loc, alloc);
+            Point3f origin = renderFromMedium.Apply(new Point3f(0, 0, 0));
+            Vector3f ex = renderFromMedium.Apply(new Point3f(1, 0, 0)) - origin;
+            Vector3f ey = renderFromMedium.Apply(new Point3f(0, 1, 0)) - origin;
+            Vector3f ez = renderFromMedium.Apply(new Point3f(0, 0, 1)) - origin;
+            Float scale = pbrt.Length(ex);
+            if (Math.Abs(pbrt.Length(ey) - scale) > 1e-4f * scale || Math.Abs(pbrt.Length(ez) - scale) > 1e-4f * scale ||
+                Math.Abs(pbrt.Dot(ex, ey)) > 1e-4f * scale * scale || Math.Abs(pbrt.Dot(ex, ez)) > 1e-4f * scale * scale ||
+                Math.Abs(ex.y) > 1e-4f * scale || Math.Abs(ex.z) > 1e-4f * scale || Math.Abs(ey.x) > 1e-4f * scale ||
+                Math.Abs(ey.z) > 1e-4f * scale || Math.Abs(ez.x) > 1e-4f * scale || Math.Abs(ez.y) > 1e-4f * scale)
+            {
+                pbrt.ErrorExit(loc, "A refractive medium supports a translation and a uniform scale as its transformation.");
+            }
+            Float stepSize = parameters.GetOneFloat("stepsize", 0.05f) * scale;
+            string fieldName = parameters.GetOneString("field", "luneburg");
+            RefractiveIndexField field;
+            Bounds3f bounds;
+            Func<Point3f, bool> contains = null;
+            if (fieldName == "luneburg")
+            {
+                Point3f center = renderFromMedium.Apply(parameters.GetOnePoint3f("center", new Point3f(0, 0, 0)));
+                Float radius = parameters.GetOneFloat("radius", 1.0f) * scale;
+                field = new LuneburgRefractiveIndexField(center, radius, parameters.GetOneFloat("exponent", 2.0f));
+                bounds = new Bounds3f(center - new Vector3f(radius, radius, radius), center + new Vector3f(radius, radius, radius));
+                Float radius2 = radius * radius;
+                contains = (Point3f q) => pbrt.LengthSquared(q - center) <= radius2;
+            }
+            else if (fieldName == "grid")
+            {
+                int nx = parameters.GetOneInt("nx", 1), ny = parameters.GetOneInt("ny", 1), nz = parameters.GetOneInt("nz", 1);
+                List<Float> index = parameters.GetFloatArray("index");
+                if (index.Count != nx * ny * nz)
+                    pbrt.ErrorExit(loc, "A refractive medium needs nx * ny * nz values of \"index\".");
+                Point3f p0 = renderFromMedium.Apply(parameters.GetOnePoint3f("p0", new Point3f(0, 0, 0)));
+                Point3f p1 = renderFromMedium.Apply(parameters.GetOnePoint3f("p1", new Point3f(1, 1, 1)));
+                bounds = new Bounds3f(p0, p1);
+                field = new GridRefractiveIndexField(bounds, nx, ny, nz, index.ToArray());
+            }
+            else
+            {
+                pbrt.ErrorExit(loc, "The refractive index field \"" + fieldName + "\" is unknown.");
+                return null;
+            }
+            // The majorant is the extinction of the homogeneous medium for the wavelengths asked for
+            return new RefractiveMedium(inner, field, bounds,
+                                        (SampledWavelengths l) =>
+                                        {
+                                            MediumProperties mp = inner.SamplePoint(origin, l);
+                                            return mp.sigma_a + mp.sigma_s;
+                                        }, stepSize, contains);
+        }
+
         // RefractiveMedium Private Members
         private Medium inner;
         private RefractiveIndexField field;
         private Bounds3f bounds;
         private Func<SampledWavelengths, SampledSpectrum> majorant;
         private Float stepSize;
+        private Func<Point3f, bool> contains;
         private RefractiveIndexField boundedField;
     }
 

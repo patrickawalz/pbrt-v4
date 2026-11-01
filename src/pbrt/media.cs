@@ -1427,6 +1427,10 @@ namespace pbrt
             {
                 m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
+            else if (name == "refractive")
+            {
+                m = RefractiveMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
             else
                 ErrorExit(loc, $"{name}: medium unknown.");
 

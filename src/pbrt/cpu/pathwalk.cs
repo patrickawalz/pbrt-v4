@@ -38,6 +38,12 @@ namespace pbrt
         {
         }
 
+        // The walk followed a curved path through a refractive medium (RefractiveMedium) since the last vertex: the segment is
+        // not a straight line, so a connection to its far end does not find it
+        public virtual void OnCurvedSegment(WalkContext ctx)
+        {
+        }
+
         // A collision of the majorant, before its event is chosen; false ends the walk
         public abstract bool BeginCollision(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
                                             SampledSpectrum sigma_maj, SampledSpectrum T_maj);
@@ -83,16 +89,20 @@ namespace pbrt
                 }
                 bool scattered = false, terminated = false;
                 // Trace a ray and sample the medium, if any
-                pstd.optional<ShapeIntersection> si = ctx.integrator.Intersect(new Ray(ctx.ray));
                 Medium rayMedium = MediumTracking.Current(ctx.stack);
+                // (not in pbrt-v4) In a refractive medium the path is curved, and the scene is not intersected along a straight ray
+                RefractiveMedium refractive = rayMedium as RefractiveMedium;
+                pstd.optional<ShapeIntersection> si = refractive != null ? default : ctx.integrator.Intersect(new Ray(ctx.ray));
                 if (rayMedium != null)
                 {
                     Float tMax = si ? si.value().tHit : Infinity;
-                    hook.BeginSegment(ctx, rayMedium, tMax);
+                    if (refractive == null)
+                    {
+                        hook.BeginSegment(ctx, rayMedium, tMax);
+                    }
                     RNG rng = new RNG(Hash(ctx.ray.o, tMax), Hash(ctx.ray.d));
                     Float u = ctx.sampler.Get1D();
-                    SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(
-                        new Ray(ctx.ray), rayMedium, tMax, u, ref rng, ctx.lambda,
+                    Func<Point3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> collision =
                         (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
                         {
                             if (!hook.BeginCollision(ctx, rayMedium, p, mp, sigma_maj, T_maj_))
@@ -139,7 +149,48 @@ namespace pbrt
                                 SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
                                 return ctx.st.NullCollision(T_maj_, sigma_maj, sigma_n);
                             }
-                        });
+                        };
+                    SampledSpectrum T_maj;
+                    if (refractive == null)
+                    {
+                        T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(new Ray(ctx.ray), rayMedium, tMax, u, ref rng,
+                                                                              ctx.lambda, collision);
+                    }
+                    else
+                    {
+                        T_maj = refractive.SampleT_majCurved(ctx.ray.o, ctx.ray.d, Infinity, u, ref rng, ctx.lambda,
+                            (Point3f p, Vector3f tangent, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                            {
+                                // The collision sees the ray as the tangent of the path there
+                                ctx.ray.o = p;
+                                ctx.ray.d = tangent;
+                                return collision(p, mp, sigma_maj, T_maj_);
+                            }, out Point3f endPoint, out Vector3f endDirection, out Float endLength);
+                        // The path left the region. The bounding surface is found by a ray that ends at the end of the path, from
+                        // a little before it (the path is straight to the accuracy of the step over that distance), and crossing it
+                        // pops the medium. A path that ends within a few rounding errors of its start (it entered at an edge) has
+                        // no distance to start from: the medium is popped here, and the surface that is then found, if any, no longer
+                        // leaves a medium that is not on the stack.
+                        Float diagonal = Length(refractive.Bounds().pMax - refractive.Bounds().pMin);
+                        if (!scattered && !terminated)
+                        {
+                            if (endLength < 1e-4f * diagonal)
+                            {
+                                ctx.stack.Pop(new BoundaryStackElement(null, refractive), MediumTracking.interfacePriority);
+                                ctx.ray.o = endLength == 0 ? ctx.ray.o : endPoint;
+                                ctx.ray.d = endLength == 0 ? ctx.ray.d : endDirection;
+                                si = ctx.integrator.Intersect(new Ray(ctx.ray));
+                            }
+                            else
+                            {
+                                Float back = Math.Min(1e-3f * diagonal, 0.5f * endLength);
+                                ctx.ray.o = endPoint - back * endDirection;
+                                ctx.ray.d = endDirection;
+                                si = ctx.integrator.Intersect(new Ray(ctx.ray));
+                            }
+                            hook.OnCurvedSegment(ctx);
+                        }
+                    }
                     if (hook.EndAfterMedium(ctx, terminated))
                     {
                         return;

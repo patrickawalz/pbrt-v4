@@ -31,7 +31,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 2 | `SymplecticRay` (algorithm 1) and `SymplecticRayJacobian` (algorithm 2, exact) | done (`refractiveray.cs`) |
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
-| 5 | Volpath: the walk, and next-event estimation through stage 3 | open |
+| 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
 | 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | open |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
@@ -79,3 +79,28 @@ s* term) and the projection on the end direction in J; the transverse part is al
 The n^2 factors of the radiance telescope along a path whose camera and light are outside the medium (basic radiance L / n^2
 is conserved along the curves and by scattering), so they are 1 for the paths here and matter only for endpoints or emission
 inside the medium, which are not supported.
+
+Stage 5, volpath (`pathwalk.cs`, `VolPathIntegrator`): the shared walk follows a curved path when the top of the boundary stack is a
+`RefractiveMedium` (scene: `MakeNamedMedium "x" "string type" "refractive"` with `"string field" "luneburg"` or `"grid"`, the coefficients
+of a homogeneous medium, `"float stepsize"`; the boundary shape of the medium must enclose exactly its region, have an
+`interface` material, and the index must be 1 on it). The collisions are sampled by `SampleT_majCurved`; at the exit the
+bounding surface is found by a short ray ending at the end of the path and crossing it pops the medium (a path shorter than 1e-4
+of the diagonal pops the medium directly). From a scattering point inside the medium the area lights are found by next event
+estimation along the curved path: `SampleLdRefractive` solves the connection, weights by `count * cos(end) / J / pdfArea` and
+takes the transmittance of the curved part (ratio tracking in arc length) times a straight shadow ray from the boundary. The
+two strategies are not combined by MIS: the curved NEE finds the area lights from such a vertex, the walk's own hit of an
+area light from there has no weight (nothing is added), and the infinite lights are found by the walk alone with weight 1
+(`refractivenee false` makes everything the walk's). A straight shadow ray through a refractive medium is blocked, and an
+emission found after a curved segment from a vertex outside is added with weight 1, because the straight connection that the
+light sampling would have used does not exist for it. bdpt, lightpath and the polarised volpath refuse refractive media
+(stages 6 and 7). Not supported: delta lights and lights inside the medium from a vertex inside the medium (error), surfaces
+inside the medium (error), a rotation in the transformation of the medium.
+
+What the tests show: the estimate of the single scattering radiance through a Luneburg lens in a sphere, next to a spherical
+light, is 1.7835e-3 +- 2.0e-5 by next event estimation and 1.7776e-3 +- 6.7e-6 by the direction of the phase function alone. An
+earlier configuration with a smaller light differed by 4 to 6 percent at about 2 sigma in two runs; larger statistics of the
+patch test (8 million direction samples) gave 0.002293 +- 0.000015 against 0.002257 +- 0.000015, so I take it as noise, but
+that comparison has not been repeated for the small light at the same statistics. The agreement test is not sensitive to the
+Jacobian and the count (dropping either changes the result by 2 to 5 percent here, the light covering a wide range of
+directions); those are checked locally: `areaJacobian` equals a finite difference to 4e-4 (8.69 against 11.1 for the straight
+line) and the count is checked in `SinglePathEstimateIsUnbiased`.

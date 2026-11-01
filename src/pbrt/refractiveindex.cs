@@ -334,27 +334,21 @@ namespace pbrt
         Vector3f slope;
     }
 
-    // BoundedRefractiveIndexField Definition: the field inside a box and a constant index outside it, the index of the
+    // BoundedRefractiveIndexField Definition: the field inside a region and a constant index outside it, the index of the
     // surroundings of a refractive medium. The medium does not model a refraction at its boundary, so the inner field has to
-    // be this index on the boundary of the box (a step in n would need Snell's law and the Fresnel equations there).
+    // be this index on the boundary of the region (a step in n would need Snell's law and the Fresnel equations there).
     public sealed class BoundedRefractiveIndexField : RefractiveIndexField
     {
-        public BoundedRefractiveIndexField(RefractiveIndexField inner, Bounds3f bounds, Float outside)
+        public BoundedRefractiveIndexField(RefractiveIndexField inner, Func<Point3f, bool> contains, Float outside)
         {
             this.inner = inner;
-            this.bounds = bounds;
+            this.contains = contains;
             this.outside = outside;
-        }
-
-        bool Contains(Point3f p)
-        {
-            return p.x >= bounds.pMin.x && p.x <= bounds.pMax.x && p.y >= bounds.pMin.y && p.y <= bounds.pMax.y &&
-                   p.z >= bounds.pMin.z && p.z <= bounds.pMax.z;
         }
 
         public override void ValueAndGradient(Point3f p, out Float value, out Vector3f gradient)
         {
-            if (Contains(p))
+            if (contains(p))
             {
                 inner.ValueAndGradient(p, out value, out gradient);
                 return;
@@ -366,7 +360,7 @@ namespace pbrt
         public override void ValueGradientAndHessian(Point3f p, out Float value, out Vector3f gradient,
                                                      out SquareMatrix3 hessian)
         {
-            if (Contains(p))
+            if (contains(p))
             {
                 inner.ValueGradientAndHessian(p, out value, out gradient, out hessian);
                 return;
@@ -377,7 +371,7 @@ namespace pbrt
         }
 
         RefractiveIndexField inner;
-        Bounds3f bounds;
+        Func<Point3f, bool> contains;
         Float outside;
     }
 
