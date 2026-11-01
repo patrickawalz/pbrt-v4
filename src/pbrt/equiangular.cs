@@ -23,6 +23,8 @@ namespace pbrt
         public Float t;
         public Float sigmaS0;
         public bool active;
+        // The number of equiangular samples of the segment (Fong 4.1): the density of the strategy is that many times as large
+        public int count = 1;
     }
 
     public static class EquiangularSampling

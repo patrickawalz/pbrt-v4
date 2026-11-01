@@ -29,6 +29,14 @@ namespace pbrt
         // it is on, and the maximum depth of the paths
         public bool bdptEquiangular = false;
         public int bdptMaxDepth = 0;
+        // (Fong et al., 4.1) The number of equiangular samples of a segment, for the scatterings before the given depth
+        public int bdptEquiangularSamples = 1;
+        public int bdptEquiangularMultipleDepth = int.MaxValue;
+
+        public int EquiangularCount(int depth)
+        {
+            return depth < bdptEquiangularMultipleDepth ? bdptEquiangularSamples : 1;
+        }
 
         public bool StrategyAllowed(int s, int t)
         {
@@ -2143,7 +2151,11 @@ namespace pbrt
                 if (equiangularSink == null || ctx.mode != TransportMode.Radiance || segmentPieces != 1 || !(bool)ctx.st.beta ||
                     vIdx > equiangularSink.maxDepth)
                     return;
-                equiangularSink.L += SampleEquiangularVertex(ctx, medium, tMax);
+                int count = ctx.integrator.EquiangularCount(vIdx);
+                for (int i = 0; i < count; ++i)
+                {
+                    equiangularSink.L += SampleEquiangularVertex(ctx, medium, tMax, count);
+                }
             }
 
             // (not in pbrt-v4) The contribution of the path that has a scattering point on the segment that the walk is about to sample,
@@ -2151,7 +2163,7 @@ namespace pbrt
             // (Fong et al., 4.2.2 and 4.2.3), and connected to the point. Its weight is that of volpath's SampleEquiangular
             // (the sum of the strategies that find the same path, relative to this one), with the strategies of bdpt next to those
             // of the walk: MISSum of the path with the scattering point as the last vertex of the camera subpath.
-            SampledSpectrum SampleEquiangularVertex(WalkContext ctx, Medium medium, Float tMax)
+            SampledSpectrum SampleEquiangularVertex(WalkContext ctx, Medium medium, Float tMax, int count)
             {
                 SampledSpectrum zero = new SampledSpectrum(0.0f);
                 BDPTIntegrator bdpt = (BDPTIntegrator)ctx.integrator;
@@ -2273,7 +2285,7 @@ namespace pbrt
                 SampledSpectrum r_u0 = path[vIdx - 1].cumU;
                 for (int i = 1; i < vIdx; ++i)
                     r_u0 *= path[i].vtx;
-                SampledSpectrum equiangular = r_u0 * rl_seg * rl_conn * pdfDistance;
+                SampledSpectrum equiangular = r_u0 * rl_seg * rl_conn * (count * pdfDistance);
                 SampledSpectrum denominator = (equiangular + sum * mp.sigma_s[0]) * (sampledLight.value().p * pdfArea);
                 Float average = denominator.Average();
                 if (!(average > 0))
@@ -2734,7 +2746,7 @@ namespace pbrt
             Float pdfDistance = EquiangularSampling.Pdf(origin, direction, tMax, y0.p(), tX);
             if (!(pdfDistance > 0))
                 return zero;
-            return value * (pdfDistance / x1.sigmaS0);
+            return value * (integrator.EquiangularCount(s + t - 2) * pdfDistance / x1.sigmaS0);
         }
 
         public static Float InfiniteLightDensity(List<Light> infiniteLights, LightSampler lightSampler, Vector3f w)
@@ -2976,12 +2988,15 @@ namespace pbrt
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null,
                               bool russianRoulette = false, bool gatherMediumEmission = true,
-                              bool unidirectionalStrategies = false, bool equiangular = false)
+                              bool unidirectionalStrategies = false, bool equiangular = false,
+                              int equiangularSamples = 1, int equiangularMultipleDepth = int.MaxValue)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
             // (not in pbrt-v4) Equiangular sampling of the scattering points next to point and area lights (see BDPT.EquiangularTerm)
             this.bdptEquiangular = equiangular && sensor == null;
             this.bdptMaxDepth = maxDepth;
+            this.bdptEquiangularSamples = Math.Max(1, equiangularSamples);
+            this.bdptEquiangularMultipleDepth = equiangularMultipleDepth;
             this.gatherMediumEmission = gatherMediumEmission;
             this.unidirectionalStrategies = unidirectionalStrategies;
             // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
@@ -3187,7 +3202,9 @@ namespace pbrt
 
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
                                       visualizeWeights, regularize, sensor, russianRoulette, gatherMediumEmission,
-                                      strategies == "unidirectional", equiangular);
+                                      strategies == "unidirectional", equiangular,
+                                      parameters.GetOneInt("equiangularsamples", 1),
+                                      parameters.GetOneInt("equiangulardepth", int.MaxValue));
         }
 
         // BDPTIntegrator Private Members
@@ -4472,9 +4489,12 @@ namespace pbrt
                                  bool regularize = false, bool polarised = false, bool analyser = false,
                                  Float analyserAngle = 0,
                                  PolarisedPathIntegrator.Measurement measurement = PolarisedPathIntegrator.Measurement.Intensity,
-                                 bool equiangular = false)
+                                 bool equiangular = false, int equiangularSamples = 1, int equiangularMultipleDepth = int.MaxValue)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
+            // (not in pbrt-v4) Several equiangular samples per segment for the first scatterings (Fong et al., 4.1)
+            this.equiangularSamples = Math.Max(1, equiangularSamples);
+            this.equiangularMultipleDepth = equiangularMultipleDepth;
             // (not in pbrt-v4) Equiangular sampling of the scattering point toward point lights (Fong et al., section 4.2.2)
             this.equiangular = equiangular;
             // (not in pbrt-v4) The polarisation of the light is carried along the path next to the scalar throughput
@@ -4602,7 +4622,12 @@ namespace pbrt
                 seg.context = new LightSampleContext(new Point3fi(ctx.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0));
                 seg.r_u0 = ctx.st.r_u;
                 seg.active = true;
-                L += vp.SampleEquiangular(ctx, medium, seg);
+                // (Fong et al., 4.1) Several samples of the segment for the first scatterings, one for the later ones
+                seg.count = depth < vp.equiangularMultipleDepth ? vp.equiangularSamples : 1;
+                for (int i = 0; i < seg.count; ++i)
+                {
+                    L += vp.SampleEquiangular(ctx, medium, seg);
+                }
             }
 
             public override bool BeginCollision(WalkContext ctx, Medium rayMedium, Point3f p, MediumProperties mp,
@@ -4708,7 +4733,7 @@ namespace pbrt
                         seg.segL = ctx.st.segL;
                         // What the direction that the phase function samples from here needs, if it reaches an area light (OnSurfaceHit)
                         scatter.origin = seg.origin; scatter.direction = seg.direction; scatter.tMax = seg.tMax;
-                        scatter.context = seg.context; scatter.r_u0 = seg.r_u0; scatter.segL = seg.segL;
+                        scatter.context = seg.context; scatter.r_u0 = seg.r_u0; scatter.segL = seg.segL; scatter.count = seg.count;
                         scatter.t = seg.t; scatter.sigmaS0 = seg.sigmaS0;
                         scatterP = p;
                         scatterValid = true;
@@ -4807,7 +4832,7 @@ namespace pbrt
                                 Float pdfDistance = EquiangularSampling.Pdf(scatter.origin, scatter.direction, scatter.tMax, y, scatter.t);
                                 Float pdfArea = equiangularArea.PdfArea();
                                 r_equiangular = scatter.r_u0 * scatter.segL * rl2 *
-                                                (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / (scatter.sigmaS0 * scatterPdf));
+                                                (scatter.count * pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / (scatter.sigmaS0 * scatterPdf));
                             }
                         }
                         scatterValid = false;
@@ -5219,7 +5244,7 @@ namespace pbrt
             // The ways to find the vertex and the connection, relative to the connection's hero wavelength
             Float pmfEquiangular = sampledLight.value().p;
             Float pointDensity = areaLight != null ? pdfAreaOrigin * geometry : 1;
-            SampledSpectrum r_equiangular = segment.r_u0 * rl_seg * rl_light * (pmfEquiangular * pdfDistance * pointDensity);
+            SampledSpectrum r_equiangular = segment.r_u0 * rl_seg * rl_light * (segment.count * pmfEquiangular * pdfDistance * pointDensity);
             SampledSpectrum r_walk = segment.r_u0 * ru_seg * rl_light * mp.sigma_s * pmfWalk;
             // The third way to an area light: the phase function samples the direction to the light
             if (areaLight != null)
@@ -5339,7 +5364,7 @@ namespace pbrt
                 Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
                                                             equiangularSegment.tMax, ls.value().pLight.p(), equiangularSegment.t);
                 r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
-                                (pmfEquiangular * pdfDistance / equiangularSegment.sigmaS0);
+                                (equiangularSegment.count * pmfEquiangular * pdfDistance / equiangularSegment.sigmaS0);
             }
             // ... and toward an area light, the point on it chosen from the start of the segment (the density per unit area, in
             // the solid angle of the vertex)
@@ -5356,7 +5381,7 @@ namespace pbrt
                                                                 equiangularSegment.tMax, y, equiangularSegment.t);
                     Float pdfArea = equiangularArea.PdfArea();
                     r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
-                                    (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / equiangularSegment.sigmaS0);
+                                    (equiangularSegment.count * pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / equiangularSegment.sigmaS0);
                 }
             }
             // Return path contribution function estimate for direct lighting
@@ -5388,9 +5413,11 @@ namespace pbrt
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
                                                 out PolarisedPathIntegrator.Measurement measurement);
             bool equiangular = parameters.GetOneBool("equiangular", false);
+            int equiangularSamples = parameters.GetOneInt("equiangularsamples", 1);
+            int equiangularMultipleDepth = parameters.GetOneInt("equiangulardepth", int.MaxValue);
             return new VolPathIntegrator(maxDepth, camera, sampler, aggregate,
                                          lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement,
-                                         equiangular);
+                                         equiangular, equiangularSamples, equiangularMultipleDepth);
         }
 
         // VolPathIntegrator Private Members
@@ -5398,6 +5425,7 @@ namespace pbrt
         LightSampler lightSampler;
         bool regularize;
         bool equiangular;
+        int equiangularSamples, equiangularMultipleDepth;
         bool polarised, analyser;
         Float analyserAngle;
         PolarisedPathIntegrator.Measurement measurement;

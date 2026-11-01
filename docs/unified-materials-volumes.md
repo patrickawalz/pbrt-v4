@@ -162,6 +162,13 @@ is reproduced exactly with the same seed.
      0.987 to 1.007; all strategies depth 3 (2048 spp) 0.999 to 1.002, depth 5 (1024 spp) 0.999 to 1.003; chromatic depth 3 0.997
      to 1.002. The noise gain is small: depth 5 pixel RMSE 0.0056 against 0.0064 for 12% more time, because bdpt's s = 1 and t = 1
      strategies already handle a point light well.
+   * Multiple sampling (Fong section 4.1; `"integer equiangularsamples" N`, `"integer equiangulardepth" D`, volpath and bdpt): N
+     equiangular samples per medium segment for the scatterings before depth D (default all), one after. With N samples the strategy's
+     density in every denominator is N times as large (`EquiangularSegment.count`, `Integrator.EquiangularCount`), and each sample
+     is not divided by N. Same results as N = 1 (the mean ratios agree within 0.2%; N = 1 is bit-identical to before). The noise
+     does not pay for the time here: volpath 24x24, 1024 spp, N = 4 against 1: noise 0.0030 against 0.0039 for 1.75 times the time;
+     bdpt N = 4 gives 0.0042 against 0.0045 for 1.3 times. The paper's gain is locality for large volume assets and an amortised PDF
+     table, neither of which this tracker has. Section 4.2.1 (uniform distance sampling with MIS) is a separate, not done item.
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
