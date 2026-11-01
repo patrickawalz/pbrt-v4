@@ -22,6 +22,18 @@ namespace pbrt
         // (not in pbrt-v4) Whether the camera subpaths of bdpt gather the emission of media at their collisions (a strategy with
         // s = 0 whose last vertex is in the emissive medium), next to the strategies that sample the medium as a light
         public bool gatherMediumEmission = false;
+        // (not in pbrt-v4) The strategies of bdpt that are used: all of them, or those of a unidirectional path tracer (the
+        // camera subpath's own hits of emitters, s = 0, and the light samples at its vertices, s = 1, with t >= 2)
+        public bool unidirectionalStrategies = false;
+
+        public bool StrategyAllowed(int s, int t)
+        {
+            if (!unidirectionalStrategies)
+            {
+                return true;
+            }
+            return s <= 1 && t >= 2;
+        }
 
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
@@ -2233,7 +2245,8 @@ namespace pbrt
                     ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
                     // See https://github.com/mmp/pbrt-v4/issues/347
                     if (i == 1) ri /= splatScale;
-                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta)
+                    // (not in pbrt-v4) The strategy with i camera vertices is a term of the sum only if it is in use
+                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && integrator.StrategyAllowed(s + t - i, i))
                         sumRi += ri;
                 }
 
@@ -2252,7 +2265,8 @@ namespace pbrt
                             continue;
                         ri *= lightVertices[0].sigmaT0;
                     }
-                    if (!lightVertices[i].delta && !deltaLightvertex)
+                    // (not in pbrt-v4) The strategy with i light vertices is a term of the sum only if it is in use
+                    if (!lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i))
                         sumRi += ri;
                 }
 
@@ -2515,10 +2529,12 @@ namespace pbrt
         public BDPTIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null,
-                              bool russianRoulette = false, bool gatherMediumEmission = true)
+                              bool russianRoulette = false, bool gatherMediumEmission = true,
+                              bool unidirectionalStrategies = false)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
             this.gatherMediumEmission = gatherMediumEmission;
+            this.unidirectionalStrategies = unidirectionalStrategies;
             // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
             this.sensor = sensor;
             this.russianRoulette = russianRoulette;
@@ -2595,7 +2611,8 @@ namespace pbrt
                                                      camera, cameraVertices, regularize, sensor != null, emissionEnds);
             Vertex[] lightVertices = new Vertex[maxDepth + 1];
             for (int i = 0; i < lightVertices.Length; ++i) lightVertices[i] = new Vertex();
-            int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer, maxDepth + 1,
+            int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer,
+                                                   unidirectionalStrategies ? 1 : maxDepth + 1,
                                                    cameraVertices[0].time(), lightSampler, lightVertices,
                                                    regularize, sensor != null);
 
@@ -2607,6 +2624,8 @@ namespace pbrt
                 {
                     int depth = t + s - 2;
                     if ((s == 1 && t == 1 && !BDPT.IsVolumeEmission(lightVertices[0])) || depth < 0 || depth > maxDepth)
+                        continue;
+                    if (!StrategyAllowed(s, t))
                         continue;
                     // Execute the $(s, t)$ connection strategy and update _L_
                     pstd.optional<Point2f> pFilmNew = default;
@@ -2688,6 +2707,10 @@ namespace pbrt
             // (not in pbrt-v4) Camera subpaths gather the emission of media at their collisions, with MIS against the strategies
             // that sample the media as lights; false leaves the emission to those strategies alone
             bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
+            // (not in pbrt-v4) "all" or "unidirectional" (see Integrator.StrategyAllowed)
+            string strategies = parameters.GetOneString("strategies", "all");
+            if (strategies != "all" && strategies != "unidirectional")
+                ErrorExit(loc, StringPrintf("\"%s\": unknown \"strategies\"; expected \"all\" or \"unidirectional\".", strategies));
             PolarisedPathIntegrator.Sensor sensor = null;
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
                                                 out PolarisedPathIntegrator.Measurement measurement);
@@ -2700,7 +2723,8 @@ namespace pbrt
             }
 
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
-                                      visualizeWeights, regularize, sensor, russianRoulette, gatherMediumEmission);
+                                      visualizeWeights, regularize, sensor, russianRoulette, gatherMediumEmission,
+                                      strategies == "unidirectional");
         }
 
         // BDPTIntegrator Private Members
