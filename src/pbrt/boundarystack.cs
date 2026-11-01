@@ -161,6 +161,13 @@ namespace pbrt
             size = 0;
         }
 
+        // The medium of the element that many places below the top (0 is the top)
+        public Medium MediumFromTop(int index)
+        {
+            pbrt.DCHECK_LT(index, size);
+            return elements[size - 1 - index].medium;
+        }
+
         public int Size() { return size; }
 
         public bool IsEmpty() { return size == 0; }
@@ -191,9 +198,25 @@ namespace pbrt
         }
 
         // The medium the next segment of the path is in
+        // (Fong et al., section 3.9) When the media on top of the stack can overlap, the segment is in all of them at once:
+        // their composite, which runs one integrator over the summed coefficients. A medium that cannot overlap hides
+        // everything below it, and ends the media that join the composite.
         public static Medium Current(in BoundaryStack stack)
         {
-            return stack.IsEmpty() ? null : stack.Top().medium;
+            if (stack.IsEmpty())
+                return null;
+            Medium top = stack.Top().medium;
+            if (top == null || !top.canOverlap)
+                return top;
+            int count = 1;
+            while (count < stack.Size())
+            {
+                Medium below = stack.MediumFromTop(count);
+                if (below == null || !below.canOverlap)
+                    break;
+                ++count;
+            }
+            return count == 1 ? top : CompositeMediumCache.Get(stack, count);
         }
 
         // Updates the stack when a path leaves a surface in direction wi. Only the surfaces with a MediumInterface that is a

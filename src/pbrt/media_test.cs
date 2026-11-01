@@ -112,5 +112,61 @@ namespace pbrt
                 EXPECT_NEAR(g, gEst, .01);
             }
         }
+
+        // (not in pbrt-v4) The phase function of a collision in overlapping volumes: sampling matches evaluation and the mean
+        // cosine is the weighted mean of the components
+        [TEST("MixturePhaseFunction", "SamplingMatchAndMeanCosine")]
+        public static void MixturePhaseFunction_SamplingMatchAndMeanCosine()
+        {
+            PhaseFunction[] phases = { new HGPhaseFunction(0.6f), new HGPhaseFunction(-0.4f), new HGPhaseFunction(0.1f) };
+            Float[] weights = { 0.5f, 0.3f, 0.2f };
+            MixturePhaseFunction mixture = new MixturePhaseFunction(phases, weights);
+            Vector3f wo = new Vector3f(0, 0, 1);
+            RNG rng = new RNG();
+            Float meanCosine = 0;
+            int n = 200000;
+            for (int i = 0; i < n; ++i)
+            {
+                Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
+                pstd.optional<PhaseFunctionSample> ps = mixture.Sample_p(wo, u);
+                EXPECT_TRUE(ps.has_value());
+                EXPECT_NEAR(ps.value().p, mixture.p(wo, ps.value().wi), 1e-4f);
+                EXPECT_NEAR(ps.value().pdf, mixture.PDF(wo, ps.value().wi), 1e-4f);
+                meanCosine += -Dot(wo, ps.value().wi);
+            }
+            meanCosine /= n;
+            EXPECT_NEAR(0.5f * 0.6f + 0.3f * -0.4f + 0.2f * 0.1f, meanCosine, 0.01f);
+
+            // Evaluation integrates to one
+            Float sum = 0;
+            int sqrtSamples = 64;
+            foreach (Point2f u in new Stratified2D(sqrtSamples, sqrtSamples))
+                sum += mixture.p(wo, SampleUniformSphere(u));
+            EXPECT_NEAR(1.0f, sum / (sqrtSamples * sqrtSamples * UniformSpherePDF()), 0.01f);
+        }
+
+        // (not in pbrt-v4) Fong et al., section 3.9: the coefficients and the majorants of overlapping media add up
+        [TEST("CompositeMedium", "SumsCoefficientsAndMajorants")]
+        public static void CompositeMedium_SumsCoefficientsAndMajorants()
+        {
+            ConstantSpectrum zero = new ConstantSpectrum(0.0f);
+            Medium a = new HomogeneousMedium(new ConstantSpectrum(0.5f), new ConstantSpectrum(1.5f), 1.0f, zero, 0.0f, 0.3f, null);
+            Medium b = new HomogeneousMedium(new ConstantSpectrum(0.25f), new ConstantSpectrum(2.0f), 1.0f, zero, 0.0f, 0.3f, null);
+            CompositeMedium composite = new CompositeMedium(new Medium[] { a, b });
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.3f);
+
+            MediumProperties mp = composite.SamplePoint(new Point3f(0, 0, 0), lambda);
+            EXPECT_NEAR(0.75f, mp.sigma_a[0], 1e-5f);
+            EXPECT_NEAR(3.5f, mp.sigma_s[0], 1e-5f);
+
+            Ray ray = new Ray(new Point3f(0, 0, 0), new Vector3f(0, 0, 1));
+            RayMajorantIterator iterator = composite.SampleRay(ray, 5, lambda, new ScratchBuffer());
+            pstd.optional<RayMajorantSegment> segment = iterator.Next();
+            EXPECT_TRUE(segment.has_value());
+            EXPECT_NEAR(0.0f, segment.value().tMin, 1e-6f);
+            EXPECT_NEAR(5.0f, segment.value().tMax, 1e-5f);
+            EXPECT_NEAR(4.25f, segment.value().sigma_maj[0], 1e-5f);
+            EXPECT_FALSE(iterator.Next().has_value());
+        }
     }
 }

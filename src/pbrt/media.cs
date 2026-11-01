@@ -194,6 +194,8 @@ namespace pbrt
                 return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is CompositeMedium)
+                return SampleT_maj<CompositeMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }
@@ -1389,6 +1391,10 @@ namespace pbrt
         // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
 
+        // (not in pbrt-v4) Whether the medium overlaps the media it shares space with (Fong et al., section 3.9: their
+        // coefficients add up) instead of being hidden by the one of higher priority: "bool overlap"
+        public bool canOverlap;
+
         // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
         public virtual SampledSpectrum ControlExtinction(SampledWavelengths lambda)
         {
@@ -1431,6 +1437,9 @@ namespace pbrt
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
             m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
+            m.canOverlap = parameters.GetOneBool("overlap", false);
+            if (m.canOverlap && m is TextureMedium && m.IsEmissive())
+                ErrorExit(loc, $"{name}: an emissive medium with a light cannot overlap other media.");
 
             parameters.ReportUnused();
             return m;
