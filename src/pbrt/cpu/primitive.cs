@@ -35,6 +35,7 @@ namespace pbrt
             this.areaLight = areaLight;
             this.mediumInterface = new MediumInterface(mediumInterface.inside, mediumInterface.outside, mediumInterface.priority,
                                                        mediumInterface.canOverlap, mediumInterface.overlapPriority);
+            this.mediumInterface.volumeMaterial = mediumInterface.volumeMaterial;
             this.alpha = alpha;
         }
 

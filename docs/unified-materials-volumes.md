@@ -99,6 +99,13 @@ is reproduced exactly with the same seed.
      an emissive texture medium with a light cannot overlap. Checked: two overlapping spheres with equal g match a single
      summed medium (per-channel mean ratios 0.9996 to 1.0009, volpath and bdpt); the material route and the earlier flag route are
      bit-identical.
+   * `Material.CreateVolume(Interaction)` (Fong listing 1, per point of entry): `"texture volumescale"` makes the material create its volume
+     for each entry point, the named medium (`ScaledMedium`) with sigma_a and sigma_s scaled by the texture there. A constant scale is
+     bit-identical to a medium with the coefficients multiplied. A scale that varies with the entry point is not defined independently
+     of the strategy: volpath and bdpt differ by about 1.3% in red on a checkerboard-scaled sphere (reproducible across seeds, the
+     noise is about 0.1%), because a shadow ray or a path built from the other end enters at another point. So bdpt, mlt and
+     lightpath refuse such scenes, and volpath's shadow rays make their own entry, as Fong's transmittance rays do. Per-entry volumes
+     cannot overlap (the composite cache would grow with every entry).
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box

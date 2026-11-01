@@ -896,6 +896,7 @@ namespace pbrt
         public static LightPathIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler,
                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
         {
+            MediumTracking.RequireNoPerEntryVolumes("lightpath");
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
                           "\"lightpath\" integrator.");
@@ -2821,6 +2822,7 @@ namespace pbrt
         public static BDPTIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler,
                                             Primitive aggregate, List<Light> lights, FileLoc loc)
         {
+            MediumTracking.RequireNoPerEntryVolumes("bdpt");
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
                           "\"bdpt\" integrator.");

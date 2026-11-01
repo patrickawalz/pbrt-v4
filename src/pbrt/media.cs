@@ -194,6 +194,8 @@ namespace pbrt
                 return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is ScaledMedium)
+                return SampleT_maj<ScaledMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CompositeMedium)
                 return SampleT_maj<CompositeMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");

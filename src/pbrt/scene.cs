@@ -635,8 +635,9 @@ namespace pbrt
                     }
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
+                    FloatTexture volumeScale = texDict.GetFloatTextureOrNull("volumescale", alloc);
                     Material m = Material.Create(type, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
-                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority);
+                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority, volumeScale);
                     namedMaterialsOut[name] = m;
                 }
 
@@ -657,8 +658,9 @@ namespace pbrt
                     }
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
+                    FloatTexture volumeScale = texDict.GetFloatTextureOrNull("volumescale", alloc);
                     Material m = Material.Create(mtl.name, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
-                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority);
+                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority, volumeScale);
                     materialsOut.Add(m);
                 }
             }
@@ -750,10 +752,18 @@ namespace pbrt
             if (insideName.Length != 0 || outsideName.Length != 0)
                 Warning(loc, "Shape has a MediumInterface and a material with a volume: using the volume of the material.");
             int priority = shapePriority != MediumInterface.noPriority ? shapePriority : material.VolumePriority();
-            Medium volume = material.CreateVolume(findMedium, loc);
-            if (material.CanOverlap() && volume is TextureMedium && volume.IsEmissive())
-                ErrorExit(loc, "A material cannot overlap other volumes when its volume is an emissive medium with a light.");
-            return new MediumInterface(volume, null, priority, material.CanOverlap(), material.OverlapPriority());
+            Medium volume = material.ResolveVolume(findMedium, loc);
+            if ((material.CanOverlap() || material.CreatesVolumePerEntry()) && volume is TextureMedium && volume.IsEmissive())
+                ErrorExit(loc, "A material cannot overlap other volumes or scale its volume when the volume is an emissive medium with a light.");
+            if (material.CanOverlap() && material.CreatesVolumePerEntry())
+                ErrorExit(loc, "A material that creates its volume for every point of entry (\"volumescale\") cannot overlap other volumes.");
+            MediumInterface made = new MediumInterface(volume, null, priority, material.CanOverlap(), material.OverlapPriority());
+            if (material.CreatesVolumePerEntry())
+            {
+                made.volumeMaterial = material;
+                MediumTracking.perEntryVolumes = true;
+            }
+            return made;
         }
 
         // (not in pbrt-v4) Whether the material of a shape has a volume, for the area lights, which are made before the materials: the

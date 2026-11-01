@@ -33,7 +33,9 @@ namespace pbrt
 
         public static bool operator ==(BoundaryStackElement a, BoundaryStackElement b)
         {
-            return ReferenceEquals(a.material, b.material) && ReferenceEquals(a.medium, b.medium) &&
+            // A material that creates its volume for every point of entry is on the stack by the material: the volume that
+            // it creates where the path leaves is another one
+            return ReferenceEquals(a.material, b.material) && (a.material != null || ReferenceEquals(a.medium, b.medium)) &&
                    a.canOverlap == b.canOverlap && a.overlapPriority == b.overlapPriority;
         }
 
@@ -49,7 +51,7 @@ namespace pbrt
 
         public override int GetHashCode()
         {
-            return (RuntimeHelpers.GetHashCode(material) * 31 + RuntimeHelpers.GetHashCode(medium)) * 31 +
+            return (RuntimeHelpers.GetHashCode(material) * 31 + (material != null ? 0 : RuntimeHelpers.GetHashCode(medium))) * 31 +
                    (canOverlap ? overlapPriority + 1 : 0);
         }
 
@@ -201,6 +203,19 @@ namespace pbrt
         // of them have the same priority, so the entry made last is on top; priorities arrive with the materials that own a volume.
         public const int interfacePriority = 0;
 
+        // Whether a material of the scene creates its volume for every point of entry (Fong et al., Material::CreateVolume). The
+        // volume then depends on where a segment entered, so the strategies that build paths in both directions or reconnect
+        // them see different volumes in the same place; only the forward path tracers define it.
+        public static bool perEntryVolumes;
+
+        public static void RequireNoPerEntryVolumes(string integrator)
+        {
+            if (perEntryVolumes)
+                pbrt.ErrorExit("The \"" + integrator + "\" integrator does not support materials with a \"volumescale\": their volume " +
+                               "depends on the point of entry, which paths that are built or reconnected from the other end " +
+                               "do not share. Use \"volpath\".");
+        }
+
         // The stack of a path that starts in the medium (the camera medium, the medium of a light)
         public static BoundaryStack Start(Medium medium)
         {
@@ -249,8 +264,10 @@ namespace pbrt
                 // A volume boundary: only the medium inside the shape is entered or left, with the priority of the shape
                 if (mediumInterface.inside != null)
                 {
-                    BoundaryStackElement element = new BoundaryStackElement(null, mediumInterface.inside,
-                                                                            mediumInterface.canOverlap, mediumInterface.overlapPriority);
+                    Material owner = mediumInterface.volumeMaterial;
+                    BoundaryStackElement element = new BoundaryStackElement(
+                        owner, !goesToOutside && owner != null ? owner.CreateVolume(intr) : mediumInterface.inside,
+                        mediumInterface.canOverlap, mediumInterface.overlapPriority);
                     if (goesToOutside)
                         stack.Pop(element, mediumInterface.priority);
                     else

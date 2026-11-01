@@ -1471,8 +1471,9 @@ namespace pbrt
         // (not in pbrt-v4) The volume that the material owns (Fong et al., Production Volume Rendering, listing 1): the shapes
         // that use the material are the boundary of the medium named by "string volume", with the priority "integer
         // volumepriority". Crossing into such a shape enters the volume and crossing out of it leaves it.
-        public void SetVolume(string name, int priority, bool canOverlap, int overlapPriority)
+        public void SetVolume(string name, int priority, bool canOverlap, int overlapPriority, FloatTexture volumeScale)
         {
+            this.volumeScale = volumeScale;
             volumeName = name;
             volumePriority = priority;
             this.canOverlap = canOverlap;
@@ -1491,15 +1492,30 @@ namespace pbrt
         public int OverlapPriority() { return overlapPriority; }
 
         // The volume of the material, found by name among the media of the scene
-        public Medium CreateVolume(Func<string, FileLoc, Medium> findMedium, FileLoc loc)
+        public Medium ResolveVolume(Func<string, FileLoc, Medium> findMedium, FileLoc loc)
         {
-            return HasVolume() ? findMedium(volumeName, loc) : null;
+            volume = HasVolume() ? findMedium(volumeName, loc) : null;
+            return volume;
+        }
+
+        // Fong et al., listing 1, Material::CreateVolume(ShadingContext): a material with a "volumescale" texture creates the
+        // volume for the point where the path enters it, the medium with its coefficients scaled by the texture there. Any
+        // other material has the one volume of the scene.
+        public bool CreatesVolumePerEntry() { return HasVolume() && volumeScale != null; }
+
+        public Medium CreateVolume(Interaction ctx)
+        {
+            if (volumeScale == null)
+                return volume;
+            return new ScaledMedium(volume, Math.Max(0, volumeScale.Evaluate(new TextureEvalContext(ctx))));
         }
 
         string volumeName = "";
         int volumePriority;
         bool canOverlap;
         int overlapPriority;
+        Medium volume;
+        FloatTexture volumeScale;
 
         public static Material Create(string name, TextureParameterDictionary parameters, Image normalMap,
                                       SortedDictionary<string, Material> namedMaterials, FileLoc loc, Allocator alloc)

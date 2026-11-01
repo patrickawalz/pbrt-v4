@@ -110,6 +110,8 @@ namespace pbrt
         public int priority = noPriority;
         public bool canOverlap;
         public int overlapPriority;
+        // (not in pbrt-v4) The material that owns the volume, when it creates the volume for every point of entry
+        public Material volumeMaterial;
     }
 
 }  // namespace pbrt
