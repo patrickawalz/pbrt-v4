@@ -404,6 +404,11 @@ namespace pbrt
                 if (node.isLeaf != 0)
                 {
                     pbrt.DCHECK(light == lights[node.childOrLightIndex]);
+                    // (not in pbrt-v4) Sample() returns no light when the root is a single light with no importance at the point
+                    // (one that faces away), so its probability there is zero. A strategy that finds a path from another point (equiangular
+                    // sampling from the start of a segment) needs the probability that Sample() really has.
+                    if (nodeIndex == 0 && node.lightBounds.Importance(p, n, allLightBounds) == 0)
+                        return 0;
                     return pmf;
                 }
                 // Compute child importances and update PMF for current node

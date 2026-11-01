@@ -4476,7 +4476,7 @@ namespace pbrt
                                     rl2[c] = scatterRl0[c] != 0 ? ctx.st.r_l[c] / scatterRl0[c] : 0;
                                 Float pmfEquiangular = vp.PmfOrZero(scatter.context, areaLight);
                                 Float pdfDistance = EquiangularSampling.Pdf(scatter.origin, scatter.direction, scatter.tMax, y, scatter.t);
-                                Float pdfArea = equiangularArea.PdfArea(scatter.context, y, isect.n);
+                                Float pdfArea = equiangularArea.PdfArea();
                                 r_equiangular = scatter.r_u0 * scatter.segL * rl2 *
                                                 (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / (scatter.sigmaS0 * scatterPdf));
                             }
@@ -4798,7 +4798,7 @@ namespace pbrt
             Float pdfAreaOrigin = 0;
             if (areaLight != null)
             {
-                if (!areaLight.SampleArea(segment.context, uLight, out yIntr, out pdfAreaOrigin))
+                if (!areaLight.SampleArea(uLight, out yIntr, out pdfAreaOrigin))
                     return new SampledSpectrum(0.0f);
                 pLight = yIntr.p();
             }
@@ -5025,7 +5025,7 @@ namespace pbrt
                     Float pmfEquiangular = PmfOrZero(equiangularSegment.context, light);
                     Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
                                                                 equiangularSegment.tMax, y, equiangularSegment.t);
-                    Float pdfArea = equiangularArea.PdfArea(equiangularSegment.context, y, ls.value().pLight.n);
+                    Float pdfArea = equiangularArea.PdfArea();
                     r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
                                     (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / equiangularSegment.sigmaS0);
                 }
