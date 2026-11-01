@@ -25,6 +25,9 @@ namespace pbrt
         public bool active;
         // The number of equiangular samples of the segment (Fong 4.1): the density of the strategy is that many times as large
         public int count = 1;
+        // Whether equiangular sampling takes part in the segment's weights, and the density of uniform distance sampling (0: not used)
+        public bool equiangular;
+        public Float pdfUniform;
     }
 
     public static class EquiangularSampling

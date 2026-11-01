@@ -167,6 +167,15 @@ is reproduced exactly with the same seed.
      Before, a choice of an unsupported light (an infinite light, say) found nothing. Point light plus a uniform infinite light, 24x24,
      1024 spp, maxdepth 8: volpath mean ratio 1.002 +- 0.0075 over six seeds, noise 0.036 against 0.066 for 1.6 times the time;
      bdpt 1.003 and 0.999, noise 0.0114 against 0.0169 for 1.25 times the time. The renders are unchanged when every light takes part.
+   * Uniform distance sampling with MIS (Fong section 4.2.1; volpath, `"bool uniformdistance" true`, independent of `equiangular`):
+     a second sample per medium segment of finite length (`SampleSegmentPoint(..., uniform: true)`): the distance uniform over the
+     segment, the light chosen from the point by the light sampler and connected as the walk's connection does, so it works for every
+     light (infinite lights, unsupported area lights, and so on). The walk's connection (`SampleLd`), the phase-sampled direction that
+     reaches the light (`OnSurfaceHit`, `OnEscape`) and equiangular sampling add its term to their denominators, and it has theirs.
+     Density 1 / length, so a segment that leaves the scene (infinite) has no such sample. Checked on a sphere of fog lit by a point light
+     plus an infinite light, 24x24, 1024 spp, three seeds: means within 0.1% of plain volpath (gray, sparse) and 0.3% (chromatic, dense);
+     pixel noise gray sparse 0.0086 plain, 0.0039 uniform (1.2 times the time), 0.0034 equiangular (1.33), 0.0035 both (1.58); chromatic
+     dense 0.027, 0.016 and 0.011 with both.
    * Multiple sampling (Fong section 4.1; `"integer equiangularsamples" N`, `"integer equiangulardepth" D`, volpath and bdpt): N
      equiangular samples per medium segment for the scatterings before depth D (default all), one after. With N samples the strategy's
      density in every denominator is N times as large (`EquiangularSegment.count`, `Integrator.EquiangularCount`), and each sample
