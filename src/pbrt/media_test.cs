@@ -152,7 +152,7 @@ namespace pbrt
             ConstantSpectrum zero = new ConstantSpectrum(0.0f);
             Medium a = new HomogeneousMedium(new ConstantSpectrum(0.5f), new ConstantSpectrum(1.5f), 1.0f, zero, 0.0f, 0.3f, null);
             Medium b = new HomogeneousMedium(new ConstantSpectrum(0.25f), new ConstantSpectrum(2.0f), 1.0f, zero, 0.0f, 0.3f, null);
-            CompositeMedium composite = new CompositeMedium(new Medium[] { a, b });
+            CompositeMedium composite = new CompositeMedium(new Medium[] { a, b }, new int[] { 0, 0 });
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.3f);
 
             MediumProperties mp = composite.SamplePoint(new Point3f(0, 0, 0), lambda);

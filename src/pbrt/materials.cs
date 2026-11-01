@@ -1471,15 +1471,24 @@ namespace pbrt
         // (not in pbrt-v4) The volume that the material owns (Fong et al., Production Volume Rendering, listing 1): the shapes
         // that use the material are the boundary of the medium named by "string volume", with the priority "integer
         // volumepriority". Crossing into such a shape enters the volume and crossing out of it leaves it.
-        public void SetVolume(string name, int priority)
+        public void SetVolume(string name, int priority, bool canOverlap, int overlapPriority)
         {
             volumeName = name;
             volumePriority = priority;
+            this.canOverlap = canOverlap;
+            this.overlapPriority = overlapPriority;
         }
 
         public bool HasVolume() { return volumeName.Length != 0; }
 
         public int VolumePriority() { return volumePriority; }
+
+        // Fong et al., section 3.9: whether the volume adds up with the volumes it overlaps ("bool overlap"; a volume that does
+        // not, like the absorbing medium of a glass object that smoke cannot enter, hides them), and the rank of its integrator
+        // ("integer overlappriority"; the volume that integrates the combination is the one of the highest rank)
+        public bool CanOverlap() { return HasVolume() && canOverlap; }
+
+        public int OverlapPriority() { return overlapPriority; }
 
         // The volume of the material, found by name among the media of the scene
         public Medium CreateVolume(Func<string, FileLoc, Medium> findMedium, FileLoc loc)
@@ -1489,6 +1498,8 @@ namespace pbrt
 
         string volumeName = "";
         int volumePriority;
+        bool canOverlap;
+        int overlapPriority;
 
         public static Material Create(string name, TextureParameterDictionary parameters, Image normalMap,
                                       SortedDictionary<string, Material> namedMaterials, FileLoc loc, Allocator alloc)

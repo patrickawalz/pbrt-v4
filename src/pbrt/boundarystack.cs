@@ -22,9 +22,19 @@ namespace pbrt
             this.medium = medium;
         }
 
+        // The overlap queries of the material of the entry (Fong et al., section 3.9)
+        public BoundaryStackElement(Material material, Medium medium, bool canOverlap, int overlapPriority)
+        {
+            this.material = material;
+            this.medium = medium;
+            this.canOverlap = canOverlap;
+            this.overlapPriority = overlapPriority;
+        }
+
         public static bool operator ==(BoundaryStackElement a, BoundaryStackElement b)
         {
-            return ReferenceEquals(a.material, b.material) && ReferenceEquals(a.medium, b.medium);
+            return ReferenceEquals(a.material, b.material) && ReferenceEquals(a.medium, b.medium) &&
+                   a.canOverlap == b.canOverlap && a.overlapPriority == b.overlapPriority;
         }
 
         public static bool operator !=(BoundaryStackElement a, BoundaryStackElement b)
@@ -39,12 +49,15 @@ namespace pbrt
 
         public override int GetHashCode()
         {
-            return RuntimeHelpers.GetHashCode(material) * 31 + RuntimeHelpers.GetHashCode(medium);
+            return (RuntimeHelpers.GetHashCode(material) * 31 + RuntimeHelpers.GetHashCode(medium)) * 31 +
+                   (canOverlap ? overlapPriority + 1 : 0);
         }
 
         // BoundaryStackElement Public Members
         public Material material;
         public Medium medium;
+        public bool canOverlap;
+        public int overlapPriority;
     }
 
     [InlineArray(BoundaryStack.capacity)]
@@ -161,11 +174,11 @@ namespace pbrt
             size = 0;
         }
 
-        // The medium of the element that many places below the top (0 is the top)
-        public Medium MediumFromTop(int index)
+        // The element that many places below the top (0 is the top)
+        public BoundaryStackElement ElementFromTop(int index)
         {
             pbrt.DCHECK_LT(index, size);
-            return elements[size - 1 - index].medium;
+            return elements[size - 1 - index];
         }
 
         public int Size() { return size; }
@@ -205,18 +218,18 @@ namespace pbrt
         {
             if (stack.IsEmpty())
                 return null;
-            Medium top = stack.Top().medium;
-            if (top == null || !top.canOverlap)
-                return top;
+            BoundaryStackElement top = stack.Top();
+            if (top.medium == null || !top.canOverlap)
+                return top.medium;
             int count = 1;
             while (count < stack.Size())
             {
-                Medium below = stack.MediumFromTop(count);
-                if (below == null || !below.canOverlap)
+                BoundaryStackElement below = stack.ElementFromTop(count);
+                if (below.medium == null || !below.canOverlap)
                     break;
                 ++count;
             }
-            return count == 1 ? top : CompositeMediumCache.Get(stack, count);
+            return count == 1 ? top.medium : CompositeMediumCache.Get(stack, count);
         }
 
         // Updates the stack when a path leaves a surface in direction wi. Only the surfaces with a MediumInterface that is a
@@ -236,7 +249,8 @@ namespace pbrt
                 // A volume boundary: only the medium inside the shape is entered or left, with the priority of the shape
                 if (mediumInterface.inside != null)
                 {
-                    BoundaryStackElement element = new BoundaryStackElement(null, mediumInterface.inside);
+                    BoundaryStackElement element = new BoundaryStackElement(null, mediumInterface.inside,
+                                                                            mediumInterface.canOverlap, mediumInterface.overlapPriority);
                     if (goesToOutside)
                         stack.Pop(element, mediumInterface.priority);
                     else

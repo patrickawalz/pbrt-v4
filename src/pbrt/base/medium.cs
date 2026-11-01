@@ -88,6 +88,18 @@ namespace pbrt
             this.priority = priority;
         }
 
+        // (not in pbrt-v4) The overlap queries of the material that owns the volume (Fong et al., section 3.9, CanOverlap and
+        // GetOverlapPriority): whether the volume adds up with the volumes it shares space with, and the rank of its integrator
+        // among them (the highest runs the combined volume).
+        public MediumInterface(Medium inside, Medium outside, int priority, bool canOverlap, int overlapPriority)
+        {
+            this.inside = inside;
+            this.outside = outside;
+            this.priority = priority;
+            this.canOverlap = canOverlap;
+            this.overlapPriority = overlapPriority;
+        }
+
         public bool IsMediumTransition() { return inside != outside; }
 
         public bool HasPriority() { return priority != noPriority; }
@@ -96,6 +108,8 @@ namespace pbrt
         public const int noPriority = int.MinValue;
         public Medium inside, outside;
         public int priority = noPriority;
+        public bool canOverlap;
+        public int overlapPriority;
     }
 
 }  // namespace pbrt

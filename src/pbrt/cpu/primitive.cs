@@ -33,7 +33,8 @@ namespace pbrt
             this.shape = shape;
             this.material = material;
             this.areaLight = areaLight;
-            this.mediumInterface = new MediumInterface(mediumInterface.inside, mediumInterface.outside, mediumInterface.priority);
+            this.mediumInterface = new MediumInterface(mediumInterface.inside, mediumInterface.outside, mediumInterface.priority,
+                                                       mediumInterface.canOverlap, mediumInterface.overlapPriority);
             this.alpha = alpha;
         }
 

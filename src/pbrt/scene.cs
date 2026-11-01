@@ -616,6 +616,8 @@ namespace pbrt
 
                     string volumeName = mtl.parameters.GetOneString("volume", "");
                     int volumePriority = mtl.parameters.GetOneInt("volumepriority", 0);
+                    bool volumeOverlap = mtl.parameters.GetOneBool("overlap", false);
+                    int volumeOverlapPriority = mtl.parameters.GetOneInt("overlappriority", 0);
                     string type = mtl.parameters.GetOneString("type", "");
                     if (type.Length == 0)
                     {
@@ -634,7 +636,7 @@ namespace pbrt
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
                     Material m = Material.Create(type, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
-                    m.SetVolume(volumeName, volumePriority);
+                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority);
                     namedMaterialsOut[name] = m;
                 }
 
@@ -644,6 +646,8 @@ namespace pbrt
                     Allocator alloc = new Allocator();
                     string volumeName = mtl.parameters.GetOneString("volume", "");
                     int volumePriority = mtl.parameters.GetOneInt("volumepriority", 0);
+                    bool volumeOverlap = mtl.parameters.GetOneBool("overlap", false);
+                    int volumeOverlapPriority = mtl.parameters.GetOneInt("overlappriority", 0);
                     string fn = ResolveFilename(mtl.parameters.GetOneString("normalmap", ""));
                     Image normalMap = null;
                     if (fn.Length != 0)
@@ -654,7 +658,7 @@ namespace pbrt
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
                     Material m = Material.Create(mtl.name, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
-                    m.SetVolume(volumeName, volumePriority);
+                    m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority);
                     materialsOut.Add(m);
                 }
             }
@@ -746,7 +750,10 @@ namespace pbrt
             if (insideName.Length != 0 || outsideName.Length != 0)
                 Warning(loc, "Shape has a MediumInterface and a material with a volume: using the volume of the material.");
             int priority = shapePriority != MediumInterface.noPriority ? shapePriority : material.VolumePriority();
-            return new MediumInterface(material.CreateVolume(findMedium, loc), null, priority);
+            Medium volume = material.CreateVolume(findMedium, loc);
+            if (material.CanOverlap() && volume is TextureMedium && volume.IsEmissive())
+                ErrorExit(loc, "A material cannot overlap other volumes when its volume is an emissive medium with a light.");
+            return new MediumInterface(volume, null, priority, material.CanOverlap(), material.OverlapPriority());
         }
 
         // (not in pbrt-v4) Whether the material of a shape has a volume, for the area lights, which are made before the materials: the

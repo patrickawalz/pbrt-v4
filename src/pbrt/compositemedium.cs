@@ -160,11 +160,20 @@ namespace pbrt
     public sealed unsafe class CompositeMedium : Medium, IMajorantMedium<RayMajorantIterator>
     {
         // CompositeMedium Public Methods
-        public CompositeMedium(Medium[] children)
+        // overlapPriorities[i] is the rank of the integrator of children[i]: the combined volume runs with the volume
+        // integrator of the child of the highest rank, and of the one entered last among those
+        public CompositeMedium(Medium[] children, int[] overlapPriorities)
         {
             this.children = children;
+            this.overlapPriorities = overlapPriorities;
+            int best = 0;
             for (int i = 0; i < children.Length; ++i)
+            {
                 emissive |= children[i].IsEmissive();
+                if (overlapPriorities[i] >= overlapPriorities[best])
+                    best = i;
+            }
+            volumeIntegrator = children[best].volumeIntegrator;
         }
 
         public override string ToString()
@@ -175,6 +184,8 @@ namespace pbrt
         public override bool IsEmissive() { return emissive; }
 
         public Medium[] Children() { return children; }
+
+        public int[] OverlapPriorities() { return overlapPriorities; }
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
@@ -252,13 +263,14 @@ namespace pbrt
 
         // CompositeMedium Private Members
         private Medium[] children;
+        private int[] overlapPriorities;
         private bool emissive;
     }
 
     // CompositeMediumCache Definition
     //
     // One CompositeMedium for every combination of media that occurs, found without allocating: the key is a hash of
-    // the media of the stack, checked against the children of the entry.
+    // the entries of the stack, checked against the children of the entry.
     public static class CompositeMediumCache
     {
         // CompositeMediumCache Public Methods
@@ -266,7 +278,11 @@ namespace pbrt
         {
             long key = 17;
             for (int i = 0; i < count; ++i)
-                key = key * 1000003 + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(stack.MediumFromTop(i));
+            {
+                BoundaryStackElement element = stack.ElementFromTop(i);
+                key = key * 1000003 + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(element.medium);
+                key = key * 1000003 + element.overlapPriority;
+            }
             if (cache.TryGetValue(key, out CompositeMedium[] entries))
             {
                 for (int e = 0; e < entries.Length; ++e)
@@ -277,18 +293,23 @@ namespace pbrt
             }
             lock (cache)
             {
-                // Children from the bottom of the part of the stack that overlaps up to the top, so that equal stacks
-                // make equal composites
-                Medium[] children = new Medium[count];
-                for (int i = 0; i < count; ++i)
-                    children[count - 1 - i] = stack.MediumFromTop(i);
-                CompositeMedium made = new CompositeMedium(children);
                 CompositeMedium[] old = cache.TryGetValue(key, out CompositeMedium[] existing) ? existing : new CompositeMedium[0];
                 for (int e = 0; e < old.Length; ++e)
                 {
                     if (Matches(old[e], stack, count))
                         return old[e];
                 }
+                // Children from the bottom of the part of the stack that overlaps up to the top, so that equal stacks
+                // make equal composites
+                Medium[] children = new Medium[count];
+                int[] priorities = new int[count];
+                for (int i = 0; i < count; ++i)
+                {
+                    BoundaryStackElement element = stack.ElementFromTop(i);
+                    children[count - 1 - i] = element.medium;
+                    priorities[count - 1 - i] = element.overlapPriority;
+                }
+                CompositeMedium made = new CompositeMedium(children, priorities);
                 CompositeMedium[] grown = new CompositeMedium[old.Length + 1];
                 Array.Copy(old, grown, old.Length);
                 grown[old.Length] = made;
@@ -305,7 +326,9 @@ namespace pbrt
                 return false;
             for (int i = 0; i < count; ++i)
             {
-                if (!ReferenceEquals(children[count - 1 - i], stack.MediumFromTop(i)))
+                BoundaryStackElement element = stack.ElementFromTop(i);
+                if (!ReferenceEquals(children[count - 1 - i], element.medium) ||
+                    composite.OverlapPriorities()[count - 1 - i] != element.overlapPriority)
                     return false;
             }
             return true;

@@ -90,6 +90,15 @@ is reproduced exactly with the same seed.
      The `interface` material is an `InterfaceMaterial` object now (it only carries the volume while the scene is built); the
      primitives of an interface still get a null material, so nothing changes at render time (same-seed renders of the material,
      glass, priority, overlap volpath and bdpt scenes are bit-identical to before).
+   * Overlap (Fong section 3.9, `CanOverlap` / `GetOverlapPriority` on the material): `"bool overlap"` and `"integer overlappriority"` next to
+     `"string volume"`. Volumes of materials that overlap add up where a path is inside several of them (`CompositeMedium`: summed
+     sigma_a / sigma_s, merged majorants, emission as the sum of sigma_a * Le, the collision's phase function chosen by sigma_s). A
+     material that does not overlap hides what is below it as before. The composite runs the volume integrator of the child with the
+     highest overlap priority. Limits: the mixture weights are the hero wavelength's (exact for equal phase functions or albedo
+     ratios that do not depend on the wavelength), polarised rendering does not look inside a mixture, and a material whose volume is
+     an emissive texture medium with a light cannot overlap. Checked: two overlapping spheres with equal g match a single
+     summed medium (per-channel mean ratios 0.9996 to 1.0009, volpath and bdpt); the material route and the earlier flag route are
+     bit-identical.
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
