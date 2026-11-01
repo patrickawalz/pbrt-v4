@@ -28,6 +28,7 @@ namespace pbrt
             this.bounds = bounds;
             this.majorant = majorant;
             this.stepSize = stepSize;
+            this.boundedField = new BoundedRefractiveIndexField(field, bounds, 1.0f);
             volumeIntegrator = inner.volumeIntegrator;
         }
 
@@ -55,6 +56,9 @@ namespace pbrt
         }
 
         public RefractiveIndexField Field() { return field; }
+
+        // The field with the index 1 outside the box: the one a connection to a point outside the medium is solved in
+        public RefractiveIndexField BoundedField() { return boundedField; }
         public Bounds3f Bounds() { return bounds; }
         public Float StepSize() { return stepSize; }
 
@@ -158,6 +162,16 @@ namespace pbrt
             }
         }
 
+        // A path from p to a target anywhere (inside the medium, or outside it where the index is 1), by one search of algorithm 3
+        // from a random direction: the count is that of the algorithm, whose expectation over finding a path is one per path.
+        public bool ConnectToPoint(Point3f start, Point3f target, RefractiveConnectionOptions options, ref RNG rng,
+                                   out RefractiveConnectionPath path, out int count)
+        {
+            RefractiveConnectionOptions local = options.Clone();
+            local.inside = null;
+            return RefractiveConnection.SolveMultiple(boundedField, start, target, local, ref rng, out path, out count);
+        }
+
         // A connection from p to target through the medium (stage 3), the target being inside the medium or on its boundary
         public bool Connect(Point3f start, Point3f target, Vector3f initialDirection, RefractiveConnectionOptions options,
                             out RefractiveConnectionPath path)
@@ -177,6 +191,7 @@ namespace pbrt
         private Bounds3f bounds;
         private Func<SampledWavelengths, SampledSpectrum> majorant;
         private Float stepSize;
+        private RefractiveIndexField boundedField;
     }
 
 }  // namespace pbrt

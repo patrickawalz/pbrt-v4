@@ -42,6 +42,9 @@ namespace pbrt
         public Float length;
         // Distance of the end of the path from the target
         public Float distance;
+        // The area on the plane perpendicular to the end direction that a unit of solid angle of start directions covers at the
+        // end: dA / d(omega) (s^2 for a straight path). It converts a density on the target into one on the start direction.
+        public Float areaJacobian;
         // Set by SolveMultiple when the number of searches reached maxTrials (the count is then a lower bound)
         public bool truncated;
     }
@@ -127,8 +130,9 @@ namespace pbrt
         // Evaluates the loss 1/2 |e|^2 and its gradient at w; false if the trace fails
         static bool Evaluate(RefractiveIndexField field, Point3f start, Point3f target, Vector3f w,
                              RefractiveConnectionOptions options, out Float loss, out Vector3f gradient, out Vector3f error,
-                             out SymplecticRayJacobian end, out Float length)
+                             out SymplecticRayJacobian end, out Float length, out SquareMatrix3 derivative)
         {
+            derivative = SquareMatrix3.Zero();
             loss = Float.PositiveInfinity;
             gradient = new Vector3f(0, 0, 0);
             error = new Vector3f(0, 0, 0);
@@ -136,7 +140,7 @@ namespace pbrt
             {
                 return false;
             }
-            ErrorAndDerivative(end, target, out error, out SquareMatrix3 derivative);
+            ErrorAndDerivative(end, target, out error, out derivative);
             loss = 0.5f * pbrt.Dot(error, error);
             gradient = pbrt.Transpose(derivative) * error;
             return !float.IsNaN((float)loss);
@@ -150,7 +154,7 @@ namespace pbrt
             path = new RefractiveConnectionPath();
             Vector3f w = pbrt.Normalize(initialDirection);
             if (!Evaluate(field, start, target, w, options, out Float loss, out Vector3f gradient, out Vector3f error,
-                          out SymplecticRayJacobian end, out Float length))
+                          out SymplecticRayJacobian end, out Float length, out SquareMatrix3 derivative))
             {
                 return false;
             }
@@ -164,6 +168,7 @@ namespace pbrt
                     path.endDirection = pbrt.Normalize(end.v);
                     path.length = length;
                     path.distance = pbrt.Length(error);
+                    path.areaJacobian = AreaJacobian(derivative, w, path.endDirection);
                     return true;
                 }
                 if (iteration >= options.maxIterations)
@@ -182,6 +187,7 @@ namespace pbrt
                 Float lossNew = loss;
                 SymplecticRayJacobian endNew = end;
                 Float lengthNew = length;
+                SquareMatrix3 derivativeNew = derivative;
                 for (int halvings = 0; halvings < 25; ++halvings, alpha *= 0.5f)
                 {
                     Vector3f candidate = w + alpha * direction;
@@ -191,7 +197,7 @@ namespace pbrt
                     }
                     // A failed trace is an infinite loss
                     if (Evaluate(field, start, target, candidate, options, out lossNew, out gradientNew, out errorNew,
-                                 out endNew, out lengthNew) && lossNew <= loss + 1e-4f * alpha * slope)
+                                 out endNew, out lengthNew, out derivativeNew) && lossNew <= loss + 1e-4f * alpha * slope)
                     {
                         wNew = candidate;
                         accepted = true;
@@ -222,7 +228,23 @@ namespace pbrt
                 loss = lossNew;
                 end = endNew;
                 length = lengthNew;
+                derivative = derivativeNew;
             }
+        }
+
+        // dA / d(omega) from the derivative of the end position with respect to w: the two directions perpendicular to w, as
+        // angles (|w| times the derivative), span a parallelogram at the end whose area on the plane perpendicular to the end
+        // direction is the Jacobian
+        public static Float AreaJacobian(SquareMatrix3 derivative, Vector3f w, Vector3f endDirection)
+        {
+            Float r = pbrt.Length(w);
+            Vector3f u = (1 / r) * w;
+            Vector3f axis = Math.Abs(u.x) < 0.6f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
+            Vector3f e1 = pbrt.Normalize(pbrt.Cross(u, axis));
+            Vector3f e2 = pbrt.Cross(u, e1);
+            Vector3f a = r * (derivative * e1);
+            Vector3f b = r * (derivative * e2);
+            return Math.Abs(pbrt.Dot(pbrt.Cross(a, b), endDirection));
         }
 
         // Algorithm 3 of the paper: searches from uniformly random directions. The first search that fails is a null path

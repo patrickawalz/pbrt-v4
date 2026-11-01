@@ -65,3 +65,17 @@ and a connection to a point on the box (type-1) reaches it to 2e-6. Seven delibe
 majorant is one constant per medium, so a heterogeneous inner medium needs a user supplied bound (no automatic bound from
 grids yet); `Medium.Create` has no "refractive" name yet, and `SampleT_maj` does not dispatch to this class (the integrators
 call `SampleT_majCurved` explicitly in stage 5).
+
+Stage 5, part 1 (the estimator of the next-event connection, before the integrators): `ConnectToPoint` finds a path from a
+point inside the medium to a point anywhere (the field is `BoundedRefractiveIndexField`: the inner field in the box, index 1
+outside, so the box boundary has to be index matched), and `RefractiveConnectionPath.areaJacobian` is dA/d(omega), the area
+that a unit of solid angle of start directions covers on the plane perpendicular to the end direction (s^2 for a straight
+path). The estimate of an integral over the directions at a point by sampling a point of a tilted emitting patch, finding the
+curve and weighting by `count * cos / J * area` equals the estimate by sampling directions and following the curve (0.00233
++- 0.00003 against 0.00224 +- 0.00006, the Luneburg lens with a varying absorption). Dropping the count, the cosine or the
+scale of |w| in J is caught. Not caught, because it does not change the result: the longitudinal part of the derivative (the
+s* term) and the projection on the end direction in J; the transverse part is all that J uses.
+
+The n^2 factors of the radiance telescope along a path whose camera and light are outside the medium (basic radiance L / n^2
+is conserved along the curves and by scattering), so they are 1 for the paths here and matter only for endpoints or emission
+inside the medium, which are not supported.

@@ -173,5 +173,93 @@ namespace pbrt
             // The lens bends the path
             EXPECT_GT(path.length, pbrt.Length(target - start));
         }
+
+        // The two ways to estimate the same integral over the directions at a point inside the medium agree: sampling the
+        // direction and following the curve to a patch that emits (A), and sampling the point of the patch and finding the curve
+        // to it with the connection solver, with the count of algorithm 3 and the Jacobian of the end (B).
+        [TEST("RefractiveMedium", "ConnectionEstimateMatchesDirectionSampling")]
+        public static void RefractiveMedium_ConnectionEstimateMatchesDirectionSampling()
+        {
+            LuneburgRefractiveIndexField lens = new LuneburgRefractiveIndexField(new Point3f(0, 0, 0), 1.5f, 2.0f);
+            RefractiveMedium medium = MakeMedium(lens, 0.05f);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            Point3f x = new Point3f(-0.3f, 0.1f, 0.2f);
+            // The patch is tilted, so the cosine at its end varies over the paths
+            Point3f center = new Point3f(3.0f, 0, 0);
+            Vector3f normal = new Vector3f(-0.5f, 0, 0.8660254f);
+            Vector3f axisU = new Vector3f(0, 1, 0);
+            Vector3f axisV = pbrt.Cross(normal, axisU);
+            Float half = 0.6f;
+            Float area = 4 * half * half;
+            RNG rng = new RNG(21);
+
+            // A: directions
+            int countA = 500000;
+            double sumA = 0, sumA2 = 0;
+            for (int i = 0; i < countA; ++i)
+            {
+                Vector3f direction = pbrt.SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Float weight = 1;
+                medium.SampleT_majCurved(x, direction, 100.0f, rng.Uniform<Float>(), ref rng, lambda,
+                                         (Point3f p, Vector3f tangent, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
+                                         {
+                                             weight *= 1 - (mp.sigma_a[0] + mp.sigma_s[0]) / sigma_maj[0];
+                                             return true;
+                                         }, out Point3f endPoint, out Vector3f endDirection, out Float endLength);
+                Float value = 0;
+                Float facing = pbrt.Dot(endDirection, normal);
+                if (facing != 0)
+                {
+                    Float t = pbrt.Dot(center - endPoint, normal) / facing;
+                    if (t > 0)
+                    {
+                        Vector3f offset = endPoint + t * endDirection - center;
+                        if (Math.Abs(pbrt.Dot(offset, axisU)) < half && Math.Abs(pbrt.Dot(offset, axisV)) < half)
+                        {
+                            value = weight;
+                        }
+                    }
+                }
+                sumA += value;
+                sumA2 += value * value;
+            }
+            double meanA = sumA / countA;
+            double seA = Math.Sqrt((sumA2 / countA - meanA * meanA) / countA);
+
+            // B: points of the patch
+            RefractiveConnectionOptions options = new RefractiveConnectionOptions();
+            options.stepSize = 0.05f;
+            options.maxLength = 12.0f;
+            options.tolerance = 1e-3f;
+            int countB = 40000;
+            double sumB = 0, sumB2 = 0;
+            int found = 0;
+            for (int i = 0; i < countB; ++i)
+            {
+                Point3f y = center + half * (2 * rng.Uniform<Float>() - 1) * axisU + half * (2 * rng.Uniform<Float>() - 1) * axisV;
+                double value = 0;
+                if (medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out int count))
+                {
+                    ++found;
+                    Float weight = 1;
+                    medium.SampleT_majCurved(x, path.startDirection, path.length, rng.Uniform<Float>(), ref rng, lambda,
+                                             (Point3f p, Vector3f tangent, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
+                                             {
+                                                 weight *= 1 - (mp.sigma_a[0] + mp.sigma_s[0]) / sigma_maj[0];
+                                                 return true;
+                                             }, out Point3f endPoint, out Vector3f endDirection, out Float endLength);
+                    Float cosine = Math.Abs(pbrt.Dot(path.endDirection, normal));
+                    // f = 1 / (4 pi), the density of the direction is area-density * J / cos
+                    value = count * weight * cosine * area / path.areaJacobian / (4 * Math.PI);
+                }
+                sumB += value;
+                sumB2 += value * value;
+            }
+            double meanB = sumB / countB;
+            double seB = Math.Sqrt((sumB2 / countB - meanB * meanB) / countB);
+            Console.Error.WriteLine("MEASURE A=" + meanA + "+-" + seA + " B=" + meanB + "+-" + seB + " found=" + found + "/" + countB);
+            EXPECT_LT(Math.Abs(meanA - meanB), 4 * Math.Sqrt(seA * seA + seB * seB));
+            EXPECT_GT(meanA, 0.001);
+        }
     }
 }
