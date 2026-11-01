@@ -26,6 +26,11 @@ namespace pbrt
         public int maxTrials = 1000;
         // If set, a path that leaves the region where this is true is a failure (the medium bounds)
         public Func<Point3f, bool> inside = null;
+
+        public RefractiveConnectionOptions Clone()
+        {
+            return (RefractiveConnectionOptions)MemberwiseClone();
+        }
     }
 
     // RefractiveConnectionPath Definition
@@ -64,11 +69,14 @@ namespace pbrt
                 Float fPrevious = f;
                 state.Step(field, h);
                 travelled += h;
-                if (options.inside != null && !options.inside(state.p))
+                f = pbrt.Dot(state.p - target, state.v);
+                // A step that ends at the closest approach may overshoot a target on the boundary: it is the refined point
+                // that has to be inside then
+                bool closing = armed && f >= 0;
+                if (!closing && options.inside != null && !options.inside(state.p))
                 {
                     return false;
                 }
-                f = pbrt.Dot(state.p - target, state.v);
                 if (float.IsNaN((float)f))
                 {
                     return false;
@@ -92,7 +100,7 @@ namespace pbrt
                     }
                     atClosest = best;
                     length = travelled - h + bestT;
-                    return true;
+                    return options.inside == null || options.inside(best.p);
                 }
                 if (!armed && f < 0)
                 {

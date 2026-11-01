@@ -30,7 +30,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 1 | `RefractiveIndexField`: cubic B-spline grid with value, gradient and Hessian (`GridRefractiveIndexField`); analytic `LuneburgRefractiveIndexField` and `LinearRefractiveIndexField` for the tests | done (`refractiveindex.cs`) |
 | 2 | `SymplecticRay` (algorithm 1) and `SymplecticRayJacobian` (algorithm 2, exact) | done (`refractiveray.cs`) |
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
-| 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, the boundary through the boundary stack | open |
+| 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | open |
 | 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | open |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
@@ -53,3 +53,15 @@ the plain integrator retraces to 1.3e-4 of the target. With one path the estimat
 velocity term, the gradient term of its denominator, the crossing test, the count, the null-path rule) are caught. A loose
 same-path test is not caught, because with one path every success is the same path: **the estimate with two or more stationary
 paths is not tested**. Type-1 connections (an end point on the medium boundary) wait for stage 4.
+
+Stage 4: `RefractiveMedium` wraps an ordinary medium (the coefficients), a `RefractiveIndexField` and a box, with a constant
+majorant. `SampleT_majCurved` samples tentative collisions in the arc length on a step grid fixed from the start of the
+path (partial steps give the collision points, so the curve does not depend on where the collisions fall), reports the point
+and the tangent at each, and stops at the exit from the box (bisection on a partial step) or at the maximum length. Ratio
+tracking with a coefficient that varies along a curved path (Luneburg lens, sigma = 0.6 + 0.4 sin(3x + 2z)) gives 0.29240
+against the quadrature 0.29257 with 800000 samples; the collisions are Poisson in the arc length (1.589 against 1.6 with
+8000 walks); the end point and direction equal those of the plain integrator to 7e-7, the exit from the box is exact to 1e-7,
+and a connection to a point on the box (type-1) reaches it to 2e-6. Seven deliberate breaks are caught. Not done: the
+majorant is one constant per medium, so a heterogeneous inner medium needs a user supplied bound (no automatic bound from
+grids yet); `Medium.Create` has no "refractive" name yet, and `SampleT_maj` does not dispatch to this class (the integrators
+call `SampleT_majCurved` explicitly in stage 5).
