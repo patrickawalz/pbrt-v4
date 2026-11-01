@@ -31,6 +31,8 @@ namespace pbrt
         public int bdptMaxDepth = 0;
         // (Fong et al., 4.1) The number of equiangular samples of a segment, for the scatterings before the given depth
         public int bdptEquiangularSamples = 1;
+        // The light sampler of the equiangular strategy, over the lights it takes part with
+        public LightSampler bdptEquiangularLightSampler;
         public int bdptEquiangularMultipleDepth = int.MaxValue;
 
         public int EquiangularCount(int depth)
@@ -2173,8 +2175,8 @@ namespace pbrt
                 Float uLightChoice = sampler.Get1D();
                 Float uDistance = sampler.Get1D();
                 Point2f uLight = sampler.Get2D();
-                pstd.optional<SampledLight> sampledLight = lightSampler.Sample(uLightChoice);
-                if (!sampledLight || !EquiangularLight(sampledLight.value().light))
+                pstd.optional<SampledLight> sampledLight = ctx.integrator.bdptEquiangularLightSampler.Sample(uLightChoice);
+                if (!sampledLight)
                     return zero;
                 Light light = sampledLight.value().light;
                 DiffuseAreaLight areaLight = light as DiffuseAreaLight;
@@ -2286,7 +2288,10 @@ namespace pbrt
                 for (int i = 1; i < vIdx; ++i)
                     r_u0 *= path[i].vtx;
                 SampledSpectrum equiangular = r_u0 * rl_seg * rl_conn * (count * pdfDistance);
-                SampledSpectrum denominator = (equiangular + sum * mp.sigma_s[0]) * (sampledLight.value().p * pdfArea);
+                // (the light is chosen with its probability among the lights of the strategy, and by the light sampler of the
+                // strategies of bdpt for the connection)
+                Float pmfConnection = lightSampler.PMF(light);
+                SampledSpectrum denominator = (equiangular * sampledLight.value().p + sum * (mp.sigma_s[0] * pmfConnection)) * pdfArea;
                 Float average = denominator.Average();
                 if (!(average > 0))
                     return zero;
@@ -2624,7 +2629,7 @@ namespace pbrt
 
                 // (not in pbrt-v4) The strategy that samples the scattering point next to the light by equiangular sampling
                 if (withEquiangular && integrator.bdptEquiangular && oneLightValid)
-                    sum += EquiangularTerm(integrator, lightVertices, cameraVertices, sampled, s, t, riOneLight, connRu, connRl);
+                    sum += EquiangularTerm(integrator, lightVertices, cameraVertices, sampled, s, t, riOneLight, connRu, connRl, lightSampler);
 
                 sumOut = sum;
                 return true;
@@ -2689,7 +2694,7 @@ namespace pbrt
         // collision), as in volpath. riOneLight is the ratio of the strategy with one light vertex to the sample's.
         static SampledSpectrum EquiangularTerm(Integrator integrator, Vertex[] lightVertices, Vertex[] cameraVertices,
                                                Vertex sampled, int s, int t, Float riOneLight, SampledSpectrum connRu,
-                                               SampledSpectrum connRl)
+                                               SampledSpectrum connRl, LightSampler lightSampler)
         {
             SampledSpectrum zero = new SampledSpectrum(0.0f);
             SampledSpectrum value = new SampledSpectrum(riOneLight);
@@ -2746,7 +2751,13 @@ namespace pbrt
             Float pdfDistance = EquiangularSampling.Pdf(origin, direction, tMax, y0.p(), tX);
             if (!(pdfDistance > 0))
                 return zero;
-            return value * (integrator.EquiangularCount(s + t - 2) * pdfDistance / x1.sigmaS0);
+            // (the light is chosen with its probability among the lights of the strategy, against that of the connection)
+            Light light = LightOfVertex(y0);
+            Float pmfConnection = lightSampler.PMF(light);
+            if (!(pmfConnection > 0))
+                return zero;
+            Float pmfEquiangular = integrator.bdptEquiangularLightSampler.PMF(light);
+            return value * (integrator.EquiangularCount(s + t - 2) * pdfDistance * pmfEquiangular / (x1.sigmaS0 * pmfConnection));
         }
 
         public static Float InfiniteLightDensity(List<Light> infiniteLights, LightSampler lightSampler, Vector3f w)
@@ -2994,6 +3005,25 @@ namespace pbrt
         {
             // (not in pbrt-v4) Equiangular sampling of the scattering points next to point and area lights (see BDPT.EquiangularTerm)
             this.bdptEquiangular = equiangular && sensor == null;
+            if (this.bdptEquiangular)
+            {
+                List<Light> supported = new List<Light>();
+                foreach (Light light in TextureMedium.AddEmissionLights(lights))
+                {
+                    if (BDPT.EquiangularLight(light))
+                    {
+                        supported.Add(light);
+                    }
+                }
+                if (supported.Count == 0)
+                {
+                    this.bdptEquiangular = false;
+                }
+                else
+                {
+                    this.bdptEquiangularLightSampler = new PowerLightSampler(supported.ToArray(), new Allocator());
+                }
+            }
             this.bdptMaxDepth = maxDepth;
             this.bdptEquiangularSamples = Math.Max(1, equiangularSamples);
             this.bdptEquiangularMultipleDepth = equiangularMultipleDepth;
@@ -4508,6 +4538,27 @@ namespace pbrt
             this.lightSampler = LightSampler.Create(lightSampleStrategy, TextureMedium.AddEmissionLights(lights).ToArray(),
                                                     new Allocator());
             this.regularize = regularize;
+            // (not in pbrt-v4) Equiangular sampling chooses among the lights it takes part with (a choice of any other light would
+            // find nothing); with none it is off
+            if (this.equiangular)
+            {
+                List<Light> supported = new List<Light>();
+                foreach (Light light in TextureMedium.AddEmissionLights(lights))
+                {
+                    if (BDPT.EquiangularLight(light))
+                    {
+                        supported.Add(light);
+                    }
+                }
+                if (supported.Count == 0)
+                {
+                    this.equiangular = false;
+                }
+                else
+                {
+                    this.equiangularLightSampler = LightSampler.Create(lightSampleStrategy, supported.ToArray(), new Allocator());
+                }
+            }
         }
 
         static Float[] ToFloats(params double[] v)
@@ -4828,7 +4879,7 @@ namespace pbrt
                                 SampledSpectrum rl2 = new SampledSpectrum(0.0f);
                                 for (int c = 0; c < NSpectrumSamples; ++c)
                                     rl2[c] = scatterRl0[c] != 0 ? ctx.st.r_l[c] / scatterRl0[c] : 0;
-                                Float pmfEquiangular = vp.PmfOrZero(scatter.context, areaLight);
+                                Float pmfEquiangular = vp.PmfEquiangularOrZero(scatter.context, areaLight);
                                 Float pdfDistance = EquiangularSampling.Pdf(scatter.origin, scatter.direction, scatter.tMax, y, scatter.t);
                                 Float pdfArea = equiangularArea.PdfArea();
                                 r_equiangular = scatter.r_u0 * scatter.segL * rl2 *
@@ -5138,7 +5189,7 @@ namespace pbrt
             Float uLightChoice = sampler.Get1D();
             Float uDistance = sampler.Get1D();
             Point2f uLight = sampler.Get2D();
-            pstd.optional<SampledLight> sampledLight = lightSampler.Sample(segment.context, uLightChoice);
+            pstd.optional<SampledLight> sampledLight = equiangularLightSampler.Sample(segment.context, uLightChoice);
             if (!sampledLight)
                 return new SampledSpectrum(0.0f);
             Light light = sampledLight.value().light;
@@ -5254,6 +5305,13 @@ namespace pbrt
 
         // (not in pbrt-v4) The probability of choosing the light from the context; the light sampler gives 0/0 for a light that has no
         // importance there (one that faces away), where the probability is zero
+        // (not in pbrt-v4) The probability that equiangular sampling chooses the light: it chooses among the lights it takes part with
+        internal Float PmfEquiangularOrZero(LightSampleContext ctx, Light light)
+        {
+            Float pmf = equiangularLightSampler.PMF(ctx, light);
+            return Float.IsNaN(pmf) ? 0 : pmf;
+        }
+
         Float PmfOrZero(LightSampleContext ctx, Light light)
         {
             Float pmf = lightSampler.PMF(ctx, light);
@@ -5360,7 +5418,7 @@ namespace pbrt
             SampledSpectrum r_equiangular = new SampledSpectrum(0.0f);
             if (equiangularSegment != null && light.Type() == LightType.DeltaPosition && volumeLight == null)
             {
-                Float pmfEquiangular = lightSampler.PMF(equiangularSegment.context, light);
+                Float pmfEquiangular = PmfEquiangularOrZero(equiangularSegment.context, light);
                 Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
                                                             equiangularSegment.tMax, ls.value().pLight.p(), equiangularSegment.t);
                 r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
@@ -5376,7 +5434,7 @@ namespace pbrt
                 Float cosY = AbsDot(ls.value().pLight.n, wi);
                 if (cosY > 0)
                 {
-                    Float pmfEquiangular = PmfOrZero(equiangularSegment.context, light);
+                    Float pmfEquiangular = PmfEquiangularOrZero(equiangularSegment.context, light);
                     Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
                                                                 equiangularSegment.tMax, y, equiangularSegment.t);
                     Float pdfArea = equiangularArea.PdfArea();
@@ -5423,6 +5481,7 @@ namespace pbrt
         // VolPathIntegrator Private Members
         int maxDepth;
         LightSampler lightSampler;
+        LightSampler equiangularLightSampler;
         bool regularize;
         bool equiangular;
         int equiangularSamples, equiangularMultipleDepth;

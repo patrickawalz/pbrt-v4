@@ -162,6 +162,11 @@ is reproduced exactly with the same seed.
      0.987 to 1.007; all strategies depth 3 (2048 spp) 0.999 to 1.002, depth 5 (1024 spp) 0.999 to 1.003; chromatic depth 3 0.997
      to 1.002. The noise gain is small: depth 5 pixel RMSE 0.0056 against 0.0064 for 12% more time, because bdpt's s = 1 and t = 1
      strategies already handle a point light well.
+   * The light choice of equiangular sampling is among the lights it takes part with (volpath: a second light sampler over them; bdpt:
+     a power sampler over them, with the ratio of its probability to the connection's in the weights); with none the flag is off.
+     Before, a choice of an unsupported light (an infinite light, say) found nothing. Point light plus a uniform infinite light, 24x24,
+     1024 spp, maxdepth 8: volpath mean ratio 1.002 +- 0.0075 over six seeds, noise 0.036 against 0.066 for 1.6 times the time;
+     bdpt 1.003 and 0.999, noise 0.0114 against 0.0169 for 1.25 times the time. The renders are unchanged when every light takes part.
    * Multiple sampling (Fong section 4.1; `"integer equiangularsamples" N`, `"integer equiangulardepth" D`, volpath and bdpt): N
      equiangular samples per medium segment for the scatterings before depth D (default all), one after. With N samples the strategy's
      density in every denominator is N times as large (`EquiangularSegment.count`, `Integrator.EquiangularCount`), and each sample
