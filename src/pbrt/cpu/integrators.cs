@@ -25,6 +25,10 @@ namespace pbrt
         // (not in pbrt-v4) The strategies of bdpt that are used: all of them, or those of a unidirectional path tracer (the
         // camera subpath's own hits of emitters, s = 0, and the light samples at its vertices, s = 1, with t >= 2)
         public bool unidirectionalStrategies = false;
+        // (not in pbrt-v4) Equiangular sampling of the scattering points of the camera subpaths of bdpt (see BDPT.EquiangularTerm): whether
+        // it is on, and the maximum depth of the paths
+        public bool bdptEquiangular = false;
+        public int bdptMaxDepth = 0;
 
         public bool StrategyAllowed(int s, int t)
         {
@@ -1559,6 +1563,8 @@ namespace pbrt
         // ratio of the majorants of the wavelengths to the hero's, which a walk that collides there has as its density
         public SampledSpectrum segU = new SampledSpectrum(1.0f), segL = new SampledSpectrum(1.0f), vtx = new SampledSpectrum(1.0f);
         public SampledSpectrum cumU = new SampledSpectrum(1.0f), emissionMaj = new SampledSpectrum(1.0f);
+        // (not in pbrt-v4) The scattering coefficient of the hero wavelength at a vertex in a medium
+        public Float sigmaS0 = 0;
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1587,7 +1593,7 @@ namespace pbrt
             type = v.type; beta = v.beta; ei = v.ei; mi = v.mi; si = v.si; bsdf = v.bsdf;
             delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
             emission = v.emission; sigmaT0 = v.sigmaT0;
-            segU = v.segU; segL = v.segL; vtx = v.vtx; cumU = v.cumU; emissionMaj = v.emissionMaj;
+            segU = v.segU; segL = v.segL; vtx = v.vtx; cumU = v.cumU; emissionMaj = v.emissionMaj; sigmaS0 = v.sigmaS0;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -1899,6 +1905,18 @@ namespace pbrt
         public int index;
     }
 
+    // (not in pbrt-v4) What the camera subpaths of bdpt add by equiangular sampling of their scattering points (see BDPT.EquiangularTerm)
+    public sealed class BDPTEquiangularSink
+    {
+        public BDPTEquiangularSink(int maxDepth)
+        {
+            this.maxDepth = maxDepth;
+        }
+
+        public SampledSpectrum L = new SampledSpectrum(0.0f);
+        public int maxDepth;
+    }
+
     // BDPT Utility Functions
     public static unsafe class BDPT
     {
@@ -1937,7 +1955,8 @@ namespace pbrt
                                                 ref SampledWavelengths lambda, Sampler sampler,
                                                 ScratchBuffer scratchBuffer, int maxDepth, Camera camera,
                                                 Vertex[] path, bool regularize, bool polarised = false,
-                                                List<MediumEmissionEnd> emissionEnds = null)
+                                                List<MediumEmissionEnd> emissionEnds = null,
+                                                BDPTEquiangularSink equiangularSink = null)
         {
             if (maxDepth == 0)
                 return 0;
@@ -1949,7 +1968,8 @@ namespace pbrt
             path[0].stack = stack;
             camera.PDF_We(new Ray(ray), &pdfPos, &pdfDir);
             return RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta, pdfDir,
-                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised, emissionEnds) + 1;
+                              maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised, emissionEnds,
+                              equiangularSink) + 1;
         }
 
         public static int GenerateLightSubpath(Integrator integrator, ref SampledWavelengths lambda,
@@ -2046,7 +2066,8 @@ namespace pbrt
                                      BoundaryStack stack, Sampler sampler, Camera camera, ScratchBuffer scratchBuffer,
                                      SampledSpectrum beta, Float pdf, int maxDepth, TransportMode mode,
                                      Vertex[] path, int off, bool regularize, bool polarised = false,
-                                     List<MediumEmissionEnd> emissionEnds = null)
+                                     List<MediumEmissionEnd> emissionEnds = null,
+                                     BDPTEquiangularSink equiangularSink = null)
         {
             if (maxDepth == 0)
                 return 0;
@@ -2064,7 +2085,7 @@ namespace pbrt
             ctx.mode = mode;
             ctx.st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
             ctx.st.trackSegment = true;
-            BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize, emissionEnds);
+            BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize, emissionEnds, equiangularSink);
             try
             {
                 // Follow random walk to initialize BDPT path vertices
@@ -2081,9 +2102,10 @@ namespace pbrt
         sealed class BDPTWalkHook : PathWalkHook
         {
             public BDPTWalkHook(Vertex[] path, int off, int maxDepth, Float pdfFwd, bool regularize,
-                                List<MediumEmissionEnd> emissionEnds = null)
+                                List<MediumEmissionEnd> emissionEnds = null, BDPTEquiangularSink equiangularSink = null)
             {
                 this.emissionEnds = emissionEnds;
+                this.equiangularSink = equiangularSink;
                 this.path = path;
                 this.off = off;
                 this.maxDepth = maxDepth;
@@ -2098,6 +2120,10 @@ namespace pbrt
             bool regularize;
             bool anyNonSpecularBounces = false;
             List<MediumEmissionEnd> emissionEnds;
+            // (not in pbrt-v4) Equiangular sampling of the camera subpath (see SampleEquiangularVertex); the number of pieces of the
+            // segment so far (the walk passes the boundaries between media without a vertex)
+            BDPTEquiangularSink equiangularSink;
+            int segmentPieces = 0;
 
             // The collisions of the segment that arrives at the new vertex go to the vertex, and the next segment starts empty
             void StoreSegment(WalkContext ctx, int index)
@@ -2107,6 +2133,152 @@ namespace pbrt
                 path[index].vtx = ctx.st.vtx;
                 path[index].cumU = path[index - 1].cumU * ctx.st.segU;
                 ctx.st.ResetSegment();
+                segmentPieces = 0;
+            }
+
+            public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
+            {
+                ++segmentPieces;
+                // Only the first piece of a segment (the one that starts at the vertex): the strategy and its weights are defined for it
+                if (equiangularSink == null || ctx.mode != TransportMode.Radiance || segmentPieces != 1 || !(bool)ctx.st.beta ||
+                    vIdx > equiangularSink.maxDepth)
+                    return;
+                equiangularSink.L += SampleEquiangularVertex(ctx, medium, tMax);
+            }
+
+            // (not in pbrt-v4) The contribution of the path that has a scattering point on the segment that the walk is about to sample,
+            // found by choosing a light, a point on it and then the distance along the segment by the angle seen from that point
+            // (Fong et al., 4.2.2 and 4.2.3), and connected to the point. Its weight is that of volpath's SampleEquiangular
+            // (the sum of the strategies that find the same path, relative to this one), with the strategies of bdpt next to those
+            // of the walk: MISSum of the path with the scattering point as the last vertex of the camera subpath.
+            SampledSpectrum SampleEquiangularVertex(WalkContext ctx, Medium medium, Float tMax)
+            {
+                SampledSpectrum zero = new SampledSpectrum(0.0f);
+                BDPTIntegrator bdpt = (BDPTIntegrator)ctx.integrator;
+                LightSampler lightSampler = bdpt.BDPTLightSampler;
+                SampledWavelengths lambda = ctx.lambda;
+                Sampler sampler = ctx.sampler;
+                Float uLightChoice = sampler.Get1D();
+                Float uDistance = sampler.Get1D();
+                Point2f uLight = sampler.Get2D();
+                pstd.optional<SampledLight> sampledLight = lightSampler.Sample(uLightChoice);
+                if (!sampledLight || !EquiangularLight(sampledLight.value().light))
+                    return zero;
+                Light light = sampledLight.value().light;
+                DiffuseAreaLight areaLight = light as DiffuseAreaLight;
+                Float length = Length(ctx.ray.d);
+                Point3f origin = ctx.ray.o;
+                Vector3f direction = ctx.ray.d / length;
+                Float segmentLength = tMax * length;
+                LightSampleContext segmentContext = new LightSampleContext(new Point3fi(origin), new Normal3f(0, 0, 0),
+                                                                            new Normal3f(0, 0, 0));
+                // The point on the light that the distance is chosen from
+                Point3f pLight;
+                Interaction yIntr = default;
+                Float pdfArea = 1;
+                if (areaLight != null)
+                {
+                    if (!areaLight.SampleArea(uLight, out yIntr, out pdfArea))
+                        return zero;
+                    pLight = yIntr.p();
+                }
+                else
+                {
+                    pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segmentContext, uLight, lambda, true);
+                    if (!lsOrigin)
+                        return zero;
+                    pLight = lsOrigin.value().pLight.p();
+                }
+                if (!EquiangularSampling.Sample(origin, direction, segmentLength, pLight, uDistance, out Float t, out Float pdfDistance))
+                    return zero;
+                Point3f p = origin + t * direction;
+
+                // The transmittance to the point, with the null collisions of the walk's tracker
+                SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
+                RNG rng = new RNG(Hash(origin, t), Hash(direction));
+                Float uTrack = rng.Uniform<Float>();
+                SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+                    new Ray(origin, direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
+                    (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                    {
+                        SampledSpectrum sigma_n = ClampZero(sigma_maj - mpp.sigma_a - mpp.sigma_s);
+                        MediumEvents.RatioTrackingStep(ref T_seg, ref rl_seg, ref ru_seg, T_maj_, sigma_maj, sigma_n);
+                        return (bool)T_seg;
+                    });
+                if (!T_seg)
+                    return zero;
+                MediumEvents.FinishSegment(ref T_seg, ref rl_seg, ref ru_seg, T_maj);
+                if (!VolPathIntegrator.MajorantCovers(medium, new Ray(origin, direction, ctx.ray.time), segmentLength, t, lambda))
+                    return zero;
+
+                // The scattering at the point
+                MediumProperties mp = medium.SamplePoint(p, lambda);
+                if (!mp.sigma_s || !(mp.sigma_s[0] > 0))
+                    return zero;
+                MediumInteraction intr = new MediumInteraction(p, -direction, ctx.ray.time, medium, mp.phase);
+                Vertex x = Vertex.CreateMedium(intr, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                x.sigmaS0 = mp.sigma_s[0];
+                x.segU = ru_seg;
+                x.segL = rl_seg;
+                x.vtx = mp.sigma_s / mp.sigma_s[0];
+                x.cumU = path[vIdx - 1].cumU * ru_seg;
+                x.stack = ctx.stack;
+
+                // The light at the point
+                LightSampleContext lightContext = Integrator.LightContextAt(intr, false, default);
+                SampledSpectrum radiance;
+                Interaction target;
+                if (areaLight != null)
+                {
+                    Vector3f d = yIntr.p() - p;
+                    Float r2 = LengthSquared(d);
+                    if (r2 == 0)
+                        return zero;
+                    Vector3f wi = d / MathF.Sqrt(r2);
+                    Float cosY = AbsDot(yIntr.n, wi);
+                    if (cosY == 0)
+                        return zero;
+                    SampledSpectrum Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wi, lambda);
+                    if (!Lemit)
+                        return zero;
+                    radiance = Lemit * (cosY / r2);
+                    target = yIntr;
+                }
+                else
+                {
+                    pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
+                    if (!ls || !ls.value().L || ls.value().pdf == 0)
+                        return zero;
+                    radiance = ls.value().L;
+                    target = ls.value().pLight;
+                    pdfArea = 1;
+                }
+                EndpointInteraction ei = new EndpointInteraction(light, target);
+                Vertex yVertex = Vertex.CreateLight(ei, new SampledSpectrum(1.0f), 0);
+                yVertex.pdfFwd = yVertex.PDFLightOrigin(ctx.integrator.infiniteLights, x, lightSampler);
+                SampledSpectrum f_hat = x.f(yVertex, TransportMode.Radiance);
+                if (!f_hat)
+                    return zero;
+                SampledSpectrum T_conn = ctx.integrator.TrSegments(intr, target, ctx.stack, lambda, out SampledSpectrum ru_conn,
+                                                                    out SampledSpectrum rl_conn, out Medium endMedium);
+                if (!T_conn)
+                    return zero;
+
+                // The weight: the ways to find the path, relative to the hero wavelength's connection
+                path[vIdx] = x;
+                Vertex[] lightVertices = new Vertex[] { new Vertex() };
+                if (!MISSum(ctx.integrator, ctx.camera, lightVertices, path, yVertex, 1, vIdx + 1, lightSampler, ru_conn, rl_conn,
+                            false, out SampledSpectrum sum))
+                    return zero;
+                SampledSpectrum r_u0 = path[vIdx - 1].cumU;
+                for (int i = 1; i < vIdx; ++i)
+                    r_u0 *= path[i].vtx;
+                SampledSpectrum equiangular = r_u0 * rl_seg * rl_conn * pdfDistance;
+                SampledSpectrum denominator = (equiangular + sum * mp.sigma_s[0]) * (sampledLight.value().p * pdfArea);
+                Float average = denominator.Average();
+                if (!(average > 0))
+                    return zero;
+                return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_conn * radiance / average;
             }
 
             public override bool BeginIteration(WalkContext ctx)
@@ -2173,6 +2345,7 @@ namespace pbrt
                 // Record medium interaction in _path_ and compute forward density
                 intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, medium, mp.phase);
                 path[vIdx] = Vertex.CreateMedium(intr, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                path[vIdx].sigmaS0 = mp.sigma_s[0];
                 StoreSegment(ctx, vIdx);
                 path[vIdx].stack = ctx.stack;
                 path[vIdx].pbeta = ctx.st.pa;
@@ -2267,13 +2440,33 @@ namespace pbrt
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
                                       LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl)
         {
+            if (!MISSum(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler, connRu, connRl,
+                        true, out SampledSpectrum sum))
+                return 1;
+            Float average = sum.Average();
+            return average > 0 ? 1 / average : 0;
+        }
+
+        // (not in pbrt-v4) The sum, per wavelength, of the probabilities of the path under all the strategies, relative to the
+        // sample's strategy (the weight of MISWeight is the inverse of its average); false if the weight is one. With
+        // withEquiangular the sum has the strategy that finds the scattering point next to the light by equiangular sampling (see
+        // EquiangularTerm).
+        public static bool MISSum(Integrator integrator, Camera camera, Vertex[] lightVertices,
+                                  Vertex[] cameraVertices, Vertex sampled, int s, int t,
+                                  LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl,
+                                  bool withEquiangular, out SampledSpectrum sumOut)
+        {
+            sumOut = default;
             // (not in pbrt-v4) With a camera subpath that gathers the emission of a medium, a path of length 0 has two strategies: the
             // gathered emission (s = 0, t = 2) and the light sample of the medium that connects to the camera (s = 1, t = 1)
             bool mediumEmissionPair = integrator.gatherMediumEmission &&
                 ((s == 0 && t == 2 && IsVolumeEmission(cameraVertices[1])) || (s == 1 && t == 1 && IsVolumeEmission(lightVertices[0])));
             if (s + t == 2 && !mediumEmissionPair)
-                return 1;
+                return false;
             Float sumRi = 0;
+            // (not in pbrt-v4) The ratio of the strategy with one light vertex, for the equiangular term (see EquiangularTerm)
+            Float riOneLight = s == 1 ? 1 : 0;
+            bool oneLightValid = s == 1;
 
             // Temporarily update vertex properties for current strategy
             // Look up connection vertices and their predecessors
@@ -2359,6 +2552,11 @@ namespace pbrt
                     if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && integrator.StrategyAllowed(s + t - i, i))
                     {
                         Float riTerm = t == 1 ? ri / splatScale : ri;
+                        if (s == 0 && i == t - 1)
+                        {
+                            riOneLight = riTerm;
+                            oneLightValid = true;
+                        }
                         // The segment that arrives at vertex i is the connection of this strategy; the others, and the connection
                         // of the sample, are walked
                         sum += riTerm * (scatterVertices * cameraVertices[i - 1].cumU * walkedAfter * cameraVertices[i].segL *
@@ -2392,6 +2590,11 @@ namespace pbrt
                     if (!skip && !lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i))
                     {
                         Float riTerm = t == 1 ? ri / splatScale : ri;
+                        if (i == 1)
+                        {
+                            riOneLight = riTerm;
+                            oneLightValid = true;
+                        }
                         if (i > 0)
                         {
                             sum += riTerm * (scatterVertices * lightVertices[i - 1].cumU * walkedAfter * lightVertices[i].segL *
@@ -2407,9 +2610,12 @@ namespace pbrt
                         walkedAfter *= lightVertices[i].segU;
                 }
 
-                Float average = sum.Average();
-                return average > 0 ? 1 / average : 0;
+                // (not in pbrt-v4) The strategy that samples the scattering point next to the light by equiangular sampling
+                if (withEquiangular && integrator.bdptEquiangular && oneLightValid)
+                    sum += EquiangularTerm(integrator, lightVertices, cameraVertices, sampled, s, t, riOneLight, connRu, connRl);
 
+                sumOut = sum;
+                return true;
             }
             finally
             {
@@ -2422,6 +2628,113 @@ namespace pbrt
                 a2.Dispose();
                 a1.Dispose();
             }
+        }
+
+        // (not in pbrt-v4) A light that equiangular sampling takes part in: a point or spot light, or an area light that is sampled
+        // uniformly by area (see DiffuseAreaLight.SupportsEquiangular)
+        public static bool EquiangularLight(Light light)
+        {
+            if (light is DiffuseAreaLight areaLight)
+                return areaLight.SupportsEquiangular();
+            return light != null && !(light is VolumeEmissionLight) && light.Type() == LightType.DeltaPosition;
+        }
+
+        static Light LightOfVertex(Vertex v)
+        {
+            return v.type == VertexType.Light ? v.ei.light : (v.type == VertexType.Surface ? v.si.areaLight : null);
+        }
+
+        // (not in pbrt-v4) The first piece of the straight segment from z to x (the part before any boundary between media), where the
+        // walk that arrives at x from z has x if there is no boundary between them: the origin and direction of the piece, its
+        // length (infinite if nothing is behind), and the distance of x from the origin
+        static bool FirstPiece(Integrator integrator, Vertex z, Vertex x, out Point3f origin, out Vector3f direction,
+                               out Float tMax, out Float tX)
+        {
+            origin = default;
+            direction = default;
+            tMax = 0;
+            tX = 0;
+            Ray ray = z.GetInteraction().SpawnRayTo(x.GetInteraction());
+            Float length = Length(ray.d);
+            if (length == 0)
+                return false;
+            pstd.optional<ShapeIntersection> si = integrator.Intersect(ray);
+            if (si && si.value().tHit < 1 - ShadowEpsilon)
+                return false;
+            origin = ray.o;
+            direction = ray.d / length;
+            tMax = si ? si.value().tHit * length : Infinity;
+            tX = Dot(x.p() - origin, direction);
+            return tX > 0 && tX <= tMax;
+        }
+
+        // (not in pbrt-v4) The strategy that finds a path y0, x1, ... with a scattering point x1 in a medium next to a point or area light
+        // y0 by choosing the light point first, and x1 on the segment that arrives at it from the camera side by the angle seen from
+        // the light (Fong et al., 4.2.2 and 4.2.3), as a term of the sum of MISSum. It differs from the strategy with one light
+        // vertex (the connection of the camera subpath, which has x1, to the light) in the segment that arrives at x1 (a connection
+        // that is sampled, with the null collisions as segL), in the scattering coefficient at x1 (which that strategy has and this does
+        // not), and in the density of x1: the equiangular one over the scattering coefficient of the hero wavelength (the density of the
+        // collision), as in volpath. riOneLight is the ratio of the strategy with one light vertex to the sample's.
+        static SampledSpectrum EquiangularTerm(Integrator integrator, Vertex[] lightVertices, Vertex[] cameraVertices,
+                                               Vertex sampled, int s, int t, Float riOneLight, SampledSpectrum connRu,
+                                               SampledSpectrum connRl)
+        {
+            SampledSpectrum zero = new SampledSpectrum(0.0f);
+            SampledSpectrum value = new SampledSpectrum(riOneLight);
+            Vertex y0, x1, z;
+            if (s == 1)
+            {
+                if (t < 2)
+                    return zero;
+                y0 = lightVertices[0];
+                x1 = cameraVertices[t - 1];
+                z = cameraVertices[t - 2];
+                for (int i = 1; i < t - 1; ++i)
+                    value *= cameraVertices[i].vtx;
+                value *= z.cumU * x1.segL * connRl;
+            }
+            else if (s == 0)
+            {
+                if (t < 3)
+                    return zero;
+                y0 = cameraVertices[t - 1];
+                x1 = cameraVertices[t - 2];
+                z = cameraVertices[t - 3];
+                for (int i = 1; i < t - 2; ++i)
+                    value *= cameraVertices[i].vtx;
+                value *= z.cumU * x1.segL * y0.segL;
+            }
+            else
+            {
+                y0 = lightVertices[0];
+                x1 = lightVertices[1];
+                for (int i = 1; i < t; ++i)
+                    value *= cameraVertices[i].vtx;
+                for (int i = 2; i < s; ++i)
+                    value *= lightVertices[i].vtx;
+                value *= cameraVertices[t - 1].cumU * x1.segL;
+                if (s == 2)
+                {
+                    z = cameraVertices[t - 1];
+                    value *= connRl;
+                }
+                else
+                {
+                    z = lightVertices[2];
+                    value *= z.segL;
+                    for (int i = 3; i < s; ++i)
+                        value *= lightVertices[i].segU;
+                    value *= connRu;
+                }
+            }
+            if (x1.type != VertexType.Medium || !(x1.sigmaS0 > 0) || !EquiangularLight(LightOfVertex(y0)))
+                return zero;
+            if (!FirstPiece(integrator, z, x1, out Point3f origin, out Vector3f direction, out Float tMax, out Float tX))
+                return zero;
+            Float pdfDistance = EquiangularSampling.Pdf(origin, direction, tMax, y0.p(), tX);
+            if (!(pdfDistance > 0))
+                return zero;
+            return value * (pdfDistance / x1.sigmaS0);
         }
 
         public static Float InfiniteLightDensity(List<Light> infiniteLights, LightSampler lightSampler, Vector3f w)
@@ -2663,9 +2976,12 @@ namespace pbrt
                               int maxDepth, bool visualizeStrategies, bool visualizeWeights,
                               bool regularize = false, PolarisedPathIntegrator.Sensor sensor = null,
                               bool russianRoulette = false, bool gatherMediumEmission = true,
-                              bool unidirectionalStrategies = false)
+                              bool unidirectionalStrategies = false, bool equiangular = false)
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
+            // (not in pbrt-v4) Equiangular sampling of the scattering points next to point and area lights (see BDPT.EquiangularTerm)
+            this.bdptEquiangular = equiangular && sensor == null;
+            this.bdptMaxDepth = maxDepth;
             this.gatherMediumEmission = gatherMediumEmission;
             this.unidirectionalStrategies = unidirectionalStrategies;
             // (not in pbrt-v4) The polarisation of the light is carried along the subpaths next to the scalar throughput
@@ -2732,6 +3048,9 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) The light sampler of the strategies, for the equiangular sampling of the camera subpaths
+        public LightSampler BDPTLightSampler { get { return lightSampler; } }
+
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler,
                                            ScratchBuffer scratchBuffer, VisibleSurface visibleSurface)
         {
@@ -2740,8 +3059,10 @@ namespace pbrt
             Vertex[] cameraVertices = new Vertex[maxDepth + 2];
             for (int i = 0; i < cameraVertices.Length; ++i) cameraVertices[i] = new Vertex();
             List<MediumEmissionEnd> emissionEnds = gatherMediumEmission ? new List<MediumEmissionEnd>() : null;
+            BDPTEquiangularSink equiangularSink = bdptEquiangular ? new BDPTEquiangularSink(maxDepth) : null;
             int nCamera = BDPT.GenerateCameraSubpath(this, ray, ref lambda, sampler, scratchBuffer, maxDepth + 2,
-                                                     camera, cameraVertices, regularize, sensor != null, emissionEnds);
+                                                     camera, cameraVertices, regularize, sensor != null, emissionEnds,
+                                                     equiangularSink);
             Vertex[] lightVertices = new Vertex[maxDepth + 1];
             for (int i = 0; i < lightVertices.Length; ++i) lightVertices[i] = new Vertex();
             int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer,
@@ -2796,6 +3117,9 @@ namespace pbrt
                 }
             }
 
+            if (equiangularSink != null)
+                L += equiangularSink.L;
+
             // (not in pbrt-v4) The emission that the camera subpath gathered in media: each end is a path of its own, with the
             // vertices of the subpath before it, and its MIS weight against the strategies that sample the medium as a light
             if (emissionEnds != null)
@@ -2841,6 +3165,11 @@ namespace pbrt
             // (not in pbrt-v4) Camera subpaths gather the emission of media at their collisions, with MIS against the strategies
             // that sample the media as lights; false leaves the emission to those strategies alone
             bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
+            // (not in pbrt-v4) Equiangular sampling of the scattering points of the camera subpaths next to point and area lights
+            // (Fong et al., 4.2); not with polarised light
+            bool equiangular = parameters.GetOneBool("equiangular", false);
+            if (equiangular && parameters.GetOneBool("polarised", false))
+                Warning(loc, "\"equiangular\" is not used with \"polarised\" bdpt.");
             // (not in pbrt-v4) "all" or "unidirectional" (see Integrator.StrategyAllowed)
             string strategies = parameters.GetOneString("strategies", "all");
             if (strategies != "all" && strategies != "unidirectional")
@@ -2858,7 +3187,7 @@ namespace pbrt
 
             return new BDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, visualizeStrategies,
                                       visualizeWeights, regularize, sensor, russianRoulette, gatherMediumEmission,
-                                      strategies == "unidirectional");
+                                      strategies == "unidirectional", equiangular);
         }
 
         // BDPTIntegrator Private Members
@@ -4906,7 +5235,7 @@ namespace pbrt
             return Float.IsNaN(pmf) ? 0 : pmf;
         }
 
-        static bool MajorantCovers(Medium medium, Ray ray, Float tMax, Float t, SampledWavelengths lambda)
+        internal static bool MajorantCovers(Medium medium, Ray ray, Float tMax, Float t, SampledWavelengths lambda)
         {
             RayMajorantIterator iterator = medium.SampleRay(ray, tMax, lambda, new ScratchBuffer());
             while (true)

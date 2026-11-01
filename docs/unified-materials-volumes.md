@@ -146,6 +146,22 @@ is reproduced exactly with the same seed.
      0.0201 against 0.0271 (chromatic), 0.0039 against 0.0068 (grid), 96x96 at 64 spp, before the switch to uniform-area sampling. At
      equal time (about 1.5 times the cost per sample) a 256x256 scene with a small bright panel in fog gains only about 3% in
      high-pass noise; at equal samples 30%.
+   * bdpt (`"bool equiangular" true`, not with `"polarised"`). The camera subpath gets the same extra sample at the first piece of
+     each medium segment (`BDPTWalkHook.BeginSegment` -> `SampleEquiangularVertex`): a light by the context-free light sampler, a point
+     on it, the distance by the angle seen from it, ratio tracking to the point, then the connection. Its vertex is put at the end of
+     the camera subpath and weighed by `BDPT.MISSum` (the sum over the strategies, per wavelength, that `MISWeight` averages) plus its
+     own term. The other way round, every strategy whose path has a scattering vertex x1 next to a point or area light y0 gets one more
+     term in its sum (`EquiangularTerm`): the strategy with one light vertex (which is already in the sum, as the sample's own or
+     as the loop's hypothetical one, `riOneLight`) with the segment that arrives at x1 as a sampled connection (`segL`; `connRl` for
+     s = 2, the light subpath's `segL` of vertex 2 for s >= 3), without the scattering coefficient at x1 (`vtx`), and with the density
+     of the distance over the hero's scattering coefficient there (`Vertex.sigmaS0`), as in volpath. The segment's first piece, its
+     length and the distance of x1 are found by casting a ray from the neighbour z to x1 (`FirstPiece`): a path whose segment crosses a
+     boundary between media has no equiangular term (the sample is only made for the first piece, so the density is zero).
+     `MISWeight` is the inverse of the average of `MISSum`; without the flag the sums are the same and the renders bit-identical.
+   * Checked at 24x24, three seeds, point light in fog, equiangular over plain bdpt: unidirectional strategies depth 3 (4096 spp)
+     0.987 to 1.007; all strategies depth 3 (2048 spp) 0.999 to 1.002, depth 5 (1024 spp) 0.999 to 1.003; chromatic depth 3 0.997
+     to 1.002. The noise gain is small: depth 5 pixel RMSE 0.0056 against 0.0064 for 12% more time, because bdpt's s = 1 and t = 1
+     strategies already handle a point light well.
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
