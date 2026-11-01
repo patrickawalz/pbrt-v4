@@ -27,6 +27,13 @@ namespace pbrt
         public bool polarised;
         // Whether r_u and r_l are tracked (volpath) or not (bdpt keeps the densities in its vertices)
         public bool rescaled;
+        // (bdpt) The null collisions of the segment that the walk is in, for the spectral MIS weights of its vertices: segU is the
+        // ratio of the probability of the segment, as a walk samples it, to the hero wavelength's, and segL the same for the segment
+        // as a connection samples it (the shadow ray of a light sample), with the hero wavelength's walk probability as the
+        // denominator of both: these are the increments of volpath's r_u and r_l along the segment. vtx is the same for the real
+        // scatterings in media at the vertex (the extinction of each wavelength over the hero's).
+        public bool trackSegment;
+        public SampledSpectrum segU, segL, vtx;
 
         public PathState(SampledSpectrum beta, PAttenuation pa, PLight pl, bool fromCamera, bool polarised, bool rescaled)
         {
@@ -38,6 +45,18 @@ namespace pbrt
             this.fromCamera = fromCamera;
             this.polarised = polarised;
             this.rescaled = rescaled;
+            this.trackSegment = false;
+            this.segU = new SampledSpectrum(1.0f);
+            this.segL = new SampledSpectrum(1.0f);
+            this.vtx = new SampledSpectrum(1.0f);
+        }
+
+        // The segment of a new vertex starts with no collisions
+        public void ResetSegment()
+        {
+            segU = new SampledSpectrum(1.0f);
+            segL = new SampledSpectrum(1.0f);
+            vtx = new SampledSpectrum(1.0f);
         }
 
         // A scalar factor of the throughput
@@ -81,29 +100,27 @@ namespace pbrt
             }
         }
 
-        // A null collision of volpath: the throughput and both rescaled probabilities. False if the path is over.
+        // A null collision: the throughput and, for volpath, both rescaled probabilities; for a path that keeps its densities in
+        // vertices (bdpt), the null collisions of the segment. False if the path is over.
         public bool NullCollision(SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n)
         {
             Float pdf = T_maj[0] * sigma_n[0];
-            SampledSpectrum w = T_maj * sigma_n / pdf;
-            beta *= w;
-            if (pdf != 0)
+            if (rescaled)
             {
-                ScalePolarised(w);
+                SampledSpectrum w = T_maj * sigma_n / pdf;
+                beta *= w;
+                if (pdf != 0)
+                {
+                    ScalePolarised(w);
+                }
+                if (pdf == 0)
+                {
+                    beta = new SampledSpectrum(0.0f);
+                }
+                r_u *= T_maj * sigma_n / pdf;
+                r_l *= T_maj * sigma_maj / pdf;
+                return (bool)beta && (bool)r_u;
             }
-            if (pdf == 0)
-            {
-                beta = new SampledSpectrum(0.0f);
-            }
-            r_u *= T_maj * sigma_n / pdf;
-            r_l *= T_maj * sigma_maj / pdf;
-            return (bool)beta && (bool)r_u;
-        }
-
-        // A null collision of a path that keeps its densities in vertices. False if the path is over.
-        public bool NullCollision(SampledSpectrum T_maj, SampledSpectrum sigma_n)
-        {
-            Float pdf = T_maj[0] * sigma_n[0];
             if (pdf == 0)
             {
                 beta = new SampledSpectrum(0.0f);
@@ -111,6 +128,11 @@ namespace pbrt
             else
             {
                 Scale(T_maj * sigma_n / pdf);
+                if (trackSegment)
+                {
+                    segU *= T_maj * sigma_n / pdf;
+                    segL *= T_maj * sigma_maj / pdf;
+                }
             }
             return (bool)beta;
         }
@@ -124,6 +146,13 @@ namespace pbrt
             {
                 r_u *= w;
             }
+            if (trackSegment)
+            {
+                // The distance to the collision is in the segment, and the scattering coefficient at the vertex
+                segU *= T_maj / T_maj[0];
+                segL *= T_maj / T_maj[0];
+                vtx *= sigma_s / sigma_s[0];
+            }
         }
 
         // The transmittance from the last collision to the end of the segment
@@ -134,6 +163,11 @@ namespace pbrt
             {
                 r_u *= T_maj / T_maj[0];
                 r_l *= T_maj / T_maj[0];
+            }
+            if (trackSegment)
+            {
+                segU *= T_maj / T_maj[0];
+                segL *= T_maj / T_maj[0];
             }
         }
 

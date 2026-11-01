@@ -131,11 +131,7 @@ namespace pbrt
                             {
                                 // Null collision
                                 SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                if (ctx.st.rescaled)
-                                {
-                                    return ctx.st.NullCollision(T_maj_, sigma_maj, sigma_n);
-                                }
-                                return ctx.st.NullCollision(T_maj_, sigma_n);
+                                return ctx.st.NullCollision(T_maj_, sigma_maj, sigma_n);
                             }
                         });
                     if (hook.EndAfterMedium(ctx, terminated))

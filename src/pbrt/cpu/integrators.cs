@@ -178,6 +178,100 @@ namespace pbrt
             endMedium = MediumTracking.Current(stack);
             return Tr / inv_w.Average();
         }
+        // (not in pbrt-v4) The transmittance of a connection with the factors of the spectral MIS weights, as the shadow rays of
+        // volpath have them: the estimate is not divided by anything; ru is the ratio, per wavelength, of the probability of
+        // the segment as a walk would have sampled it to the probability that the connection samples it with for the hero
+        // wavelength, and rl the same for the connection (volpath's r_u and r_l after the shadow ray)
+        public SampledSpectrum TrSegments(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda,
+                                          out SampledSpectrum ru, out SampledSpectrum rl, out Medium endMedium)
+        {
+            endMedium = null;
+            RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
+            Ray ray = p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
+            SampledSpectrum T_ray = new SampledSpectrum(1.0f);
+            SampledSpectrum r_l = new SampledSpectrum(1.0f), r_u = new SampledSpectrum(1.0f);
+            ru = r_u;
+            rl = r_l;
+            if (LengthSquared(ray.d) == 0)
+            {
+                endMedium = MediumTracking.Current(stack);
+                return T_ray;
+            }
+            MediumTracking.CrossSurface(ref stack, p0, ray.d);
+
+            while (true)
+            {
+                pstd.optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
+                // Handle opaque surface along ray's path
+                if (si && ThinCoatMaterial.Blocks(si.value().intr, ray.d))
+                {
+                    return new SampledSpectrum(0.0f);
+                }
+
+                // Update transmittance for current ray segment
+                Medium rayMedium = MediumTracking.Current(stack);
+                if (rayMedium != null)
+                {
+                    Point3f pExit = ray.Apply(si ? si.value().tHit : (1 - ShadowEpsilon));
+                    ray.d = pExit - ray.o;
+
+                    SampledSpectrum T_closed;
+                    if (rayMedium.volumeIntegrator.transmittance.TryClosedForm(ray, rayMedium, 1.0f, lambda, out T_closed))
+                    {
+                        T_ray *= T_closed;
+                    }
+                    else if (rayMedium.volumeIntegrator.transmittance.TryEstimate(ray, rayMedium, 1.0f, ref rng, lambda, ref T_ray, ref r_l, ref r_u))
+                    {
+                    }
+                    else
+                    {
+                        SampledSpectrum T_maj =
+                            rayMedium.volumeIntegrator.tracker.SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
+                                        (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
+                                         SampledSpectrum T_maj_) =>
+                                        {
+                                            SampledSpectrum sigma_n =
+                                                ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                                            rayMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n, ref rng);
+
+                                            // Possibly terminate the transmittance computation using Russian roulette
+                                            if (russianRoulette && (bool)T_ray && (bool)r_l &&
+                                                (T_ray / (r_l + r_u).Average()).MaxComponentValue() < 0.05f)
+                                            {
+                                                Float q = 0.75f;
+                                                if (rng.Uniform<Float>() < q)
+                                                {
+                                                    T_ray = new SampledSpectrum(0.0f);
+                                                }
+                                                else
+                                                {
+                                                    T_ray /= 1 - q;
+                                                }
+                                            }
+                                            return (bool)T_ray;
+                                        });
+                        rayMedium.volumeIntegrator.transmittance.Finish(ref T_ray, ref r_l, ref r_u, T_maj);
+                    }
+                }
+
+                // Generate next ray segment or return final transmittance
+                if (!T_ray)
+                {
+                    return new SampledSpectrum(0.0f);
+                }
+                if (!si)
+                {
+                    break;
+                }
+                ray = si.value().intr.SpawnRayTo(p1);
+                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
+            }
+            endMedium = MediumTracking.Current(stack);
+            ru = r_u;
+            rl = r_l;
+            return T_ray;
+        }
+
         // Integrator Public Methods
         public static Integrator Create(string name, ParameterDictionary parameters, Camera camera,
                                         Sampler sampler, Primitive aggregate, List<Light> lights,
@@ -1495,6 +1589,14 @@ namespace pbrt
         // wavelength there (the density of a collision at the point, per length, that the MIS weights use)
         public SampledSpectrum emission;
         public Float sigmaT0 = 0;
+        // (not in pbrt-v4) The null collisions of the segment that arrives at the vertex along its subpath, and the scattering
+        // coefficient at the vertex, for the spectral MIS weights (see PathState.segU): segU and segL are the ratios of the
+        // probability of the segment as a walk samples it (segU) and as a connection samples it (segL), per wavelength, to the
+        // probability that the hero wavelength's walk had; vtx the ratio of the scattering coefficients; cumU the product of
+        // segU along the subpath up to the vertex (volpath's r_u); emissionMaj, for a vertex in an emissive medium, the
+        // ratio of the majorants of the wavelengths to the hero's, which a walk that collides there has as its density
+        public SampledSpectrum segU = new SampledSpectrum(1.0f), segL = new SampledSpectrum(1.0f), vtx = new SampledSpectrum(1.0f);
+        public SampledSpectrum cumU = new SampledSpectrum(1.0f), emissionMaj = new SampledSpectrum(1.0f);
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1523,6 +1625,7 @@ namespace pbrt
             type = v.type; beta = v.beta; ei = v.ei; mi = v.mi; si = v.si; bsdf = v.bsdf;
             delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
             emission = v.emission; sigmaT0 = v.sigmaT0;
+            segU = v.segU; segL = v.segL; vtx = v.vtx; cumU = v.cumU; emissionMaj = v.emissionMaj;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -1946,8 +2049,9 @@ namespace pbrt
             // (not in pbrt-v4) The extinction at the point of an emissive medium, for the weight of a camera subpath that gathers it
             if (path[0].ei.light is VolumeEmissionLight emissiveMedium)
             {
-                MediumProperties mpEmission = emissiveMedium.Medium().SamplePoint(ray.o, lambda);
-                path[0].sigmaT0 = (mpEmission.sigma_a + mpEmission.sigma_s)[0];
+                SampledSpectrum majorant = emissiveMedium.Medium().MajorantAt(ray.o, lambda);
+                path[0].sigmaT0 = majorant[0];
+                path[0].emissionMaj = majorant / majorant[0];
             }
 
             // Follow light subpath random walk
@@ -1997,6 +2101,7 @@ namespace pbrt
             ctx.scratchBuffer = scratchBuffer;
             ctx.mode = mode;
             ctx.st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
+            ctx.st.trackSegment = true;
             BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize, emissionEnds);
             try
             {
@@ -2032,6 +2137,16 @@ namespace pbrt
             bool anyNonSpecularBounces = false;
             List<MediumEmissionEnd> emissionEnds;
 
+            // The collisions of the segment that arrives at the new vertex go to the vertex, and the next segment starts empty
+            void StoreSegment(WalkContext ctx, int index)
+            {
+                path[index].segU = ctx.st.segU;
+                path[index].segL = ctx.st.segL;
+                path[index].vtx = ctx.st.vtx;
+                path[index].cumU = path[index - 1].cumU * ctx.st.segU;
+                ctx.st.ResetSegment();
+            }
+
             public override bool BeginIteration(WalkContext ctx)
             {
                 // Attempt to create the next subpath vertex in _path_
@@ -2066,9 +2181,15 @@ namespace pbrt
                         Vertex end = Vertex.CreateLight(emissionLight, new Interaction(p, ctx.ray.time, medium),
                                                         ctx.st.beta * w, 0);
                         end.emission = mp.sigma_a * mp.Le;
-                        end.sigmaT0 = (mp.sigma_a + mp.sigma_s)[0];
+                        // (the density of a collision at the point is the majorant's: every collision gathers, null or not)
+                        end.sigmaT0 = sigma_maj[0];
+                        end.emissionMaj = sigma_maj / sigma_maj[0];
+                        // The null collisions on the way, and the distance to this collision
+                        end.segU = ctx.st.segU * T_maj / T_maj[0];
+                        end.segL = ctx.st.segL * T_maj / T_maj[0];
+                        end.cumU = path[vIdx - 1].cumU * end.segU;
                         // The density of a collision at the point, per volume: the density of the direction at the previous
-                        // vertex, as for the vertices of real scatterings, and the extinction for the distance along the ray
+                        // vertex, as for the vertices of real scatterings, and the majorant for the distance along the ray
                         end.pdfFwd = path[vIdx - 1].ConvertDensity(pdfFwd, end) * end.sigmaT0;
                         end.pbeta = ctx.st.pa;
                         end.pbeta *= w;
@@ -2090,6 +2211,7 @@ namespace pbrt
                 // Record medium interaction in _path_ and compute forward density
                 intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, medium, mp.phase);
                 path[vIdx] = Vertex.CreateMedium(intr, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                StoreSegment(ctx, vIdx);
                 path[vIdx].stack = ctx.stack;
                 path[vIdx].pbeta = ctx.st.pa;
                 path[vIdx].plight = ctx.st.pl;
@@ -2117,6 +2239,7 @@ namespace pbrt
                 if (ctx.mode == TransportMode.Radiance)
                 {
                     path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ctx.ray)), ctx.st.beta, pdfFwd);
+                    StoreSegment(ctx, vIdx);
                     path[vIdx].pbeta = ctx.st.pa;
                     ++bounces;
                 }
@@ -2138,6 +2261,7 @@ namespace pbrt
                 ++PathIntegrator.totalBSDFs;
                 // Initialize _vertex_ with surface intersection information
                 path[vIdx] = Vertex.CreateSurface(isect, bsdf, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                StoreSegment(ctx, vIdx);
                 path[vIdx].stack = ctx.stack;
                 path[vIdx].pbeta = ctx.st.pa;
                 path[vIdx].plight = ctx.st.pl;
@@ -2175,11 +2299,24 @@ namespace pbrt
             return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), v0.stack, lambda);
         }
 
+        // (not in pbrt-v4) The geometry term of a connection without its transmittance
+        static Float GeometryTerm(Vertex v0, Vertex v1)
+        {
+            Vector3f d = v0.p() - v1.p();
+            Float g = 1 / LengthSquared(d);
+            d *= std.sqrt(g);
+            if (v0.IsOnSurface())
+                g *= AbsDot(v0.ns(), d);
+            if (v1.IsOnSurface())
+                g *= AbsDot(v1.ns(), d);
+            return g;
+        }
+
         static Float remap0(Float f) { return f != 0 ? f : 1; }
 
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
-                                      LightSampler lightSampler)
+                                      LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl)
         {
             // (not in pbrt-v4) With a camera subpath that gathers the emission of a medium, a path of length 0 has two strategies: the
             // gathered emission (s = 0, t = 2) and the light sample of the medium that connects to the camera (s = 1, t = 1)
@@ -2238,8 +2375,32 @@ namespace pbrt
                 Float splatScale = (Float)film.FullResolution().x * (Float)film.FullResolution().y /
                                    (Float)film.PixelBounds().Area();
 
+                // (not in pbrt-v4) The probability of the path under each strategy, for each wavelength, relative to the hero
+                // wavelength's under the strategy of the sample: the scalar ratios of the densities of the vertices (ri), as in
+                // pbrt-v4, times the spectral ratios of the media: the null collisions of each segment (as a walk samples it, or
+                // as a connection samples it) and the scattering coefficients at the vertices. The sum over the strategies, and
+                // the average of that over the wavelengths, is the denominator of the sample (the weights of volpath's r_u and
+                // r_l, for every strategy). Without a medium all of these are one.
+                SampledSpectrum scatterVertices = new SampledSpectrum(1.0f);
+                for (int i = 1; i < t; ++i)
+                    scatterVertices *= cameraVertices[i].vtx;
+                for (int i = 1; i < s; ++i)
+                    scatterVertices *= lightVertices[i].vtx;
+                SampledSpectrum cameraWalked = t >= 1 ? cameraVertices[t - 1].cumU : new SampledSpectrum(1.0f);
+                SampledSpectrum lightWalked = s >= 1 ? lightVertices[s - 1].cumU : new SampledSpectrum(1.0f);
+                SampledSpectrum oneSpectrum = new SampledSpectrum(1.0f);
+                // The connection segment of the sample, if there is one, and what it is when a walk samples it
+                SampledSpectrum connectionAsConnection = s >= 1 ? connRl : oneSpectrum;
+                SampledSpectrum connectionAsWalk = s >= 1 ? connRu : oneSpectrum;
+                // An emissive medium is sampled by a walk whose collision gathers at the point (s = 0), with the density of a
+                // collision there for each wavelength
+                bool hasEmissionEnd = s == 0 && t >= 1 && IsVolumeEmission(cameraVertices[t - 1]);
+                SampledSpectrum emissionEnd = hasEmissionEnd ? cameraVertices[t - 1].emissionMaj : oneSpectrum;
+                SampledSpectrum sum = scatterVertices * cameraWalked * lightWalked * connectionAsConnection * emissionEnd;
+
                 // Consider hypothetical connection strategies along the camera subpath
                 Float ri = 1;
+                SampledSpectrum walkedAfter = oneSpectrum;
                 for (int i = t - 1; i > 0; --i)
                 {
                     ri *= remap0(cameraVertices[i].pdfRev) / remap0(cameraVertices[i].pdfFwd);
@@ -2247,32 +2408,58 @@ namespace pbrt
                     if (i == 1) ri /= splatScale;
                     // (not in pbrt-v4) The strategy with i camera vertices is a term of the sum only if it is in use
                     if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && integrator.StrategyAllowed(s + t - i, i))
-                        sumRi += ri;
+                    {
+                        Float riTerm = t == 1 ? ri / splatScale : ri;
+                        // The segment that arrives at vertex i is the connection of this strategy; the others, and the connection
+                        // of the sample, are walked
+                        sum += riTerm * (scatterVertices * cameraVertices[i - 1].cumU * walkedAfter * cameraVertices[i].segL *
+                                         lightWalked * connectionAsWalk);
+                    }
+                    walkedAfter *= cameraVertices[i].segU;
                 }
 
                 // Consider hypothetical connection strategies along the light subpath
                 ri = 1;
+                walkedAfter = oneSpectrum;
                 for (int i = s - 1; i >= 0; --i)
                 {
                     ri *= remap0(lightVertices[i].pdfRev) / remap0(lightVertices[i].pdfFwd);
                     bool deltaLightvertex = i > 0 ? lightVertices[i - 1].delta : lightVertices[0].IsDeltaLight();
                     // (not in pbrt-v4) A camera subpath that gathers the emission of volumes has the s = 0 strategy with the
-                    // density of a collision at the point (per volume: the extinction times the density of the direction);
+                    // density of a collision at the point (per volume: the majorant times the density of the direction);
                     // one that does not has no such strategy
+                    SampledSpectrum emissionHere = oneSpectrum;
+                    bool skip = false;
                     if (i == 0 && IsVolumeEmission(lightVertices[0]))
                     {
                         if (!integrator.gatherMediumEmission)
-                            continue;
-                        ri *= lightVertices[0].sigmaT0;
+                            skip = true;
+                        else
+                        {
+                            ri *= lightVertices[0].sigmaT0;
+                            emissionHere = lightVertices[0].emissionMaj;
+                        }
                     }
-                    // (not in pbrt-v4) The strategy with i light vertices is a term of the sum only if it is in use
-                    if (!lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i))
-                        sumRi += ri;
+                    if (!skip && !lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i))
+                    {
+                        Float riTerm = t == 1 ? ri / splatScale : ri;
+                        if (i > 0)
+                        {
+                            sum += riTerm * (scatterVertices * lightVertices[i - 1].cumU * walkedAfter * lightVertices[i].segL *
+                                             cameraWalked * connectionAsWalk);
+                        }
+                        else
+                        {
+                            // No connection: every segment is walked by the camera subpath
+                            sum += riTerm * (scatterVertices * cameraWalked * lightWalked * connectionAsWalk * emissionHere);
+                        }
+                    }
+                    if (i > 0)
+                        walkedAfter *= lightVertices[i].segU;
                 }
 
-                // See https://github.com/mmp/pbrt-v4/issues/347
-                if (t == 1) sumRi /= splatScale;
-                return 1 / (1 + sumRi);
+                Float average = sum.Average();
+                return average > 0 ? 1 / average : 0;
 
             }
             finally
@@ -2347,6 +2534,8 @@ namespace pbrt
             SampledSpectrum L = new SampledSpectrum(0.0f);
             // (not in pbrt-v4) The direction of the light at the sensor for a connection to the camera
             Vector3f toCamera = default;
+            // (not in pbrt-v4) The factors of the connection segment for the spectral MIS weights (see Integrator.TrSegments)
+            SampledSpectrum connRu = new SampledSpectrum(1.0f), connRl = new SampledSpectrum(1.0f);
             // Ignore invalid connections related to infinite area lights
             if (t > 1 && s != 0 && cameraVertices[t - 1].type == VertexType.Light)
                 return new SampledSpectrum(0.0f);
@@ -2384,7 +2573,8 @@ namespace pbrt
                         DCHECK(!L.HasNaNs());
                         if ((bool)L)
                         {
-                            L *= integrator.Tr(cs.value().pRef, cs.value().pLens, qs.stack, lambda);
+                            L *= integrator.TrSegments(cs.value().pRef, cs.value().pLens, qs.stack, lambda, out connRu, out connRl,
+                                                       out Medium _);
 
                             // See https://github.com/mmp/pbrt-v4/issues/347
                             Film film = camera.GetFilm();
@@ -2433,8 +2623,9 @@ namespace pbrt
                             sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
                             if (volumeLight != null)
                             {
-                                MediumProperties mpEmission = volumeLight.Medium().SamplePoint(lightWeight.value().pLight.p(), lambda);
-                                sampled.sigmaT0 = (mpEmission.sigma_a + mpEmission.sigma_s)[0];
+                                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda);
+                                sampled.sigmaT0 = majorant[0];
+                                sampled.emissionMaj = majorant / majorant[0];
                             }
                             L = pt.beta * pt.f(sampled, TransportMode.Radiance) * sampled.beta;
                             if (pt.IsOnSurface())
@@ -2442,8 +2633,8 @@ namespace pbrt
                             // Only check visibility if the path would carry radiance.
                             if ((bool)L)
                             {
-                                L *= integrator.Tr(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
-                                                   out Medium endMedium);
+                                L *= integrator.TrSegments(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
+                                                           out connRu, out connRl, out Medium endMedium);
                                 // The point has to lie in the medium that emits
                                 if (volumeLight != null && endMedium != volumeLight.Medium())
                                     L = new SampledSpectrum(0.0f);
@@ -2460,7 +2651,11 @@ namespace pbrt
                 {
                     L = qs.beta * qs.f(pt, TransportMode.Importance) * pt.f(qs, TransportMode.Radiance) * pt.beta;
                     if ((bool)L)
-                        L *= G(integrator, sampler, qs, pt, lambda);
+                    {
+                        L *= GeometryTerm(qs, pt);
+                        L *= integrator.TrSegments(qs.GetInteraction(), pt.GetInteraction(), qs.stack, lambda, out connRu,
+                                                   out connRl, out Medium _);
+                    }
                 }
             }
 
@@ -2471,7 +2666,8 @@ namespace pbrt
                 PathIntegrator.pathLength = new StatIntDistribution();
             PathIntegrator.pathLength.Add(s + t - 2);
             // Compute MIS weight for connection strategy
-            Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler)
+            Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler,
+                                                  connRu, connRl)
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;
