@@ -33,6 +33,11 @@ namespace pbrt
         // The top of each iteration; false ends the walk
         public abstract bool BeginIteration(WalkContext ctx);
 
+        // The ray is in a medium and the segment up to tMax (the next surface, or infinity) is about to be sampled
+        public virtual void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
+        {
+        }
+
         // A collision of the majorant, before its event is chosen; false ends the walk
         public abstract bool BeginCollision(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
                                             SampledSpectrum sigma_maj, SampledSpectrum T_maj);
@@ -83,6 +88,7 @@ namespace pbrt
                 if (rayMedium != null)
                 {
                     Float tMax = si ? si.value().tHit : Infinity;
+                    hook.BeginSegment(ctx, rayMedium, tMax);
                     RNG rng = new RNG(Hash(ctx.ray.o, tMax), Hash(ctx.ray.d));
                     Float u = ctx.sampler.Get1D();
                     SampledSpectrum T_maj = rayMedium.volumeIntegrator.tracker.SampleT_maj(

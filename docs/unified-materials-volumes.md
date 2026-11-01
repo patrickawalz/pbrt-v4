@@ -106,6 +106,24 @@ is reproduced exactly with the same seed.
      noise is about 0.1%), because a shadow ray or a path built from the other end enters at another point. So bdpt, mlt and
      lightpath refuse such scenes, and volpath's shadow rays make their own entry, as Fong's transmittance rays do. Per-entry volumes
      cannot overlap (the composite cache would grow with every entry).
+6. (done for point and spot lights in volpath) Equiangular sampling (Fong section 4.2.2, `"bool equiangular" true`).
+   * Each medium segment of a volpath walk also gets a scattering point chosen from a point light: the light by the light sampler
+     from the start of the segment, the distance by the angle seen from the light (`EquiangularSampling`), then the connection. The
+     transmittance to the point is ratio tracked with the walk's own tracker (`PathWalk` calls the new `BeginSegment` hook; the
+     default is a no-op, so bdpt and mlt are untouched).
+   * One MIS with the walk (a collision, then `SampleLd`) over the spectral ratios already tracked: for the same path the walk
+     has probability `r_u * ru_seg * sigma_s * pmf` and equiangular `r_u0 * rl_seg * p_e * pmf`, both relative to the hero's connection;
+     `PathState.segL` (now tracked for volpath too) gives the walk's side. Only `DeltaPosition` lights take part, every other light
+     is found by the walk alone with the old weights. Polarised rendering does not use it. Without the flag the renders are
+     bit-identical to before (volpath and bdpt).
+   * Checked against a 1024 spp density-sampling reference with a point light in fog: homogeneous gray and chromatic, point plus
+     spot light, and a heterogeneous grid (3-seed mean ratios 1.000 to 1.008, within the reference's own noise; the heterogeneous
+     grid 1.0003, 1.0000, 1.0002). The per-seed RMSE is about half that of density sampling for the homogeneous scenes and 0.007
+     against 0.009 for the grid, at about 1.5 times the time.
+   * A finding that applies to every strategy that picks a point on the segment: pbrt-v4's grid density is interpolated between cell
+     centres, so it is positive up to half a cell outside the bounds where the majorant iterator has no segment, and the walk can
+     never collide there. Equiangular sampling treats a point outside the majorants as having no medium (`MajorantCovers`). Before
+     that it was 14 to 19% too bright on a 4x4x4 grid, which showed up as a deterministic bias with a tiny RMSE.
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box

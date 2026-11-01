@@ -119,6 +119,11 @@ namespace pbrt
                 }
                 r_u *= T_maj * sigma_n / pdf;
                 r_l *= T_maj * sigma_maj / pdf;
+                if (trackSegment && pdf != 0)
+                {
+                    segU *= T_maj * sigma_n / pdf;
+                    segL *= T_maj * sigma_maj / pdf;
+                }
                 return (bool)beta && (bool)r_u;
             }
             if (pdf == 0)

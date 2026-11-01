@@ -4142,9 +4142,12 @@ namespace pbrt
                                  string lightSampleStrategy = "bvh",
                                  bool regularize = false, bool polarised = false, bool analyser = false,
                                  Float analyserAngle = 0,
-                                 PolarisedPathIntegrator.Measurement measurement = PolarisedPathIntegrator.Measurement.Intensity)
+                                 PolarisedPathIntegrator.Measurement measurement = PolarisedPathIntegrator.Measurement.Intensity,
+                                 bool equiangular = false)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
+            // (not in pbrt-v4) Equiangular sampling of the scattering point toward point lights (Fong et al., section 4.2.2)
+            this.equiangular = equiangular;
             // (not in pbrt-v4) The polarisation of the light is carried along the path next to the scalar throughput
             this.polarised = polarised;
             this.analyser = analyser;
@@ -4189,6 +4192,7 @@ namespace pbrt
                 // factor of beta, so its first element is beta
                 st = new PathState(new SampledSpectrum(1.0f), PAttenuation.Identity(), PLight.Zero(), true, polarised, true)
             };
+            ctx.st.trackSegment = equiangular && !polarised;
             VolPathWalkHook hook = new VolPathWalkHook(this, visibleSurf, -ray.d);
             try
             {
@@ -4237,6 +4241,33 @@ namespace pbrt
             public override bool BeginIteration(WalkContext ctx)
             {
                 return true;
+            }
+
+            // (not in pbrt-v4) Equiangular sampling of the scattering point of the segment (see SampleEquiangular): the segment
+            // is recorded for the weight of the vertex that the walk finds on it, and the other way to find one is sampled
+            EquiangularSegment equiangularSegment = new EquiangularSegment();
+
+            public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
+            {
+                equiangularSegment.active = false;
+                if (!vp.equiangular || polarised)
+                {
+                    return;
+                }
+                ctx.st.ResetSegment();
+                if (depth >= maxDepth || !(bool)ctx.st.beta || !(bool)ctx.st.r_u)
+                {
+                    return;
+                }
+                Float length = Length(ctx.ray.d);
+                EquiangularSegment seg = equiangularSegment;
+                seg.origin = ctx.ray.o;
+                seg.direction = ctx.ray.d / length;
+                seg.tMax = tMax * length;
+                seg.context = new LightSampleContext(new Point3fi(ctx.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0));
+                seg.r_u0 = ctx.st.r_u;
+                seg.active = true;
+                L += vp.SampleEquiangular(ctx, medium, seg);
             }
 
             public override bool BeginCollision(WalkContext ctx, Medium rayMedium, Point3f p, MediumProperties mp,
@@ -4332,8 +4363,17 @@ namespace pbrt
                     }
                 }
                 else
+                {
+                    EquiangularSegment seg = equiangularSegment.active ? equiangularSegment : null;
+                    if (seg != null)
+                    {
+                        seg.t = Length(p - seg.origin);
+                        seg.sigmaS0 = mp.sigma_s[0];
+                        seg.segL = ctx.st.segL;
+                    }
                     L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
-                                     out Vector3f _);
+                                     out Vector3f _, seg);
+                }
                 phaseBsdf = intr.GetBSDF();
                 return true;
             }
@@ -4691,13 +4731,108 @@ namespace pbrt
             return L;
         }
 
+        // (not in pbrt-v4) Equiangular sampling of the scattering point on the medium segment (Fong et al., section 4.2.2): a point light is
+        // chosen from the start of the segment, a distance along it by the angle seen from the light, and the light is connected to the
+        // point. The transmittance to the point is ratio tracked with the null collisions of the walk's tracker, so that the weight
+        // against the way of the walk (a collision, then a connection to the light, SampleLd) is the spectral one: both are found
+        // with the same ratios r_u0 (the path up to the segment) and the segment's null collisions, as the walk (r_u) and as this
+        // connection (r_l) samples them. Only point lights take part; every other light is found by the walk alone.
+        SampledSpectrum SampleEquiangular(WalkContext ctx, Medium medium, EquiangularSegment segment)
+        {
+            SampledWavelengths lambda = ctx.lambda;
+            Sampler sampler = ctx.sampler;
+            Float uLightChoice = sampler.Get1D();
+            Float uDistance = sampler.Get1D();
+            Point2f uLight = sampler.Get2D();
+            pstd.optional<SampledLight> sampledLight = lightSampler.Sample(segment.context, uLightChoice);
+            if (!sampledLight)
+                return new SampledSpectrum(0.0f);
+            Light light = sampledLight.value().light;
+            if (light.Type() != LightType.DeltaPosition)
+                return new SampledSpectrum(0.0f);
+            pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
+            if (!lsOrigin)
+                return new SampledSpectrum(0.0f);
+            Point3f pLight = lsOrigin.value().pLight.p();
+            if (!EquiangularSampling.Sample(segment.origin, segment.direction, segment.tMax, pLight, uDistance,
+                                            out Float t, out Float pdfDistance))
+                return new SampledSpectrum(0.0f);
+            Point3f p = segment.origin + t * segment.direction;
+
+            // The transmittance to the point, as the walk's tracker sees the segment
+            SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
+            RNG rng = new RNG(Hash(segment.origin, t), Hash(segment.direction));
+            Float uTrack = rng.Uniform<Float>();
+            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+                new Ray(segment.origin, segment.direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
+                (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mpp.sigma_a - mpp.sigma_s);
+                    MediumEvents.RatioTrackingStep(ref T_seg, ref rl_seg, ref ru_seg, T_maj_, sigma_maj, sigma_n);
+                    return (bool)T_seg;
+                });
+            if (!T_seg)
+                return new SampledSpectrum(0.0f);
+            MediumEvents.FinishSegment(ref T_seg, ref rl_seg, ref ru_seg, T_maj);
+            // The walk only finds collisions where a majorant covers the ray, so a point outside them has no medium for this strategy
+            // either (a grid whose density is interpolated between cell centres is positive up to half a cell beyond its bounds, where no
+            // majorant is)
+            if (!MajorantCovers(medium, new Ray(segment.origin, segment.direction, ctx.ray.time), segment.tMax, t, lambda))
+                return new SampledSpectrum(0.0f);
+
+            // The scattering at the point
+            MediumProperties mp = medium.SamplePoint(p, lambda);
+            if (!mp.sigma_s)
+                return new SampledSpectrum(0.0f);
+            MediumInteraction intr = new MediumInteraction(p, -segment.direction, ctx.ray.time, medium, mp.phase);
+            LightSampleContext lightContext = LightContextAt(intr, false, default);
+            pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
+            if (!ls || !ls.value().L || ls.value().pdf == 0)
+                return new SampledSpectrum(0.0f);
+            BSDF phaseBSDF = intr.GetBSDF();
+            SampledSpectrum f_hat = phaseBSDF.f(intr.wo, ls.value().wi);
+            if (!f_hat)
+                return new SampledSpectrum(0.0f);
+
+            // The connection from the point to the light
+            BoundaryStack stack = ctx.stack;
+            Ray lightRay = intr.SpawnRayTo(ls.value().pLight);
+            RNG rngLight = new RNG(Hash(lightRay.o), Hash(lightRay.d));
+            SampledSpectrum T_light = ShadowRay(lightRay, intr, ls.value().pLight, ref stack, lambda, rngLight, true,
+                                                out SampledSpectrum ru_light, out SampledSpectrum rl_light);
+            if (!T_light)
+                return new SampledSpectrum(0.0f);
+
+            // The two ways to find the vertex and the connection, relative to the connection's hero wavelength
+            Float pmfEquiangular = sampledLight.value().p;
+            Float pmfWalk = lightSampler.PMF(lightContext, light) * ls.value().pdf;
+            SampledSpectrum r_equiangular = segment.r_u0 * rl_seg * rl_light * (pmfEquiangular * pdfDistance);
+            SampledSpectrum r_walk = segment.r_u0 * ru_seg * rl_light * mp.sigma_s * pmfWalk;
+            return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_light * ls.value().L / (r_equiangular + r_walk).Average();
+        }
+
+        static bool MajorantCovers(Medium medium, Ray ray, Float tMax, Float t, SampledWavelengths lambda)
+        {
+            RayMajorantIterator iterator = medium.SampleRay(ray, tMax, lambda, new ScratchBuffer());
+            while (true)
+            {
+                pstd.optional<RayMajorantSegment> segment = iterator.Next();
+                if (!segment)
+                    return false;
+                if (t >= segment.value().tMin && t <= segment.value().tMax)
+                    return true;
+                if (segment.value().tMin > t)
+                    return false;
+            }
+        }
+
         // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at intr, before it leaves towards the light
         // volumeEmissionAllowed is not in pbrt-v4: the emission of a medium is sampled as a light inside the volume; a point
         // there is only reached by the other strategy while the depth allows an emission vertex, so the two stay a pair
         SampledSpectrum SampleLd(Interaction intr, BSDF? bsdf,
                                  SampledWavelengths lambda, Sampler sampler,
                                  SampledSpectrum beta, SampledSpectrum r_p, BoundaryStack stack, bool volumeEmissionAllowed,
-                                 out Vector3f wiLight)
+                                 out Vector3f wiLight, EquiangularSegment equiangularSegment = null)
         {
             // (not in pbrt-v4) The direction of the light sample, for the polarisation of the scattering toward it
             wiLight = default;
@@ -4771,11 +4906,24 @@ namespace pbrt
                     return new SampledSpectrum(0.0f);
                 r_u *= volumeLight.Medium().MajorantAt(ls.value().pLight.p(), lambda);
             }
+            // (not in pbrt-v4) Equiangular sampling finds the same path (this vertex, this point light) by choosing the light and then
+            // the distance along the segment: its probability, with the null collisions of the walk as that way connects them
+            SampledSpectrum r_equiangular = new SampledSpectrum(0.0f);
+            if (equiangularSegment != null && light.Type() == LightType.DeltaPosition && volumeLight == null)
+            {
+                Float pmfEquiangular = lightSampler.PMF(equiangularSegment.context, light);
+                Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
+                                                            equiangularSegment.tMax, ls.value().pLight.p(), equiangularSegment.t);
+                r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
+                                (pmfEquiangular * pdfDistance / equiangularSegment.sigmaS0);
+            }
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;
             r_u *= r_p * scatterPDF;
             if (IsDeltaLight(light.Type()))
-                return beta * f_hat * T_ray * ls.value().L / r_l.Average();
+            {
+                return beta * f_hat * T_ray * ls.value().L / (r_l + r_equiangular).Average();
+            }
             else
                 return beta * f_hat * T_ray * ls.value().L / (r_l + r_u).Average();
         }
@@ -4797,14 +4945,17 @@ namespace pbrt
             bool polarised = parameters.GetOneBool("polarised", false);
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
                                                 out PolarisedPathIntegrator.Measurement measurement);
+            bool equiangular = parameters.GetOneBool("equiangular", false);
             return new VolPathIntegrator(maxDepth, camera, sampler, aggregate,
-                                         lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement);
+                                         lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement,
+                                         equiangular);
         }
 
         // VolPathIntegrator Private Members
         int maxDepth;
         LightSampler lightSampler;
         bool regularize;
+        bool equiangular;
         bool polarised, analyser;
         Float analyserAngle;
         PolarisedPathIntegrator.Measurement measurement;
