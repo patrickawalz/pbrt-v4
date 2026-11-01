@@ -124,6 +124,20 @@ is reproduced exactly with the same seed.
      centres, so it is positive up to half a cell outside the bounds where the majorant iterator has no segment, and the walk can
      never collide there. Equiangular sampling treats a point outside the majorants as having no medium (`MajorantCovers`). Before
      that it was 14 to 19% too bright on a 4x4x4 grid, which showed up as a deterministic bias with a tiny RMSE.
+   * Area lights (Fong section 4.2.3), triangle emitters only: a point y on the light is chosen from the start of the segment (the
+     shape's own sampling, with the density per unit area), then the distance by the angle seen from y, then the connection. Three
+     strategies find the same path in the solid angle of the vertex: the walk's collision plus `SampleLd`, the phase-sampled direction
+     that hits the light, and this one; `SampleLd` and `OnSurfaceHit` add its term to their denominators (the hook keeps a snapshot of
+     the segment of the last scattering vertex, dropped at any surface bounce or later vertex). The light sampler gives 0/0 for a
+     light with no importance at the origin (one that faces away), which is a probability of zero here (`PmfOrZero`).
+   * A finding: the shape's `PDF(ctx, wi)` is an intersection test of the direction, and it missed about 1% of the points that
+     `Sample` had chosen (the area-sampling branch of a small triangle), which made the three weights inconsistent and the render
+     +1% too bright at depth 8 (0 at depth 1, growing with depth; found by switching strategies off per segment). `Triangle.PdfAreaFrom`
+     gives the density of the point directly; quads, disks and other shapes do not take part until they have one. After it: 24x24 at
+     8192 spp, three seeds, equiangular over density sampling 1.003 (seed spread 0.3%), depth 1 and 2 within 0.2%.
+   * Noise at the same number of samples: RMSE against a 2048 spp reference 0.0177 and 0.0174 against 0.0241 (gray), 0.0195 and
+     0.0201 against 0.0271 (chromatic), 0.0039 against 0.0068 (grid), 96x96 at 64 spp. At equal time (about 1.5 times the cost per
+     sample) a 256x256 scene with a small bright panel in fog gains only about 3% in high-pass noise; at equal samples 30%.
    Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box

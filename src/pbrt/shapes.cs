@@ -1088,6 +1088,20 @@ namespace pbrt
             return 0.5f * pbrt.Length(pbrt.Cross(p1 - p0, p2 - p0));
         }
 
+        // (not in pbrt-v4) The density per unit area at the point y (with normal n) of the sampling of the triangle from p, which is that of
+        // Sample whichever way it samples: Intersect of the ray from p, as PDF does, can miss a point that was sampled
+        public Float PdfAreaFrom(Point3f p, Point3f y, Normal3f n)
+        {
+            Float solidAngle = SolidAngle(p);
+            if (solidAngle < MinSphericalSampleArea || solidAngle > MaxSphericalSampleArea)
+                return 1 / Area();
+            Vector3f w = y - p;
+            Float r2 = pbrt.LengthSquared(w);
+            if (r2 == 0)
+                return 0;
+            return pbrt.AbsDot(n, w / MathF.Sqrt(r2)) / (r2 * solidAngle);
+        }
+
         public Float SolidAngle(Point3f p)
         {
             // Get triangle vertices in _p0_, _p1_, and _p2_

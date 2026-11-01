@@ -1020,6 +1020,46 @@ namespace pbrt
             return shape.PDF(shapeCtx, wi);
         }
 
+        // (not in pbrt-v4) Equiangular sampling of the scattering point toward an area light (Fong et al., section 4.2.3) chooses a point
+        // on the light from the start of the medium segment. The densities of the other strategies at a point have to be those of the
+        // sampling of that point, which the shape's PDF (an intersection test of the direction) misses for some of them, so the shapes
+        // are triangles, which give the density directly.
+        public bool SupportsEquiangular()
+        {
+            return shape is Triangle;
+        }
+
+        // A point on the light seen from ctx, with the density per unit area; false if there is none
+        public bool SampleArea(LightSampleContext ctx, Point2f u, out Interaction y, out Float pdfArea)
+        {
+            y = default;
+            pdfArea = 0;
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
+            pstd.optional<ShapeSample> ss = shape.Sample(shapeCtx, u);
+            if (!ss || ss.value().pdf == 0)
+                return false;
+            Interaction intr = ss.value().intr;
+            intr.mediumInterface = mediumInterface;
+            if (AlphaMasked(intr))
+                return false;
+            Vector3f w = intr.p() - ctx.p();
+            Float r2 = pbrt.LengthSquared(w);
+            if (r2 == 0)
+                return false;
+            Float cos = pbrt.AbsDot(intr.n, w / MathF.Sqrt(r2));
+            if (cos == 0)
+                return false;
+            pdfArea = ss.value().pdf * cos / r2;
+            y = intr;
+            return pdfArea > 0 && !Float.IsInfinity(pdfArea);
+        }
+
+        // The density per unit area of SampleArea for the point y with normal n
+        public Float PdfArea(LightSampleContext ctx, Point3f y, Normal3f n)
+        {
+            return ((Triangle)shape).PdfAreaFrom(ctx.p(), y, n);
+        }
+
         public override SampledSpectrum Phi(SampledWavelengths lambda)
         {
             SampledSpectrum L = new SampledSpectrum(0.0f);

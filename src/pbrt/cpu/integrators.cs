@@ -4246,6 +4246,12 @@ namespace pbrt
             // (not in pbrt-v4) Equiangular sampling of the scattering point of the segment (see SampleEquiangular): the segment
             // is recorded for the weight of the vertex that the walk finds on it, and the other way to find one is sampled
             EquiangularSegment equiangularSegment = new EquiangularSegment();
+            // (not in pbrt-v4) The segment of the last scattering vertex, for the emission that its phase-sampled direction finds
+            EquiangularSegment scatter = new EquiangularSegment();
+            bool scatterValid;
+            Point3f scatterP;
+            SampledSpectrum scatterRl0;
+            Float scatterPdf;
 
             public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
             {
@@ -4365,11 +4371,18 @@ namespace pbrt
                 else
                 {
                     EquiangularSegment seg = equiangularSegment.active ? equiangularSegment : null;
+                    scatterValid = false;
                     if (seg != null)
                     {
                         seg.t = Length(p - seg.origin);
                         seg.sigmaS0 = mp.sigma_s[0];
                         seg.segL = ctx.st.segL;
+                        // What the direction that the phase function samples from here needs, if it reaches an area light (OnSurfaceHit)
+                        scatter.origin = seg.origin; scatter.direction = seg.direction; scatter.tMax = seg.tMax;
+                        scatter.context = seg.context; scatter.r_u0 = seg.r_u0; scatter.segL = seg.segL;
+                        scatter.t = seg.t; scatter.sigmaS0 = seg.sigmaS0;
+                        scatterP = p;
+                        scatterValid = true;
                     }
                     L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
                                      out Vector3f _, seg);
@@ -4382,6 +4395,8 @@ namespace pbrt
             {
                 // Update ray path state for indirect volume scattering
                 ctx.st.r_l = ctx.st.r_u / ps.pdf;
+                scatterRl0 = ctx.st.r_l;
+                scatterPdf = ps.pdf;
                 prevIntrContext = new LightSampleContext(intr);
                 fneeScatterPdf = ps.pdf;
                 fneeRatio = -1;
@@ -4444,8 +4459,31 @@ namespace pbrt
                         Light areaLight = isect.areaLight;
                         Float p_l = lightSampler.PMF(prevIntrContext, areaLight) *
                                     areaLight.PDF_Li(prevIntrContext, ctx.ray.d, true);
+                        // (not in pbrt-v4) The third way to this path: equiangular sampling from the start of the segment of the vertex
+                        // that the direction came from, toward a point of the light (see SampleLd)
+                        SampledSpectrum r_equiangular = new SampledSpectrum(0.0f);
+                        DiffuseAreaLight equiangularArea = areaLight as DiffuseAreaLight;
+                        if (scatterValid && equiangularArea != null && equiangularArea.SupportsEquiangular())
+                        {
+                            Point3f y = isect.p();
+                            Vector3f w = y - scatterP;
+                            Float r2 = LengthSquared(w);
+                            Float cosY = r2 > 0 ? AbsDot(isect.n, w / MathF.Sqrt(r2)) : 0;
+                            if (cosY > 0)
+                            {
+                                SampledSpectrum rl2 = new SampledSpectrum(0.0f);
+                                for (int c = 0; c < NSpectrumSamples; ++c)
+                                    rl2[c] = scatterRl0[c] != 0 ? ctx.st.r_l[c] / scatterRl0[c] : 0;
+                                Float pmfEquiangular = vp.PmfOrZero(scatter.context, areaLight);
+                                Float pdfDistance = EquiangularSampling.Pdf(scatter.origin, scatter.direction, scatter.tMax, y, scatter.t);
+                                Float pdfArea = equiangularArea.PdfArea(scatter.context, y, isect.n);
+                                r_equiangular = scatter.r_u0 * scatter.segL * rl2 *
+                                                (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / (scatter.sigmaS0 * scatterPdf));
+                            }
+                        }
+                        scatterValid = false;
                         ctx.st.r_l *= p_l;
-                        L += ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l).Average();
+                        L += ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average();
                         if (polarised)
                             pL += ctx.st.pa * new PLight(LeSurf / (ctx.st.r_u + ctx.st.r_l).Average());
                     }
@@ -4502,6 +4540,7 @@ namespace pbrt
                                          depth < maxDepth, out Vector3f _);
                     DCHECK(IsInf(L.y(ctx.lambda)) == false);
                 }
+                scatterValid = false;
                 prevIntrContext = new LightSampleContext(isect);
                 return true;
             }
@@ -4573,6 +4612,7 @@ namespace pbrt
                     ctx.st.r_u *= bssrdfSample.pdf / bssrdfSample.pdf[0];
                     SurfaceInteraction pi = ssi;
                     pi.wo = bssrdfSample.wo;
+                    scatterValid = false;
                     prevIntrContext = new LightSampleContext(pi);
                     // Possibly regularize subsurface BSDF
                     BSDF Sw = bssrdfSample.Sw;
@@ -4748,12 +4788,27 @@ namespace pbrt
             if (!sampledLight)
                 return new SampledSpectrum(0.0f);
             Light light = sampledLight.value().light;
-            if (light.Type() != LightType.DeltaPosition)
+            // (not in pbrt-v4) Area lights (Fong 4.2.3): a point on the light is chosen from the start of the segment, and the distance
+            // along the segment by the angle seen from that point
+            DiffuseAreaLight areaLight = light as DiffuseAreaLight;
+            if (areaLight != null ? !areaLight.SupportsEquiangular() : light.Type() != LightType.DeltaPosition)
                 return new SampledSpectrum(0.0f);
-            pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
-            if (!lsOrigin)
-                return new SampledSpectrum(0.0f);
-            Point3f pLight = lsOrigin.value().pLight.p();
+            Point3f pLight;
+            Interaction yIntr = default;
+            Float pdfAreaOrigin = 0;
+            if (areaLight != null)
+            {
+                if (!areaLight.SampleArea(segment.context, uLight, out yIntr, out pdfAreaOrigin))
+                    return new SampledSpectrum(0.0f);
+                pLight = yIntr.p();
+            }
+            else
+            {
+                pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
+                if (!lsOrigin)
+                    return new SampledSpectrum(0.0f);
+                pLight = lsOrigin.value().pLight.p();
+            }
             if (!EquiangularSampling.Sample(segment.origin, segment.direction, segment.tMax, pLight, uDistance,
                                             out Float t, out Float pdfDistance))
                 return new SampledSpectrum(0.0f);
@@ -4786,29 +4841,69 @@ namespace pbrt
                 return new SampledSpectrum(0.0f);
             MediumInteraction intr = new MediumInteraction(p, -segment.direction, ctx.ray.time, medium, mp.phase);
             LightSampleContext lightContext = LightContextAt(intr, false, default);
-            pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
-            if (!ls || !ls.value().L || ls.value().pdf == 0)
-                return new SampledSpectrum(0.0f);
+            SampledSpectrum Lemit;
+            Interaction target;
+            Vector3f wiLight;
+            Float geometry = 1;     // r^2 / |cos| of the point on an area light: the density per unit area to per solid angle
+            Float pmfWalk;          // the density of the walk's connection to the point, per unit solid angle (delta: the delta measure)
+            if (areaLight != null)
+            {
+                Vector3f d = yIntr.p() - p;
+                Float r2 = LengthSquared(d);
+                if (r2 == 0)
+                    return new SampledSpectrum(0.0f);
+                wiLight = d / MathF.Sqrt(r2);
+                Float cosY = AbsDot(yIntr.n, wiLight);
+                if (cosY == 0)
+                    return new SampledSpectrum(0.0f);
+                Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wiLight, lambda);
+                if (!Lemit)
+                    return new SampledSpectrum(0.0f);
+                geometry = r2 / cosY;
+                target = yIntr;
+                pmfWalk = PmfOrZero(lightContext, light) * areaLight.PDF_Li(lightContext, wiLight, true);
+            }
+            else
+            {
+                pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
+                if (!ls || !ls.value().L || ls.value().pdf == 0)
+                    return new SampledSpectrum(0.0f);
+                Lemit = ls.value().L;
+                target = ls.value().pLight;
+                wiLight = ls.value().wi;
+                pmfWalk = PmfOrZero(lightContext, light) * ls.value().pdf;
+            }
             BSDF phaseBSDF = intr.GetBSDF();
-            SampledSpectrum f_hat = phaseBSDF.f(intr.wo, ls.value().wi);
+            SampledSpectrum f_hat = phaseBSDF.f(intr.wo, wiLight);
             if (!f_hat)
                 return new SampledSpectrum(0.0f);
 
             // The connection from the point to the light
             BoundaryStack stack = ctx.stack;
-            Ray lightRay = intr.SpawnRayTo(ls.value().pLight);
+            Ray lightRay = intr.SpawnRayTo(target);
             RNG rngLight = new RNG(Hash(lightRay.o), Hash(lightRay.d));
-            SampledSpectrum T_light = ShadowRay(lightRay, intr, ls.value().pLight, ref stack, lambda, rngLight, true,
+            SampledSpectrum T_light = ShadowRay(lightRay, intr, target, ref stack, lambda, rngLight, true,
                                                 out SampledSpectrum ru_light, out SampledSpectrum rl_light);
             if (!T_light)
                 return new SampledSpectrum(0.0f);
 
-            // The two ways to find the vertex and the connection, relative to the connection's hero wavelength
+            // The ways to find the vertex and the connection, relative to the connection's hero wavelength
             Float pmfEquiangular = sampledLight.value().p;
-            Float pmfWalk = lightSampler.PMF(lightContext, light) * ls.value().pdf;
-            SampledSpectrum r_equiangular = segment.r_u0 * rl_seg * rl_light * (pmfEquiangular * pdfDistance);
+            Float pointDensity = areaLight != null ? pdfAreaOrigin * geometry : 1;
+            SampledSpectrum r_equiangular = segment.r_u0 * rl_seg * rl_light * (pmfEquiangular * pdfDistance * pointDensity);
             SampledSpectrum r_walk = segment.r_u0 * ru_seg * rl_light * mp.sigma_s * pmfWalk;
-            return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_light * ls.value().L / (r_equiangular + r_walk).Average();
+            // The third way to an area light: the phase function samples the direction to the light
+            if (areaLight != null)
+                r_walk += segment.r_u0 * ru_seg * ru_light * mp.sigma_s * phaseBSDF.PDF(intr.wo, wiLight);
+            return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_light * Lemit / (r_equiangular + r_walk).Average();
+        }
+
+        // (not in pbrt-v4) The probability of choosing the light from the context; the light sampler gives 0/0 for a light that has no
+        // importance there (one that faces away), where the probability is zero
+        Float PmfOrZero(LightSampleContext ctx, Light light)
+        {
+            Float pmf = lightSampler.PMF(ctx, light);
+            return Float.IsNaN(pmf) ? 0 : pmf;
         }
 
         static bool MajorantCovers(Medium medium, Ray ray, Float tMax, Float t, SampledWavelengths lambda)
@@ -4917,6 +5012,24 @@ namespace pbrt
                 r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
                                 (pmfEquiangular * pdfDistance / equiangularSegment.sigmaS0);
             }
+            // ... and toward an area light, the point on it chosen from the start of the segment (the density per unit area, in
+            // the solid angle of the vertex)
+            DiffuseAreaLight equiangularArea = light as DiffuseAreaLight;
+            if (equiangularSegment != null && equiangularArea != null && equiangularArea.SupportsEquiangular())
+            {
+                Point3f y = ls.value().pLight.p();
+                Float r2 = LengthSquared(y - intr.p());
+                Float cosY = AbsDot(ls.value().pLight.n, wi);
+                if (cosY > 0)
+                {
+                    Float pmfEquiangular = PmfOrZero(equiangularSegment.context, light);
+                    Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
+                                                                equiangularSegment.tMax, y, equiangularSegment.t);
+                    Float pdfArea = equiangularArea.PdfArea(equiangularSegment.context, y, ls.value().pLight.n);
+                    r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
+                                    (pmfEquiangular * pdfDistance * pdfArea * r2 / cosY / equiangularSegment.sigmaS0);
+                }
+            }
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;
             r_u *= r_p * scatterPDF;
@@ -4925,7 +5038,7 @@ namespace pbrt
                 return beta * f_hat * T_ray * ls.value().L / (r_l + r_equiangular).Average();
             }
             else
-                return beta * f_hat * T_ray * ls.value().L / (r_l + r_u).Average();
+                return beta * f_hat * T_ray * ls.value().L / (r_l + r_u + r_equiangular).Average();
         }
 
         public override string ToString()
