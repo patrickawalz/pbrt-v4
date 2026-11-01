@@ -29,15 +29,6 @@ namespace pbrt
             return (MediumEventType)pbrt.SampleDiscrete(new Float[] { pAbsorb, pScatter, pNull }, u);
         }
 
-        // Ratio-tracking update at a null collision for a transmittance estimate that is not combined with another strategy
-        public static void RatioTrackingStep(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                             SampledSpectrum sigma_maj, SampledSpectrum sigma_n)
-        {
-            Float pr = T_maj[0] * sigma_maj[0];
-            Tr *= T_maj * sigma_n / pr;
-            inv_w *= T_maj * sigma_maj / pr;
-        }
-
         // Ratio-tracking update at a null collision for a transmittance that is combined with the light and unidirectional
         // strategies through the rescaled path probabilities r_l and r_u
         public static void RatioTrackingStep(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
@@ -50,12 +41,6 @@ namespace pbrt
         }
 
         // The last segment of a ray, from the last collision to the end of the segment
-        public static void FinishSegment(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj)
-        {
-            Tr *= T_maj / T_maj[0];
-            inv_w *= T_maj / T_maj[0];
-        }
-
         public static void FinishSegment(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
                                          SampledSpectrum T_maj)
         {

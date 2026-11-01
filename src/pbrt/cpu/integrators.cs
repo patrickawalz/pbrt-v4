@@ -92,92 +92,27 @@ namespace pbrt
         // below 0.05 survives with probability 0.25 (as in the shadow rays of the volumetric path integrator)
         public bool russianRoulette = false;
 
-        // (not in pbrt-v4) stack is the BoundaryStack of the path on arrival at p0, before it leaves p0 towards p1
-        public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda)
+        // (not in pbrt-v4) The context for sampling a light from a vertex: at a surface the point moves to the side of it that the
+        // BSDF scatters to (shared by volpath's and bdpt's light samples)
+        public static LightSampleContext LightContextAt(Interaction intr, bool onSurface, BxDFFlags flags)
         {
-            return Tr(p0, p1, stack, lambda, out Medium endMedium);
+            if (!onSurface)
+            {
+                return new LightSampleContext(intr);
+            }
+            LightSampleContext ctx = new LightSampleContext(intr.AsSurface());
+            // Try to nudge the light sampling position to correct side of the surface
+            if (IsReflective(flags) && !IsTransmissive(flags))
+            {
+                ctx.pi = new Point3fi(intr.OffsetRayOrigin(intr.wo));
+            }
+            else if (IsTransmissive(flags) && !IsReflective(flags))
+            {
+                ctx.pi = new Point3fi(intr.OffsetRayOrigin(-intr.wo));
+            }
+            return ctx;
         }
 
-        // (not in pbrt-v4) endMedium is the medium that the path is in on arrival at p1
-        public SampledSpectrum Tr(Interaction p0, Interaction p1, BoundaryStack stack, SampledWavelengths lambda,
-                                  out Medium endMedium)
-        {
-            endMedium = null;
-            RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
-
-            // :-(
-            Ray ray =
-                p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
-            SampledSpectrum Tr = new SampledSpectrum(1.0f), inv_w = new SampledSpectrum(1.0f), r_u_unused = new SampledSpectrum(1.0f);
-            if (LengthSquared(ray.d) == 0)
-            {
-                endMedium = MediumTracking.Current(stack);
-                return Tr;
-            }
-            MediumTracking.CrossSurface(ref stack, p0, ray.d);
-
-            while (true)
-            {
-                pstd.optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
-                // Handle opaque surface along ray's path
-                if (si && ThinCoatMaterial.Blocks(si.value().intr, ray.d))
-                    return new SampledSpectrum(0.0f);
-
-                // Update transmittance for current ray segment
-                Medium rayMedium = MediumTracking.Current(stack);
-                if (rayMedium != null)
-                {
-                    Point3f pExit = ray.Apply(si ? si.value().tHit : (1 - ShadowEpsilon));
-                    ray.d = pExit - ray.o;
-
-                    SampledSpectrum T_closed;
-                    if (rayMedium.volumeIntegrator.transmittance.TryClosedForm(ray, rayMedium, 1.0f, lambda, out T_closed))
-                        Tr *= T_closed;
-                    else if (rayMedium.volumeIntegrator.transmittance.TryEstimate(ray, rayMedium, 1.0f, ref rng, lambda, ref Tr, ref inv_w, ref r_u_unused))
-                    {
-                    }
-                    else
-                    {
-                    SampledSpectrum T_maj =
-                        rayMedium.volumeIntegrator.tracker.SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
-                                    (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
-                                     SampledSpectrum T_maj_) =>
-                                    {
-                                        SampledSpectrum sigma_n =
-                                            ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-
-                                        // ratio-tracking: only evaluate null scattering
-                                        rayMedium.volumeIntegrator.transmittance.Step(ref Tr, ref inv_w, T_maj_, sigma_maj, sigma_n, ref rng);
-
-                                        // Possibly terminate the transmittance computation using Russian roulette
-                                        if (russianRoulette && (bool)Tr && (bool)inv_w &&
-                                            (Tr / inv_w.Average()).MaxComponentValue() < 0.05f)
-                                        {
-                                            Float q = 0.75f;
-                                            if (rng.Uniform<Float>() < q)
-                                                Tr = new SampledSpectrum(0.0f);
-                                            else
-                                                Tr /= 1 - q;
-                                        }
-
-                                        if (!Tr || !inv_w)
-                                            return false;
-
-                                        return true;
-                                    });
-                    rayMedium.volumeIntegrator.transmittance.Finish(ref Tr, ref inv_w, T_maj);
-                    }
-                }
-
-                // Generate next ray segment or return final transmittance
-                if (!si)
-                    break;
-                ray = si.value().intr.SpawnRayTo(p1);
-                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
-            }
-            endMedium = MediumTracking.Current(stack);
-            return Tr / inv_w.Average();
-        }
         // (not in pbrt-v4) The transmittance of a connection with the factors of the spectral MIS weights, as the shadow rays of
         // volpath have them: the estimate is not divided by anything; ru is the ratio, per wavelength, of the probability of
         // the segment as a walk would have sampled it to the probability that the connection samples it with for the hero
@@ -187,88 +122,114 @@ namespace pbrt
         {
             endMedium = null;
             RNG rng = new RNG(Hash(p0.p()), Hash(p1.p()));
-            Ray ray = p0.IsSurfaceInteraction() ? p0.AsSurface().SpawnRayTo(p1) : p0.SpawnRayTo(p1);
-            SampledSpectrum T_ray = new SampledSpectrum(1.0f);
-            SampledSpectrum r_l = new SampledSpectrum(1.0f), r_u = new SampledSpectrum(1.0f);
-            ru = r_u;
-            rl = r_l;
+            Ray ray = p0.SpawnRayTo(p1);
             if (LengthSquared(ray.d) == 0)
             {
+                ru = new SampledSpectrum(1.0f);
+                rl = new SampledSpectrum(1.0f);
                 endMedium = MediumTracking.Current(stack);
-                return T_ray;
+                return new SampledSpectrum(1.0f);
             }
-            MediumTracking.CrossSurface(ref stack, p0, ray.d);
-
-            while (true)
+            SampledSpectrum T_ray = ShadowRay(ray, p0, p1, ref stack, lambda, rng, russianRoulette, out ru, out rl);
+            if ((bool)T_ray)
             {
-                pstd.optional<ShapeIntersection> si = Intersect(ray, 1 - ShadowEpsilon);
+                endMedium = MediumTracking.Current(stack);
+            }
+            return T_ray;
+        }
+
+        // (not in pbrt-v4) The shadow ray of volpath and bdpt: the transmittance estimate from the origin of the ray to the target
+        // through the media and the boundaries between them, and the factors r_u and r_l that the null collisions of the
+        // estimator give the probability of the segment (as a walk, r_u, and as this connection, r_l, would sample it, relative
+        // to the hero wavelength's of the connection). ray starts at origin and ends at target (t = 1); stack is the stack of media
+        // on arrival at origin, and ends as the stack at the target. A blocked ray returns zero.
+        public SampledSpectrum ShadowRay(Ray lightRay, Interaction origin, Interaction target, ref BoundaryStack stack,
+                                         SampledWavelengths lambda, RNG rng, bool roulette,
+                                         out SampledSpectrum r_u, out SampledSpectrum r_l)
+        {
+            MediumTracking.CrossSurface(ref stack, origin, lightRay.d);
+            SampledSpectrum T_ray = new SampledSpectrum(1.0f);
+            SampledSpectrum rl = new SampledSpectrum(1.0f), ru = new SampledSpectrum(1.0f);
+
+            while (lightRay.d != new Vector3f(0, 0, 0))
+            {
+                // Trace ray through media to estimate transmittance
+                pstd.optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
                 // Handle opaque surface along ray's path
-                if (si && ThinCoatMaterial.Blocks(si.value().intr, ray.d))
+                if (si && ThinCoatMaterial.Blocks(si.value().intr, lightRay.d))
                 {
+                    r_l = rl;
+                    r_u = ru;
                     return new SampledSpectrum(0.0f);
                 }
 
                 // Update transmittance for current ray segment
-                Medium rayMedium = MediumTracking.Current(stack);
-                if (rayMedium != null)
+                Medium lightMedium = MediumTracking.Current(stack);
+                if (lightMedium != null)
                 {
-                    Point3f pExit = ray.Apply(si ? si.value().tHit : (1 - ShadowEpsilon));
-                    ray.d = pExit - ray.o;
-
+                    Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
+                    Float uT = rng.Uniform<Float>();
                     SampledSpectrum T_closed;
-                    if (rayMedium.volumeIntegrator.transmittance.TryClosedForm(ray, rayMedium, 1.0f, lambda, out T_closed))
+                    if (lightMedium.volumeIntegrator.transmittance.TryClosedForm(lightRay, lightMedium, tMax, lambda, out T_closed))
                     {
                         T_ray *= T_closed;
                     }
-                    else if (rayMedium.volumeIntegrator.transmittance.TryEstimate(ray, rayMedium, 1.0f, ref rng, lambda, ref T_ray, ref r_l, ref r_u))
+                    else if (lightMedium.volumeIntegrator.transmittance.TryEstimate(lightRay, lightMedium, tMax, ref rng, lambda, ref T_ray, ref rl, ref ru))
                     {
                     }
                     else
                     {
                         SampledSpectrum T_maj =
-                            rayMedium.volumeIntegrator.tracker.SampleT_maj(ray, rayMedium, 1.0f, rng.Uniform<Float>(), ref rng, lambda,
+                            lightMedium.volumeIntegrator.tracker.SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
                                         (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                          SampledSpectrum T_maj_) =>
                                         {
+                                            // Update ray transmittance estimate at sampled point
+                                            // Update _T_ray_ and PDFs using ratio-tracking estimator
                                             SampledSpectrum sigma_n =
                                                 ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                            rayMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n, ref rng);
+                                            lightMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref rl, ref ru, T_maj_, sigma_maj, sigma_n, ref rng);
 
-                                            // Possibly terminate the transmittance computation using Russian roulette
-                                            if (russianRoulette && (bool)T_ray && (bool)r_l &&
-                                                (T_ray / (r_l + r_u).Average()).MaxComponentValue() < 0.05f)
+                                            // Possibly terminate transmittance computation using
+                                            // Russian roulette
+                                            if (roulette)
                                             {
-                                                Float q = 0.75f;
-                                                if (rng.Uniform<Float>() < q)
+                                                SampledSpectrum Tr = T_ray / (rl + ru).Average();
+                                                if (Tr.MaxComponentValue() < 0.05f)
                                                 {
-                                                    T_ray = new SampledSpectrum(0.0f);
-                                                }
-                                                else
-                                                {
-                                                    T_ray /= 1 - q;
+                                                    Float q = 0.75f;
+                                                    if (rng.Uniform<Float>() < q)
+                                                        T_ray = new SampledSpectrum(0.0f);
+                                                    else
+                                                        T_ray /= 1 - q;
                                                 }
                                             }
-                                            return (bool)T_ray;
+
+                                            if (!T_ray)
+                                                return false;
+                                            return true;
                                         });
-                        rayMedium.volumeIntegrator.transmittance.Finish(ref T_ray, ref r_l, ref r_u, T_maj);
+                        // Update transmittance estimate for final segment
+                        lightMedium.volumeIntegrator.transmittance.Finish(ref T_ray, ref rl, ref ru, T_maj);
                     }
                 }
 
                 // Generate next ray segment or return final transmittance
                 if (!T_ray)
                 {
+                    r_l = rl;
+                    r_u = ru;
                     return new SampledSpectrum(0.0f);
                 }
                 if (!si)
                 {
                     break;
                 }
-                ray = si.value().intr.SpawnRayTo(p1);
-                MediumTracking.CrossSurface(ref stack, si.value().intr, ray.d);
+                lightRay = si.value().intr.SpawnRayTo(target);
+                MediumTracking.CrossSurface(ref stack, si.value().intr, lightRay.d);
             }
-            endMedium = MediumTracking.Current(stack);
-            ru = r_u;
-            rl = r_l;
+            r_l = rl;
+            r_u = ru;
             return T_ray;
         }
 
@@ -2286,19 +2247,6 @@ namespace pbrt
             }
         }
 
-        public static SampledSpectrum G(Integrator integrator, Sampler sampler, Vertex v0, Vertex v1,
-                                        SampledWavelengths lambda)
-        {
-            Vector3f d = v0.p() - v1.p();
-            Float g = 1 / LengthSquared(d);
-            d *= std.sqrt(g);
-            if (v0.IsOnSurface())
-                g *= AbsDot(v0.ns(), d);
-            if (v1.IsOnSurface())
-                g *= AbsDot(v1.ns(), d);
-            return g * integrator.Tr(v0.GetInteraction(), v1.GetInteraction(), v0.stack, lambda);
-        }
-
         // (not in pbrt-v4) The geometry term of a connection without its transmittance
         static Float GeometryTerm(Vertex v0, Vertex v1)
         {
@@ -2597,20 +2545,8 @@ namespace pbrt
                         Light light = sampledLight.value().light;
                         Float p_l = sampledLight.value().p;
 
-                        LightSampleContext ctx;
-                        if (pt.IsOnSurface())
-                        {
-                            SurfaceInteraction si = pt.GetInteraction().AsSurface();
-                            ctx = new LightSampleContext(si);
-                            // Try to nudge the light sampling position to correct side of the surface
-                            BxDFFlags flags = pt.bsdf.Flags();
-                            if (IsReflective(flags) && !IsTransmissive(flags))
-                                ctx.pi = si.OffsetRayOrigin(si.wo);
-                            else if (IsTransmissive(flags) && !IsReflective(flags))
-                                ctx.pi = si.OffsetRayOrigin(-si.wo);
-                        }
-                        else
-                            ctx = new LightSampleContext(pt.GetInteraction());
+                        LightSampleContext ctx = Integrator.LightContextAt(pt.GetInteraction(), pt.IsOnSurface(),
+                                                                           pt.IsOnSurface() ? pt.bsdf.Flags() : default);
                         // (not in pbrt-v4) The point of an emissive volume has a third coordinate
                         VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
                         pstd.optional<LightLiSample> lightWeight = volumeLight != null
@@ -4765,19 +4701,7 @@ namespace pbrt
             wiLight = default;
             // Estimate light-sampled direct illumination at _intr_
             // Initialize _LightSampleContext_ for volumetric light sampling
-            LightSampleContext ctx;
-            if (bsdf.HasValue)
-            {
-                ctx = new LightSampleContext(intr.AsSurface());
-                // Try to nudge the light sampling position to correct side of the surface
-                BxDFFlags flags = bsdf.Value.Flags();
-                if (IsReflective(flags) && !IsTransmissive(flags))
-                    ctx.pi = new Point3fi(intr.OffsetRayOrigin(intr.wo));
-                else if (IsTransmissive(flags) && !IsReflective(flags))
-                    ctx.pi = new Point3fi(intr.OffsetRayOrigin(-intr.wo));
-            }
-            else
-                ctx = new LightSampleContext(intr);
+            LightSampleContext ctx = LightContextAt(intr, bsdf.HasValue, bsdf.HasValue ? bsdf.Value.Flags() : default);
 
             // Sample a light source using _lightSampler_
             Float u = sampler.Get1D();
@@ -4831,73 +4755,12 @@ namespace pbrt
 
             // Declare path state variables for ray to light source
             Ray lightRay = intr.SpawnRayTo(ls.value().pLight);
-            MediumTracking.CrossSurface(ref stack, intr, lightRay.d);
-            SampledSpectrum T_ray = new SampledSpectrum(1.0f), r_l = new SampledSpectrum(1.0f),
-                            r_u = new SampledSpectrum(1.0f);
             RNG rng = new RNG(Hash(lightRay.o), Hash(lightRay.d));
-
-            while (lightRay.d != new Vector3f(0, 0, 0))
-            {
-                // Trace ray through media to estimate transmittance
-                pstd.optional<ShapeIntersection> si = Intersect(lightRay, 1 - ShadowEpsilon);
-                // Handle opaque surface along ray's path
-                if (si && ThinCoatMaterial.Blocks(si.value().intr, lightRay.d))
-                    return new SampledSpectrum(0.0f);
-
-                // Update transmittance for current ray segment
-                Medium lightMedium = MediumTracking.Current(stack);
-                if (lightMedium != null)
-                {
-                    Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
-                    Float uT = rng.Uniform<Float>();
-                    SampledSpectrum T_closed;
-                    if (lightMedium.volumeIntegrator.transmittance.TryClosedForm(lightRay, lightMedium, tMax, lambda, out T_closed))
-                        T_ray *= T_closed;
-                    else if (lightMedium.volumeIntegrator.transmittance.TryEstimate(lightRay, lightMedium, tMax, ref rng, lambda, ref T_ray, ref r_l, ref r_u))
-                    {
-                    }
-                    else
-                    {
-                    SampledSpectrum T_maj =
-                        lightMedium.volumeIntegrator.tracker.SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
-                                    (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
-                                     SampledSpectrum T_maj_) =>
-                                    {
-                                        // Update ray transmittance estimate at sampled point
-                                        // Update _T_ray_ and PDFs using ratio-tracking estimator
-                                        SampledSpectrum sigma_n =
-                                            ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
-                                        lightMedium.volumeIntegrator.transmittance.Step(ref T_ray, ref r_l, ref r_u, T_maj_, sigma_maj, sigma_n, ref rng);
-
-                                        // Possibly terminate transmittance computation using
-                                        // Russian roulette
-                                        SampledSpectrum Tr = T_ray / (r_l + r_u).Average();
-                                        if (Tr.MaxComponentValue() < 0.05f)
-                                        {
-                                            Float q = 0.75f;
-                                            if (rng.Uniform<Float>() < q)
-                                                T_ray = new SampledSpectrum(0.0f);
-                                            else
-                                                T_ray /= 1 - q;
-                                        }
-
-                                        if (!T_ray)
-                                            return false;
-                                        return true;
-                                    });
-                    // Update transmittance estimate for final segment
-                    lightMedium.volumeIntegrator.transmittance.Finish(ref T_ray, ref r_l, ref r_u, T_maj);
-                    }
-                }
-
-                // Generate next ray segment or return final transmittance
-                if (!T_ray)
-                    return new SampledSpectrum(0.0f);
-                if (!si)
-                    break;
-                lightRay = si.value().intr.SpawnRayTo(ls.value().pLight);
-                MediumTracking.CrossSurface(ref stack, si.value().intr, lightRay.d);
-            }
+            // (not in pbrt-v4) The shadow ray is shared with bdpt (see Integrator.ShadowRay)
+            SampledSpectrum T_ray = ShadowRay(lightRay, intr, ls.value().pLight, ref stack, lambda, rng, true,
+                                              out SampledSpectrum r_u, out SampledSpectrum r_l);
+            if (!T_ray)
+                return new SampledSpectrum(0.0f);
             // (not in pbrt-v4) The point has to lie in the medium that emits, and the other strategy reaches it with the
             // density of a collision there: the majorant at the point, per length
             if (volumeLight != null)

@@ -94,8 +94,8 @@ namespace pbrt
     }
 
     // TransmittanceEstimator Definition: what a shadow ray does at each null collision of the tracker, and at the end of
-    // a segment. The Standalone overloads serve a transmittance that is used alone (Tr, inv_w); the Combined overloads
-    // one that is weighed against other strategies through the rescaled path probabilities (T_ray, r_l, r_u).
+    // a segment. The transmittance is weighed against the other strategies through the rescaled path probabilities
+    // (T_ray, r_l, r_u).
     public abstract unsafe class TransmittanceEstimator
     {
         public abstract string Name();
@@ -109,18 +109,15 @@ namespace pbrt
         }
 
         // An estimator that runs the whole segment itself (it needs a different majorant than the tracker's): updates T_ray,
-        // r_l and r_u for the segment and returns true; the standalone form passes inv_w for r_l and a dummy for r_u.
+        // r_l and r_u for the segment and returns true.
         public virtual bool TryEstimate(Ray ray, Medium medium, Float tMax, ref RNG rng, SampledWavelengths lambda,
                                         ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u)
         {
             return false;
         }
 
-        public abstract void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng);
         public abstract void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
                                   SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng);
-        public abstract void Finish(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj);
         public abstract void Finish(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u, SampledSpectrum T_maj);
     }
 
@@ -129,21 +126,10 @@ namespace pbrt
     {
         public override string Name() { return "ratio"; }
 
-        public override void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
-        {
-            MediumEvents.RatioTrackingStep(ref Tr, ref inv_w, T_maj, sigma_maj, sigma_n);
-        }
-
         public override void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
                                   SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
         {
             MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj, sigma_maj, sigma_n);
-        }
-
-        public override void Finish(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj)
-        {
-            MediumEvents.FinishSegment(ref Tr, ref inv_w, T_maj);
         }
 
         public override void Finish(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u, SampledSpectrum T_maj)
@@ -179,13 +165,6 @@ namespace pbrt
     public sealed unsafe class TrackLengthEstimator : RatioTrackingEstimator
     {
         public override string Name() { return "tracklength"; }
-
-        public override void Step(ref SampledSpectrum Tr, ref SampledSpectrum inv_w, SampledSpectrum T_maj,
-                                  SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
-        {
-            SampledSpectrum dummy = new SampledSpectrum(1f);
-            Step(ref Tr, ref inv_w, ref dummy, T_maj, sigma_maj, sigma_n, ref rng);
-        }
 
         public override void Step(ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u,
                                   SampledSpectrum T_maj, SampledSpectrum sigma_maj, SampledSpectrum sigma_n, ref RNG rng)
