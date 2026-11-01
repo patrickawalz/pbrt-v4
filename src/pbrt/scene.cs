@@ -740,7 +740,7 @@ namespace pbrt
             return textures;
         }
 
-        // (not in pbrt-v4) The volume of a shape comes from its material (Material.HasVolume() / CreateVolume(), as in Fong et al.
+        // (not in pbrt-v4) The volume of a shape comes from its material (Material.HasVolume() / GetVolume() (Fong's CreateVolume, named after GetBSDF), as in Fong et al.
         // where the material owns the volume) or, as in pbrt-v4, from the MediumInterface in effect. The material wins when it has
         // a volume; a priority on the shape overrides the one of the material.
         MediumInterface MakeMediumInterface(string insideName, string outsideName, int shapePriority, Material material,

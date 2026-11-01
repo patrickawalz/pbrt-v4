@@ -23,7 +23,7 @@ References: Fong et al., *Production Volume Rendering* (SIGGRAPH 2017 course) se
 ## Target interfaces (names follow pbrt-v4 where an equivalent exists)
 
 ```
-Material            CreateBSDF(ctx) / HasVolume() / CreateVolume(ctx) / GetBoundaryPriority() / CanOverlap()
+Material            GetBSDF(ctx) / HasVolume() / GetVolume(ctx) / GetBoundaryPriority() / CanOverlap()
 BSDF                one type for surface and phase: f, Sample_f, PDF, Flags (a phase BSDF has no shading frame normal)
 Interaction         one struct for surface and medium points
 Volume (per type)   integrator module: SampleCollision(ray, tMax, u, rng) -> event + weights
@@ -85,7 +85,7 @@ is reproduced exactly with the same seed.
      frame, no `wo.z == 0` rejection). `Vertex.f` / `Vertex.PDF`, the volpath and simplevolpath scattering, the BDPT random walk and
      `SampleLd` use it; same-seed renders are unchanged. `Interaction` was already one class with a surface and a medium
      subclass.
-   * `Material.HasVolume()` / `CreateVolume(findMedium, loc)` / `VolumePriority()` (Fong listing 1) are on the `Material` class; the scene sets
+   * `Material.HasVolume()` / `ResolveVolume(findMedium, loc)` / `VolumePriority()` (Fong listing 1) are on the `Material` class; the scene sets
      them from `"string volume"` / `"integer volumepriority"` when it makes the material, and `MakeMediumInterface` asks the material.
      The `interface` material is an `InterfaceMaterial` object now (it only carries the volume while the scene is built); the
      primitives of an interface still get a null material, so nothing changes at render time (same-seed renders of the material,
@@ -99,7 +99,7 @@ is reproduced exactly with the same seed.
      an emissive texture medium with a light cannot overlap. Checked: two overlapping spheres with equal g match a single
      summed medium (per-channel mean ratios 0.9996 to 1.0009, volpath and bdpt); the material route and the earlier flag route are
      bit-identical.
-   * `Material.CreateVolume(Interaction)` (Fong listing 1, per point of entry): `"texture volumescale"` makes the material create its volume
+   * `Material.GetVolume(Interaction)` (Fong's `CreateVolume`, named after pbrt-v4's `GetBSDF`) (Fong listing 1, per point of entry): `"texture volumescale"` makes the material create its volume
      for each entry point, the named medium (`ScaledMedium`) with sigma_a and sigma_s scaled by the texture there. A constant scale is
      bit-identical to a medium with the coefficients multiplied. A scale that varies with the entry point is not defined independently
      of the strategy: volpath and bdpt differ by about 1.3% in red on a checkerboard-scaled sphere (reproducible across seeds, the
@@ -183,7 +183,7 @@ is reproduced exactly with the same seed.
      does not pay for the time here: volpath 24x24, 1024 spp, N = 4 against 1: noise 0.0030 against 0.0039 for 1.75 times the time;
      bdpt N = 4 gives 0.0042 against 0.0045 for 1.3 times. The paper's gain is locality for large volume assets and an amortised PDF
      table, neither of which this tracker has. Section 4.2.1 (uniform distance sampling with MIS) is a separate, not done item.
-   Not done: `CanOverlap()` (summed extinction) and a per-hit `CreateVolume(ctx)` that depends on the intersection.
+   Not done: `CanOverlap()` (summed extinction) and a per-hit `GetVolume(ctx)` that depends on the intersection.
 6. (done, apart from emission) Texture-driven volumes.
    * `FloatTexture` needs only `MinValue()` / `MaxValue()`; `RegionBounds(box)` (default: the global bounds) tightens them over a box
      and `Gradient(ctx)` (default: central difference) gives the derivative, which a texture can override with the analytic one.

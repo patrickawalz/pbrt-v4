@@ -266,7 +266,7 @@ namespace pbrt
                 {
                     Material owner = mediumInterface.volumeMaterial;
                     BoundaryStackElement element = new BoundaryStackElement(
-                        owner, !goesToOutside && owner != null ? owner.CreateVolume(intr) : mediumInterface.inside,
+                        owner, !goesToOutside && owner != null ? owner.GetVolume(intr) : mediumInterface.inside,
                         mediumInterface.canOverlap, mediumInterface.overlapPriority);
                     if (goesToOutside)
                         stack.Pop(element, mediumInterface.priority);

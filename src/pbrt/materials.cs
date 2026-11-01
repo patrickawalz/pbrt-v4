@@ -1498,12 +1498,12 @@ namespace pbrt
             return volume;
         }
 
-        // Fong et al., listing 1, Material::CreateVolume(ShadingContext): a material with a "volumescale" texture creates the
+        // Fong et al., listing 1, Material::CreateVolume(ShadingContext), named GetVolume here after pbrt-v4's GetBSDF: a material with a "volumescale" texture creates the
         // volume for the point where the path enters it, the medium with its coefficients scaled by the texture there. Any
         // other material has the one volume of the scene.
         public bool CreatesVolumePerEntry() { return HasVolume() && volumeScale != null; }
 
-        public Medium CreateVolume(Interaction ctx)
+        public Medium GetVolume(Interaction ctx)
         {
             if (volumeScale == null)
                 return volume;
