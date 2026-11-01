@@ -113,6 +113,10 @@ namespace pbrt
             dpdw = dpdwNew;
         }
 
+        // The index and its gradient at p
+        public Float Index() { return n; }
+        public Vector3f IndexGradient() { return gradient; }
+
         // SymplecticRayJacobian Public Members
         public Point3f p;
         public Vector3f v;

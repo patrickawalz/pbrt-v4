@@ -29,7 +29,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | --- | --- | --- |
 | 1 | `RefractiveIndexField`: cubic B-spline grid with value, gradient and Hessian (`GridRefractiveIndexField`); analytic `LuneburgRefractiveIndexField` and `LinearRefractiveIndexField` for the tests | done (`refractiveindex.cs`) |
 | 2 | `SymplecticRay` (algorithm 1) and `SymplecticRayJacobian` (algorithm 2, exact) | done (`refractiveray.cs`) |
-| 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | open |
+| 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, the boundary through the boundary stack | open |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | open |
 | 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | open |
@@ -45,3 +45,11 @@ Luneburg lens onto its surface point with an error of 2.6e-5 at the step 0.02. T
 integrator to 6e-5 for an analytic field and for the spline. Each of seven deliberate breaks of the code (a basis weight, the
 prefilter, the second half kick, the paper's variant of the derivative, the normalisation of the direction, the
 extrapolation, a Hessian term) is caught by at least one test.
+
+Stage 3: the derivative of the closest-approach error (including the change of the arc length s* with the direction) equals a
+finite difference to 7e-5; the solver finds the straight line in a constant index and, through the Luneburg lens, a path that
+the plain integrator retraces to 1.3e-4 of the target. With one path the estimate of algorithm 3 has the mean 0.977 (689 of
+1500 searches found a path, the rest pointed away), consistent with the expected 1. Six deliberate breaks (the s* term, the
+velocity term, the gradient term of its denominator, the crossing test, the count, the null-path rule) are caught. A loose
+same-path test is not caught, because with one path every success is the same path: **the estimate with two or more stationary
+paths is not tested**. Type-1 connections (an end point on the medium boundary) wait for stage 4.
