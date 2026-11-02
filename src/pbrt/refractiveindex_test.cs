@@ -159,5 +159,45 @@ namespace pbrt
             EXPECT_EQ(1.0f, outside);
             EXPECT_EQ(0.0f, pbrt.Length(gradientOutside));
         }
+
+        // The bump lens is 1 outside its sphere, smooth across it (the value, gradient and Hessian are continuous), and has
+        // the derivatives of its formula
+        [TEST("BumpRefractiveIndexField", "DerivativesAreConsistentAndVanishAtTheSurface")]
+        public static void BumpRefractiveIndexField_DerivativesAreConsistentAndVanishAtTheSurface()
+        {
+            RNG rng = new RNG(4);
+            Point3f center = new Point3f(0.2f, -0.1f, 0.3f);
+            BumpRefractiveIndexField field = new BumpRefractiveIndexField(center, 1.5f, 0.4f);
+            Float delta = 1e-3f;
+            for (int i = 0; i < 60; ++i)
+            {
+                Vector3f direction = pbrt.Normalize(new Vector3f(rng.Uniform<Float>() - 0.5f, rng.Uniform<Float>() - 0.5f, rng.Uniform<Float>() - 0.5f));
+                Point3f p = center + (0.1f + 1.3f * rng.Uniform<Float>()) * direction;
+                field.ValueGradientAndHessian(p, out Float value, out Vector3f gradient, out SquareMatrix3 hessian);
+                for (int a = 0; a < 3; ++a)
+                {
+                    Point3f plus = p, minus = p;
+                    plus[a] += delta;
+                    minus[a] -= delta;
+                    field.ValueGradientAndHessian(plus, out Float valuePlus, out Vector3f gradientPlus, out SquareMatrix3 hessianPlus);
+                    field.ValueGradientAndHessian(minus, out Float valueMinus, out Vector3f gradientMinus, out SquareMatrix3 hessianMinus);
+                    EXPECT_NEAR((valuePlus - valueMinus) / (2 * delta), gradient[a], 1e-3f);
+                    for (int b = 0; b < 3; ++b)
+                    {
+                        EXPECT_NEAR((gradientPlus[b] - gradientMinus[b]) / (2 * delta), hessian[b][a], 1e-3f);
+                    }
+                }
+            }
+            // At the surface, from inside, the value is 1 and the gradient and the Hessian vanish
+            Point3f surface = center + 1.4999f * new Vector3f(0.6f, 0.0f, 0.8f);
+            field.ValueGradientAndHessian(surface, out Float surfaceValue, out Vector3f surfaceGradient, out SquareMatrix3 surfaceHessian);
+            EXPECT_NEAR(1.0f, surfaceValue, 1e-6f);
+            EXPECT_NEAR(0.0f, pbrt.Length(surfaceGradient), 1e-6f);
+            // (the Hessian is proportional to the distance to the surface, 1e-4 here, with the factor 4)
+            EXPECT_LT(Math.Abs(surfaceHessian[0][0] + surfaceHessian[1][1] + surfaceHessian[2][2]), 1e-3f);
+            // The center is the maximum
+            field.ValueAndGradient(center, out Float centerValue, out Vector3f centerGradient);
+            EXPECT_NEAR(1.4f, centerValue, 1e-6f);
+        }
     }
 }

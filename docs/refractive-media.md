@@ -32,7 +32,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
-| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a done (see "Stage 6 design") |
+| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a and 6b done (see "Stage 6 design") |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
 ## What the tests establish
@@ -131,18 +131,40 @@ What is settled, with the checks that settle it:
   densities of a vertex pair use J of the other direction through this relation, and a connection takes J in one fixed
   orientation (camera to light) for every strategy. `RefractiveConnection.TraceEdge` returns J for any edge, and the test
   `ReversedEdgeHasTheJacobianOfTheConservedThroughput` shows the relation: with steps of 0.02, 0.01, 0.005 and 0.0025 the
-  two sides differ by 1.0e-2, 8e-3, 4e-3 and 1.4e-3 at most (relative), so it holds in the limit, at first order in the step.
+  two sides differ by 1.0e-2, 8e-3, 4e-3 and 1.4e-3 at most (relative), so it holds in the limit (these numbers are from the first order integrator that was replaced below; the test now passes with the second order one).
 * One trace on the bounded field (index 1, gradient 0 outside) covers an edge that is straight, curved and straight, so the
   Jacobian of a whole edge needs no composition of pieces.
 
-Observation to follow up: the integrator is first order in the step (its drift divides by the index at the start of the step):
-the curve traced back from the end misses the start by 5e-3, 2.6e-3, 1.3e-3 and 6.6e-4 for the four steps above. It is
-self-consistent (the connection solver and the walk use the same steps, and the derivative is exact for it), but a
-second order drift (the index at the middle of the step, or the length of v) would converge faster, at the price of the exact
-derivative that the tests establish. I have not looked at the accuracy against the analytic rays of the Luneburg lens.
+Integrator change found on the way (after the first commit of stage 6): the drift of the step divided by the index at the start of
+the step (`x += s v / n(x)`), which makes the integrator first order in the step and not reversible. Against a fourth order
+Runge-Kutta reference on the Luneburg ray (arc length 1.8, height 0.3) the position error with steps 0.04, 0.02, 0.01 and 0.005
+was 5.5e-3, 2.9e-3, 1.5e-3 and 7.8e-4. The Hamiltonian |v| - n of the paths is separable, so the drift along `v / |v|` is the
+Stoermer-Verlet step of it, second order and reversible: the same errors are 2.8e-5, 7.0e-6, 1.8e-6 and 4.4e-7. Both
+`SymplecticRay.Step` and the exact derivative in `SymplecticRayJacobian.Step` use it now, and all earlier suites pass (the
+finite difference tests of the derivative included). The first kick of a path is evaluated a little ahead of its start
+(`SymplecticRay.StartNudge`, 1e-5), because a path that starts on the boundary of a medium has rounding put it on either side of
+a gradient that jumps there.
+
+Remaining limit: a field whose gradient jumps at the boundary of the region (the Luneburg lens) loses accuracy at the step that
+crosses the boundary, because the step does not end there: a solved curve that crosses it differs from the walk's by up to
+7e-3 in position and 0.02 in direction at step 0.05, and the connection solver then fails for about 10 percent of the edges that
+start outside the lens. A field that is smooth across the boundary does not have this: `BumpRefractiveIndexField`
+(`n = 1 + A (1 - (r / R)^2)^3`, C^2 at the sphere) is the lens of the bdpt tests, and the heat haze of the scenes has index 1 and
+zero gradient at its boundary by construction.
+
+Stage 6b (done): `BDPTWalkHook` records, for the edge that arrives at each vertex, whether it ran through a refractive medium
+(`Vertex.curvedEdge`) and the edge (`Vertex.edge`: leaving and arriving directions, the area Jacobian in the direction of the
+walk and of its reverse). The curve is solved between the camera side vertex and the light side one whichever way the walk went
+(`RefractiveMedium.SolveEdge`, started from the walk's direction, so that it is the walk's curve to the tolerance of the solver),
+and traced again from the walk's start if the solver fails. Tests (`RefractiveBDPTTests`, bump lens with a scattering medium):
+for 5864 edges of camera subpaths the solved curve reaches the vertex within 1.4e-5, the arrival direction agrees with the
+vertex's `wo` within 6.8e-6, the start direction is the camera ray's, there are no fallbacks, and the Jacobian agrees with a trace
+with a tenth of the step to 9.4e-4 (the end point to 5.3e-4); for 297 edges of light subpaths the fine trace from the previous
+vertex reaches the vertex within 2.6e-4 with the Jacobian within 3.4e-3, and the reversed trace the previous vertex within 6.2e-4
+with the reverse Jacobian within 2.4e-3. The edges are recorded and nothing uses them yet.
 
 Sub-stages: 6a the edge Jacobian and the reversal relation (done); 6b the camera and light walks of bdpt store, per vertex, the
-tangents at both ends of the edge that arrives there and the two Jacobians; 6c `Vertex.PDF`, `ConvertDensity` and the MIS
+tangents at both ends of the edge that arrives there and the two Jacobians (done); 6c `Vertex.PDF`, `ConvertDensity` and the MIS
 remapping use them instead of the positions; 6d the connection through the solver (count, J, visibility along the polyline,
 transmittance by ratio tracking along the curve, the spectral MIS ratios of the connection segment); 6e the test: bdpt against
 volpath on the lens scene (same single scattering radiance within the standard error), and the refusal removed.

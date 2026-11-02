@@ -25,6 +25,8 @@ namespace pbrt
         public ScratchBuffer scratchBuffer;
         public TransportMode mode;
         public PathState st;
+        // (not in pbrt-v4) The refractive medium of the segment that the walk is following, for the hooks of the segment (null otherwise)
+        public RefractiveMedium refractive;
     }
 
     // PathWalkHook Definition
@@ -92,6 +94,7 @@ namespace pbrt
                 Medium rayMedium = MediumTracking.Current(ctx.stack);
                 // (not in pbrt-v4) In a refractive medium the path is curved, and the scene is not intersected along a straight ray
                 RefractiveMedium refractive = rayMedium as RefractiveMedium;
+                ctx.refractive = refractive;
                 pstd.optional<ShapeIntersection> si = refractive != null ? default : ctx.integrator.Intersect(new Ray(ctx.ray));
                 if (rayMedium != null)
                 {

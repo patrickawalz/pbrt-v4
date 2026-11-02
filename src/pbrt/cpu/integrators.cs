@@ -1584,6 +1584,11 @@ namespace pbrt
         public SampledSpectrum cumU = new SampledSpectrum(1.0f), emissionMaj = new SampledSpectrum(1.0f);
         // (not in pbrt-v4) The scattering coefficient of the hero wavelength at a vertex in a medium
         public Float sigmaS0 = 0;
+        // (not in pbrt-v4) The edge that arrives at the vertex along its subpath, when it follows a curved path through a refractive
+        // medium: the directions it leaves the previous vertex along and arrives along, and the area Jacobians dA_perp / dOmega of the
+        // edge and of its reverse (see RefractiveEdge)
+        public bool curvedEdge = false;
+        public RefractiveEdge edge;
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1613,6 +1618,7 @@ namespace pbrt
             delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
             emission = v.emission; sigmaT0 = v.sigmaT0;
             segU = v.segU; segL = v.segL; vtx = v.vtx; cumU = v.cumU; emissionMaj = v.emissionMaj; sigmaS0 = v.sigmaS0;
+            curvedEdge = v.curvedEdge; edge = v.edge;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }
@@ -2143,6 +2149,66 @@ namespace pbrt
             // segment so far (the walk passes the boundaries between media without a vertex)
             BDPTEquiangularSink equiangularSink;
             int segmentPieces = 0;
+            // (not in pbrt-v4) The edge that the walk is following: where and along what it left the last vertex, and the refractive
+            // medium it has been through (the edge is curved), which the vertex at its end records (see FinishEdge)
+            bool edgeStarted = false;
+            Point3f edgeStart;
+            Vector3f edgeDirection;
+            RefractiveMedium edgeMedium;
+
+            void StartEdge(Point3f start, Vector3f direction)
+            {
+                edgeStarted = true;
+                edgeStart = start;
+                edgeDirection = Normalize(direction);
+                edgeMedium = null;
+            }
+
+            // The vertex at index has been made: when the edge that arrives at it was curved, the curve between the two vertices is
+            // solved for its directions and Jacobians, from the camera side vertex to the light side one whichever way the walk
+            // went (see RefractiveMedium.SolveEdge), and the edge is stored in the direction of the walk: leaving the previous vertex,
+            // arriving at this one, with the Jacobian of this direction and of the reverse. If the solver does not find the curve, the
+            // curve that the walk followed is traced again from its start.
+            void FinishEdge(WalkContext ctx, int index)
+            {
+                if (edgeMedium == null)
+                {
+                    return;
+                }
+                Point3f previous = path[index - 1].p();
+                Point3f current = path[index].p();
+                Vector3f arrival = Normalize(ctx.ray.d);
+                RefractiveEdge edge;
+                bool found;
+                if (ctx.mode == TransportMode.Radiance)
+                {
+                    // The camera side is the previous vertex
+                    found = edgeMedium.SolveEdge(previous, current, edgeDirection, out edge);
+                }
+                else
+                {
+                    // The camera side is this vertex: the solved curve leaves it along the reverse of the direction of arrival, and
+                    // arrives at the previous vertex against the direction that the walk leaves it along
+                    found = edgeMedium.SolveEdge(current, previous, (-1) * arrival, out RefractiveEdge solved);
+                    edge = new RefractiveEdge();
+                    edge.startDirection = (-1) * solved.endDirection;
+                    edge.endDirection = (-1) * solved.startDirection;
+                    edge.length = solved.length;
+                    edge.distance = solved.distance;
+                    edge.areaJacobian = solved.areaJacobianReverse;
+                    edge.areaJacobianReverse = solved.areaJacobian;
+                }
+                if (!found)
+                {
+                    found = edgeMedium.TraceEdge(edgeStart, edgeDirection, current, out edge);
+                }
+                if (found)
+                {
+                    path[index].curvedEdge = true;
+                    path[index].edge = edge;
+                }
+                edgeMedium = null;
+            }
 
             // The collisions of the segment that arrives at the new vertex go to the vertex, and the next segment starts empty
             void StoreSegment(WalkContext ctx, int index)
@@ -2322,12 +2388,25 @@ namespace pbrt
                     ctx.st.SurviveRoulette(q);
                 }
                 vIdx = off + bounces;
+                if (!edgeStarted)
+                {
+                    StartEdge(ctx.ray.o, ctx.ray.d);
+                }
                 return true;
+            }
+
+            public override void OnCurvedSegment(WalkContext ctx)
+            {
+                edgeMedium = ctx.refractive;
             }
 
             public override bool BeginCollision(WalkContext ctx, Medium medium, Point3f p, MediumProperties mp,
                                                 SampledSpectrum sigma_maj, SampledSpectrum T_maj)
             {
+                if (ctx.refractive != null)
+                {
+                    edgeMedium = ctx.refractive;
+                }
                 // (not in pbrt-v4) A camera subpath gathers the emission of the medium at each of its collisions, like volpath does:
                 // the collision is the last vertex of a path with no light subpath, and the strategies that sample the medium as a
                 // light share the weight (see MISWeight). The emission end is kept next to the subpath: the walk goes on.
@@ -2372,6 +2451,7 @@ namespace pbrt
                 intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, medium, mp.phase);
                 path[vIdx] = Vertex.CreateMedium(intr, ctx.st.beta, pdfFwd, path[vIdx - 1]);
                 path[vIdx].sigmaS0 = mp.sigma_s[0];
+                FinishEdge(ctx, vIdx);
                 StoreSegment(ctx, vIdx);
                 path[vIdx].stack = ctx.stack;
                 path[vIdx].pbeta = ctx.st.pa;
@@ -2387,6 +2467,7 @@ namespace pbrt
                 ctx.ray = intr.SpawnRay(ps.wi);
                 anyNonSpecularBounces = true;
                 path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.pdf, path[vIdx - 1]);
+                StartEdge(path[vIdx].p(), ctx.ray.d);
             }
 
             public override bool EndAfterMedium(WalkContext ctx, bool terminated)
@@ -2422,6 +2503,7 @@ namespace pbrt
                 ++PathIntegrator.totalBSDFs;
                 // Initialize _vertex_ with surface intersection information
                 path[vIdx] = Vertex.CreateSurface(isect, bsdf, ctx.st.beta, pdfFwd, path[vIdx - 1]);
+                FinishEdge(ctx, vIdx);
                 StoreSegment(ctx, vIdx);
                 path[vIdx].stack = ctx.stack;
                 path[vIdx].pbeta = ctx.st.pa;
@@ -2443,6 +2525,7 @@ namespace pbrt
                     pdfRev = pdfFwd = 0;
                 }
                 path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1]);
+                StartEdge(path[vIdx].p(), ctx.ray.d);
                 return true;
             }
         }

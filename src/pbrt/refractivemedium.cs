@@ -103,6 +103,17 @@ namespace pbrt
         private Float maxDensity;
     }
 
+
+    // (not in pbrt-v4) RefractiveEdge Definition (stage 6): an edge of a subpath, from a vertex along startDirection to the vertex it
+    // reaches (arriving along endDirection) with the area Jacobian dA_perp(end) / dOmega(start) of the curve, and the one of the
+    // reverse edge, which follows from the conservation of n^2 dA dOmega
+    public struct RefractiveEdge
+    {
+        public Vector3f startDirection, endDirection;
+        public Float length, distance;
+        public Float areaJacobian, areaJacobianReverse;
+    }
+
     // RefractiveMedium Definition
     public sealed unsafe class RefractiveMedium : Medium
     {
@@ -269,6 +280,55 @@ namespace pbrt
                 ray = next;
                 s = gridEnd;
             }
+        }
+
+        // The edge of a walk that left start along direction and reached end (the curve is traced again from start, on the field that
+        // is 1 outside the region, until its closest approach to end: its distance from end is the error of the two traces)
+        public bool TraceEdge(Point3f start, Vector3f direction, Point3f end, out RefractiveEdge edge)
+        {
+            edge = new RefractiveEdge();
+            RefractiveConnectionOptions options = ConnectionOptions(pbrt.Length(end - start));
+            options.inside = null;
+            Vector3f w = pbrt.Normalize(direction);
+            if (!RefractiveConnection.TraceToClosestApproach(boundedField, start, w, end, options,
+                                                             out SymplecticRayJacobian atClosest, out Float length))
+            {
+                return false;
+            }
+            RefractiveConnection.ErrorAndDerivative(atClosest, end, out Vector3f error, out SquareMatrix3 derivative);
+            edge.startDirection = w;
+            edge.endDirection = pbrt.Normalize(atClosest.v);
+            edge.length = length;
+            edge.distance = pbrt.Length(error);
+            edge.areaJacobian = RefractiveConnection.AreaJacobian(derivative, w, edge.endDirection);
+            boundedField.ValueAndGradient(start, out Float startIndex, out Vector3f startGradient);
+            boundedField.ValueAndGradient(end, out Float endIndex, out Vector3f endGradient);
+            edge.areaJacobianReverse = (endIndex / startIndex) * (endIndex / startIndex) * edge.areaJacobian;
+            return true;
+        }
+
+        // The edge between a camera side vertex and a light side vertex as a function of the two vertices alone: the curve that the
+        // solver finds from the camera side vertex, starting from a guess of the direction, the Jacobian dA_perp(light side) /
+        // dOmega(camera side) and, by the conservation of n^2 dA dOmega, the one of the reverse. Every strategy of bdpt that has the
+        // edge in its path uses these values, whichever subpath walked it, which the weights of the strategies need.
+        public bool SolveEdge(Point3f cameraSide, Point3f lightSide, Vector3f directionGuess, out RefractiveEdge edge)
+        {
+            edge = new RefractiveEdge();
+            RefractiveConnectionOptions options = ConnectionOptions(pbrt.Length(lightSide - cameraSide));
+            options.inside = null;
+            if (!RefractiveConnection.Solve(boundedField, cameraSide, lightSide, directionGuess, options, out RefractiveConnectionPath path))
+            {
+                return false;
+            }
+            edge.startDirection = path.startDirection;
+            edge.endDirection = path.endDirection;
+            edge.length = path.length;
+            edge.distance = path.distance;
+            edge.areaJacobian = path.areaJacobian;
+            boundedField.ValueAndGradient(cameraSide, out Float cameraIndex, out Vector3f cameraGradient);
+            boundedField.ValueAndGradient(lightSide, out Float lightIndex, out Vector3f lightGradient);
+            edge.areaJacobianReverse = (lightIndex / cameraIndex) * (lightIndex / cameraIndex) * path.areaJacobian;
+            return true;
         }
 
         // The options of a connection over the given distance: the tolerance and the longest path scale with the medium

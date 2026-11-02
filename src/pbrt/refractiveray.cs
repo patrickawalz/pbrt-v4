@@ -9,7 +9,8 @@
 // with s the arc length and v the optical velocity, whose length is n(x) along the path (the equations conserve that, and
 // |v| - n is the error of the integration). SymplecticRay is the symplectic integrator of the paper (algorithm 1): a half
 // kick of v, a drift of x and a half kick, which does not drift in energy over long paths the way an explicit Runge-Kutta
-// step does. SymplecticRayJacobian carries the derivatives of the position and the optical velocity with respect to the
+// step does. (The drift here is along v / |v|, the Hamiltonian |v| - n being separable, which makes the step second order and
+// reversible; dividing by n(x) as in dx/ds = v / n makes it first order, and not reversible.) SymplecticRayJacobian carries the derivatives of the position and the optical velocity with respect to the
 // initial direction along the path (algorithm 2), which the gradient based search for the path between two points needs.
 
 using System;
@@ -25,7 +26,10 @@ namespace pbrt
         // A ray at p along direction, whose optical velocity has the length of the index there
         public SymplecticRay(RefractiveIndexField field, Point3f p, Vector3f direction)
         {
-            field.ValueAndGradient(p, out Float indexAtStart, out Vector3f gradientAtStart);
+            // The index and its gradient are those a little ahead along the direction: a path that starts on the boundary of a medium
+            // (rounding puts it on either side) has the gradient of the medium for its first half kick
+            field.ValueAndGradient(p, out Float indexAtStart, out Vector3f unused);
+            field.ValueAndGradient(p + StartNudge * pbrt.Normalize(direction), out Float indexAhead, out Vector3f gradientAtStart);
             this.p = p;
             this.v = indexAtStart * pbrt.Normalize(direction);
             this.n = indexAtStart;
@@ -44,7 +48,7 @@ namespace pbrt
         {
             Float half = 0.5f * s;
             v += half * gradient;
-            p += s / n * v;
+            p += s / pbrt.Length(v) * v;
             field.ValueAndGradient(p, out n, out gradient);
             v += half * gradient;
         }
@@ -64,6 +68,9 @@ namespace pbrt
             }
         }
 
+        // How far ahead of its start the field is evaluated for the first kick of a path
+        public const Float StartNudge = 1e-5f;
+
         // SymplecticRay Public Members
         public Point3f p;
         public Vector3f v;
@@ -80,9 +87,10 @@ namespace pbrt
         // SymplecticRayJacobian Public Methods
         public SymplecticRayJacobian(RefractiveIndexField field, Point3f p, Vector3f w)
         {
-            field.ValueGradientAndHessian(p, out Float indexAtStart, out Vector3f gradientAtStart,
-                                          out SquareMatrix3 hessianAtStart);
             Float length = pbrt.Length(w);
+            field.ValueAndGradient(p, out Float indexAtStart, out Vector3f unused);
+            field.ValueGradientAndHessian(p + SymplecticRay.StartNudge / length * w, out Float indexAhead, out Vector3f gradientAtStart,
+                                          out SquareMatrix3 hessianAtStart);
             this.p = p;
             this.v = indexAtStart / length * w;
             this.dpdw = SquareMatrix3.Zero();
@@ -94,18 +102,20 @@ namespace pbrt
             this.hessian = hessianAtStart;
         }
 
-        // One step of arc length s, with the exact derivative of the step. (Algorithm 2 of the paper evaluates n and the
-        // gradient at the end of the drift for the derivative of the drift; they are the ones at the start of it here, which
-        // makes the derivatives those of the integrator, and equal to a finite difference of it.)
+        // One step of arc length s, with the exact derivative of the step: the derivative of the integrator, which equals a finite
+        // difference of it
         public void Step(RefractiveIndexField field, Float s)
         {
             Float half = 0.5f * s;
             Vector3f vHalf = v + half * gradient;
             SquareMatrix3 dvdwHalf = dvdw + half * (hessian * dpdw);
-            Float inverseIndex = 1 / n;
-            Point3f pNew = p + s * inverseIndex * vHalf;
-            SquareMatrix3 dpdwNew = dpdw + s * (inverseIndex * dvdwHalf +
-                                                (-inverseIndex * inverseIndex) * (RefractiveIndexField.OuterProduct(vHalf, gradient) * dpdw));
+            // The drift is along v / |v|: the Hamiltonian |v| - n of the paths is separable, and the step is second order and
+            // reversible
+            Float length = pbrt.Length(vHalf);
+            Vector3f u = (1 / length) * vHalf;
+            Point3f pNew = p + s * u;
+            SquareMatrix3 projected = dvdwHalf + (Float)(-1) * (RefractiveIndexField.OuterProduct(u, u) * dvdwHalf);
+            SquareMatrix3 dpdwNew = dpdw + (s / length) * projected;
             field.ValueGradientAndHessian(pNew, out n, out gradient, out hessian);
             v = vHalf + half * gradient;
             dvdw = dvdwHalf + half * (hessian * dpdwNew);

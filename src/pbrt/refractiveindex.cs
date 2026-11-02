@@ -307,6 +307,50 @@ namespace pbrt
         Float exponent;
     }
 
+    // (not in pbrt-v4) BumpRefractiveIndexField Definition: n(r) = 1 + A (1 - (r / R)^2)^3 inside the sphere of radius R and 1 outside: a
+    // smooth lens (the value, the gradient and the Hessian are continuous and 1, 0 and 0 on the sphere), unlike the Luneburg lens
+    // whose gradient jumps at its surface. A path that crosses the surface in the middle of a step of the integrator has no kink
+    // to lose accuracy at.
+    public sealed class BumpRefractiveIndexField : RefractiveIndexField
+    {
+        public BumpRefractiveIndexField(Point3f center, Float radius, Float amplitude)
+        {
+            this.center = center;
+            this.radius = radius;
+            this.amplitude = amplitude;
+        }
+
+        public override void ValueAndGradient(Point3f p, out Float value, out Vector3f gradient)
+        {
+            ValueGradientAndHessian(p, out value, out gradient, out SquareMatrix3 hessian);
+        }
+
+        public override void ValueGradientAndHessian(Point3f p, out Float value, out Vector3f gradient,
+                                                     out SquareMatrix3 hessian)
+        {
+            Vector3f offset = p - center;
+            Float t = pbrt.LengthSquared(offset) / (radius * radius);
+            if (t >= 1)
+            {
+                value = 1;
+                gradient = new Vector3f(0, 0, 0);
+                hessian = SquareMatrix3.Zero();
+                return;
+            }
+            Float s = 1 - t;
+            value = 1 + amplitude * s * s * s;
+            Float inverseRadius2 = 1 / (radius * radius);
+            gradient = (-6 * amplitude * s * s * inverseRadius2) * offset;
+            // d/dx_j of -6 A s^2 x_i / R^2 = -6 A / R^2 (s^2 delta_ij - 4 s x_i x_j / R^2)
+            hessian = (-6 * amplitude * s * s * inverseRadius2) * new SquareMatrix3() +
+                      (24 * amplitude * s * inverseRadius2 * inverseRadius2) * OuterProduct(offset, offset);
+        }
+
+        Point3f center;
+        Float radius;
+        Float amplitude;
+    }
+
     // LinearRefractiveIndexField Definition: n(p) = n0 + g . p. A light path in it has the invariant that n sin(theta) is constant
     // along a gradient g that is along z, so that n(x) = C cosh(g x / C + a): a closed form for the tests
     public sealed class LinearRefractiveIndexField : RefractiveIndexField
