@@ -13,6 +13,96 @@ using System.Collections.Generic;
 namespace pbrt
 {
 
+
+    // (not in pbrt-v4) GridModulatedMedium Definition: a medium whose extinction coefficients are those of the inner medium times
+    // the density grid, and whose emission is the inner medium's times the emission grid. The grids (x fastest, then y, then z;
+    // values at the corners of the cells over the bounds) are interpolated trilinearly, and are zero outside the bounds.
+    public sealed unsafe class GridModulatedMedium : Medium
+    {
+        // Either grid can be null, which is a factor of one
+        public GridModulatedMedium(Medium inner, Bounds3f bounds, int resolutionX, int resolutionY, int resolutionZ,
+                                   Float[] density, Float[] emission)
+        {
+            if (resolutionX < 2 || resolutionY < 2 || resolutionZ < 2)
+            {
+                pbrt.ErrorExit("A grid of a medium needs at least two values along each axis.");
+            }
+            if ((density != null && density.Length != resolutionX * resolutionY * resolutionZ) ||
+                (emission != null && emission.Length != resolutionX * resolutionY * resolutionZ))
+            {
+                pbrt.ErrorExit("A grid of a medium needs nx * ny * nz values.");
+            }
+            this.inner = inner;
+            this.bounds = bounds;
+            this.resolutionX = resolutionX;
+            this.resolutionY = resolutionY;
+            this.resolutionZ = resolutionZ;
+            this.density = density;
+            this.emission = emission;
+            maxDensity = 1;
+            if (density != null)
+            {
+                maxDensity = 0;
+                for (int i = 0; i < density.Length; ++i)
+                {
+                    maxDensity = Math.Max(maxDensity, density[i]);
+                }
+            }
+            volumeIntegrator = inner.volumeIntegrator;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ GridModulatedMedium inner: %s ]", inner);
+        }
+
+        public override bool IsEmissive() { return inner.IsEmissive(); }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
+        {
+            MediumProperties mp = inner.SamplePoint(p, lambda);
+            Float d = density == null ? 1 : Interpolate(density, p);
+            Float e = emission == null ? 1 : Interpolate(emission, p);
+            mp.sigma_a = mp.sigma_a * d;
+            mp.sigma_s = mp.sigma_s * d;
+            mp.Le = mp.Le * e;
+            return mp;
+        }
+
+        // The largest factor of the extinction coefficients: a majorant of the medium is the inner one times this
+        public Float MaxDensity() { return maxDensity; }
+
+        public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            MediumProperties mp = inner.SamplePoint(ray.o, lambda);
+            return buf.Alloc(new HomogeneousMajorantIterator(0, tMax, (mp.sigma_a + mp.sigma_s) * maxDensity));
+        }
+
+        Float Interpolate(Float[] values, Point3f p)
+        {
+            Vector3f o = bounds.Offset(p);
+            if (o.x < 0 || o.x > 1 || o.y < 0 || o.y > 1 || o.z < 0 || o.z > 1)
+            {
+                return 0;
+            }
+            Float fx = o.x * (resolutionX - 1), fy = o.y * (resolutionY - 1), fz = o.z * (resolutionZ - 1);
+            int ix = Math.Min((int)fx, resolutionX - 2), iy = Math.Min((int)fy, resolutionY - 2), iz = Math.Min((int)fz, resolutionZ - 2);
+            Float tx = fx - ix, ty = fy - iy, tz = fz - iz;
+            Float Value(int x, int y, int z) { return values[(z * resolutionY + y) * resolutionX + x]; }
+            Float x00 = pbrt.Lerp(tx, Value(ix, iy, iz), Value(ix + 1, iy, iz));
+            Float x10 = pbrt.Lerp(tx, Value(ix, iy + 1, iz), Value(ix + 1, iy + 1, iz));
+            Float x01 = pbrt.Lerp(tx, Value(ix, iy, iz + 1), Value(ix + 1, iy, iz + 1));
+            Float x11 = pbrt.Lerp(tx, Value(ix, iy + 1, iz + 1), Value(ix + 1, iy + 1, iz + 1));
+            return pbrt.Lerp(tz, pbrt.Lerp(ty, x00, x10), pbrt.Lerp(ty, x01, x11));
+        }
+
+        private Medium inner;
+        private Bounds3f bounds;
+        private int resolutionX, resolutionY, resolutionZ;
+        private Float[] density, emission;
+        private Float maxDensity;
+    }
+
     // RefractiveMedium Definition
     public sealed unsafe class RefractiveMedium : Medium
     {
@@ -218,13 +308,16 @@ namespace pbrt
 
         // "refractive": the coefficients of a homogeneous medium ("sigma_a", "sigma_s", "scale", "g", "preset"), a "string field"
         // that is "luneburg" ("point3 center", "float radius", "float exponent") or "grid" ("integer nx", "ny", "nz", "float
-        // index", "point3 p0", "p1"), and "float stepsize". The region of the medium is the sphere or the box, and has to be what
+        // index", "point3 p0", "p1"), "float stepsize", and optionally grids "float density" and "float emission" (nx * ny * nz
+        // values over the bounds, scaling the extinction and the "Le"). The region of the medium is the sphere or the box, and has to be what
         // the boundary shape of the scene encloses. The index must be 1 on the boundary of the region. renderFromMedium may
         // translate and scale uniformly (a rotation is not supported).
         public static RefractiveMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                               Allocator alloc)
         {
-            Medium inner = HomogeneousMedium.Create(parameters, loc, alloc);
+            Medium homogeneous = HomogeneousMedium.Create(parameters, loc, alloc);
+            Medium inner = homogeneous;
+            Float maxDensity = 1;
             Point3f origin = renderFromMedium.Apply(new Point3f(0, 0, 0));
             Vector3f ex = renderFromMedium.Apply(new Point3f(1, 0, 0)) - origin;
             Vector3f ey = renderFromMedium.Apply(new Point3f(0, 1, 0)) - origin;
@@ -267,12 +360,25 @@ namespace pbrt
                 pbrt.ErrorExit(loc, "The refractive index field \"" + fieldName + "\" is unknown.");
                 return null;
             }
-            // The majorant is the extinction of the homogeneous medium for the wavelengths asked for
+            // Optional grids over the bounds ("integer nx", "ny", "nz" values, x fastest) scale the extinction ("float density")
+            // and the emission ("float emission", the "Le" of the homogeneous medium is its scale)
+            List<Float> densityValues = parameters.GetFloatArray("density");
+            List<Float> emissionValues = parameters.GetFloatArray("emission");
+            if (densityValues.Count > 0 || emissionValues.Count > 0)
+            {
+                GridModulatedMedium modulated = new GridModulatedMedium(homogeneous, bounds, parameters.GetOneInt("nx", 1),
+                                                                        parameters.GetOneInt("ny", 1), parameters.GetOneInt("nz", 1),
+                                                                        densityValues.Count > 0 ? densityValues.ToArray() : null,
+                                                                        emissionValues.Count > 0 ? emissionValues.ToArray() : null);
+                inner = modulated;
+                maxDensity = modulated.MaxDensity();
+            }
+            // The majorant is the extinction of the homogeneous medium for the wavelengths asked for, times the largest density
             return new RefractiveMedium(inner, field, bounds,
                                         (SampledWavelengths l) =>
                                         {
-                                            MediumProperties mp = inner.SamplePoint(origin, l);
-                                            return mp.sigma_a + mp.sigma_s;
+                                            MediumProperties mp = homogeneous.SamplePoint(origin, l);
+                                            return (mp.sigma_a + mp.sigma_s) * maxDensity;
                                         }, stepSize, contains);
         }
 

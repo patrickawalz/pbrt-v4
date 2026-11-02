@@ -261,5 +261,48 @@ namespace pbrt
             EXPECT_LT(Math.Abs(meanA - meanB), 4 * Math.Sqrt(seA * seA + seB * seB));
             EXPECT_GT(meanA, 0.001);
         }
+
+        // GridModulatedMedium interpolates the grids trilinearly (a linear function exactly), is zero outside the bounds, and has the
+        // largest density as the factor of its majorant
+        [TEST("RefractiveMedium", "GridModulatedMediumInterpolatesTheGrids")]
+        public static void RefractiveMedium_GridModulatedMediumInterpolatesTheGrids()
+        {
+            Medium inner = new HomogeneousMedium(new ConstantSpectrum(0.5f), new ConstantSpectrum(0.25f), 1.0f, new ConstantSpectrum(2f), 1.0f, 0.0f, null);
+            Bounds3f bounds = new Bounds3f(new Point3f(-1, -2, -3), new Point3f(1, 2, 3));
+            int nx = 3, ny = 4, nz = 5;
+            Float[] density = new Float[nx * ny * nz];
+            Float[] emission = new Float[nx * ny * nz];
+            for (int z = 0; z < nz; ++z)
+            {
+                for (int y = 0; y < ny; ++y)
+                {
+                    for (int x = 0; x < nx; ++x)
+                    {
+                        Float px = -1 + 2.0f * x / (nx - 1), py = -2 + 4.0f * y / (ny - 1), pz = -3 + 6.0f * z / (nz - 1);
+                        density[(z * ny + y) * nx + x] = 1.5f + 0.5f * px - 0.25f * py + 0.1f * pz;
+                        emission[(z * ny + y) * nx + x] = 3.0f - 0.5f * px + 0.2f * py - 0.3f * pz;
+                    }
+                }
+            }
+            GridModulatedMedium medium = new GridModulatedMedium(inner, bounds, nx, ny, nz, density, emission);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            Point3f[] points = new Point3f[] { new Point3f(0.3f, -0.7f, 1.1f), new Point3f(-0.9f, 1.9f, -2.7f), new Point3f(0.0f, 0.0f, 0.0f),
+                                               new Point3f(1.0f, 2.0f, 3.0f) };
+            for (int i = 0; i < points.Length; ++i)
+            {
+                Point3f p = points[i];
+                MediumProperties mp = medium.SamplePoint(p, lambda);
+                Float expectedDensity = 1.5f + 0.5f * p.x - 0.25f * p.y + 0.1f * p.z;
+                Float expectedEmission = 3.0f - 0.5f * p.x + 0.2f * p.y - 0.3f * p.z;
+                EXPECT_NEAR(0.5f * expectedDensity, mp.sigma_a[0], 1e-5f);
+                EXPECT_NEAR(0.25f * expectedDensity, mp.sigma_s[0], 1e-5f);
+                EXPECT_NEAR(2.0f * expectedEmission, mp.Le[0], 1e-5f);
+            }
+            MediumProperties outside = medium.SamplePoint(new Point3f(1.01f, 0, 0), lambda);
+            EXPECT_EQ(0.0f, outside.sigma_a[0]);
+            EXPECT_EQ(0.0f, outside.Le[0]);
+            // The largest value of the density grid is at the corner (1, -2, 3)
+            EXPECT_NEAR(1.5f + 0.5f + 0.5f + 0.3f, medium.MaxDensity(), 1e-5f);
+        }
     }
 }

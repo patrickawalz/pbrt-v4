@@ -97,10 +97,25 @@ light sampling would have used does not exist for it. bdpt, lightpath and the po
 inside the medium (error), a rotation in the transformation of the medium.
 
 What the tests show: the estimate of the single scattering radiance through a Luneburg lens in a sphere, next to a spherical
-light, is 1.7835e-3 +- 2.0e-5 by next event estimation and 1.7776e-3 +- 6.7e-6 by the direction of the phase function alone. An
-earlier configuration with a smaller light differed by 4 to 6 percent at about 2 sigma in two runs; larger statistics of the
-patch test (8 million direction samples) gave 0.002293 +- 0.000015 against 0.002257 +- 0.000015, so I take it as noise, but
-that comparison has not been repeated for the small light at the same statistics. The agreement test is not sensitive to the
+light, is 2.983e-3 +- 2.4e-5 by next event estimation and 3.0095e-3 +- 8.0e-6 by the direction of the phase function alone
+(difference 1 sigma). Correction of the first numbers of this stage (1.7835e-3 and 1.7776e-3, which agreed as well): the test
+cast the same ray for every sample, and the walk seeds its random numbers from the ray (`Hash(ray.o, tMax)`), so all samples shared
+them after the first collision and the standard errors were wrong, and so were the means. The test now moves the ray origin by
+1e-4 per sample, as the film does. The 4 to 6 percent difference I put down to noise in an earlier configuration of the same
+test probably had that cause too, but I have not rerun that configuration to confirm it. The agreement test is not sensitive to the
 Jacobian and the count (dropping either changes the result by 2 to 5 percent here, the light covering a wide range of
 directions); those are checked locally: `areaJacobian` equals a finite difference to 4e-4 (8.69 against 11.1 for the straight
 line) and the count is checked in `SinglePathEstimateIsUnbiased`.
+
+Medium emission and grids (after stage 5): the emission of the medium needs no special code in volpath: `BeginCollision` adds
+`sigma_a Le` at every tentative collision of the curved walk, with the weights of the straight one (the emission is not a light,
+so there is no MIS, and `Le` is the emitted basic radiance, so no n^2 factor). `RefractiveMedium` wraps any inner medium, and a
+scene can scale the extinction and the emission of its homogeneous medium by grids: `"float density"` and `"float emission"`
+(`nx * ny * nz` values over the bounds of the field, x fastest, trilinear, zero outside), implemented by `GridModulatedMedium`;
+the majorant is the extinction times the largest density. `"rgb Le"` and `"float Lescale"` give the emission that the
+grid scales. Test `EmissionAlongTheCurveMatchesQuadrature`: the volpath radiance along a camera ray through a sphere of a
+constant medium, of a medium whose coefficients vary like sinusoids, and of the density and emission grids, in a straight path
+(index 1) and through the Luneburg lens, equals the integral of `sigma_a Le exp(-optical depth)` on a finely traced curve; the
+six cases agree within 1.5 standard errors (about 0.3 percent). The oblique ray makes the test sensitive to the interpolation in
+z (a mutation that drops it fails; with the first, near planar ray it passed). Still unsupported: emission in the sense of light
+sources inside the medium, `VolumeEmissionLight`, which the curved NEE ignores.
