@@ -14,6 +14,95 @@ namespace pbrt
         // The centre of the sphere light of the scene
         static Vector3f LightPosition = new Vector3f(-3.2f, 0.3f, 0.2f);
         static Float LightRadius = 1.2f;
+        // Whether the lens is the rough 9 x 9 x 9 grid of the renders of docs/refractive-media.md (index up to 1.85, with the kinks of
+        // trilinear interpolation) in place of the smooth bump
+        static bool UseRenderGrid = false;
+
+        // The index of the lens of the renders (x fastest), over the cube of half-width LensRadius
+        static readonly Float[] RenderGridIndex = new Float[]
+        {
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00337f, 1.01372f, 1.00184f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.02553f, 1.05657f, 1.01902f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.01257f, 1.03337f, 1.00862f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00015f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00337f, 1.01372f, 1.00184f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00862f, 1.12562f, 1.20564f, 1.10603f, 1.00337f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.04268f, 1.26870f, 1.39662f, 1.23577f, 1.02553f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.02378f, 1.19854f, 1.30456f, 1.17175f, 1.01257f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00001f, 1.03128f, 1.06619f, 1.02378f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.02553f, 1.05657f, 1.01902f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.04268f, 1.26870f, 1.39662f, 1.23577f, 1.02553f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.12051f, 1.49259f, 1.67959f, 1.44287f, 1.08589f, 1.00039f, 1.00000f, 1.00000f,
+            1.00000f, 1.08064f, 1.38558f, 1.54589f, 1.35341f, 1.11852f, 1.04845f, 1.00108f, 1.00000f,
+            1.00000f, 1.00439f, 1.09705f, 1.16545f, 1.10313f, 1.10463f, 1.08055f, 1.00492f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00041f, 1.00196f, 1.03043f, 1.02075f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.01257f, 1.03337f, 1.00862f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.02378f, 1.19854f, 1.30456f, 1.17175f, 1.01257f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.08064f, 1.38558f, 1.54589f, 1.36423f, 1.15206f, 1.07644f, 1.00430f, 1.00000f,
+            1.00000f, 1.05070f, 1.29531f, 1.43472f, 1.44202f, 1.45916f, 1.36727f, 1.09377f, 1.00000f,
+            1.00000f, 1.00106f, 1.06287f, 1.12655f, 1.30536f, 1.55322f, 1.48090f, 1.14195f, 1.00004f,
+            1.00000f, 1.00000f, 1.00000f, 1.00028f, 1.10837f, 1.29246f, 1.24575f, 1.04845f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00086f, 1.02249f, 1.01468f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00015f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00001f, 1.03128f, 1.06619f, 1.02378f, 1.00039f, 1.00004f, 1.00000f, 1.00000f,
+            1.00000f, 1.00439f, 1.09705f, 1.16545f, 1.14558f, 1.20559f, 1.16780f, 1.02433f, 1.00000f,
+            1.00000f, 1.00106f, 1.06287f, 1.13804f, 1.38452f, 1.68322f, 1.59973f, 1.19662f, 1.00086f,
+            1.00000f, 1.00000f, 1.00216f, 1.05319f, 1.44180f, 1.85207f, 1.75514f, 1.27312f, 1.00430f,
+            1.00000f, 1.00000f, 1.00000f, 1.00713f, 1.22027f, 1.49481f, 1.42788f, 1.11889f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.01100f, 1.06864f, 1.05149f, 1.00134f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00041f, 1.02829f, 1.11889f, 1.09377f, 1.00713f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00634f, 1.21219f, 1.48090f, 1.41526f, 1.11355f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.01607f, 1.29246f, 1.61583f, 1.53813f, 1.16780f, 1.00028f,
+            1.00000f, 1.00000f, 1.00000f, 1.00086f, 1.13008f, 1.33382f, 1.28268f, 1.06138f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00196f, 1.03043f, 1.02075f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00492f, 1.00233f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.02075f, 1.09848f, 1.07644f, 1.00430f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.04004f, 1.14814f, 1.11889f, 1.01215f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00633f, 1.05149f, 1.03747f, 1.00039f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+            1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f, 1.00000f,
+        };
 
         static void MakeScene(out RefractiveMedium medium, out VolPathIntegrator integrator, out Camera camera, int samples)
         {
@@ -23,8 +112,10 @@ namespace pbrt
         static void MakeScene(out RefractiveMedium medium, out VolPathIntegrator integrator, out Camera camera, out Light[] lightArray, int samples)
         {
             Transform identity = new Transform();
-            BumpRefractiveIndexField lens = new BumpRefractiveIndexField(new Point3f(0, 0, 0), LensRadius, 0.4f);
             Bounds3f box = new Bounds3f(new Point3f(-LensRadius, -LensRadius, -LensRadius), new Point3f(LensRadius, LensRadius, LensRadius));
+            RefractiveIndexField lens = UseRenderGrid
+                ? (RefractiveIndexField)new GridRefractiveIndexField(box, 9, 9, 9, RenderGridIndex)
+                : new BumpRefractiveIndexField(new Point3f(0, 0, 0), LensRadius, 0.4f);
             Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.05f), new ConstantSpectrum(0.8f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
             medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.85f), 0.05f,
                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
@@ -698,12 +789,39 @@ namespace pbrt
         [TEST("RefractiveBDPT", "UnweightedStrategiesAgreeAtDepthTwo")]
         public static void RefractiveBDPT_UnweightedStrategiesAgreeAtDepthTwo()
         {
-            int samples = 200000;
-            LightPosition = new Vector3f(-5.0f, 0.3f, 0.2f);
-            LightRadius = 3.0f;
+            DepthTwoStrategies("bump lens", 200000, new Vector3f(-5.0f, 0.3f, 0.2f), 3.0f, false, new Point3f(4.0f, 0.2f, 0.1f),
+                               new Vector3f(-1.0f, 0.05f, 0.2f));
+        }
+
+        // The lens and the light of the renders, with camera rays through the side of the lens that faces away from the light and
+        // the side that faces it
+        [TEST("RefractiveBDPT", "StrategiesAgreeAtDepthTwoOnTheRenderGridAwayFromTheLight")]
+        public static void RefractiveBDPT_StrategiesAgreeAtDepthTwoOnTheRenderGridAwayFromTheLight()
+        {
+            DepthTwoStrategies("render grid, away from the light", 300000, new Vector3f(3.2f, 0.3f, -0.2f), 1.2f, true,
+                               new Point3f(0.0f, 0.0f, -7.0f), new Vector3f(-0.9f, 0.1f, 7.0f));
+        }
+
+        [TEST("RefractiveBDPT", "StrategiesAgreeAtDepthTwoOnTheRenderGridTowardsTheLight")]
+        public static void RefractiveBDPT_StrategiesAgreeAtDepthTwoOnTheRenderGridTowardsTheLight()
+        {
+            DepthTwoStrategies("render grid, towards the light", 300000, new Vector3f(3.2f, 0.3f, -0.2f), 1.2f, true,
+                               new Point3f(0.0f, 0.0f, -7.0f), new Vector3f(0.9f, 0.1f, 7.0f));
+        }
+
+        static void DepthTwoStrategies(string label, int samples, Vector3f lightPosition, Float lightRadius, bool renderGrid,
+                                       Point3f origin, Vector3f direction)
+        {
+            Vector3f savedPosition = LightPosition;
+            Float savedRadius = LightRadius;
+            bool savedGrid = UseRenderGrid;
+            LightPosition = lightPosition;
+            LightRadius = lightRadius;
+            UseRenderGrid = renderGrid;
             MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
-            LightPosition = new Vector3f(-3.2f, 0.3f, 0.2f);
-            LightRadius = 1.2f;
+            LightPosition = savedPosition;
+            LightRadius = savedRadius;
+            UseRenderGrid = savedGrid;
             List<Light> lightList = new List<Light>(lights);
             IndependentSampler sampler = new IndependentSampler(samples, 37);
             BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, false);
@@ -717,8 +835,8 @@ namespace pbrt
                 sampler.StartPixelSample(new Point2i(0, 0), i);
                 SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
                 Point2f jitter = sampler.Get2D();
-                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y),
-                                                          pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.2f)));
+                RayDifferential ray = new RayDifferential(new Point3f(origin.x, origin.y + 1e-4f * jitter.x, origin.z + 1e-4f * jitter.y),
+                                                          pbrt.Normalize(direction));
                 Vertex[] cameraVertices = new Vertex[6];
                 for (int v = 0; v < cameraVertices.Length; ++v)
                     cameraVertices[v] = new Vertex();
@@ -789,7 +907,7 @@ namespace pbrt
             }
             double unidirectionalMean = unidirectionalSum / samples;
             double unidirectionalError = Math.Sqrt((unidirectionalSum2 / samples - unidirectionalMean * unidirectionalMean) / samples);
-            Console.Error.WriteLine("MEASURE depth two unidirectional weighted total " + unidirectionalMean + "+-" + unidirectionalError);
+            Console.Error.WriteLine("MEASURE " + label + " depth two unidirectional weighted total " + unidirectionalMean + "+-" + unidirectionalError);
             double totalMean = totalSum / samples;
             double totalError = Math.Sqrt((totalSum2 / samples - totalMean * totalMean) / samples);
             double[] mean = new double[3], error = new double[3];
@@ -798,7 +916,7 @@ namespace pbrt
                 mean[k] = sum[k] / samples;
                 error[k] = Math.Sqrt((sum2[k] / samples - mean[k] * mean[k]) / samples);
             }
-            Console.Error.WriteLine("MEASURE depth two unweighted walk(0,4) " + mean[0] + "+-" + error[0] + " light sample(1,3) " + mean[1] + "+-" + error[1] +
+            Console.Error.WriteLine("MEASURE " + label + " depth two unweighted walk(0,4) " + mean[0] + "+-" + error[0] + " light sample(1,3) " + mean[1] + "+-" + error[1] +
                                     " connection(2,2) " + mean[2] + "+-" + error[2] + "; weighted " + weightedSum[0] / samples + " " +
                                     weightedSum[1] / samples + " " + weightedSum[2] / samples + " total " +
                                     (weightedSum[0] + weightedSum[1] + weightedSum[2]) / samples +
