@@ -3329,6 +3329,17 @@ namespace pbrt
                 }
             }
 
+            // (not in pbrt-v4) The emission of a medium counts as a vertex of the path in volpath (it is gathered at a collision only while
+            // depth < maxDepth, and the light sample of the medium has the same limit), so a path that ends in such an emission has one
+            // scattering fewer than the other paths of the same maxDepth. All the strategies of a path share its light end, so the
+            // limit leaves out whole paths and the MIS weights of the rest are unchanged.
+            if ((bool)L)
+            {
+                Vertex emissionEnd = s == 0 ? cameraVertices[t - 1] : (s == 1 && t > 1 ? sampled : lightVertices[0]);
+                if (IsVolumeEmission(emissionEnd) && s + t - 2 > integrator.bdptMaxDepth - 1)
+                    L = new SampledSpectrum(0.0f);
+            }
+
             ++PathIntegrator.totalPaths;
             if (!L)
                 ++PathIntegrator.zeroRadiancePaths;
