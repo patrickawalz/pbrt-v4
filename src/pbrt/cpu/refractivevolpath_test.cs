@@ -102,6 +102,97 @@ namespace pbrt
             EXPECT_GT(meanDirection, 0.0);
         }
 
+        // The mean radiance along a ray through a Luneburg lens with one scattering, lit only by an emissive volume (the medium of a
+        // sphere) beside the lens. mode 0: the emission is found by the walk alone; 1: by the connection along a curved path to a
+        // point of the volume; 2: by the forward estimate along the curved ray (emission_fnee)
+        static void VolumeLightRadiance(int mode, int samples, out double mean, out double standardError)
+        {
+            Transform identity = new Transform();
+            Float radius = 1.5f;
+            LuneburgRefractiveIndexField lens = new LuneburgRefractiveIndexField(new Point3f(0, 0, 0), radius, 2.0f);
+            Bounds3f box = new Bounds3f(new Point3f(-radius, -radius, -radius), new Point3f(radius, radius, radius));
+            RefractiveMedium medium = new RefractiveMedium(new VaryingScatterer(), lens, box,
+                                                           (SampledWavelengths l) => new SampledSpectrum(1.0f), 0.05f,
+                                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= radius * radius);
+            Shape boundary = new Sphere(identity, identity, false, radius, -radius, radius, 360);
+
+            Point3f center = new Point3f(-1.0f, 2.3f, 0.2f);
+            Float fireRadius = 0.8f;
+            Bounds3f fireBounds = new Bounds3f(center - new Vector3f(fireRadius, fireRadius, fireRadius),
+                                               center + new Vector3f(fireRadius, fireRadius, fireRadius));
+            TextureMedium fire = new TextureMedium(fireBounds, identity, new ConstantSpectrum(2f), new ConstantSpectrum(0f), 1.0f, 0f,
+                                                   new FloatConstantTexture(1f), 0f, 1f, 4, 4, 0, 0.5f,
+                                                   new SpectrumConstantTexture(new ConstantSpectrum(1f)), 1f, null);
+            Transform renderFromFire = pbrt.Translate(new Vector3f(center.x, center.y, center.z));
+            Shape fireShape = new Sphere(renderFromFire, pbrt.Inverse(renderFromFire), false, fireRadius, -fireRadius, fireRadius, 360);
+
+            TextureMedium.ClearEmissionLights();
+            List<Light> lights = new List<Light>();
+            try
+            {
+                fire.EnableEmissionSampling(8, mode == 2);
+                lights = TextureMedium.AddEmissionLights(lights);
+            }
+            finally
+            {
+                TextureMedium.ClearEmissionLights();
+            }
+
+            List<Primitive> prims = new List<Primitive>();
+            prims.Add(new GeometricPrimitive(boundary, null, null, new MediumInterface(medium, null)));
+            prims.Add(new GeometricPrimitive(fireShape, null, null, new MediumInterface(fire, null)));
+            Primitive aggregate = new BVHAggregate(prims);
+
+            Point2i resolution = new Point2i(4, 4);
+            Transform id = new Transform();
+            AnimatedTransform identityA = new AnimatedTransform(id, 0, id, 1);
+            FilmBaseParameters fp = new FilmBaseParameters(resolution, new Bounds2i(new Point2i(0, 0), resolution),
+                                                           new BoxFilter(new Vector2f(0.5f, 0.5f)), 1.0f, PixelSensor.CreateDefault(),
+                                                           "refractive_test.exr");
+            RGBFilm film = new RGBFilm(fp, RGBColorSpace.sRGB);
+            CameraBaseParameters cbp = new CameraBaseParameters(new CameraTransform(identityA), film, null,
+                                                                new ParameterDictionary(), new FileLoc());
+            Camera camera = new PerspectiveCamera(cbp, 45, new Bounds2f(new Point2f(-1, -1), new Point2f(1, 1)), 0.0f, 10.0f);
+            IndependentSampler sampler = new IndependentSampler(samples, 11);
+            VolPathIntegrator integrator = new VolPathIntegrator(2, camera, sampler, aggregate, lights, "uniform", false, false,
+                                                                 false, 0, PolarisedPathIntegrator.Measurement.Intensity, false, 1,
+                                                                 int.MaxValue, false, mode != 0);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double sum = 0, sum2 = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Vector3f rayDirection = pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.0f));
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y), rayDirection);
+                SampledSpectrum L = integrator.Li(ray, ref lambda, sampler, buffer, null);
+                double value = L.Average();
+                sum += value;
+                sum2 += value * value;
+                buffer.Reset();
+            }
+            mean = sum / samples;
+            standardError = Math.Sqrt((sum2 / samples - mean * mean) / samples);
+        }
+
+        // The emission of a volume beside the lens, found from a vertex inside it: the walk alone, the connection to a point of the
+        // volume along a curved path, and the forward estimate along the curved ray estimate the same radiance
+        [TEST("RefractiveVolPath", "VolumeLightThroughTheLensAgreesAcrossStrategies")]
+        public static void RefractiveVolPath_VolumeLightThroughTheLensAgreesAcrossStrategies()
+        {
+            VolumeLightRadiance(0, 200000, out double meanWalk, out double seWalk);
+            VolumeLightRadiance(1, 30000, out double meanPoint, out double sePoint);
+            VolumeLightRadiance(2, 30000, out double meanForward, out double seForward);
+            Console.Error.WriteLine("MEASURE volume light walk=" + meanWalk + "+-" + seWalk + " point=" + meanPoint + "+-" + sePoint +
+                                    " forward=" + meanForward + "+-" + seForward);
+            EXPECT_GT(meanWalk, 0.0);
+            EXPECT_LT(Math.Abs(meanPoint - meanWalk), 4 * Math.Sqrt(sePoint * sePoint + seWalk * seWalk));
+            EXPECT_LT(Math.Abs(meanForward - meanWalk), 4 * Math.Sqrt(seForward * seForward + seWalk * seWalk));
+            EXPECT_LT(sePoint, 0.1 * meanPoint);
+            EXPECT_LT(seForward, 0.1 * meanForward);
+        }
+
         // An absorbing and emitting medium whose coefficients vary with the position
         private class VaryingEmitter : Medium
         {

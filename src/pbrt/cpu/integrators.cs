@@ -2228,12 +2228,17 @@ namespace pbrt
             // curve that the walk followed is traced again from its start.
             void FinishEdge(WalkContext ctx, int index)
             {
+                FinishEdge(ctx, path[index - 1], path[index]);
+            }
+
+            void FinishEdge(WalkContext ctx, Vertex previousVertex, Vertex currentVertex)
+            {
                 if (edgeMedium == null)
                 {
                     return;
                 }
-                Point3f previous = path[index - 1].p();
-                Point3f current = path[index].p();
+                Point3f previous = previousVertex.p();
+                Point3f current = currentVertex.p();
                 Vector3f arrival = Normalize(ctx.ray.d);
                 RefractiveEdge edge;
                 bool found;
@@ -2261,11 +2266,11 @@ namespace pbrt
                 }
                 if (found)
                 {
-                    path[index].curvedEdge = true;
-                    path[index].edge = edge;
+                    currentVertex.curvedEdge = true;
+                    currentVertex.edge = edge;
                     // The density of the vertex, per area perpendicular to the arrival, from the density of the direction it was
                     // sampled with
-                    path[index].pdfFwd = path[index - 1].ConvertDensity(pdfFwd, path[index], path[index].EdgeIn());
+                    currentVertex.pdfFwd = previousVertex.ConvertDensity(pdfFwd, currentVertex, currentVertex.EdgeIn());
                 }
                 edgeMedium = null;
             }
@@ -2489,7 +2494,11 @@ namespace pbrt
                         end.cumU = path[vIdx - 1].cumU * end.segU;
                         // The density of a collision at the point, per volume: the density of the direction at the previous
                         // vertex, as for the vertices of real scatterings, and the majorant for the distance along the ray
-                        end.pdfFwd = path[vIdx - 1].ConvertDensity(pdfFwd, end) * end.sigmaT0;
+                        // (a collision after a curved edge: the end records the edge, and the walk goes on along it)
+                        RefractiveMedium edgeMediumOfWalk = edgeMedium;
+                        FinishEdge(ctx, path[vIdx - 1], end);
+                        edgeMedium = edgeMediumOfWalk;
+                        end.pdfFwd = path[vIdx - 1].ConvertDensity(pdfFwd, end, end.EdgeIn()) * end.sigmaT0;
                         end.pbeta = ctx.st.pa;
                         end.pbeta *= w;
                         end.stack = ctx.stack;
@@ -3182,13 +3191,34 @@ namespace pbrt
                         RefractiveMedium refractive = BDPT.RefractiveOf(pt);
                         if (refractive != null)
                         {
-                            if (light is VolumeEmissionLight || light.Type() == LightType.Infinite || IsDeltaLight(light.Type()))
-                                ErrorExit("bdpt supports area lights only with a refractive medium (docs/refractive-media.md).");
+                            if (light.Type() == LightType.Infinite || IsDeltaLight(light.Type()))
+                                ErrorExit("bdpt supports area lights and the emission of media only with a refractive medium (docs/refractive-media.md).");
+                            VolumeEmissionLight emissiveVolume = light as VolumeEmissionLight;
                             DiffuseAreaLight areaLight = light as DiffuseAreaLight;
-                            if (areaLight == null)
-                                ErrorExit("bdpt supports diffuse area lights only with a refractive medium (docs/refractive-media.md).");
-                            // The point is sampled by area: a curved path reaches points that the straight line does not see
-                            if (areaLight.SampleArea(sampler.Get2D(), out Interaction yIntr, out Float pdfArea))
+                            if (emissiveVolume == null && areaLight == null)
+                                ErrorExit("bdpt supports diffuse area lights and the emission of media only with a refractive medium (docs/refractive-media.md).");
+                            // The point is sampled by area (or by volume for the emission of a medium): a curved path reaches points that
+                            // the straight line does not see
+                            Interaction yIntr = default;
+                            Float pdfPoint = 0;
+                            SampledSpectrum emissionOfVolume = default;
+                            bool sampledPoint;
+                            if (emissiveVolume != null)
+                            {
+                                pstd.optional<LightLiSample> volumeSample = emissiveVolume.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda);
+                                sampledPoint = volumeSample && (bool)volumeSample.value().L && volumeSample.value().pdf > 0;
+                                if (sampledPoint)
+                                {
+                                    yIntr = volumeSample.value().pLight;
+                                    emissionOfVolume = volumeSample.value().L;
+                                    pdfPoint = volumeSample.value().pdf / DistanceSquared(pt.p(), yIntr.p());
+                                }
+                            }
+                            else
+                            {
+                                sampledPoint = areaLight.SampleArea(sampler.Get2D(), out yIntr, out pdfPoint);
+                            }
+                            if (sampledPoint)
                             {
                                 Point3f y = yIntr.p();
                                 if (refractive.Contains(y))
@@ -3196,12 +3226,23 @@ namespace pbrt
                                 if (DistanceSquared(pt.p(), y) > 0 &&
                                     CurvedConnection(integrator, refractive, pt, yIntr, true, lambda,
                                                      out curvedToLight, out curvedToCamera, out int count,
-                                                     out SampledSpectrum curvedT, out connRu, out connRl))
+                                                     out SampledSpectrum curvedT, out connRu, out connRl) &&
+                                    (emissiveVolume == null ||
+                                     MediumTracking.Current(StackAtPoint(integrator, camera, y, pt.time())) == emissiveVolume.Medium()))
                                 {
-                                    SampledSpectrum Le = light.L(y, yIntr.n, yIntr.uv, (-1) * curvedToLight.arriving, lambda);
+                                    // The emission of a medium is the same in all directions
+                                    SampledSpectrum Le = emissiveVolume != null
+                                        ? emissionOfVolume
+                                        : light.L(y, yIntr.n, yIntr.uv, (-1) * curvedToLight.arriving, lambda);
                                     EndpointInteraction ei = new EndpointInteraction(light, yIntr);
-                                    sampled = Vertex.CreateLight(ei, Le / (pdfArea * p_l), 0);
+                                    sampled = Vertex.CreateLight(ei, Le / (pdfPoint * p_l), 0);
                                     sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
+                                    if (emissiveVolume != null)
+                                    {
+                                        SampledSpectrum majorant = emissiveVolume.Medium().MajorantAt(y, lambda);
+                                        sampled.sigmaT0 = majorant[0];
+                                        sampled.emissionMaj = majorant / majorant[0];
+                                    }
                                     L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
                                     L *= GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
                                 }
