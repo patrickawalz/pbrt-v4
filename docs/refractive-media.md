@@ -32,7 +32,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
-| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | open |
+| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a done (see "Stage 6 design") |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
 ## What the tests establish
@@ -119,3 +119,30 @@ constant medium, of a medium whose coefficients vary like sinusoids, and of the 
 six cases agree within 1.5 standard errors (about 0.3 percent). The oblique ray makes the test sensitive to the interpolation in
 z (a mutation that drops it fails; with the first, near planar ray it passed). Still unsupported: emission in the sense of light
 sources inside the medium, `VolumeEmissionLight`, which the curved NEE ignores.
+
+## Stage 6 design (bdpt through curved edges)
+
+What is settled, with the checks that settle it:
+
+* No n^2 factors at interior vertices: the basic radiance L / n^2 obeys the transport equation with the local solid angle, so the
+  throughput of a path has no index factors except where an endpoint is inside the medium (not supported).
+* The geometry term of an edge is `cos(start) cos(end) / J`, J = dA_perp(end) / dOmega(start) of the curve, which is d^2 in a
+  straight edge. J is not symmetric: conservation of n^2 dA dOmega gives `J(a to b) = (n_a / n_b)^2 J(b to a)`. So the reverse
+  densities of a vertex pair use J of the other direction through this relation, and a connection takes J in one fixed
+  orientation (camera to light) for every strategy. `RefractiveConnection.TraceEdge` returns J for any edge, and the test
+  `ReversedEdgeHasTheJacobianOfTheConservedThroughput` shows the relation: with steps of 0.02, 0.01, 0.005 and 0.0025 the
+  two sides differ by 1.0e-2, 8e-3, 4e-3 and 1.4e-3 at most (relative), so it holds in the limit, at first order in the step.
+* One trace on the bounded field (index 1, gradient 0 outside) covers an edge that is straight, curved and straight, so the
+  Jacobian of a whole edge needs no composition of pieces.
+
+Observation to follow up: the integrator is first order in the step (its drift divides by the index at the start of the step):
+the curve traced back from the end misses the start by 5e-3, 2.6e-3, 1.3e-3 and 6.6e-4 for the four steps above. It is
+self-consistent (the connection solver and the walk use the same steps, and the derivative is exact for it), but a
+second order drift (the index at the middle of the step, or the length of v) would converge faster, at the price of the exact
+derivative that the tests establish. I have not looked at the accuracy against the analytic rays of the Luneburg lens.
+
+Sub-stages: 6a the edge Jacobian and the reversal relation (done); 6b the camera and light walks of bdpt store, per vertex, the
+tangents at both ends of the edge that arrives there and the two Jacobians; 6c `Vertex.PDF`, `ConvertDensity` and the MIS
+remapping use them instead of the positions; 6d the connection through the solver (count, J, visibility along the polyline,
+transmittance by ratio tracking along the curve, the spectral MIS ratios of the connection segment); 6e the test: bdpt against
+volpath on the lens scene (same single scattering radiance within the standard error), and the refusal removed.

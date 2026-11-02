@@ -253,6 +253,33 @@ namespace pbrt
             return Math.Abs(pbrt.Dot(pbrt.Cross(a, b), endDirection));
         }
 
+        // (stage 6) The curve that a walk follows from start along direction for the arc length length, with the area Jacobian dA / d(omega)
+        // of the edge it makes: the end position's two directions perpendicular to the end direction against the solid angle of the
+        // start direction. The field is the one of the whole edge (the index is 1 and its gradient 0 where the edge runs outside the
+        // medium, so that one trace covers straight and curved pieces), and the steps are those of the integrator.
+        public static void TraceEdge(RefractiveIndexField field, Point3f start, Vector3f direction, Float length, Float stepSize,
+                                     out Point3f end, out Vector3f endDirection, out Float areaJacobian, out Float startIndex,
+                                     out Float endIndex)
+        {
+            Vector3f w = pbrt.Normalize(direction);
+            field.ValueAndGradient(start, out startIndex, out Vector3f startGradient);
+            SymplecticRayJacobian ray = new SymplecticRayJacobian(field, start, w);
+            int steps = (int)(length / stepSize);
+            for (int i = 0; i < steps; ++i)
+            {
+                ray.Step(field, stepSize);
+            }
+            Float rest = length - steps * stepSize;
+            if (rest > 0)
+            {
+                ray.Step(field, rest);
+            }
+            end = ray.p;
+            endDirection = pbrt.Normalize(ray.v);
+            endIndex = ray.Index();
+            areaJacobian = AreaJacobian(ray.dpdw, w, endDirection);
+        }
+
         // Algorithm 3 of the paper: searches from uniformly random directions. The first search that fails is a null path
         // (false, count 0). Otherwise the searches go on until one finds the same path again (same start direction within what
         // the tolerance allows); the number of searches, failures included, is the count, whose expected value over the first

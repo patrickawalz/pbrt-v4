@@ -175,5 +175,35 @@ namespace pbrt
                 EXPECT_NEAR(expected, path.areaJacobian, 2e-3f);
             }
         }
+
+        // Reversing an edge: the curve traced back from the end along the reversed end direction returns to the start, and the Jacobians
+        // of the two directions are related by the conservation of the basic throughput n^2 dA dOmega:
+        // J(start to end) = (n_start / n_end)^2 J(end to start). The bdpt reverse densities use this. The integrator is not time
+        // reversible (its drift divides by the index at the start of the step), so both hold up to an error of the order of the step
+        // (measured with steps of 0.02, 0.01, 0.005 and 0.0025: the position error 5e-3 down to 6.6e-4, the relation of the
+        // Jacobians 1.0e-2 down to 1.4e-3 at most, halving with the step).
+        [TEST("RefractiveConnection", "ReversedEdgeHasTheJacobianOfTheConservedThroughput")]
+        public static void RefractiveConnection_ReversedEdgeHasTheJacobianOfTheConservedThroughput()
+        {
+            LuneburgRefractiveIndexField lens = new LuneburgRefractiveIndexField(new Point3f(0, 0, 0), 1.5f, 2.0f);
+            Point3f[] starts = new Point3f[] { new Point3f(-0.3f, 0.1f, 0.2f), new Point3f(-1.2f, 0.1f, -0.9f), new Point3f(0.2f, -0.6f, 0.1f) };
+            Vector3f[] directions = new Vector3f[] { new Vector3f(1.0f, 0.2f, 0.1f), new Vector3f(1.0f, 0.1f, 0.9f), new Vector3f(-0.4f, 0.8f, 0.3f) };
+            Float[] lengths = new Float[] { 1.7f, 1.3f, 0.9f };
+            Float step = 0.0025f;
+            for (int i = 0; i < starts.Length; ++i)
+            {
+                RefractiveConnection.TraceEdge(lens, starts[i], directions[i], lengths[i], step, out Point3f end, out Vector3f endDirection,
+                                               out Float jacobian, out Float startIndex, out Float endIndex);
+                RefractiveConnection.TraceEdge(lens, end, (-1) * endDirection, lengths[i], step, out Point3f back, out Vector3f backDirection,
+                                               out Float reverseJacobian, out Float reverseStartIndex, out Float reverseEndIndex);
+                EXPECT_LT(pbrt.Length(back - starts[i]), 3e-3f);
+                EXPECT_LT(pbrt.Length(backDirection + pbrt.Normalize(directions[i])), 2e-4f);
+                EXPECT_NEAR(endIndex, reverseStartIndex, 1e-6f);
+                Float expected = (startIndex / endIndex) * (startIndex / endIndex) * reverseJacobian;
+                EXPECT_NEAR(expected, jacobian, 5e-3f * jacobian);
+                // The relation is not the identity: the indices differ at the ends (the factors are 1.8, 2.0 and 0.95)
+                EXPECT_GT(Math.Abs(startIndex / endIndex - 1), 0.02f);
+            }
+        }
     }
 }
