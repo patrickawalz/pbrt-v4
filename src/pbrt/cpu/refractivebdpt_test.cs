@@ -594,17 +594,7 @@ namespace pbrt
             EXPECT_LT(s2Error, 0.05 * Math.Abs(s1));
         }
 
-        [TEST("RefractiveBDPT", "ScratchDepth")]
-        public static void RefractiveBDPT_ScratchDepth()
-        {
-            foreach (int depth in new int[] { 2, 3 })
-            {
-                LensRadiance(false, depth, false, 100000, out double volpathMean, out double volpathError);
-                LensRadiance(true, depth, false, 100000, out double bdptMean, out double bdptError);
-                Console.Error.WriteLine("MEASURE depth " + depth + " volpath=" + volpathMean + "+-" + volpathError + " bdpt(all, t>=2)=" + bdptMean + "+-" + bdptError +
-                                        " z=" + (bdptMean - volpathMean) / Math.Sqrt(volpathError * volpathError + bdptError * bdptError));
-            }
-        }
+
 
         // The unweighted light sample connection from a scattering point in the lens along the curved path (the contribution of
         // ConnectBDPT with s = 1, before the weight) against the integral over the surface of the light of the same quantity,
@@ -761,48 +751,8 @@ namespace pbrt
             Console.Error.WriteLine("MEASURE unweighted walk " + sumWalk / samples + " sample " + sumSample / samples + " difference " + meanDifference +
                                     "+-" + errorDifference + " z=" + meanDifference / errorDifference + "; weighted walk " + weightedWalk / samples +
                                     " sample " + weightedSample / samples + " total " + (weightedWalk + weightedSample) / samples);
-        }
-
-        [TEST("RefractiveBDPT", "ScratchSolverVersusEdgeJacobian")]
-        public static void RefractiveBDPT_ScratchSolverVersusEdgeJacobian()
-        {
-            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, 10);
-            RNG rng = new RNG(3, 4);
-            double worstJ = 0, sumJ = 0, worstDir = 0, sumDir = 0;
-            int n = 0, failed = 0, failedMultiple = 0, failedEdge = 0, disagree = 0, zeroCount = 0;
-            double sumCount = 0;
-            for (int k = 0; k < 4000; ++k)
-            {
-                Point3f x = new Point3f(1.3f * (2 * rng.Uniform<Float>() - 1), 1.3f * (2 * rng.Uniform<Float>() - 1), 1.3f * (2 * rng.Uniform<Float>() - 1));
-                if (!medium.Contains(x))
-                    continue;
-                Float u = 1 - 2 * rng.Uniform<Float>(), phi = 2 * (Float)Math.PI * rng.Uniform<Float>(), r = (Float)Math.Sqrt(Math.Max(0, 1 - u * u));
-                Point3f y = new Point3f(LightPosition.x + 1.2f * r * (Float)Math.Cos(phi), LightPosition.y + 1.2f * r * (Float)Math.Sin(phi), LightPosition.z + 1.2f * u);
-                RefractiveConnectionOptions options = medium.ConnectionOptions(pbrt.Distance(x, y));
-                bool foundMultiple = medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out int count);
-                bool foundEdge = medium.SolveEdge(x, y, pbrt.Normalize(y - x), out RefractiveEdge edge);
-                if (!foundMultiple) ++failedMultiple;
-                if (!foundEdge) ++failedEdge;
-                if (foundMultiple != foundEdge) ++disagree;
-                if (foundMultiple && count == 0) ++zeroCount;
-                if (foundMultiple) sumCount += count;
-                if (!foundMultiple || !foundEdge)
-                {
-                    ++failed;
-                    continue;
-                }
-                double dj = Math.Abs(path.areaJacobian - edge.areaJacobian) / path.areaJacobian;
-                double dd = pbrt.Length(path.startDirection - edge.startDirection);
-                worstJ = Math.Max(worstJ, dj);
-                sumJ += (edge.areaJacobian - path.areaJacobian) / path.areaJacobian;
-                worstDir = Math.Max(worstDir, dd);
-                sumDir += dd;
-                ++n;
-            }
-            Console.Error.WriteLine("MEASURE solver vs SolveEdge: pairs " + n + " failed " + failed + " J worst " + worstJ + " mean signed " + sumJ / n +
-                                    " direction worst " + worstDir + " mean " + sumDir / n +
-                                    " | failed ConnectToPoint " + failedMultiple + " SolveEdge " + failedEdge + " disagree " + disagree +
-                                    " zero counts " + zeroCount + " mean count " + sumCount / Math.Max(1, n + failedEdge));
+            EXPECT_LT(Math.Abs(meanDifference), 4 * errorDifference);
+            EXPECT_GT(sumSample, 0.0);
         }
     }
 }
