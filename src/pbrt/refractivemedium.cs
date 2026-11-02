@@ -114,6 +114,39 @@ namespace pbrt
         public Float areaJacobian, areaJacobianReverse;
     }
 
+
+    // (not in pbrt-v4) EdgeGeometry Definition (stage 6): how an edge is traversed from one vertex to the next when it is curved: the
+    // direction it leaves along, the direction it arrives along and the area Jacobian dA_perp(arrival) / dOmega(leaving). An edge
+    // that is not curved (curved false) is the straight line between the two vertices.
+    public struct EdgeGeometry
+    {
+        public bool curved;
+        public Vector3f leaving, arriving;
+        public Float jacobian;
+
+        // The edge in the direction it was walked in
+        public static EdgeGeometry Forward(RefractiveEdge edge)
+        {
+            EdgeGeometry g = new EdgeGeometry();
+            g.curved = true;
+            g.leaving = edge.startDirection;
+            g.arriving = edge.endDirection;
+            g.jacobian = edge.areaJacobian;
+            return g;
+        }
+
+        // The edge traversed the other way
+        public static EdgeGeometry Backward(RefractiveEdge edge)
+        {
+            EdgeGeometry g = new EdgeGeometry();
+            g.curved = true;
+            g.leaving = (-1) * edge.endDirection;
+            g.arriving = (-1) * edge.startDirection;
+            g.jacobian = edge.areaJacobianReverse;
+            return g;
+        }
+    }
+
     // RefractiveMedium Definition
     public sealed unsafe class RefractiveMedium : Medium
     {

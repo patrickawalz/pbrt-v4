@@ -1800,6 +1800,22 @@ namespace pbrt
             return s;
         }
 
+        // (not in pbrt-v4) The edge that arrives at this vertex, in the direction it was walked and the other way (not curved when it is
+        // straight)
+        public EdgeGeometry EdgeIn() { return curvedEdge ? EdgeGeometry.Forward(edge) : default; }
+        public EdgeGeometry EdgeBack() { return curvedEdge ? EdgeGeometry.Backward(edge) : default; }
+
+        // (not in pbrt-v4) The density per area at next of a direction density at this vertex, when the edge to next is curved: the
+        // area is perpendicular to the direction of arrival, and its Jacobian takes the place of the squared distance
+        public Float ConvertDensity(Float pdf, Vertex next, EdgeGeometry edge)
+        {
+            if (!edge.curved || next.IsInfiniteLight())
+                return ConvertDensity(pdf, next);
+            if (next.IsOnSurface())
+                pdf *= AbsDot(next.ng(), edge.arriving);
+            return pdf / edge.jacobian;
+        }
+
         public Float ConvertDensity(Float pdf, Vertex next)
         {
             // Return solid angle density if _next_ is an infinite area light
@@ -1817,17 +1833,23 @@ namespace pbrt
 
         public Float PDF(Integrator integrator, Vertex prev, Vertex next)
         {
+            return PDF(integrator, prev, next, default, default);
+        }
+
+        // (not in pbrt-v4) With the edges to prev and to next as they are traversed from this vertex (see EdgeGeometry)
+        public Float PDF(Integrator integrator, Vertex prev, Vertex next, EdgeGeometry toPrev, EdgeGeometry toNext)
+        {
             if (type == VertexType.Light)
-                return PDFLight(integrator, next);
+                return PDFLight(integrator, next, toNext);
             // Compute directions to preceding and next vertex
-            Vector3f wn = next.p() - p();
+            Vector3f wn = toNext.curved ? toNext.leaving : next.p() - p();
             if (LengthSquared(wn) == 0)
                 return 0;
             wn = Normalize(wn);
             Vector3f wp = default;
             if (prev != null)
             {
-                wp = prev.p() - p();
+                wp = toPrev.curved ? toPrev.leaving : prev.p() - p();
                 if (LengthSquared(wp) == 0)
                     return 0;
                 wp = Normalize(wp);
@@ -1847,14 +1869,21 @@ namespace pbrt
                 LOG_FATAL("Vertex::PDF(): Unimplemented");
 
             // Return probability per unit area at vertex _next_
-            return ConvertDensity(pdf, next);
+            return ConvertDensity(pdf, next, toNext);
         }
 
         public Float PDFLight(Integrator integrator, Vertex v)
         {
-            Vector3f w = v.p() - p();
-            Float invDist2 = 1 / LengthSquared(w);
-            w *= std.sqrt(invDist2);
+            return PDFLight(integrator, v, default);
+        }
+
+        // (not in pbrt-v4) With the edge to v as it is traversed from this vertex: curved, the density per solid angle is converted with
+        // the Jacobian of the edge in place of the squared distance
+        public Float PDFLight(Integrator integrator, Vertex v, EdgeGeometry toVertex)
+        {
+            Vector3f w = toVertex.curved ? toVertex.leaving : v.p() - p();
+            Float invDist2 = toVertex.curved ? 1 / toVertex.jacobian : 1 / LengthSquared(w);
+            w = toVertex.curved ? Normalize(w) : w * std.sqrt(invDist2);
             // Compute sampling density _pdf_ for light type
             Float pdf;
             if (IsInfiniteLight())
@@ -1887,13 +1916,19 @@ namespace pbrt
             }
 
             if (v.IsOnSurface())
-                pdf *= AbsDot(v.ng(), w);
+                pdf *= AbsDot(v.ng(), toVertex.curved ? toVertex.arriving : w);
             return pdf;
         }
 
         public Float PDFLightOrigin(List<Light> infiniteLights, Vertex v, LightSampler lightSampler)
         {
-            Vector3f w = v.p() - p();
+            return PDFLightOrigin(infiniteLights, v, lightSampler, default);
+        }
+
+        // (not in pbrt-v4) With the edge to v as it is traversed from this vertex
+        public Float PDFLightOrigin(List<Light> infiniteLights, Vertex v, LightSampler lightSampler, EdgeGeometry toVertex)
+        {
+            Vector3f w = toVertex.curved ? toVertex.leaving : v.p() - p();
             if (LengthSquared(w) == 0)
                 return 0;
             w = Normalize(w);
@@ -2206,6 +2241,9 @@ namespace pbrt
                 {
                     path[index].curvedEdge = true;
                     path[index].edge = edge;
+                    // The density of the vertex, per area perpendicular to the arrival, from the density of the direction it was
+                    // sampled with
+                    path[index].pdfFwd = path[index - 1].ConvertDensity(pdfFwd, path[index], path[index].EdgeIn());
                 }
                 edgeMedium = null;
             }
@@ -2466,7 +2504,7 @@ namespace pbrt
                 pdfFwd = ps.pdf;
                 ctx.ray = intr.SpawnRay(ps.wi);
                 anyNonSpecularBounces = true;
-                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.pdf, path[vIdx - 1]);
+                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.pdf, path[vIdx - 1], path[vIdx].EdgeBack());
                 StartEdge(path[vIdx].p(), ctx.ray.d);
             }
 
@@ -2524,7 +2562,7 @@ namespace pbrt
                     path[vIdx].delta = true;
                     pdfRev = pdfFwd = 0;
                 }
-                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1]);
+                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(pdfRev, path[vIdx - 1], path[vIdx].EdgeBack());
                 StartEdge(path[vIdx].p(), ctx.ray.d);
                 return true;
             }
@@ -2547,10 +2585,11 @@ namespace pbrt
 
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
-                                      LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl)
+                                      LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl,
+                                      EdgeGeometry connectionToLight = default, EdgeGeometry connectionToCamera = default)
         {
             if (!MISSum(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler, connRu, connRl,
-                        true, out SampledSpectrum sum))
+                        true, out SampledSpectrum sum, connectionToLight, connectionToCamera))
                 return 1;
             Float average = sum.Average();
             return average > 0 ? 1 / average : 0;
@@ -2563,7 +2602,8 @@ namespace pbrt
         public static bool MISSum(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                   Vertex[] cameraVertices, Vertex sampled, int s, int t,
                                   LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl,
-                                  bool withEquiangular, out SampledSpectrum sumOut)
+                                  bool withEquiangular, out SampledSpectrum sumOut,
+                                  EdgeGeometry connectionToLight = default, EdgeGeometry connectionToCamera = default)
         {
             sumOut = default;
             // (not in pbrt-v4) With a camera subpath that gathers the emission of a medium, a path of length 0 has two strategies: the
@@ -2610,17 +2650,18 @@ namespace pbrt
 
                 if (pt != null)
                     a4 = new ScopedAssignment<Float>(ref pt.pdfRev,
-                        s > 0 ? qs.PDF(integrator, qsMinus, pt)
-                              : pt.PDFLightOrigin(integrator.infiniteLights, ptMinus, lightSampler));
+                        s > 0 ? qs.PDF(integrator, qsMinus, pt, qs.EdgeBack(), connectionToCamera)
+                              : pt.PDFLightOrigin(integrator.infiniteLights, ptMinus, lightSampler, pt.EdgeBack()));
 
                 if (ptMinus != null)
                     a5 = new ScopedAssignment<Float>(ref ptMinus.pdfRev,
-                        s > 0 ? pt.PDF(integrator, qs, ptMinus) : pt.PDFLight(integrator, ptMinus));
+                        s > 0 ? pt.PDF(integrator, qs, ptMinus, connectionToLight, pt.EdgeBack())
+                              : pt.PDFLight(integrator, ptMinus, pt.EdgeBack()));
 
                 if (qs != null)
-                    a6 = new ScopedAssignment<Float>(ref qs.pdfRev, pt.PDF(integrator, ptMinus, qs));
+                    a6 = new ScopedAssignment<Float>(ref qs.pdfRev, pt.PDF(integrator, ptMinus, qs, pt.EdgeBack(), connectionToLight));
                 if (qsMinus != null)
-                    a7 = new ScopedAssignment<Float>(ref qsMinus.pdfRev, qs.PDF(integrator, pt, qsMinus));
+                    a7 = new ScopedAssignment<Float>(ref qsMinus.pdfRev, qs.PDF(integrator, pt, qsMinus, connectionToCamera, qs.EdgeBack()));
 
                 Film film = camera.GetFilm();
                 Float splatScale = (Float)film.FullResolution().x * (Float)film.FullResolution().y /

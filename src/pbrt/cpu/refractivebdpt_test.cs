@@ -74,6 +74,7 @@ namespace pbrt
             IndependentSampler sampler = new IndependentSampler(samples, 11);
             ScratchBuffer buffer = new ScratchBuffer();
             int curved = 0, straight = 0, firstEdges = 0;
+            double worstDensity = 0; int densityChecks = 0;
             double worstDistance = 0, worstDirection = 0, worstStart = 0, worstJacobian = 0, worstFineDistance = 0;
             List<double> distances = new List<double>(), directionErrors = new List<double>(), startErrors = new List<double>();
             for (int i = 0; i < samples; ++i)
@@ -112,6 +113,17 @@ namespace pbrt
                         }
                         EXPECT_GT(path[v].edge.areaJacobian, 0.0f);
                         EXPECT_GT(path[v].edge.areaJacobianReverse, 0.0f);
+                        if (v >= 2 && path[v].type == VertexType.Medium && path[v - 1].type == VertexType.Medium)
+                        {
+                            // The density of the vertex is the density of the phase function sample over the Jacobian of the edge
+                            Float phase = path[v - 1].PDF(integrator, path[v - 2], path[v], path[v - 1].EdgeBack(), path[v].EdgeIn());
+                            Float direct = path[v - 1].bsdf.PDF(path[v - 1].mi.wo, path[v].edge.startDirection);
+                            Float expected = direct / path[v].edge.areaJacobian;
+                            EXPECT_GT(expected, 0.0f);
+                            worstDensity = Math.Max(worstDensity, Math.Abs(path[v].pdfFwd - expected) / expected);
+                            worstDensity = Math.Max(worstDensity, Math.Abs(phase - expected) / expected);
+                            ++densityChecks;
+                        }
                         // The Jacobian of the edge against one traced with a tenth of the step, from the recorded start and direction
                         RefractiveConnection.TraceEdge(medium.BoundedField(), path[v - 1].p(), path[v].edge.startDirection, path[v].edge.length,
                                                        0.005f, out Point3f fineEnd, out Vector3f fineDirection, out Float fineJacobian,
@@ -147,6 +159,9 @@ namespace pbrt
             // Measured: 9.4e-4 and 5.3e-4
             EXPECT_LT(worstJacobian, 5e-3);
             EXPECT_LT(worstFineDistance, 3e-3);
+            EXPECT_GT(densityChecks, 100);
+            Console.WriteLine($"medium pdfFwd vs phase pdf / J: {densityChecks} checks, worst relative {worstDensity:E2}");
+            EXPECT_LT(worstDensity, 1e-4);
         }
 
         // The edges of light subpaths, which walk the other way: leaving the previous vertex along the recorded start direction and

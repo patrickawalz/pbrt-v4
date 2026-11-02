@@ -32,7 +32,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
-| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a and 6b done (see "Stage 6 design") |
+| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a, 6b and 6c done (see "Stage 6 design") |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
 ## What the tests establish
@@ -168,3 +168,7 @@ tangents at both ends of the edge that arrives there and the two Jacobians (done
 remapping use them instead of the positions; 6d the connection through the solver (count, J, visibility along the polyline,
 transmittance by ratio tracking along the curve, the spectral MIS ratios of the connection segment); 6e the test: bdpt against
 volpath on the lens scene (same single scattering radiance within the standard error), and the refusal removed.
+
+### Stage 6c: densities through curved edges
+
+`EdgeGeometry` (curved flag, leaving direction, arriving direction, Jacobian) describes an edge as traversed from one vertex to the next. `Vertex.ConvertDensity`, `PDF`, `PDFLight` and `PDFLightOrigin` take the edges to the previous and next vertex: a curved edge uses its leaving direction for the BSDF/phase evaluation and its Jacobian in place of the squared distance, with the cosine taken against the arrival direction. The walk hook stores `pdfFwd` and `pdfRev` through them, and `MISSum` takes the connection edge (not yet curved; that is 6d). Test: for 2947 curved medium vertices `pdfFwd` equals the phase-function density over the edge Jacobian, and `Vertex.PDF` agrees.
