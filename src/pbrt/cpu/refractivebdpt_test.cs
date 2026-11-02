@@ -692,6 +692,88 @@ namespace pbrt
             EXPECT_LT(Math.Abs(mean - integral), 4 * error + 0.003 * integral);
         }
 
+        // The strategies that find a path with two scatterings in the lens and then the light (the walk that hits the light, the light
+        // sample at the second scattering, and the connection of the first scattering to a light subpath's vertex in the lens) each
+        // estimate the same integral before their weights: the unweighted contributions agree in the mean
+        [TEST("RefractiveBDPT", "UnweightedStrategiesAgreeAtDepthTwo")]
+        public static void RefractiveBDPT_UnweightedStrategiesAgreeAtDepthTwo()
+        {
+            int samples = 200000;
+            LightPosition = new Vector3f(-5.0f, 0.3f, 0.2f);
+            LightRadius = 3.0f;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            LightPosition = new Vector3f(-3.2f, 0.3f, 0.2f);
+            LightRadius = 1.2f;
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 37);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, true);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double[] sum = new double[3], sum2 = new double[3];
+            double[] weightedSum = new double[3];
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y),
+                                                          pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.2f)));
+                Vertex[] cameraVertices = new Vertex[6];
+                for (int v = 0; v < cameraVertices.Length; ++v)
+                    cameraVertices[v] = new Vertex();
+                int cameraCount = BDPT.GenerateCameraSubpath(bdpt, ray, ref lambda, sampler, buffer, 4, camera, cameraVertices, false);
+                Vertex[] lightVertices = new Vertex[4];
+                for (int v = 0; v < lightVertices.Length; ++v)
+                    lightVertices[v] = new Vertex();
+                int lightCount = BDPT.GenerateLightSubpath(bdpt, ref lambda, sampler, camera, buffer, 3, 0, bdpt.BDPTLightSampler, lightVertices, false);
+                double[] value = new double[3];
+                bool firstInLens = cameraCount >= 2 && cameraVertices[1].type == VertexType.Medium;
+                pstd.optional<Point2f> pRaster = default;
+                Float weight;
+                SampledWavelengths l;
+                if (firstInLens && cameraCount >= 4 && cameraVertices[2].type == VertexType.Medium &&
+                    cameraVertices[3].type == VertexType.Surface && cameraVertices[3].si.areaLight != null)
+                {
+                    weight = 0;
+                    l = lambda;
+                    SampledSpectrum Lw = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 0, 4, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                    value[0] = weight > 0 ? Lw.Average() / weight : 0;
+                    weightedSum[0] += Lw.Average();
+                }
+                if (firstInLens && cameraCount >= 3 && cameraVertices[2].type == VertexType.Medium)
+                {
+                    weight = 0;
+                    l = lambda;
+                    SampledSpectrum Ls = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 1, 3, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                    value[1] = weight > 0 ? Ls.Average() / weight : 0;
+                    weightedSum[1] += Ls.Average();
+                }
+                if (firstInLens && lightCount >= 2 && lightVertices[1].type == VertexType.Medium)
+                {
+                    weight = 0;
+                    l = lambda;
+                    SampledSpectrum Lc = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 2, 2, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                    value[2] = weight > 0 ? Lc.Average() / weight : 0;
+                    weightedSum[2] += Lc.Average();
+                }
+                for (int k = 0; k < 3; ++k)
+                {
+                    sum[k] += value[k];
+                    sum2[k] += value[k] * value[k];
+                }
+                buffer.Reset();
+            }
+            double[] mean = new double[3], error = new double[3];
+            for (int k = 0; k < 3; ++k)
+            {
+                mean[k] = sum[k] / samples;
+                error[k] = Math.Sqrt((sum2[k] / samples - mean[k] * mean[k]) / samples);
+            }
+            Console.Error.WriteLine("MEASURE depth two unweighted walk(0,4) " + mean[0] + "+-" + error[0] + " light sample(1,3) " + mean[1] + "+-" + error[1] +
+                                    " connection(2,2) " + mean[2] + "+-" + error[2] + "; weighted " + weightedSum[0] / samples + " " +
+                                    weightedSum[1] / samples + " " + weightedSum[2] / samples + " total " +
+                                    (weightedSum[0] + weightedSum[1] + weightedSum[2]) / samples);
+        }
+
         // The two strategies that find the light after one scattering in the lens each estimate the same integral, before their weights:
         // the unweighted contributions of the walk that hits the light (s = 0, t = 3) and of the light sample (s = 1, t = 2) agree in the
         // mean over camera subpaths
