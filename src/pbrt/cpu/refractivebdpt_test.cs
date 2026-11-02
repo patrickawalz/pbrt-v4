@@ -213,5 +213,105 @@ namespace pbrt
             EXPECT_LT(worstBack, 3e-3);
             EXPECT_LT(worstReverseJacobian, 1e-2);
         }
+
+        // The single scattering radiance of a camera ray through the lens, by volpath (the walk and the curved next event estimate)
+        // or by bdpt (the same two strategies, now with weights between them: the hit of the light by the walk through the curved
+        // edge, and the light sample connected along a curved path)
+        static void LensRadiance(bool useBDPT, int maxDepth, bool unidirectional, int samples, out double mean, out double standardError)
+        {
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 7);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, maxDepth, false, false, false, null,
+                                                     false, true, unidirectional);
+            VolPathIntegrator reference = new VolPathIntegrator(maxDepth, camera, sampler, volpath.aggregate, lightList, "uniform", false,
+                                                                false, false, 0, PolarisedPathIntegrator.Measurement.Intensity, false, 1,
+                                                                int.MaxValue, false, true);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double sum = 0, sum2 = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Vector3f rayDirection = pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.0f));
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y), rayDirection);
+                SampledSpectrum L = useBDPT ? bdpt.Li(ray, ref lambda, sampler, buffer, null) : reference.Li(ray, ref lambda, sampler, buffer, null);
+                double value = L.Average();
+                sum += value;
+                sum2 += value * value;
+                buffer.Reset();
+            }
+            mean = sum / samples;
+            standardError = Math.Sqrt((sum2 / samples - mean * mean) / samples);
+        }
+
+        [TEST("RefractiveBDPT", "UnidirectionalStrategiesMatchVolpath")]
+        public static void RefractiveBDPT_UnidirectionalStrategiesMatchVolpath()
+        {
+            LensRadiance(false, 1, false, 60000, out double volpathMean, out double volpathError);
+            LensRadiance(true, 1, true, 60000, out double bdptMean, out double bdptError);
+            Console.Error.WriteLine("MEASURE volpath=" + volpathMean + "+-" + volpathError + " bdpt(s<=1)=" + bdptMean + "+-" + bdptError);
+            EXPECT_GT(volpathMean, 0.0);
+            EXPECT_LT(Math.Abs(volpathMean - bdptMean), 4 * Math.Sqrt(volpathError * volpathError + bdptError * bdptError));
+        }
+
+        // A path that scatters once in the lens and ends on the light is found by two strategies: the walk that hits the light
+        // (s = 0, t = 3) and the light sample connected from the scattering point (s = 1, t = 2). The weights of the two strategies
+        // for the same path add up to one, only if both have the same density per area of the vertices and of the curved edge
+        [TEST("RefractiveBDPT", "WeightsOfTheTwoStrategiesOfAPathAddUpToOne")]
+        public static void RefractiveBDPT_WeightsOfTheTwoStrategiesOfAPathAddUpToOne()
+        {
+            int samples = 40000;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 5);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 3, false, false, false, null,
+                                                     false, true, false);
+            ScratchBuffer buffer = new ScratchBuffer();
+            int paths = 0, curvedPaths = 0;
+            double worst = 0, sumWeight0 = 0, sumWeight1 = 0;
+            SampledSpectrum one = new SampledSpectrum(1.0f);
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Vector3f direction = pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.0f));
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y), direction);
+                Vertex[] cameraVertices = new Vertex[6];
+                for (int v = 0; v < cameraVertices.Length; ++v)
+                    cameraVertices[v] = new Vertex();
+                int count = BDPT.GenerateCameraSubpath(bdpt, ray, ref lambda, sampler, buffer, 5, camera, cameraVertices, false);
+                if (count < 3 || cameraVertices[1].type != VertexType.Medium || cameraVertices[2].type != VertexType.Surface ||
+                    cameraVertices[2].si.areaLight == null)
+                {
+                    buffer.Reset();
+                    continue;
+                }
+                ++paths;
+                Vertex[] lightVertices = new Vertex[2];
+                for (int v = 0; v < lightVertices.Length; ++v)
+                    lightVertices[v] = new Vertex();
+                Float weight0 = BDPT.MISWeight(bdpt, camera, lightVertices, cameraVertices, new Vertex(), 0, 3, bdpt.BDPTLightSampler, one, one);
+                Light light = cameraVertices[2].si.areaLight;
+                EndpointInteraction ei = new EndpointInteraction(light, cameraVertices[2].GetInteraction());
+                Vertex sampled = Vertex.CreateLight(ei, one, 0);
+                EdgeGeometry toLight = cameraVertices[2].EdgeIn(), toCamera = cameraVertices[2].EdgeBack();
+                if (toLight.curved)
+                    ++curvedPaths;
+                sampled.pdfFwd = sampled.PDFLightOrigin(bdpt.infiniteLights, cameraVertices[1], bdpt.BDPTLightSampler, toCamera);
+                Float weight1 = BDPT.MISWeight(bdpt, camera, lightVertices, cameraVertices, sampled, 1, 2, bdpt.BDPTLightSampler, one, one,
+                                               toLight, toCamera);
+                worst = Math.Max(worst, Math.Abs(weight0 + weight1 - 1));
+                sumWeight0 += weight0;
+                sumWeight1 += weight1;
+                buffer.Reset();
+            }
+            Console.Error.WriteLine("MEASURE paths=" + paths + " curved=" + curvedPaths + " worst |w0 + w1 - 1|=" + worst +
+                                    " mean w0=" + sumWeight0 / Math.Max(paths, 1) + " mean w1=" + sumWeight1 / Math.Max(paths, 1));
+            EXPECT_GT(curvedPaths, 300);
+            EXPECT_LT(worst, 1e-3);
+        }
     }
 }

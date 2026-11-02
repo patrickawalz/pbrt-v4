@@ -1698,7 +1698,13 @@ namespace pbrt
 
         public SampledSpectrum f(Vertex next, TransportMode mode)
         {
-            Vector3f wi = next.p() - p();
+            return f(next, mode, default);
+        }
+
+        // (not in pbrt-v4) With the edge to next as it is traversed from this vertex: a curved edge leaves along its own direction
+        public SampledSpectrum f(Vertex next, TransportMode mode, EdgeGeometry toNext)
+        {
+            Vector3f wi = toNext.curved ? toNext.leaving : next.p() - p();
             if (LengthSquared(wi) == 0)
                 return new SampledSpectrum(0.0f);
             wi = Normalize(wi);
@@ -2581,6 +2587,135 @@ namespace pbrt
             return g;
         }
 
+        // (not in pbrt-v4) The geometry term of a curved edge from v0 to v1: one over the area Jacobian of the edge in place of one over
+        // the squared distance, with the cosines against the directions the edge leaves and arrives along
+        static Float GeometryTerm(Vertex v0, Vertex v1, EdgeGeometry edge)
+        {
+            Float g = 1 / edge.jacobian;
+            if (v0.IsOnSurface())
+                g *= AbsDot(v0.ns(), edge.leaving);
+            if (v1.IsOnSurface())
+                g *= AbsDot(v1.ns(), edge.arriving);
+            return g;
+        }
+
+        // (not in pbrt-v4) The refractive medium that a scattering vertex is in (null for the others)
+        public static RefractiveMedium RefractiveOf(Vertex v)
+        {
+            if (v == null || v.type == VertexType.Camera || v.type == VertexType.Light)
+                return null;
+            return MediumTracking.Current(v.stack) as RefractiveMedium;
+        }
+
+        // (not in pbrt-v4) Whether a strategy with a hypothetical connection along an edge of a subpath is in use: a curved edge can be
+        // a connection if one end is in the refractive medium (the connection solves the path from there) and it is not the camera
+        // sampled for t = 1
+        static bool CurvedConnectionAllowed(Vertex edgeOwner, Vertex a, Vertex b, int tOfStrategy)
+        {
+            if (!edgeOwner.curvedEdge)
+                return true;
+            return tOfStrategy >= 2 && (RefractiveOf(a) != null || RefractiveOf(b) != null);
+        }
+
+        // (not in pbrt-v4) A connection between a vertex inside a refractive medium and another vertex (inside or outside it) along
+        // the curved path that the connection solver finds: the count of the search (an estimate of one over the probability that
+        // it finds a path), the edge in both directions (leaving the camera side and the light side vertex), and the transmittance
+        // of the whole path with the factors of the spectral MIS weights. The part of the path outside the medium is straight and
+        // is found from the surface that bounds the medium, like volpath does it for its light samples.
+        public static bool CurvedConnection(Integrator integrator, RefractiveMedium medium, Vertex inside, Interaction other,
+                                            bool insideIsCameraSide, SampledWavelengths lambda, out EdgeGeometry toLight,
+                                            out EdgeGeometry toCamera, out int count, out SampledSpectrum transmittance,
+                                            out SampledSpectrum ru, out SampledSpectrum rl)
+        {
+            toLight = default;
+            toCamera = default;
+            count = 0;
+            transmittance = new SampledSpectrum(0.0f);
+            ru = new SampledSpectrum(1.0f);
+            rl = new SampledSpectrum(1.0f);
+            Point3f x = inside.p();
+            Point3f y = other.p();
+            bool bothInside = medium.Contains(y);
+            RNG rng = new RNG(Hash(x), Hash(y));
+            RefractiveConnectionOptions options = medium.ConnectionOptions(Distance(x, y));
+            if (!medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out count))
+                return false;
+            if (path.areaJacobian <= 0)
+                return false;
+            medium.BoundedField().ValueAndGradient(x, out Float nInside, out Vector3f unusedGradient);
+            medium.BoundedField().ValueAndGradient(y, out Float nOther, out unusedGradient);
+            Float ratio2 = (nOther / nInside) * (nOther / nInside);
+            RefractiveEdge edge = new RefractiveEdge();
+            edge.length = path.length;
+            edge.distance = path.distance;
+            if (insideIsCameraSide)
+            {
+                edge.startDirection = path.startDirection;
+                edge.endDirection = path.endDirection;
+                edge.areaJacobian = path.areaJacobian;
+                edge.areaJacobianReverse = ratio2 * path.areaJacobian;
+            }
+            else
+            {
+                edge.startDirection = (-1) * path.endDirection;
+                edge.endDirection = (-1) * path.startDirection;
+                edge.areaJacobian = ratio2 * path.areaJacobian;
+                edge.areaJacobianReverse = path.areaJacobian;
+            }
+            toLight = EdgeGeometry.Forward(edge);
+            toCamera = EdgeGeometry.Backward(edge);
+
+            // The transmittance of the curved part, by the tracking of the medium along the arc length
+            SampledSpectrum T_ray = new SampledSpectrum(1.0f);
+            SampledSpectrum rlCurve = new SampledSpectrum(1.0f), ruCurve = new SampledSpectrum(1.0f);
+            Float uT = rng.Uniform<Float>();
+            SampledSpectrum T_maj = medium.SampleT_majCurved(x, path.startDirection, path.length, uT, ref rng, lambda,
+                (Point3f p, Vector3f tangent, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                    medium.volumeIntegrator.transmittance.Step(ref T_ray, ref rlCurve, ref ruCurve, T_maj_, sigma_maj, sigma_n, ref rng);
+                    return (bool)T_ray;
+                }, out Point3f exitPoint, out Vector3f exitDirection, out Float exitLength);
+            medium.volumeIntegrator.transmittance.Finish(ref T_ray, ref rlCurve, ref ruCurve, T_maj);
+            if (!T_ray)
+                return false;
+            rl = rlCurve;
+            ru = ruCurve;
+            if (bothInside)
+            {
+                transmittance = T_ray;
+                return true;
+            }
+
+            // The straight part from the boundary to the other vertex
+            BoundaryStack stack = inside.stack;
+            Float diagonal = Length(medium.Bounds().pMax - medium.Bounds().pMin);
+            Interaction boundaryIntr = inside.GetInteraction();
+            Ray lightRay;
+            if (exitLength < 1e-4f * diagonal)
+            {
+                stack.Pop(new BoundaryStackElement(null, medium), MediumTracking.interfacePriority);
+                lightRay = new Ray(exitPoint, y - exitPoint);
+            }
+            else
+            {
+                Float back = Math.Min(1e-3f * diagonal, 0.5f * exitLength);
+                pstd.optional<ShapeIntersection> boundary = integrator.Intersect(new Ray(exitPoint - back * exitDirection, exitDirection), 4 * back);
+                if (!boundary)
+                    return false;
+                boundaryIntr = boundary.value().intr;
+                lightRay = boundaryIntr.SpawnRayTo(other);
+            }
+            SampledSpectrum T_out = integrator.ShadowRay(lightRay, boundaryIntr, other, ref stack, lambda, rng, true,
+                                                         out SampledSpectrum ruOut, out SampledSpectrum rlOut);
+            if (!T_out)
+                return false;
+            transmittance = T_ray * T_out;
+            rl *= rlOut;
+            ru *= ruOut;
+            return true;
+        }
+
         static Float remap0(Float f) { return f != 0 ? f : 1; }
 
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
@@ -2699,7 +2834,8 @@ namespace pbrt
                     // See https://github.com/mmp/pbrt-v4/issues/347
                     if (i == 1) ri /= splatScale;
                     // (not in pbrt-v4) The strategy with i camera vertices is a term of the sum only if it is in use
-                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && integrator.StrategyAllowed(s + t - i, i))
+                    if (!cameraVertices[i].delta && !cameraVertices[i - 1].delta && integrator.StrategyAllowed(s + t - i, i) &&
+                        CurvedConnectionAllowed(cameraVertices[i], cameraVertices[i - 1], cameraVertices[i], i))
                     {
                         Float riTerm = t == 1 ? ri / splatScale : ri;
                         if (s == 0 && i == t - 1)
@@ -2737,7 +2873,8 @@ namespace pbrt
                             emissionHere = lightVertices[0].emissionMaj;
                         }
                     }
-                    if (!skip && !lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i))
+                    if (!skip && !lightVertices[i].delta && !deltaLightvertex && integrator.StrategyAllowed(i, t + s - i) &&
+                        (i == 0 || CurvedConnectionAllowed(lightVertices[i], lightVertices[i - 1], lightVertices[i], t + s - i)))
                     {
                         Float riTerm = t == 1 ? ri / splatScale : ri;
                         if (i == 1)
@@ -2954,6 +3091,8 @@ namespace pbrt
             Vector3f toCamera = default;
             // (not in pbrt-v4) The factors of the connection segment for the spectral MIS weights (see Integrator.TrSegments)
             SampledSpectrum connRu = new SampledSpectrum(1.0f), connRl = new SampledSpectrum(1.0f);
+            // (not in pbrt-v4) The connection edge when it is curved (see CurvedConnection), in both directions
+            EdgeGeometry curvedToLight = default, curvedToCamera = default;
             // Ignore invalid connections related to infinite area lights
             if (t > 1 && s != 0 && cameraVertices[t - 1].type == VertexType.Light)
                 return new SampledSpectrum(0.0f);
@@ -3017,34 +3156,67 @@ namespace pbrt
 
                         LightSampleContext ctx = Integrator.LightContextAt(pt.GetInteraction(), pt.IsOnSurface(),
                                                                            pt.IsOnSurface() ? pt.bsdf.Flags() : default);
-                        // (not in pbrt-v4) The point of an emissive volume has a third coordinate
-                        VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
-                        pstd.optional<LightLiSample> lightWeight = volumeLight != null
-                            ? volumeLight.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda)
-                            : light.SampleLi(ctx, sampler.Get2D(), lambda);
-                        if (lightWeight && (bool)lightWeight.value().L && lightWeight.value().pdf > 0)
+                        // (not in pbrt-v4) From inside a refractive medium the light is reached along a curved path, to an area light
+                        RefractiveMedium refractive = BDPT.RefractiveOf(pt);
+                        if (refractive != null)
                         {
-                            EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
-                            sampled = Vertex.CreateLight(ei, lightWeight.value().L / (lightWeight.value().pdf * p_l), 0);
-                            sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
-                            if (volumeLight != null)
+                            if (light is VolumeEmissionLight || light.Type() == LightType.Infinite || IsDeltaLight(light.Type()))
+                                ErrorExit("bdpt supports area lights only with a refractive medium (docs/refractive-media.md).");
+                            pstd.optional<LightLiSample> areaSample = light.SampleLi(ctx, sampler.Get2D(), lambda, true);
+                            if (areaSample && (bool)areaSample.value().L && areaSample.value().pdf > 0)
                             {
-                                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda);
-                                sampled.sigmaT0 = majorant[0];
-                                sampled.emissionMaj = majorant / majorant[0];
+                                Point3f y = areaSample.value().pLight.p();
+                                if (refractive.Contains(y))
+                                    ErrorExit("A light inside a refractive medium is not supported (docs/refractive-media.md).");
+                                Float cosineStraight = AbsDot(areaSample.value().pLight.n, areaSample.value().wi);
+                                Float distance2 = DistanceSquared(pt.p(), y);
+                                if (cosineStraight > 0 && distance2 > 0 &&
+                                    CurvedConnection(integrator, refractive, pt, areaSample.value().pLight, true, lambda,
+                                                     out curvedToLight, out curvedToCamera, out int count,
+                                                     out SampledSpectrum curvedT, out connRu, out connRl))
+                                {
+                                    Float pdfArea = areaSample.value().pdf * cosineStraight / distance2;
+                                    SampledSpectrum Le = light.L(y, areaSample.value().pLight.n, areaSample.value().pLight.uv,
+                                                                 (-1) * curvedToLight.arriving, lambda);
+                                    EndpointInteraction ei = new EndpointInteraction(light, areaSample.value().pLight);
+                                    sampled = Vertex.CreateLight(ei, Le / (pdfArea * p_l), 0);
+                                    sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
+                                    L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
+                                    L *= GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
+                                }
                             }
-                            L = pt.beta * pt.f(sampled, TransportMode.Radiance) * sampled.beta;
-                            if (pt.IsOnSurface())
-                                L *= AbsDot(lightWeight.value().wi, pt.ns());
-                            // Only check visibility if the path would carry radiance.
-                            if ((bool)L)
+                        }
+                        if (refractive == null)
+                        {
+                            // (not in pbrt-v4) The point of an emissive volume has a third coordinate
+                            VolumeEmissionLight volumeLight = light as VolumeEmissionLight;
+                            pstd.optional<LightLiSample> lightWeight = volumeLight != null
+                                ? volumeLight.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda)
+                                : light.SampleLi(ctx, sampler.Get2D(), lambda);
+                            if (lightWeight && (bool)lightWeight.value().L && lightWeight.value().pdf > 0)
                             {
-                                L *= integrator.TrSegments(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
-                                                           out connRu, out connRl, out Medium endMedium);
-                                // The point has to lie in the medium that emits
-                                if (volumeLight != null && endMedium != volumeLight.Medium())
-                                    L = new SampledSpectrum(0.0f);
-                            }
+                                EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
+                                sampled = Vertex.CreateLight(ei, lightWeight.value().L / (lightWeight.value().pdf * p_l), 0);
+                                sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
+                                if (volumeLight != null)
+                                {
+                                    SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda);
+                                    sampled.sigmaT0 = majorant[0];
+                                    sampled.emissionMaj = majorant / majorant[0];
+                                }
+                                L = pt.beta * pt.f(sampled, TransportMode.Radiance) * sampled.beta;
+                                if (pt.IsOnSurface())
+                                    L *= AbsDot(lightWeight.value().wi, pt.ns());
+                                // Only check visibility if the path would carry radiance.
+                                if ((bool)L)
+                                {
+                                    L *= integrator.TrSegments(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
+                                                               out connRu, out connRl, out Medium endMedium);
+                                    // The point has to lie in the medium that emits
+                                    if (volumeLight != null && endMedium != volumeLight.Medium())
+                                        L = new SampledSpectrum(0.0f);
+                                }
+                        }
                         }
                     }
                 }
@@ -3055,12 +3227,31 @@ namespace pbrt
                 Vertex qs = lightVertices[s - 1], pt = cameraVertices[t - 1];
                 if (qs.IsConnectible() && pt.IsConnectible())
                 {
-                    L = qs.beta * qs.f(pt, TransportMode.Importance) * pt.f(qs, TransportMode.Radiance) * pt.beta;
-                    if ((bool)L)
+                    // (not in pbrt-v4) From inside a refractive medium the connection is a curved path
+                    bool cameraSideInside = BDPT.RefractiveOf(pt) != null;
+                    RefractiveMedium refractive = cameraSideInside ? BDPT.RefractiveOf(pt) : BDPT.RefractiveOf(qs);
+                    if (refractive != null)
                     {
-                        L *= GeometryTerm(qs, pt);
-                        L *= integrator.TrSegments(qs.GetInteraction(), pt.GetInteraction(), qs.stack, lambda, out connRu,
-                                                   out connRl, out Medium _);
+                        if (CurvedConnection(integrator, refractive, cameraSideInside ? pt : qs,
+                                             (cameraSideInside ? qs : pt).GetInteraction(), cameraSideInside, lambda,
+                                             out curvedToLight, out curvedToCamera, out int count,
+                                             out SampledSpectrum curvedT, out connRu, out connRl))
+                        {
+                            L = qs.beta * qs.f(pt, TransportMode.Importance, curvedToCamera) *
+                                pt.f(qs, TransportMode.Radiance, curvedToLight) * pt.beta;
+                            if ((bool)L)
+                                L *= GeometryTerm(pt, qs, curvedToLight) * (Float)count * curvedT;
+                        }
+                    }
+                    else
+                    {
+                        L = qs.beta * qs.f(pt, TransportMode.Importance) * pt.f(qs, TransportMode.Radiance) * pt.beta;
+                        if ((bool)L)
+                        {
+                            L *= GeometryTerm(qs, pt);
+                            L *= integrator.TrSegments(qs.GetInteraction(), pt.GetInteraction(), qs.stack, lambda, out connRu,
+                                                       out connRl, out Medium _);
+                        }
                     }
                 }
             }
@@ -3073,7 +3264,7 @@ namespace pbrt
             PathIntegrator.pathLength.Add(s + t - 2);
             // Compute MIS weight for connection strategy
             Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler,
-                                                  connRu, connRl)
+                                                  connRu, connRl, curvedToLight, curvedToCamera)
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;
@@ -3325,7 +3516,8 @@ namespace pbrt
                                             Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("bdpt");
-            MediumTracking.RequireNoRefractive("bdpt");
+            if (MediumTracking.hasRefractive && parameters.GetOneBool("equiangular", false))
+                ErrorExit("The \"bdpt\" integrator does not support \"equiangular\" sampling with refractive media (docs/refractive-media.md).");
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
                           "\"bdpt\" integrator.");
@@ -3358,6 +3550,8 @@ namespace pbrt
                                                 out PolarisedPathIntegrator.Measurement measurement);
             if (parameters.GetOneBool("polarised", false))
             {
+                if (MediumTracking.hasRefractive)
+                    ErrorExit(loc, "Polarised bdpt does not support refractive media yet (docs/refractive-media.md, stage 7).");
                 sensor = new PolarisedPathIntegrator.Sensor();
                 sensor.analyser = analyser;
                 sensor.analyserAngle = analyserAngle;

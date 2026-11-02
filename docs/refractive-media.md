@@ -32,7 +32,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
-| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | in progress: 6a, 6b and 6c done (see "Stage 6 design") |
+| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | done except 6e polish: 6a–6d, bdpt enabled (see "Stage 6 design") |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
 ## What the tests establish
@@ -172,3 +172,11 @@ volpath on the lens scene (same single scattering radiance within the standard e
 ### Stage 6c: densities through curved edges
 
 `EdgeGeometry` (curved flag, leaving direction, arriving direction, Jacobian) describes an edge as traversed from one vertex to the next. `Vertex.ConvertDensity`, `PDF`, `PDFLight` and `PDFLightOrigin` take the edges to the previous and next vertex: a curved edge uses its leaving direction for the BSDF/phase evaluation and its Jacobian in place of the squared distance, with the cosine taken against the arrival direction. The walk hook stores `pdfFwd` and `pdfRev` through them, and `MISSum` takes the connection edge (not yet curved; that is 6d). Test: for 2947 curved medium vertices `pdfFwd` equals the phase-function density over the edge Jacobian, and `Vertex.PDF` agrees.
+
+### Stage 6d/6e: curved connections, bdpt enabled
+
+`BDPT.CurvedConnection` connects a vertex inside a refractive medium to any other vertex with the solver (`SolveMultiple` count, curved transmittance by ratio tracking, straight leg from the bounding surface), and the contribution is f·f·beta·beta · count · (cos·cos / J). Used for s>=2,t>=2 and for light samples (s=1) to area lights. Strategies that cannot be curved are excluded consistently from the MIS sums: t=1 (camera sampling) and connections along a curved edge with neither end inside the medium (`CurvedConnectionAllowed`); such paths are found by the walks.
+
+Verified: bdpt with s<=1 against volpath on the bump lens (0.000813 ± 1.0e-5 vs 0.000807 ± 1.0e-5); the weights of the walk-hit and the light-sample strategies of the same path add up to one (worst 1.2e-7, 459 curved paths; mutations of the stored density and the connection edge at the light vertex are caught, the one at the camera vertex is an equivalent mutation because t=1 is excluded); full bdpt against volpath on a grid-index lens with a backdrop and a sphere light (40x30, 256 spp): mean ratio 1.003, difference z = 0.97 (lens region z = 0.26).
+
+Limits: area lights only (infinite, delta and volume lights error out), no equiangular sampling, polarised bdpt and lightpath still refuse (stage 7), no surfaces inside the medium.
