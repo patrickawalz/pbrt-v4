@@ -32,7 +32,7 @@ Fraboni et al., *Can You See the Heat? A Null-Scattering Approach for Refractive
 | 3 | Connection solver: BFGS on the initial direction, the end point of the closest approach, the multiple-path estimate (algorithm 3) | done (`refractiveconnection.cs`), type-2 connections only |
 | 4 | `RefractiveMedium`: bounded, distance sampling along the curve, `n_end^2 / n_start^2` on the throughput, type-1 connections | done (`refractivemedium.cs`) except the boundary stack and the scene wiring, which belong to stage 5 |
 | 5 | Volpath: the walk, and next-event estimation through stage 3 | done for area lights and a non-polarised volpath (see below) |
-| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | done except 6e polish: 6a–6d, bdpt enabled (see "Stage 6 design") |
+| 6 | bdpt: the connections, the reverse densities from the end direction of the curved edge; equiangular sampling is off on refractive segments | 6 done (6a–6e); 7 done: polarised volpath and bdpt (see "Stage 6 design") |
 | 7 | Polarisation: the Stokes frame follows the curve, no Fresnel at the bending, the end directions in `ConnectionMueller` | open |
 
 ## What the tests establish
@@ -179,4 +179,10 @@ volpath on the lens scene (same single scattering radiance within the standard e
 
 Verified: bdpt with s<=1 against volpath on the bump lens (0.000813 ± 1.0e-5 vs 0.000807 ± 1.0e-5); the weights of the walk-hit and the light-sample strategies of the same path add up to one (worst 1.2e-7, 459 curved paths; mutations of the stored density and the connection edge at the light vertex are caught, the one at the camera vertex is an equivalent mutation because t=1 is excluded); full bdpt against volpath on a grid-index lens with a backdrop and a sphere light (40x30, 256 spp): mean ratio 1.003, difference z = 0.97 (lens region z = 0.26).
 
-Limits: area lights only (infinite, delta and volume lights error out), no equiangular sampling, polarised bdpt and lightpath still refuse (stage 7), no surfaces inside the medium.
+Limits: area lights only (infinite, delta and volume lights error out), no equiangular sampling, lightpath still refuses, no surfaces inside the medium.
+
+### Stage 7: polarisation
+
+Light in an isotropic medium with a smoothly varying index keeps its polarisation along the ray without turning about it (Rytov's law, the parallel transport of the electric field), and there is no Fresnel interaction in the bulk. A curved edge therefore carries the Stokes vector between the frames at its two ends by the angle between the frame at one end and the other end's frame carried along the path. `PolarisationTransport` carries a vector of the transverse plane along the path with the steps of the integrator (a rotation about the normal of the old and new tangent at each step); `Attenuation.Transport` is the identity Mueller element between the frames (z along the light, x the carried vector at the entry and the exit). The walk flushes the transport before every vertex that follows a curved edge (`WalkContext.FlushTransport`), the curved connections of bdpt trace the connection edge with the same carry, and the connection Mueller matrices use the directions that the edge leaves along instead of the straight direction to the vertex.
+
+Verified: the transported vector stays perpendicular and of unit length, converges with the step, is fixed out of the plane for a planar path, and for a path with torsion it turns relative to the normal by minus the integral of the torsion computed from the tangents alone (integral -0.7530, turned +0.7531); the polarised radiance of volpath (next event estimate) and of the sampled direction agree; bdpt with s<=1 agrees with volpath for I, S1 and S2 of a side-lit Rayleigh lens (S1 is -87% of I there); a scene symmetric about a plane measures no S2 (3.6e-7 ± 2.5e-7 against S1 = -3.6e-5). Dropping the carry changes S2 of that scene by 13% (3.8 sigma); the volpath/bdpt comparison cannot detect that, since both use the same carry, which is why the torsion test exists.

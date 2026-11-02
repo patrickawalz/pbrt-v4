@@ -147,6 +147,86 @@ namespace pbrt
         }
     }
 
+
+    // (not in pbrt-v4) The transverse vector that the polarisation of light follows along a curved path (Rytov's law): in an
+    // isotropic medium whose index varies smoothly the electric field is carried along the ray without turning about it, so the
+    // vector is rotated, at each step, by the rotation that takes the old tangent to the new one about their common normal. The
+    // Stokes frames at the two ends of an edge differ by the angle between the frame there and this vector.
+    public sealed class PolarisationTransport
+    {
+        // Whether an edge is being followed, its direction and vector at the vertex it left, and the direction and vector now
+        public bool active;
+        public Vector3f startDirection, startVector;
+        public Vector3f tangent, vector;
+        // The state at the last step of the grid (the collisions are partway through a step)
+        Vector3f baseTangent, baseVector;
+        // For tests: the tangent and the vector after each full step, when these are not null
+        public System.Collections.Generic.List<Vector3f> tangentHistory, vectorHistory;
+
+        // The edge leaves a vertex along direction: any vector perpendicular to it is the reference
+        public void Begin(Vector3f direction)
+        {
+            PolarisationFrame frame = default;
+            frame.SetFromZ(pbrt.Normalize(direction));
+            active = true;
+            startDirection = frame.z;
+            startVector = frame.x;
+            tangent = baseTangent = frame.z;
+            vector = baseVector = frame.x;
+        }
+
+        // The same with the given vector (made perpendicular to the direction)
+        public void Begin(Vector3f direction, Vector3f reference)
+        {
+            Vector3f d = pbrt.Normalize(direction);
+            Vector3f x = pbrt.Normalize(reference - d * pbrt.Dot(reference, d));
+            active = true;
+            startDirection = d;
+            startVector = x;
+            tangent = baseTangent = d;
+            vector = baseVector = x;
+        }
+
+        public void End()
+        {
+            active = false;
+        }
+
+        // A full step of the path ended with this tangent
+        public void Advance(Vector3f newTangent)
+        {
+            baseVector = Rotate(baseVector, baseTangent, newTangent);
+            baseTangent = newTangent;
+            tangent = newTangent;
+            vector = baseVector;
+            if (tangentHistory != null)
+            {
+                tangentHistory.Add(newTangent);
+                vectorHistory.Add(baseVector);
+            }
+        }
+
+        // The path is partway through the step, with this tangent
+        public void Report(Vector3f newTangent)
+        {
+            vector = Rotate(baseVector, baseTangent, newTangent);
+            tangent = newTangent;
+        }
+
+        // The rotation about the normal of the two tangents that takes the old to the new, applied to e
+        public static Vector3f Rotate(Vector3f e, Vector3f oldTangent, Vector3f newTangent)
+        {
+            Vector3f axis = pbrt.Cross(oldTangent, newTangent);
+            Float sin = pbrt.Length(axis);
+            Float cos = pbrt.Dot(oldTangent, newTangent);
+            if (sin < 1e-12f)
+                return e;
+            axis = axis / sin;
+            Vector3f rotated = e * cos + pbrt.Cross(axis, e) * sin + axis * (pbrt.Dot(axis, e) * (1 - cos));
+            return pbrt.Normalize(rotated);
+        }
+    }
+
     // RefractiveMedium Definition
     public sealed unsafe class RefractiveMedium : Medium
     {
@@ -248,7 +328,8 @@ namespace pbrt
         public SampledSpectrum SampleT_majCurved(Point3f p, Vector3f direction, Float maxLength, Float u, ref RNG rng,
                                                  SampledWavelengths lambda,
                                                  Func<Point3f, Vector3f, MediumProperties, SampledSpectrum, SampledSpectrum, bool> callback,
-                                                 out Point3f endPoint, out Vector3f endDirection, out Float endLength)
+                                                 out Point3f endPoint, out Vector3f endDirection, out Float endLength,
+                                                 PolarisationTransport transport = null)
         {
             SampledSpectrum sigma_maj = majorant(lambda);
             SymplecticRay ray = new SymplecticRay(field, p, direction);
@@ -292,6 +373,8 @@ namespace pbrt
                 if (nextCollision < segmentEnd)
                 {
                     SymplecticRay atCollision = Partial(field, ray, nextCollision - s);
+                    if (transport != null)
+                        transport.Report(atCollision.Direction());
                     SampledSpectrum T_maj = pbrt.FastExp(-(nextCollision - lastCollision) * sigma_maj);
                     MediumProperties mp = inner.SamplePoint(atCollision.p, lambda);
                     if (!callback(atCollision.p, atCollision.Direction(), mp, sigma_maj, T_maj))
@@ -305,12 +388,16 @@ namespace pbrt
                 if (ended)
                 {
                     SymplecticRay atEnd = Partial(field, ray, segmentEnd - s);
+                    if (transport != null)
+                        transport.Report(atEnd.Direction());
                     endPoint = atEnd.p;
                     endDirection = atEnd.Direction();
                     endLength = segmentEnd;
                     return pbrt.FastExp(-(segmentEnd - lastCollision) * sigma_maj);
                 }
                 ray = next;
+                if (transport != null)
+                    transport.Advance(next.Direction());
                 s = gridEnd;
             }
         }

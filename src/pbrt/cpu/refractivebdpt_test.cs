@@ -11,6 +11,10 @@ namespace pbrt
         const Float LensRadius = 1.5f;
 
         // A bump lens (smooth, index 1.4 at its center) of a scattering medium in a sphere, a camera ray towards it, and an integrator to walk with
+        // The centre of the sphere light of the scene
+        static Vector3f LightPosition = new Vector3f(-3.2f, 0.3f, 0.2f);
+        static Float LightRadius = 1.2f;
+
         static void MakeScene(out RefractiveMedium medium, out VolPathIntegrator integrator, out Camera camera, int samples)
         {
             MakeScene(out medium, out integrator, out camera, out Light[] lights, samples);
@@ -25,9 +29,9 @@ namespace pbrt
             medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.85f), 0.05f,
                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
             Shape boundary = new Sphere(identity, identity, false, LensRadius, -LensRadius, LensRadius, 360);
-            Transform renderFromLight = pbrt.Translate(new Vector3f(-3.2f, 0.3f, 0.2f));
+            Transform renderFromLight = pbrt.Translate(LightPosition);
             Transform lightFromRender = pbrt.Inverse(renderFromLight);
-            Shape lightShape = new Sphere(renderFromLight, lightFromRender, false, 1.2f, -1.2f, 1.2f, 360);
+            Shape lightShape = new Sphere(renderFromLight, lightFromRender, false, LightRadius, -LightRadius, LightRadius, 360);
             ConstantSpectrum Le = new ConstantSpectrum(1);
             Light areaLight = new DiffuseAreaLight(renderFromLight, new MediumInterface(), Le, 1.0f / SpectrumToPhotometric(Le),
                                                    lightShape, null, new Image(), null, false);
@@ -224,6 +228,7 @@ namespace pbrt
             IndependentSampler sampler = new IndependentSampler(samples, 7);
             BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, maxDepth, false, false, false, null,
                                                      false, true, unidirectional);
+            bdpt.skipCameraSampling = !unidirectional;
             VolPathIntegrator reference = new VolPathIntegrator(maxDepth, camera, sampler, volpath.aggregate, lightList, "uniform", false,
                                                                 false, false, 0, PolarisedPathIntegrator.Measurement.Intensity, false, 1,
                                                                 int.MaxValue, false, true);
@@ -312,6 +317,492 @@ namespace pbrt
                                     " mean w0=" + sumWeight0 / Math.Max(paths, 1) + " mean w1=" + sumWeight1 / Math.Max(paths, 1));
             EXPECT_GT(curvedPaths, 300);
             EXPECT_LT(worst, 1e-3);
+        }
+
+        // The transverse vector that the polarisation follows along a curved path (see PolarisationTransport)
+        static void TransportThroughTheLens(Float stepSize, Point3f start, Vector3f direction, Vector3f reference, out Vector3f endDirection,
+                                            out Vector3f endVector, out Float length)
+        {
+            BumpRefractiveIndexField lens = new BumpRefractiveIndexField(new Point3f(0, 0, 0), LensRadius, 0.4f);
+            Bounds3f box = new Bounds3f(new Point3f(-LensRadius, -LensRadius, -LensRadius), new Point3f(LensRadius, LensRadius, LensRadius));
+            Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.0f), new ConstantSpectrum(0.0f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
+            RefractiveMedium medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.0f), stepSize,
+                                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
+            PolarisationTransport transport = new PolarisationTransport();
+            transport.Begin(direction, reference);
+            RNG rng = new RNG(1, 2);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            medium.SampleT_majCurved(start, direction, Infinity, 0.5f, ref rng, lambda,
+                                     (Point3f p, Vector3f t, MediumProperties mp, SampledSpectrum m, SampledSpectrum T) => true,
+                                     out Point3f endPoint, out endDirection, out length, transport);
+            endVector = transport.vector;
+        }
+
+        [TEST("RefractiveBDPT", "PolarisationIsCarriedAlongTheCurve")]
+        public static void RefractiveBDPT_PolarisationIsCarriedAlongTheCurve()
+        {
+            // In a plane (a ray through the centre of the lens at an angle) the out-of-plane vector does not move, and the in-plane
+            // one stays in the plane and perpendicular to the path
+            Point3f planarStart = new Point3f(-1.2f, 0.5f, 0);
+            Vector3f planarDirection = pbrt.Normalize(new Vector3f(1.0f, 0.1f, 0));
+            TransportThroughTheLens(0.01f, planarStart, planarDirection, new Vector3f(0, 0, 1), out Vector3f d1, out Vector3f e1, out Float l1);
+            EXPECT_LT(pbrt.Length(e1 - new Vector3f(0, 0, 1)), 1e-5);
+            TransportThroughTheLens(0.01f, planarStart, planarDirection, new Vector3f(0, 1, 0), out Vector3f d2, out Vector3f e2, out Float l2);
+            EXPECT_LT(Math.Abs(e2.z), 1e-5);
+            EXPECT_LT(Math.Abs(pbrt.Dot(e2, d2)), 1e-5);
+            // The path did bend, so the test of the in-plane vector has an effect
+            EXPECT_GT(pbrt.Length(d1 - planarDirection), 0.02f);
+            EXPECT_LT(pbrt.Length(e2 - new Vector3f(0, 1, 0)), 1.5f);
+            EXPECT_GT(pbrt.Length(e2 - new Vector3f(0, 1, 0)), 0.02f);
+
+            // Off a plane the vector turns about the path (the path has torsion): it stays perpendicular and of unit length, and the
+            // result converges with the step
+            Point3f start = new Point3f(-1.2f, 0.3f, 0.4f);
+            Vector3f direction = pbrt.Normalize(new Vector3f(1.0f, 0.2f, -0.3f));
+            Vector3f reference = new Vector3f(0, 0, 1);
+            TransportThroughTheLens(0.04f, start, direction, reference, out Vector3f dA, out Vector3f eA, out Float lA);
+            TransportThroughTheLens(0.02f, start, direction, reference, out Vector3f dB, out Vector3f eB, out Float lB);
+            TransportThroughTheLens(0.005f, start, direction, reference, out Vector3f dC, out Vector3f eC, out Float lC);
+            Console.Error.WriteLine("MEASURE transport: perpendicular " + pbrt.Dot(eC, dC) + " length " + pbrt.Length(eC) +
+                                    " error h=0.04 " + pbrt.Length(eA - eC) + " h=0.02 " + pbrt.Length(eB - eC));
+            EXPECT_LT(Math.Abs(pbrt.Dot(eC, dC)), 1e-5);
+            EXPECT_LT(Math.Abs(pbrt.Length(eC) - 1), 1e-5);
+            EXPECT_LT(pbrt.Length(eB - eC), pbrt.Length(eA - eC));
+            EXPECT_LT(pbrt.Length(eB - eC), 2e-3);
+            // The vector turned about the path, relative to the one that a rotation-free (flat) carry would give
+            EXPECT_GT(pbrt.Length(eC - reference), 0.02f);
+        }
+
+        // The polarised radiance (a Stokes component) of a camera ray through a lens of a Rayleigh scattering medium, by volpath
+        static void PolarisedLensRadiance(PolarisedPathIntegrator.Measurement measurement, bool nee, int maxDepth, int samples,
+                                          out double mean, out double standardError)
+        {
+            HGPhaseFunction.creationRayleigh = 1;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            HGPhaseFunction.creationRayleigh = 0;
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 9);
+            VolPathIntegrator integrator = new VolPathIntegrator(maxDepth, camera, sampler, volpath.aggregate, lightList, "uniform", false,
+                                                                 true, false, 0, measurement, false, 1, int.MaxValue, false, nee);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double sum = 0, sum2 = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Vector3f rayDirection = pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.2f));
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y), rayDirection);
+                SampledSpectrum L = integrator.Li(ray, ref lambda, sampler, buffer, null);
+                double value = L.Average();
+                sum += value;
+                sum2 += value * value;
+                buffer.Reset();
+            }
+            mean = sum / samples;
+            standardError = Math.Sqrt((sum2 / samples - mean * mean) / samples);
+        }
+
+        // Polarised volpath through the lens: the next event estimate and the sampled direction agree for the Stokes components
+        // that the frame transport along the first curved edge decides (S1 and S2 of the light scattered twice)
+        [TEST("RefractiveBDPT", "PolarisedVolpathThroughTheLens")]
+        public static void RefractiveBDPT_PolarisedVolpathThroughTheLens()
+        {
+            PolarisedPathIntegrator.Measurement[] measurements = { PolarisedPathIntegrator.Measurement.Intensity,
+                                                                    PolarisedPathIntegrator.Measurement.S1,
+                                                                    PolarisedPathIntegrator.Measurement.S2 };
+            foreach (PolarisedPathIntegrator.Measurement measurement in measurements)
+            {
+                PolarisedLensRadiance(measurement, true, 2, 40000, out double nee, out double neeError);
+                PolarisedLensRadiance(measurement, false, 2, 400000, out double direction, out double directionError);
+                Console.Error.WriteLine("MEASURE " + measurement + ": nee " + nee + "+-" + neeError + " direction " + direction + "+-" + directionError);
+                EXPECT_LT(Math.Abs(nee - direction), 4 * Math.Sqrt(neeError * neeError + directionError * directionError));
+            }
+        }
+
+
+        // Two bumps of the index: not symmetric about a point, so the paths in it are not planar
+        sealed class TwoBumpField : RefractiveIndexField
+        {
+            BumpRefractiveIndexField a = new BumpRefractiveIndexField(new Point3f(0.5f, 0.3f, 0.4f), 1.1f, 1.2f);
+            BumpRefractiveIndexField b = new BumpRefractiveIndexField(new Point3f(-0.4f, -0.3f, -0.3f), 1.1f, 1.0f);
+
+            public override void ValueAndGradient(Point3f p, out Float value, out Vector3f gradient)
+            {
+                ValueGradientAndHessian(p, out value, out gradient, out SquareMatrix3 hessian);
+            }
+
+            public override void ValueGradientAndHessian(Point3f p, out Float value, out Vector3f gradient, out SquareMatrix3 hessian)
+            {
+                a.ValueGradientAndHessian(p, out Float va, out Vector3f ga, out SquareMatrix3 ha);
+                b.ValueGradientAndHessian(p, out Float vb, out Vector3f gb, out SquareMatrix3 hb);
+                value = va + vb - 1;
+                gradient = ga + gb;
+                hessian = ha + hb;
+            }
+        }
+
+        // The turning of the transported vector about the path follows Rytov's law: relative to the normal of the path it turns by
+        // minus the torsion of the path, whose integral is computed here from the tangents alone (derivatives of the curve by
+        // finite differences), independently of the rotations that carry the vector
+        [TEST("RefractiveBDPT", "TransportTurnsByTheTorsionOfThePath")]
+        public static void RefractiveBDPT_TransportTurnsByTheTorsionOfThePath()
+        {
+            Float step = 0.02f;
+            RefractiveIndexField lens = new TwoBumpField();
+            Bounds3f box = new Bounds3f(new Point3f(-LensRadius, -LensRadius, -LensRadius), new Point3f(LensRadius, LensRadius, LensRadius));
+            Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.0f), new ConstantSpectrum(0.0f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
+            RefractiveMedium medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.0f), step,
+                                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
+            Point3f[] starts = { new Point3f(1.0f, 0.0f, -0.5f), new Point3f(-1.0f, 0.3f, 0.2f), new Point3f(0.2f, -1.1f, 0.4f),
+                                 new Point3f(0.1f, 0.9f, -0.9f), new Point3f(-0.8f, -0.8f, 0.5f), new Point3f(0.9f, 0.5f, 0.6f) };
+            Vector3f[] directions = { new Vector3f(0.0f, 1.0f, 0.5f), new Vector3f(1.0f, 0.2f, -0.6f), new Vector3f(0.7f, 0.5f, 0.2f),
+                                      new Vector3f(0.4f, -0.5f, 0.8f), new Vector3f(0.6f, 0.4f, -0.7f), new Vector3f(-0.5f, 0.5f, -0.6f) };
+            double largest = 0;
+            for (int ray = 0; ray < starts.Length; ++ray)
+            {
+                Point3f start = starts[ray];
+                Vector3f direction = pbrt.Normalize(directions[ray]);
+                PolarisationTransport transport = new PolarisationTransport();
+                transport.tangentHistory = new List<Vector3f>();
+                transport.vectorHistory = new List<Vector3f>();
+                transport.Begin(direction, new Vector3f(1, 0, 0));
+                transport.tangentHistory.Add(transport.tangent);
+                transport.vectorHistory.Add(transport.vector);
+                RNG rng = new RNG(1, 2);
+                medium.SampleT_majCurved(start, direction, Infinity, 0.5f, ref rng, SampledWavelengths.SampleVisible(0.5f),
+                                         (Point3f p, Vector3f t, MediumProperties mp, SampledSpectrum m, SampledSpectrum T) => true,
+                                         out Point3f endPoint, out Vector3f endDirection, out Float length, transport);
+                List<Vector3f> t = transport.tangentHistory;
+                List<Vector3f> e = transport.vectorHistory;
+                int n = t.Count;
+                EXPECT_GT(n, 60);
+                EXPECT_TRUE(true);
+                // The curvature vector k = dt/ds and its derivative by finite differences, the torsion of the path
+                double integral = 0, maxTorsion = 0, maxCurvature = 0;
+                double angleStart = 0, angleEnd = 0;
+                // Angle of the vector in the plane perpendicular to the path, from the normal (the direction of the curvature)
+                Func<int, double> angle = (int i) =>
+                {
+                    Vector3f k = (t[i + 1] - t[i]) * (1.0f / step);
+                    Vector3f normal = pbrt.Normalize(k);
+                    Vector3f binormal = pbrt.Cross(t[i], normal);
+                    return Math.Atan2(pbrt.Dot(e[i], binormal), pbrt.Dot(e[i], normal));
+                };
+                // Only the part of the path that is bent has a normal
+                int first = 1, last = n - 3;
+                while (first < last && pbrt.Length(t[first + 1] - t[first]) / step < 0.08f)
+                    ++first;
+                while (last > first && pbrt.Length(t[last + 2] - t[last + 1]) / step < 0.08f)
+                    --last;
+                angleStart = angle(first);
+                angleEnd = angle(last);
+                for (int i = first; i < last; ++i)
+                {
+                    Vector3f k0 = (t[i + 1] - t[i]) * (1.0f / step);
+                    Vector3f k1 = (t[i + 2] - t[i + 1]) * (1.0f / step);
+                    Vector3f dk = (k1 - k0) * (1.0f / step);
+                    Vector3f km = (k0 + k1) * 0.5f;
+                    Vector3f tm = pbrt.Normalize(t[i] + t[i + 1]);
+                    double curvature2 = pbrt.LengthSquared(km);
+                    double torsion = pbrt.Dot(tm, pbrt.Cross(km, dk)) / curvature2;
+                    integral += torsion * step;
+                    maxTorsion = Math.Max(maxTorsion, Math.Abs(torsion));
+                    maxCurvature = Math.Max(maxCurvature, Math.Sqrt(curvature2));
+                }
+                // The angle is of the vector from the normal, which turns by +torsion in the frame that the vector does not turn in
+                double turned = angleEnd - angleStart;
+                while (turned > Math.PI) turned -= 2 * Math.PI;
+                while (turned < -Math.PI) turned += 2 * Math.PI;
+                Console.Error.WriteLine("MEASURE torsion: steps " + n + " max curvature " + maxCurvature + " max torsion " + maxTorsion +
+                                        " integral " + integral + " vector turned relative to the normal " + turned);
+                largest = Math.Max(largest, Math.Abs(integral));
+                if (Math.Abs(integral) > 0.01 || Math.Abs(turned) > 0.01)
+                    EXPECT_LT(Math.Abs(turned + integral), 0.02);
+
+            }
+            EXPECT_GT(largest, 0.05);
+        }
+
+        // The polarised radiance of the camera ray through the lens of a Rayleigh medium lit from the side, by volpath or by bdpt with
+        // the strategies of a unidirectional path tracer (the scattering is near 90 degrees, so the light is strongly polarised and
+        // the frames that the curved edges carry decide S1 and S2)
+        static void PolarisedSideLitRadiance(bool useBDPT, PolarisedPathIntegrator.Measurement measurement, int maxDepth, int samples,
+                                             out double mean, out double standardError, bool planar = false)
+        {
+            Vector3f savedLight = LightPosition;
+            LightPosition = new Vector3f(0.3f, -3.2f, planar ? 0.0f : 0.4f);
+            HGPhaseFunction.creationRayleigh = 1;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            HGPhaseFunction.creationRayleigh = 0;
+            LightPosition = savedLight;
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 13);
+            PolarisedPathIntegrator.Sensor sensor = new PolarisedPathIntegrator.Sensor();
+            sensor.analyser = false;
+            sensor.analyserAngle = 0;
+            sensor.measurement = measurement;
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, maxDepth, false, false, false, sensor,
+                                                     false, true, true);
+            VolPathIntegrator reference = new VolPathIntegrator(maxDepth, camera, sampler, volpath.aggregate, lightList, "uniform", false,
+                                                                true, false, 0, measurement, false, 1, int.MaxValue, false, true);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double sum = 0, sum2 = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Vector3f rayDirection = pbrt.Normalize(new Vector3f(-1.0f, 0.05f, planar ? 0.0f : 0.2f));
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, (planar ? 0.0f : 0.1f) + 1e-4f * jitter.y), rayDirection);
+                SampledSpectrum L = useBDPT ? bdpt.Li(ray, ref lambda, sampler, buffer, null) : reference.Li(ray, ref lambda, sampler, buffer, null);
+                double value = L.Average();
+                sum += value;
+                sum2 += value * value;
+                buffer.Reset();
+            }
+            mean = sum / samples;
+            standardError = Math.Sqrt((sum2 / samples - mean * mean) / samples);
+        }
+
+        [TEST("RefractiveBDPT", "PolarisedUnidirectionalStrategiesMatchVolpath")]
+        public static void RefractiveBDPT_PolarisedUnidirectionalStrategiesMatchVolpath()
+        {
+            PolarisedPathIntegrator.Measurement[] measurements = { PolarisedPathIntegrator.Measurement.Intensity,
+                                                                    PolarisedPathIntegrator.Measurement.S1,
+                                                                    PolarisedPathIntegrator.Measurement.S2 };
+            foreach (PolarisedPathIntegrator.Measurement measurement in measurements)
+            {
+                PolarisedSideLitRadiance(false, measurement, 1, 60000, out double volpathMean, out double volpathError);
+                PolarisedSideLitRadiance(true, measurement, 1, 60000, out double bdptMean, out double bdptError);
+                Console.Error.WriteLine("MEASURE " + measurement + ": volpath " + volpathMean + "+-" + volpathError + " bdpt " + bdptMean + "+-" + bdptError);
+                EXPECT_LT(Math.Abs(volpathMean - bdptMean), 4 * Math.Sqrt(volpathError * volpathError + bdptError * bdptError));
+            }
+        }
+
+        // A scene that is symmetric about the plane z = 0 (the lens, the light, the camera ray and the camera's up direction in it)
+        // measures no S2 (the 45 degree polarisation changes sign under the reflection), while S1 is strong: a carry of the
+        // polarisation along the curved edge that turned the frames about the path would break that
+        [TEST("RefractiveBDPT", "PolarisedRadianceOfASymmetricSceneHasNoS2")]
+        public static void RefractiveBDPT_PolarisedRadianceOfASymmetricSceneHasNoS2()
+        {
+            PolarisedSideLitRadiance(true, PolarisedPathIntegrator.Measurement.S1, 1, 60000, out double s1, out double s1Error, true);
+            PolarisedSideLitRadiance(true, PolarisedPathIntegrator.Measurement.S2, 1, 60000, out double s2, out double s2Error, true);
+            Console.Error.WriteLine("MEASURE symmetric scene: S1 " + s1 + "+-" + s1Error + " S2 " + s2 + "+-" + s2Error);
+            EXPECT_LT(s1, 0.0);
+            EXPECT_LT(Math.Abs(s2), 4 * s2Error);
+            EXPECT_LT(s2Error, 0.05 * Math.Abs(s1));
+        }
+
+        [TEST("RefractiveBDPT", "ScratchDepth")]
+        public static void RefractiveBDPT_ScratchDepth()
+        {
+            foreach (int depth in new int[] { 2, 3 })
+            {
+                LensRadiance(false, depth, false, 100000, out double volpathMean, out double volpathError);
+                LensRadiance(true, depth, false, 100000, out double bdptMean, out double bdptError);
+                Console.Error.WriteLine("MEASURE depth " + depth + " volpath=" + volpathMean + "+-" + volpathError + " bdpt(all, t>=2)=" + bdptMean + "+-" + bdptError +
+                                        " z=" + (bdptMean - volpathMean) / Math.Sqrt(volpathError * volpathError + bdptError * bdptError));
+            }
+        }
+
+        // The unweighted light sample connection from a scattering point in the lens along the curved path (the contribution of
+        // ConnectBDPT with s = 1, before the weight) against the integral over the surface of the light of the same quantity,
+        // summed on a grid of points with the solver and the exact transmittance of the grey medium
+        [TEST("RefractiveBDPT", "LightSampleMatchesQuadratureOverTheLight")]
+        public static void RefractiveBDPT_LightSampleMatchesQuadratureOverTheLight()
+        {
+            int samples = 400000;
+            HGPhaseFunction.creationRayleigh = 0;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 21);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, true);
+            ScratchBuffer buffer = new ScratchBuffer();
+            // A camera subpath with a vertex inside the lens
+            Vertex[] cameraVertices = null;
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            for (int attempt = 0; attempt < 1000 && cameraVertices == null; ++attempt)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), attempt);
+                Vertex[] candidate = new Vertex[4];
+                for (int v = 0; v < candidate.Length; ++v)
+                    candidate[v] = new Vertex();
+                SampledWavelengths l = lambda;
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f, 0.1f), pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.2f)));
+                int count = BDPT.GenerateCameraSubpath(bdpt, ray, ref l, sampler, buffer, 3, camera, candidate, false);
+                if (count >= 2 && candidate[1].type == VertexType.Medium && BDPT.RefractiveOf(candidate[1]) != null)
+                {
+                    cameraVertices = candidate;
+                    lambda = l;
+                }
+                buffer.Reset();
+            }
+            EXPECT_TRUE(cameraVertices != null);
+            Vertex pt = cameraVertices[1];
+            Vertex[] lightVertices = { new Vertex(), new Vertex() };
+            double sum = 0, sum2 = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(1, 1), i);
+                pstd.optional<Point2f> pRaster = default;
+                Float weight = 0;
+                SampledWavelengths l = lambda;
+                SampledSpectrum L = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 1, 2, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                double value = weight > 0 ? L.Average() / weight : 0;
+                sum += value;
+                sum2 += value * value;
+                buffer.Reset();
+            }
+            double mean = sum / samples, error = Math.Sqrt((sum2 / samples - mean * mean) / samples);
+
+            // The quadrature over the sphere of the light
+            Point3f x = pt.p();
+            Vector3f center = LightPosition;
+            Float radius = 1.2f;
+            Light light = lights[0];
+            RNG rng = new RNG(5, 6);
+            int points = 200000;
+            double integral = 0;
+            int failed = 0;
+            double sigmaT = 0.85;
+            for (int k = 0; k < points; ++k)
+            {
+                // A uniform point of the sphere
+                Float u = 1 - 2 * rng.Uniform<Float>();
+                Float phi = 2 * (Float)Math.PI * rng.Uniform<Float>();
+                Float r = (Float)Math.Sqrt(Math.Max(0, 1 - u * u));
+                Vector3f n = new Vector3f(r * (Float)Math.Cos(phi), r * (Float)Math.Sin(phi), u);
+                Point3f y = new Point3f(center.x + radius * n.x, center.y + radius * n.y, center.z + radius * n.z);
+                RefractiveConnectionOptions options = medium.ConnectionOptions(pbrt.Distance(x, y));
+                options.inside = null;
+                RefractiveConnectionPath path = default;
+                bool found = RefractiveConnection.Solve(medium.BoundedField(), x, y, pbrt.Normalize(y - x), options, out path);
+                if (!found)
+                {
+                    ++failed;
+                    continue;
+                }
+                Float cosEnd = Math.Abs(pbrt.Dot(n, path.endDirection));
+                SampledSpectrum Le = light.L(y, new Normal3f(n.x, n.y, n.z), new Point2f(0, 0), (-1) * path.endDirection, lambda);
+                if (!Le)
+                    continue;
+                // The transmittance of the length in the medium
+                RNG scratch = new RNG(1, 2);
+                medium.SampleT_majCurved(x, path.startDirection, path.length, 0.5f, ref scratch, lambda,
+                                         (Point3f p, Vector3f t, MediumProperties mp, SampledSpectrum m, SampledSpectrum T) => true,
+                                         out Point3f exitPoint, out Vector3f exitDirection, out Float inside);
+                double transmittance = Math.Exp(-sigmaT * inside);
+                SampledSpectrum f = pt.bsdf.f(pt.mi.wo, path.startDirection);
+                integral += f.Average() * Le.Average() * cosEnd / path.areaJacobian * transmittance;
+            }
+            integral *= 4 * Math.PI * radius * radius / points * pt.beta.Average();
+            Console.Error.WriteLine("MEASURE light sample " + mean + "+-" + error + " quadrature " + integral + " (failed solves " + failed + "/" + points + ")" +
+                                    " ratio " + mean / integral);
+            EXPECT_LT(Math.Abs(mean - integral), 4 * error + 0.003 * integral);
+        }
+
+        // The two strategies that find the light after one scattering in the lens each estimate the same integral, before their weights:
+        // the unweighted contributions of the walk that hits the light (s = 0, t = 3) and of the light sample (s = 1, t = 2) agree in the
+        // mean over camera subpaths
+        [TEST("RefractiveBDPT", "UnweightedStrategiesAgreeInTheMean")]
+        public static void RefractiveBDPT_UnweightedStrategiesAgreeInTheMean()
+        {
+            int samples = 300000;
+            LightPosition = new Vector3f(-5.0f, 0.3f, 0.2f);
+            LightRadius = 3.0f;
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, samples);
+            LightPosition = new Vector3f(-3.2f, 0.3f, 0.2f);
+            LightRadius = 1.2f;
+            List<Light> lightList = new List<Light>(lights);
+            IndependentSampler sampler = new IndependentSampler(samples, 31);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, true);
+            ScratchBuffer buffer = new ScratchBuffer();
+            double sumWalk = 0, sumSample = 0, sumDifference2 = 0, sumDifference = 0;
+            double weightedWalk = 0, weightedSample = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                sampler.StartPixelSample(new Point2i(0, 0), i);
+                SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
+                Point2f jitter = sampler.Get2D();
+                RayDifferential ray = new RayDifferential(new Point3f(4.0f, 0.2f + 1e-4f * jitter.x, 0.1f + 1e-4f * jitter.y),
+                                                          pbrt.Normalize(new Vector3f(-1.0f, 0.05f, 0.2f)));
+                Vertex[] cameraVertices = new Vertex[5];
+                for (int v = 0; v < cameraVertices.Length; ++v)
+                    cameraVertices[v] = new Vertex();
+                int count = BDPT.GenerateCameraSubpath(bdpt, ray, ref lambda, sampler, buffer, 3, camera, cameraVertices, false);
+                double walk = 0, sample = 0;
+                if (count >= 2 && cameraVertices[1].type == VertexType.Medium)
+                {
+                    Vertex[] lightVertices = { new Vertex(), new Vertex() };
+                    pstd.optional<Point2f> pRaster = default;
+                    Float weight = 0;
+                    SampledWavelengths l = lambda;
+                    if (count >= 3 && cameraVertices[2].type == VertexType.Surface && cameraVertices[2].si.areaLight != null)
+                    {
+                        SampledSpectrum Lw = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 0, 3, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                        walk = weight > 0 ? Lw.Average() / weight : 0;
+                        weightedWalk += Lw.Average();
+                    }
+                    weight = 0;
+                    l = lambda;
+                    SampledSpectrum Ls = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 1, 2, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
+                    sample = weight > 0 ? Ls.Average() / weight : 0;
+                    weightedSample += Ls.Average();
+                }
+                sumWalk += walk;
+                sumSample += sample;
+                sumDifference += walk - sample;
+                sumDifference2 += (walk - sample) * (walk - sample);
+                buffer.Reset();
+            }
+            double meanDifference = sumDifference / samples;
+            double errorDifference = Math.Sqrt((sumDifference2 / samples - meanDifference * meanDifference) / samples);
+            Console.Error.WriteLine("MEASURE unweighted walk " + sumWalk / samples + " sample " + sumSample / samples + " difference " + meanDifference +
+                                    "+-" + errorDifference + " z=" + meanDifference / errorDifference + "; weighted walk " + weightedWalk / samples +
+                                    " sample " + weightedSample / samples + " total " + (weightedWalk + weightedSample) / samples);
+        }
+
+        [TEST("RefractiveBDPT", "ScratchSolverVersusEdgeJacobian")]
+        public static void RefractiveBDPT_ScratchSolverVersusEdgeJacobian()
+        {
+            MakeScene(out RefractiveMedium medium, out VolPathIntegrator volpath, out Camera camera, out Light[] lights, 10);
+            RNG rng = new RNG(3, 4);
+            double worstJ = 0, sumJ = 0, worstDir = 0, sumDir = 0;
+            int n = 0, failed = 0, failedMultiple = 0, failedEdge = 0, disagree = 0, zeroCount = 0;
+            double sumCount = 0;
+            for (int k = 0; k < 4000; ++k)
+            {
+                Point3f x = new Point3f(1.3f * (2 * rng.Uniform<Float>() - 1), 1.3f * (2 * rng.Uniform<Float>() - 1), 1.3f * (2 * rng.Uniform<Float>() - 1));
+                if (!medium.Contains(x))
+                    continue;
+                Float u = 1 - 2 * rng.Uniform<Float>(), phi = 2 * (Float)Math.PI * rng.Uniform<Float>(), r = (Float)Math.Sqrt(Math.Max(0, 1 - u * u));
+                Point3f y = new Point3f(LightPosition.x + 1.2f * r * (Float)Math.Cos(phi), LightPosition.y + 1.2f * r * (Float)Math.Sin(phi), LightPosition.z + 1.2f * u);
+                RefractiveConnectionOptions options = medium.ConnectionOptions(pbrt.Distance(x, y));
+                bool foundMultiple = medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out int count);
+                bool foundEdge = medium.SolveEdge(x, y, pbrt.Normalize(y - x), out RefractiveEdge edge);
+                if (!foundMultiple) ++failedMultiple;
+                if (!foundEdge) ++failedEdge;
+                if (foundMultiple != foundEdge) ++disagree;
+                if (foundMultiple && count == 0) ++zeroCount;
+                if (foundMultiple) sumCount += count;
+                if (!foundMultiple || !foundEdge)
+                {
+                    ++failed;
+                    continue;
+                }
+                double dj = Math.Abs(path.areaJacobian - edge.areaJacobian) / path.areaJacobian;
+                double dd = pbrt.Length(path.startDirection - edge.startDirection);
+                worstJ = Math.Max(worstJ, dj);
+                sumJ += (edge.areaJacobian - path.areaJacobian) / path.areaJacobian;
+                worstDir = Math.Max(worstDir, dd);
+                sumDir += dd;
+                ++n;
+            }
+            Console.Error.WriteLine("MEASURE solver vs SolveEdge: pairs " + n + " failed " + failed + " J worst " + worstJ + " mean signed " + sumJ / n +
+                                    " direction worst " + worstDir + " mean " + sumDir / n +
+                                    " | failed ConnectToPoint " + failedMultiple + " SolveEdge " + failedEdge + " disagree " + disagree +
+                                    " zero counts " + zeroCount + " mean count " + sumCount / Math.Max(1, n + failedEdge));
         }
     }
 }
