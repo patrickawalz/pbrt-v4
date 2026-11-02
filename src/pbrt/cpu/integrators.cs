@@ -1787,7 +1787,13 @@ namespace pbrt
             else if (type == VertexType.Light && ei.light is VolumeEmissionLight)
                 return emission;
             else if (si.areaLight != null)
+            {
+                // (not in pbrt-v4) After a curved edge the light leaves against the direction in which the edge arrives
+                EdgeGeometry edgeIn = EdgeIn();
+                if (edgeIn.curved)
+                    w = (-1) * edgeIn.arriving;
                 return si.areaLight.L(si.p(), si.n, si.uv, w, lambda);
+            }
             else
                 return new SampledSpectrum(0.0f);
         }
