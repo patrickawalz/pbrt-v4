@@ -256,7 +256,63 @@ namespace pbrt
             MediumTracking.hasRefractive = true;
             this.boundedField = new BoundedRefractiveIndexField(field, this.contains, 1.0f);
             volumeIntegrator = inner.volumeIntegrator;
+            WarnIfIndexIsNotOneOnBoundary();
         }
+
+        // The medium does not model a refraction at its boundary (no Snell's law, no Fresnel), so the index of the field has to be 1 there:
+        // a step in n makes the curved paths of the walks and of the connections disagree about the geometry across the step. Looks for
+        // points of the boundary from random points inside the region.
+        void WarnIfIndexIsNotOneOnBoundary()
+        {
+            RNG rng = new RNG(1, 2);
+            Vector3f extent = bounds.pMax - bounds.pMin;
+            Float diagonal = pbrt.Length(extent);
+            Float worst = 0;
+            int found = 0;
+            for (int attempt = 0; attempt < 4000 && found < 200; ++attempt)
+            {
+                Point3f p = new Point3f(bounds.pMin.x + extent.x * rng.Uniform<Float>(), bounds.pMin.y + extent.y * rng.Uniform<Float>(),
+                                        bounds.pMin.z + extent.z * rng.Uniform<Float>());
+                if (!contains(p))
+                {
+                    continue;
+                }
+                Vector3f direction = pbrt.SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Point3f inside = p;
+                for (int step = 1; step <= 64; ++step)
+                {
+                    Point3f candidate = p + (step * diagonal / 64) * direction;
+                    if (contains(candidate))
+                    {
+                        inside = candidate;
+                        continue;
+                    }
+                    Point3f outside = candidate;
+                    for (int bisection = 0; bisection < 24; ++bisection)
+                    {
+                        Point3f middle = new Point3f(0.5f * (inside.x + outside.x), 0.5f * (inside.y + outside.y), 0.5f * (inside.z + outside.z));
+                        if (contains(middle))
+                        {
+                            inside = middle;
+                        }
+                        else
+                        {
+                            outside = middle;
+                        }
+                    }
+                    field.ValueAndGradient(inside, out Float value, out Vector3f gradient);
+                    worst = Math.Max(worst, Math.Abs(value - 1));
+                    ++found;
+                    break;
+                }
+            }
+            if (worst > 0.005f)
+            {
+                pbrt.Warning(pbrt.StringPrintf("RefractiveMedium: the index is %f away from 1 on the boundary of the medium, which does not model a refraction " +
+                                               "there (Snell's law, Fresnel); make the field 1 on the boundary.", worst));
+            }
+        }
+
 
         public override string ToString()
         {

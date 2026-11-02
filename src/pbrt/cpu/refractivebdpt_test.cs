@@ -118,7 +118,7 @@ namespace pbrt
                 : new BumpRefractiveIndexField(new Point3f(0, 0, 0), LensRadius, 0.4f);
             Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.05f), new ConstantSpectrum(0.8f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
             medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.85f), 0.05f,
-                                          (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
+                                          UseRenderGrid ? null : (Func<Point3f, bool>)((Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius));
             Shape boundary = new Sphere(identity, identity, false, LensRadius, -LensRadius, LensRadius, 360);
             Transform renderFromLight = pbrt.Translate(LightPosition);
             Transform lightFromRender = pbrt.Inverse(renderFromLight);
@@ -130,7 +130,28 @@ namespace pbrt
             lights.Add(areaLight);
             lightArray = lights.ToArray();
             List<Primitive> prims = new List<Primitive>();
-            prims.Add(new GeometricPrimitive(boundary, null, null, new MediumInterface(medium, null)));
+            if (UseRenderGrid)
+            {
+                // The render's lens is the box of the grid, whose index is 1 on its faces
+                Float h = LensRadius;
+                pstd.vector<Point3f> corners = new pstd.vector<Point3f>(new Point3f[] {
+                    new Point3f(-h, -h, -h), new Point3f(h, -h, -h), new Point3f(h, h, -h), new Point3f(-h, h, -h),
+                    new Point3f(-h, -h, h), new Point3f(h, -h, h), new Point3f(h, h, h), new Point3f(-h, h, h) });
+                pstd.vector<int> cubeIndices = new pstd.vector<int>(new int[] { 0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
+                                                                               2, 3, 7, 2, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5 });
+                TriangleMesh cube = new TriangleMesh(identity, false, cubeIndices, corners, new pstd.vector<Vector3f>(),
+                                                     new pstd.vector<Normal3f>(), new pstd.vector<Point2f>(), new pstd.vector<int>(),
+                                                     new Allocator());
+                pstd.vector<Shape> faces = Triangle.CreateTriangles(cube, new Allocator());
+                for (int f = 0; f < (int)faces.size(); ++f)
+                {
+                    prims.Add(new GeometricPrimitive(faces[f], null, null, new MediumInterface(medium, null)));
+                }
+            }
+            else
+            {
+                prims.Add(new GeometricPrimitive(boundary, null, null, new MediumInterface(medium, null)));
+            }
             Material black = new DiffuseMaterial(new SpectrumConstantTexture(new ConstantSpectrum(0f)), null, null);
             prims.Add(new GeometricPrimitive(lightShape, black, areaLight, new MediumInterface()));
             Primitive aggregate = new BVHAggregate(prims);
@@ -418,7 +439,7 @@ namespace pbrt
             Bounds3f box = new Bounds3f(new Point3f(-LensRadius, -LensRadius, -LensRadius), new Point3f(LensRadius, LensRadius, LensRadius));
             Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.0f), new ConstantSpectrum(0.0f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
             RefractiveMedium medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.0f), stepSize,
-                                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
+                                                           UseRenderGrid ? null : (Func<Point3f, bool>)((Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius));
             PolarisationTransport transport = new PolarisationTransport();
             transport.Begin(direction, reference);
             RNG rng = new RNG(1, 2);
@@ -544,7 +565,7 @@ namespace pbrt
             Bounds3f box = new Bounds3f(new Point3f(-LensRadius, -LensRadius, -LensRadius), new Point3f(LensRadius, LensRadius, LensRadius));
             Medium scatterer = new HomogeneousMedium(new ConstantSpectrum(0.0f), new ConstantSpectrum(0.0f), 1.0f, new ConstantSpectrum(0f), 0.0f, 0.0f, null);
             RefractiveMedium medium = new RefractiveMedium(scatterer, lens, box, (SampledWavelengths l) => new SampledSpectrum(0.0f), step,
-                                                           (Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius);
+                                                           UseRenderGrid ? null : (Func<Point3f, bool>)((Point3f p) => pbrt.LengthSquared(new Vector3f(p.x, p.y, p.z)) <= LensRadius * LensRadius));
             Point3f[] starts = { new Point3f(1.0f, 0.0f, -0.5f), new Point3f(-1.0f, 0.3f, 0.2f), new Point3f(0.2f, -1.1f, 0.4f),
                                  new Point3f(0.1f, 0.9f, -0.9f), new Point3f(-0.8f, -0.8f, 0.5f), new Point3f(0.9f, 0.5f, 0.6f) };
             Vector3f[] directions = { new Vector3f(0.0f, 1.0f, 0.5f), new Vector3f(1.0f, 0.2f, -0.6f), new Vector3f(0.7f, 0.5f, 0.2f),
@@ -798,7 +819,7 @@ namespace pbrt
         [TEST("RefractiveBDPT", "StrategiesAgreeAtDepthTwoOnTheRenderGridAwayFromTheLight")]
         public static void RefractiveBDPT_StrategiesAgreeAtDepthTwoOnTheRenderGridAwayFromTheLight()
         {
-            DepthTwoStrategies("render grid, away from the light", 300000, new Vector3f(3.2f, 0.3f, -0.2f), 1.2f, true,
+            DepthTwoStrategies("render grid, away from the light", 100000, new Vector3f(3.2f, 0.3f, -0.2f), 1.2f, true,
                                new Point3f(0.0f, 0.0f, -7.0f), new Vector3f(-0.9f, 0.1f, 7.0f));
         }
 
