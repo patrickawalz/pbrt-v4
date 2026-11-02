@@ -706,12 +706,14 @@ namespace pbrt
             LightRadius = 1.2f;
             List<Light> lightList = new List<Light>(lights);
             IndependentSampler sampler = new IndependentSampler(samples, 37);
-            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, true);
+            BDPTIntegrator bdpt = new BDPTIntegrator(camera, sampler, volpath.aggregate, lightList, 1, false, false, false, null, false, true, false);
             ScratchBuffer buffer = new ScratchBuffer();
             double[] sum = new double[3], sum2 = new double[3];
             double[] weightedSum = new double[3];
+            double totalSum = 0, totalSum2 = 0, unidirectionalSum = 0, unidirectionalSum2 = 0;
             for (int i = 0; i < samples; ++i)
             {
+                double[] weighted = new double[3];
                 sampler.StartPixelSample(new Point2i(0, 0), i);
                 SampledWavelengths lambda = SampledWavelengths.SampleVisible(sampler.Get1D());
                 Point2f jitter = sampler.Get2D();
@@ -737,7 +739,7 @@ namespace pbrt
                     l = lambda;
                     SampledSpectrum Lw = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 0, 4, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
                     value[0] = weight > 0 ? Lw.Average() / weight : 0;
-                    weightedSum[0] += Lw.Average();
+                    weighted[0] = Lw.Average();
                 }
                 if (firstInLens && cameraCount >= 3 && cameraVertices[2].type == VertexType.Medium)
                 {
@@ -745,7 +747,7 @@ namespace pbrt
                     l = lambda;
                     SampledSpectrum Ls = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 1, 3, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
                     value[1] = weight > 0 ? Ls.Average() / weight : 0;
-                    weightedSum[1] += Ls.Average();
+                    weighted[1] = Ls.Average();
                 }
                 if (firstInLens && lightCount >= 2 && lightVertices[1].type == VertexType.Medium)
                 {
@@ -753,15 +755,43 @@ namespace pbrt
                     l = lambda;
                     SampledSpectrum Lc = BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 2, 2, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight);
                     value[2] = weight > 0 ? Lc.Average() / weight : 0;
-                    weightedSum[2] += Lc.Average();
+                    weighted[2] = Lc.Average();
                 }
+                double total = weighted[0] + weighted[1] + weighted[2];
+                totalSum += total;
+                totalSum2 += total * total;
+                // The same path with the two unidirectional strategies alone, whose weights leave the connection out
+                bdpt.unidirectionalStrategies = true;
+                double unidirectionalTotal = 0;
+                if (firstInLens && cameraCount >= 4 && cameraVertices[2].type == VertexType.Medium &&
+                    cameraVertices[3].type == VertexType.Surface && cameraVertices[3].si.areaLight != null)
+                {
+                    weight = 0;
+                    l = lambda;
+                    unidirectionalTotal += BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 0, 4, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight).Average();
+                }
+                if (firstInLens && cameraCount >= 3 && cameraVertices[2].type == VertexType.Medium)
+                {
+                    weight = 0;
+                    l = lambda;
+                    unidirectionalTotal += BDPT.ConnectBDPT(bdpt, ref l, lightVertices, cameraVertices, 1, 3, bdpt.BDPTLightSampler, camera, sampler, ref pRaster, ref weight).Average();
+                }
+                bdpt.unidirectionalStrategies = false;
+                unidirectionalSum += unidirectionalTotal;
+                unidirectionalSum2 += unidirectionalTotal * unidirectionalTotal;
                 for (int k = 0; k < 3; ++k)
                 {
                     sum[k] += value[k];
                     sum2[k] += value[k] * value[k];
+                    weightedSum[k] += weighted[k];
                 }
                 buffer.Reset();
             }
+            double unidirectionalMean = unidirectionalSum / samples;
+            double unidirectionalError = Math.Sqrt((unidirectionalSum2 / samples - unidirectionalMean * unidirectionalMean) / samples);
+            Console.Error.WriteLine("MEASURE depth two unidirectional weighted total " + unidirectionalMean + "+-" + unidirectionalError);
+            double totalMean = totalSum / samples;
+            double totalError = Math.Sqrt((totalSum2 / samples - totalMean * totalMean) / samples);
             double[] mean = new double[3], error = new double[3];
             for (int k = 0; k < 3; ++k)
             {
@@ -771,7 +801,13 @@ namespace pbrt
             Console.Error.WriteLine("MEASURE depth two unweighted walk(0,4) " + mean[0] + "+-" + error[0] + " light sample(1,3) " + mean[1] + "+-" + error[1] +
                                     " connection(2,2) " + mean[2] + "+-" + error[2] + "; weighted " + weightedSum[0] / samples + " " +
                                     weightedSum[1] / samples + " " + weightedSum[2] / samples + " total " +
-                                    (weightedSum[0] + weightedSum[1] + weightedSum[2]) / samples);
+                                    (weightedSum[0] + weightedSum[1] + weightedSum[2]) / samples +
+                                    " total from samples " + totalMean + "+-" + totalError + " against the walk " + mean[0] + "+-" + error[0] +
+                                    " z=" + (totalMean - mean[0]) / Math.Sqrt(totalError * totalError + error[0] * error[0]));
+            // The weights of all the strategies of such paths add up to one, with the connection and without it
+            EXPECT_LT(Math.Abs(totalMean - mean[0]), 4 * Math.Sqrt(totalError * totalError + error[0] * error[0]));
+            EXPECT_LT(Math.Abs(unidirectionalMean - mean[0]), 4 * Math.Sqrt(unidirectionalError * unidirectionalError + error[0] * error[0]));
+            EXPECT_LT(Math.Abs(mean[1] - mean[0]), 4 * Math.Sqrt(error[1] * error[1] + error[0] * error[0]));
         }
 
         // The two strategies that find the light after one scattering in the lens each estimate the same integral, before their weights:
