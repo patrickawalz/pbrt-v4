@@ -34,6 +34,7 @@ namespace pbrt
         public double epsilon = 1e-8;
         public int maxSteps = 32768;
         public double relaxation = 1.2;
+        public double validation = 2;
         public double lipschitzFactor = 1;
         public SdfUvMapping uvMapping = SdfUvMapping.Spherical;
         public int tessellation = 64;
@@ -60,6 +61,7 @@ namespace pbrt
             this.upper = new SdfVector(upper.x, upper.y, upper.z);
             lipschitz = field.Lipschitz() * options.lipschitzFactor;
             localBounds = field.HasLocalBounds();
+            rigorousField = field.IsRigorous();
             SdfVector extent = this.upper - this.lower;
             scale = extent.Length();
             epsilon = options.epsilon * scale;
@@ -113,13 +115,26 @@ namespace pbrt
         {
             uHit = 0;
             double u = u0;
-            double previousRadius = 0, stepLength = 0, omega = options.relaxation, previousU = u0;
+            double previousRadius = 0, stepLength = 0, omega = rigorousField ? options.relaxation : 1.0, previousU = u0;
             double side = field.Evaluate(o + w * u0) < 0 ? -1 : 1;
+            bool validate = !rigorousField && options.validation > 0;
+            double previousSigned = 0;
             for (int step = 0; step < options.maxSteps; ++step)
             {
                 SdfVector p = o + w * u;
                 double f = field.Evaluate(p);
                 double distance = Math.Abs(f);
+                if (validate && step > 0 && Math.Abs(stepLength) > 8 * epsilon &&
+                    previousSigned - side * f > options.validation * Math.Abs(stepLength))
+                {
+                    // The estimate fell faster than a distance can along this step, so it overestimated the distance at the previous
+                    // point: take half of the step instead (the previous point stays the reference)
+                    stepLength *= 0.5;
+                    u = previousU + stepLength;
+                    omega = 1;
+                    continue;
+                }
+                previousSigned = side * f;
                 double signedRadius = side * f / StepBound(p, distance);
                 double radius = Math.Abs(signedRadius);
                 if (omega > 1 && radius + previousRadius < stepLength)
@@ -568,6 +583,7 @@ namespace pbrt
             options.epsilon = parameters.GetOneFloat("epsilon", (Float)options.epsilon);
             options.maxSteps = parameters.GetOneInt("maxsteps", options.maxSteps);
             options.relaxation = Math.Max(1.0, parameters.GetOneFloat("relaxation", (Float)options.relaxation));
+            options.validation = Math.Max(0.0, parameters.GetOneFloat("validation", (Float)options.validation));
             options.lipschitzFactor = parameters.GetOneFloat("lipschitz", 1);
             options.tessellation = parameters.GetOneInt("tessellation", options.tessellation);
             options.areaSubdivisions = parameters.GetOneInt("areasubdivisions", options.areaSubdivisions);
@@ -614,7 +630,7 @@ namespace pbrt
         private readonly SdfShapeOptions options;
         private readonly SdfVector lower, upper;
         private readonly double lipschitz, scale, epsilon, gradientStep;
-        private readonly bool localBounds;
+        private readonly bool localBounds, rigorousField;
         private readonly double[] objectFromRenderMatrix, renderFromObjectMatrix;
         private SdfSurfaceSampler sampler;
         private readonly object samplerLock = new object();

@@ -202,6 +202,35 @@ namespace pbrt
             EXPECT_GT(found, rays / 20);
         }
 
+        [TEST("Sdf", "MandelbulbSlopeStatistics")]
+        public static void Sdf_MandelbulbSlopeStatistics()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 3;
+            SdfNode field = SdfParser.Parse("mandelbulb(8, 8)", context);
+            RNG rng = new RNG(5);
+            double worst = 0;
+            int above = 0, total = 0;
+            for (int i = 0; i < 400000; ++i)
+            {
+                SdfVector a = new SdfVector((rng.Uniform<double>() - 0.5) * 3, (rng.Uniform<double>() - 0.5) * 3, (rng.Uniform<double>() - 0.5) * 3);
+                double scale = Math.Pow(10, -4 * rng.Uniform<double>());
+                SdfVector b = a + new SdfVector(rng.Uniform<double>() - 0.5, rng.Uniform<double>() - 0.5, rng.Uniform<double>() - 0.5) * scale;
+                double length = (b - a).Length();
+                double slope = Math.Abs(field.Evaluate(a) - field.Evaluate(b)) / length;
+                ++total;
+                if (slope > field.Lipschitz())
+                {
+                    ++above;
+                }
+                worst = Math.Max(worst, slope);
+            }
+            Console.WriteLine("mandelbulb slope: bound " + field.Lipschitz() + ", worst " + worst + ", pairs above the bound " + above + " of " + total);
+            // The estimate really does exceed its nominal bound, so it must not be reported as rigorous
+            EXPECT_TRUE(!field.IsRigorous());
+            EXPECT_GT(above, 0);
+        }
+
         [TEST("Sdf", "TracingIsConservative")]
         public static void Sdf_TracingIsConservative()
         {
@@ -214,7 +243,7 @@ namespace pbrt
             CheckNoMissedHits("scale(ellipsoid(1,.5,.3), 1.2, 1, 1)", 2, 600);
             CheckNoMissedHits("repeat(sphere(.25), 1, 1, 1, 1)", 2, 600);
             // The Mandelbulb's estimate is not Lipschitz bounded (IsRigorous is false), so a few misses are expected
-            CheckNoMissedHits("mandelbulb(8, 8)", 1.5, 600, 1.2, 0.03);
+            CheckNoMissedHits("mandelbulb(8, 8)", 1.5, 6000, 1.2, 0.005);
             CheckNoMissedHits("gyroid(1.5, .08) & sphere(1.4)", 2, 600);
             CheckNoMissedHits("menger(3)", 1.5, 400);
             CheckNoMissedHits("mirror(translate(cone(.4, 1), .4, -.5, 0), \"x\")", 2, 400);
