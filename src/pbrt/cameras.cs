@@ -1343,7 +1343,58 @@ namespace pbrt
         // (function-local "static RNG rng" in TestExitPupilBounds)
         static RNG testExitPupilBoundsRng = new RNG();
 
-        Float TraceLensesFromScene(Ray rCamera, Ray* rOut)
+        // (not in pbrt-v4) The Mueller matrix of the lens system for light that goes through it (see PolarisedSensor)
+        sealed class LensMueller
+        {
+            public PolarisedLightSystem.Attenuation attenuation = PolarisedLightSystem.Attenuation.Identity();
+        }
+
+        // A lens space vector in render space (lens space has z the other way round than camera space)
+        Vector3f RenderFromLens(Vector3f v)
+        {
+            return RenderFromCamera(new Vector3f(v.x, v.y, -v.z), 0);
+        }
+
+        // (not in pbrt-v4) The light that goes through a refracting element interface: the transmission Mueller matrix of the Fresnel
+        // equations, in the frames of the plane of incidence of that interface (the x axis is the s axis). The scalar factors of
+        // radiance of the interfaces (eta^2 of each) cancel in a lens system that starts and ends in air.
+        void RecordTransmission(LensMueller recorder, Vector3f travelIn, Vector3f travelOut, Normal3f n, Float eta)
+        {
+            Vector3f normal = new Vector3f(n.x, n.y, n.z);
+            Float cosTheta = pbrt.Dot(normal, -travelIn);
+            pbrt.FrDielectricPolarised(cosTheta, eta, out Float Fs, out Float Fp, out Float Ds, out Float Dp);
+            PolarisedLightSystem.Attenuation transmission = PolarisedLightSystem.Attenuation.Fresnel(new SampledSpectrum(1.0f),
+                                                                                                    1 - Fs, 1 - Fp, 0, 0);
+            transmission = transmission.Scattered(RenderFromLens(travelOut), RenderFromLens(-travelIn), RenderFromLens(normal), true);
+            // Later interfaces act after the earlier ones
+            recorder.attenuation = transmission * recorder.attenuation;
+        }
+
+        public override bool PolarisedSensor(Ray ray, out PolarisedLightSystem.Attenuation optics, out Vector3f sensorDirection,
+                                             out Vector3f sensorUp)
+        {
+            optics = default;
+            sensorDirection = default;
+            sensorUp = default;
+            // The light goes along -ray.d through the optics, from the front element to the film
+            Vector3f dCamera = CameraFromRender(-ray.d, ray.time);
+            Point3f oCamera = CameraFromRender(ray.o, ray.time);
+            LensMueller recorder = new LensMueller();
+            Ray rFilm;
+            // Start a little in front of the first element so that the trace meets it
+            Float back = 1e-3f * std.max(1, LensFrontZ());
+            Ray rScene = new Ray(oCamera - back * pbrt.Normalize(dCamera), pbrt.Normalize(dCamera));
+            if (TraceLensesFromScene(rScene, &rFilm, recorder) == 0)
+                return false;
+            optics = recorder.attenuation;
+            // The light arrives at the film along the direction of the ray that ends there; the up of the image is -y on the film
+            // (the lens turns the image over, and the row 0 of the film is the lowest y)
+            sensorDirection = pbrt.Normalize(RenderFromCamera(rFilm.d, ray.time));
+            sensorUp = RenderFromCamera(new Vector3f(0, -1, 0), ray.time);
+            return true;
+        }
+
+        Float TraceLensesFromScene(Ray rCamera, Ray* rOut, LensMueller recorder = null)
         {
             Float elementZ = -LensFrontZ();
             // Transform _rCamera_ from camera to lens system space
@@ -1388,6 +1439,10 @@ namespace pbrt
                     Float eta_t = (elementInterfaces[(ulong)i].eta != 0) ? elementInterfaces[(ulong)i].eta : 1;
                     if (!pbrt.Refract(pbrt.Normalize(-rLens.d), n, eta_t / eta_i, null, &wt))
                         return 0;
+                    if (recorder != null)
+                    {
+                        RecordTransmission(recorder, pbrt.Normalize(rLens.d), pbrt.Normalize(wt), n, eta_t / eta_i);
+                    }
                     rLens.d = wt;
                 }
                 elementZ += element.thickness;

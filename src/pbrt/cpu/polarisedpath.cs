@@ -178,6 +178,7 @@ namespace pbrt
             bool specularBounce = false;
             LightSampleContext prevIntrCtx = default;
             Vector3f cameraDirection = -ray.d;
+            Ray cameraRay = new Ray(ray);
 
             while (true)
             {
@@ -262,7 +263,7 @@ namespace pbrt
                 }
             }
 
-            return Measure(L, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+            return MeasureCameraRay(camera, cameraRay, L, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
         }
 
         // What the sensor measures of the light that arrives from the direction toward the camera
@@ -273,7 +274,23 @@ namespace pbrt
                 return L.GetIntensity();
             Attenuation sensor = analyser ? Attenuation.LinearPolariser(analyserAngle) : Attenuation.Identity();
             sensor = sensor.ForSensor(cameraDirection, cameraUp);
-            StokesVector measured = (sensor * L).ToStokesVector();
+            return Select((sensor * L).ToStokesVector(), analyser, measurement);
+        }
+
+        // (not in pbrt-v4) The same for light that arrives along a camera ray, through the polarising optics of the camera if it has
+        // any (see Camera.PolarisedSensor): the light goes through the optics, and the sensor is on the film
+        internal static SampledSpectrum MeasureCameraRay(Camera camera, Ray cameraRay, PLight L, bool analyser, Float analyserAngle,
+                                                         Measurement measurement, Vector3f cameraDirection, Vector3f cameraUp)
+        {
+            if (!camera.PolarisedSensor(cameraRay, out Attenuation optics, out Vector3f sensorDirection, out Vector3f sensorUp))
+                return Measure(L, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+            Attenuation sensor = analyser ? Attenuation.LinearPolariser(analyserAngle) : Attenuation.Identity();
+            sensor = sensor.ForSensor(sensorDirection, sensorUp);
+            return Select((sensor * (optics * L)).ToStokesVector(), analyser, measurement);
+        }
+
+        static SampledSpectrum Select(StokesVector measured, bool analyser, Measurement measurement)
+        {
             switch (measurement)
             {
             case Measurement.S1:

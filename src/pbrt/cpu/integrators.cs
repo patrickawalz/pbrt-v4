@@ -4600,7 +4600,7 @@ namespace pbrt
             try
             {
                 PathWalk.Run(ctx, hook);
-                return Finish(hook.L, hook.pL, hook.cameraDirection);
+                return Finish(hook.L, hook.pL, hook.cameraDirection, new Ray(ray));
             }
             finally
             {
@@ -5102,11 +5102,11 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) The radiance of the path: the scalar one, or what the sensor measures of the Stokes vector
-        SampledSpectrum Finish(SampledSpectrum L, PLight pL, Vector3f cameraDirection)
+        SampledSpectrum Finish(SampledSpectrum L, PLight pL, Vector3f cameraDirection, Ray cameraRay)
         {
             if (!polarised)
                 return L;
-            return PolarisedPathIntegrator.Measure(pL, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, pL, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
         }
 
         // (not in pbrt-v4) Forward next event estimation of the emission of a medium (after "Line Integration for Rendering
