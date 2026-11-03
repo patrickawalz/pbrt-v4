@@ -2823,6 +2823,10 @@ namespace pbrt
             {
                 shapes.push_back(SdfShape.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
             }
+            else if (name == "displacedmesh")
+            {
+                shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
+            }
             else if (name == "bilinearmesh")
             {
                 BilinearPatchMesh mesh = BilinearPatch.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
