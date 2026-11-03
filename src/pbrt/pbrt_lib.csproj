@@ -25,6 +25,7 @@
        CMake build does, instead of being checked in. The tool does not depend on this library; the generated
        sources go to obj/rgbspec and are regenerated only when the tool's source changes. -->
   <ItemGroup>
+    <ProjectReference Include="../opensubdiv_lib/opensubdiv_lib.csproj" />
     <ProjectReference Include="cmd/rgb2spec_opt.csproj" ReferenceOutputAssembly="false"
                       GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;UseAppHost" />
   </ItemGroup>

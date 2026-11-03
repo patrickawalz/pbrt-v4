@@ -13,6 +13,6 @@
     <NoWarn>CS0108;CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../ext/opensubdiv/sdc/*.cs;../../ext/opensubdiv/vtr/*.cs;../../ext/opensubdiv/far/*.cs" />
+    <Compile Include="../ext/opensubdiv/sdc/*.cs;../ext/opensubdiv/vtr/*.cs;../ext/opensubdiv/far/*.cs" />
   </ItemGroup>
 </Project>
