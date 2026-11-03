@@ -324,6 +324,17 @@ On a 2.8 long, 0.07 thick rod seen from 0.45 away, the relative standard deviati
 agree (1.3355 vs 1.3401). In a full image (rod above a diffuse sphere, 16 spp) the error against a 1024 spp reference drops only from
 0.433 to 0.408 (RMSE), because most of the noise there is not the light sampling.
 
+### OpenVDB level sets
+
+`vdb("file.nvdb", "gridname")` in an sdf expression reads a float level set grid (NanoVDB file, grid class LevelSet) as a field, with the
+trilinear reconstruction of the NanoVDB port (an empty grid name takes the first grid; fog volumes are refused). Where the grid has no
+voxel the sample is the background (the half width of the band: a lower bound of the distance outside, negative inside), and beyond the
+bounding box of the active voxels the distance to the box is added, so the field is usable far from the band. The Lipschitz bound is 1.25.
+The grid is a field like any other, so `smoothsubtract(vdb(...), torus(...))`, `offset`, `shell` or an SDF texture density work on it. Test
+file: `scenes/sdf/level_set_torus.nvdb` (written by the C++ NanoVDB, `createLevelSetTorus`; test `Sdf.VdbLevelSetMatchesTheAnalyticTorus`:
+within 2.4e-3 of the analytic torus in the band with 0.05 voxels). The port reads uncompressed .nvdb files only; convert OpenVDB files
+with `nanovdb_convert` (level sets stay level sets).
+
 ## Per-volume integrators (`volumeintegrator.cs`)
 
 As in Fong et al., every medium carries its own integrator, built from two shareable modules. The path estimators

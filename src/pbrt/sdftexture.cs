@@ -159,6 +159,7 @@ namespace pbrt
             SdfParseContext context = new SdfParseContext();
             context.domainRadius = parameters.GetOneFloat("domainradius", 2);
             context.meshLoader = SdfMeshLoader.Load;
+            context.vdbLoader = SdfVdbLoader.Load;
             SdfNode field = SdfParser.Parse(expression, context);
             if (parameters.GetOneBool("compile", true))
             {

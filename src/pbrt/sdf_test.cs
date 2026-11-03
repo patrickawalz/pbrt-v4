@@ -14,6 +14,7 @@ namespace pbrt
             SdfParseContext context = new SdfParseContext();
             context.domainRadius = extent * Math.Sqrt(3);
             context.meshLoader = SdfMeshLoader.Load;
+            context.vdbLoader = SdfVdbLoader.Load;
             SdfNode field = SdfParser.Parse(expression, context);
             return new SdfShape(renderFromObject, Inverse(renderFromObject), reverse, field,
                                 new Point3f((Float)(-extent), (Float)(-extent), (Float)(-extent)),
@@ -610,6 +611,7 @@ namespace pbrt
             SdfParseContext context = new SdfParseContext();
             context.domainRadius = 4;
             context.meshLoader = SdfMeshLoader.Load;
+            context.vdbLoader = SdfVdbLoader.Load;
             string[] expressions = new string[]
             {
                 "sphere(1)", "box(1, .5, .7, .1)", "torus(1, .3)", "cylinder(.5, 1)", "capsule(0,0,0, 0,1,.5, .3)", "plane(0,1,0, .2)",
@@ -934,6 +936,63 @@ namespace pbrt
             EXPECT_GT(compared, 500);
             // The triangle that a point is found in can differ from the one that sampled it, along the borders of the triangles
             EXPECT_GT(close, compared * 97 / 100);
+        }
+
+        // The path of a file of scenes/sdf, searched for upward from the test binary (null when the repository is not around)
+        private static string SceneFile(string name)
+        {
+            string directory = AppContext.BaseDirectory;
+            for (int i = 0; i < 12 && directory != null; ++i)
+            {
+                string candidate = System.IO.Path.Combine(directory, "scenes", "sdf", name);
+                if (System.IO.File.Exists(candidate))
+                {
+                    return candidate;
+                }
+                directory = System.IO.Path.GetDirectoryName(directory);
+            }
+            return null;
+        }
+
+        [TEST("Sdf", "VdbLevelSetMatchesTheAnalyticTorus")]
+        public static void Sdf_VdbLevelSetMatchesTheAnalyticTorus()
+        {
+            string file = SceneFile("level_set_torus.nvdb");
+            if (file == null)
+            {
+                Console.WriteLine("VDB test skipped: scenes/sdf/level_set_torus.nvdb not found");
+                return;
+            }
+            // createLevelSetTorus(0.7, 0.25) with 0.05 voxels and a band of three voxels, written by NanoVDB
+            SdfNode grid = SdfVdbLoader.Load(file, "");
+            EXPECT_TRUE(grid is SdfVdbGrid);
+            RNG rng = new RNG(83);
+            double worstInBand = 0, worstOutside = 0;
+            int inBand = 0, tested = 0;
+            for (int i = 0; i < 5000; ++i)
+            {
+                SdfVector p = new SdfVector(3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5);
+                // NanoVDB makes the torus around the y axis
+                double exact = Math.Sqrt(Math.Pow(Math.Sqrt(p.x * p.x + p.z * p.z) - 0.7, 2) + p.y * p.y) - 0.25;
+                double bestError = Math.Abs(grid.Evaluate(p) - exact);
+                ++tested;
+                if (Math.Abs(exact) < 0.1)
+                {
+                    ++inBand;
+                    worstInBand = Math.Max(worstInBand, bestError);
+                }
+                else
+                {
+                    worstOutside = Math.Max(worstOutside, bestError);
+                }
+            }
+            Console.WriteLine("VDB torus: {0} points, {1} in the band, worst error in the band {2:E2}", tested, inBand, worstInBand);
+            // In the band the trilinear reconstruction is within a fraction of a voxel (0.05) of the distance
+            EXPECT_LT(worstInBand, 0.01);
+            EXPECT_GT(inBand, 100);
+            // The field is a lower bound of the distance outside the band, and never changes sign across the surface
+            EXPECT_LT(grid.Evaluate(new SdfVector(0.7, 0, 0)), 0);
+            EXPECT_GT(grid.Evaluate(new SdfVector(1.3, 0.3, 0.2)), 0);
         }
     }
 }

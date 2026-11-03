@@ -30,6 +30,7 @@ namespace pbrt
         public double domainRadius = 2;
         // Called to make a field from a mesh file (name, resolution, padding); set by the code that knows how to read meshes
         public Func<string, int, double, string, SdfNode> meshLoader;
+        public Func<string, string, SdfNode> vdbLoader;
     }
 
     // SdfParser Definition
@@ -415,6 +416,13 @@ namespace pbrt
                     }
                     return context.meshLoader(Text(a, 0, name), (int)Number(a, 1, 64, name), Number(a, 2, 0.05, name),
                                               a.Count > 3 ? Text(a, 3, name) : "auto");
+                case "vdb":
+                    Count(a, name, 1, 2);
+                    if (context.vdbLoader == null)
+                    {
+                        Fail("vdb: no grid loader available here");
+                    }
+                    return context.vdbLoader(Text(a, 0, name), a.Count > 1 ? Text(a, 1, name) : "");
                 case "union":
                     Count(a, name, 2, 2);
                     return new SdfUnion(Node(a, 0, name), Node(a, 1, name));

@@ -569,6 +569,7 @@ namespace pbrt
                                              Math.Max(lower.y * lower.y, upper.y * upper.y) +
                                              Math.Max(lower.z * lower.z, upper.z * upper.z));
             context.meshLoader = SdfMeshLoader.Load;
+            context.vdbLoader = SdfVdbLoader.Load;
             SdfNode field = SdfParser.Parse(expression, context);
             if (parameters.GetOneBool("compile", true))
             {
