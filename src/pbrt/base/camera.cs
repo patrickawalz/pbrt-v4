@@ -34,6 +34,21 @@ namespace pbrt
         // direction that the light has at the film and sensorUp the direction of the up of the image on the film. A camera
         // without such optics (the default) returns false and the sensor is at the origin of the ray, looking along ray.d with the
         // up of the camera. The optics may depend on the wavelength (in nanometres) of the light.
+        // (not in pbrt-v4) Whether the image of the camera is convolved with the point spread function of diffraction at its aperture,
+        // and the displacement on the film (in pixels) of a sample of that function for the film point pRaster and a wavelength in
+        // nanometres: uSelect, uCell and uInCell are uniform random numbers. A camera without diffraction (the default) has none.
+        public virtual bool HasDiffraction()
+        {
+            return false;
+        }
+
+        public virtual bool SampleDiffractionOffset(Point2f pRaster, Float wavelength, Float uSelect, Float uCell, Point2f uInCell,
+                                                    out Vector2f offsetRaster)
+        {
+            offsetRaster = default;
+            return false;
+        }
+
         public virtual bool PolarisedSensor(Ray ray, Float wavelength, out PolarisedLightSystem.Attenuation optics,
                                             out Vector3f sensorDirection, out Vector3f sensorUp)
         {

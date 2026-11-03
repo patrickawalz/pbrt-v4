@@ -979,7 +979,7 @@ namespace pbrt
     }
 
     // RealisticCamera Definition
-    public sealed unsafe class RealisticCamera : CameraBase
+    public sealed unsafe partial class RealisticCamera : CameraBase
     {
         // RealisticCamera Private Declarations
         struct LensElementInterface
@@ -1515,7 +1515,7 @@ namespace pbrt
                                Float setApertureDiameter, Image apertureImage, Allocator alloc,
                                List<Float> asphericParameters = null, List<Float> abbeNumbers = null,
                                List<Float> sellmeierParameters = null, List<Float> cauchyParameters = null,
-                               List<string> glassNames = null)
+                               List<string> glassNames = null, bool diffraction = false)
             : base(baseParameters)
         {
             elementInterfaces = new pstd.vector<LensElementInterface>();
@@ -1636,6 +1636,13 @@ namespace pbrt
                 Float r1 = (Float)(i + 1) / nSamples * film.Diagonal() / 2;
                 exitPupilBounds[(ulong)i] = BoundExitPupil(r0, r1);
             });
+
+            // (not in pbrt-v4) The point spread functions of diffraction at the pupil
+            this.diffraction = diffraction;
+            if (diffraction)
+            {
+                BuildDiffractionTables();
+            }
 
             // Compute minimum differentials for _RealisticCamera_
             FindMinimumDifferentials(this);
@@ -2405,6 +2412,18 @@ namespace pbrt
                 return null;
             }
 
+            // (not in pbrt-v4) "none" (the default) or "aperture": the image is convolved with the point spread function of diffraction
+            // at the pupil of each film point (see realisticcamera_diffraction.cs)
+            string diffractionMode = parameters.GetOneString("diffraction", "none");
+            if (diffractionMode != "none" && diffractionMode != "aperture")
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"%s\": unknown \"diffraction\" (must be \"none\" or \"aperture\").",
+                                                        diffractionMode));
+                return null;
+            }
+
+            bool diffraction = diffractionMode == "aperture";
+
             int builtinRes = 256;
             Func<Point2f[], Image> rasterize = (Point2f[] vert) =>
             {
@@ -2537,7 +2556,7 @@ namespace pbrt
 
             return new RealisticCamera(cameraBaseParameters, lensParameters, focusDistance, apertureDiameter,
                                        apertureImage, alloc, asphericParameters, abbeNumbers,
-                                       sellmeierParameters, cauchyParameters, glassNames);
+                                       sellmeierParameters, cauchyParameters, glassNames, diffraction);
         }
 
         // RealisticCamera Private Members

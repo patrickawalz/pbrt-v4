@@ -519,7 +519,23 @@ namespace pbrt
 
             // Initialize _CameraSample_ for current sample
             Filter filter = camera.GetFilm().GetFilter();
-            CameraSample cameraSample = GetCameraSample(sampler, pPixel, filter);
+            bool diffraction = camera.HasDiffraction();
+            CameraSample cameraSample;
+            if (diffraction)
+            {
+                // (not in pbrt-v4) The samples are splatted at their film point plus a sample of the point spread function of
+                // diffraction, with the filter of the film, so the film point is uniform in the pixel
+                cameraSample = new CameraSample();
+                cameraSample.pFilm = Options.disablePixelJitter ? new Point2f(pPixel.x + 0.5f, pPixel.y + 0.5f)
+                                                                : new Point2f(pPixel.x, pPixel.y) + (Vector2f)sampler.GetPixel2D();
+                cameraSample.time = sampler.Get1D();
+                cameraSample.pLens = sampler.Get2D();
+                cameraSample.filterWeight = 1;
+            }
+            else
+            {
+                cameraSample = GetCameraSample(sampler, pPixel, filter);
+            }
 
             // Generate camera ray for current sample
             pstd.optional<CameraRayDifferential> cameraRay =
@@ -566,8 +582,45 @@ namespace pbrt
                 NoCameraRay(cameraSample, ref lambda, sampler, scratchBuffer);
             }
             // Add camera ray's contribution to image
+            if (diffraction)
+            {
+                AddCameraSplat(camera, cameraSample.pFilm, L, lambda, sampler);
+                return;
+            }
+
             camera.GetFilm().AddSample(pPixel, L, lambda, visibleSurface,
                                        cameraSample.filterWeight);
+        }
+
+        // (not in pbrt-v4) Adds the contribution L of the geometric image at the film point pFilm to the film: the contribution
+        // of each wavelength of the sample goes to its own point, pFilm plus a sample of the point spread function of diffraction
+        // of the camera at that wavelength (the contribution of a camera without diffraction goes to pFilm)
+        protected static void AddCameraSplat(Camera camera, Point2f pFilm, SampledSpectrum L, SampledWavelengths lambda,
+                                             Sampler sampler)
+        {
+            if (!camera.HasDiffraction())
+            {
+                camera.GetFilm().AddSplat(pFilm, L, lambda);
+                return;
+            }
+
+            for (int i = 0; i < pbrt.NSpectrumSamples; ++i)
+            {
+                // Each wavelength has random numbers of its own: with the same ones the displacements of the wavelengths would all
+                // be in the same direction, a radial colour streak
+                Float uSelect = sampler.Get1D();
+                Float uCell = sampler.Get1D();
+                Point2f uInCell = sampler.Get2D();
+                if (L[i] == 0)
+                {
+                    continue;
+                }
+
+                SampledSpectrum component = new SampledSpectrum(0.0f);
+                component[i] = L[i];
+                camera.SampleDiffractionOffset(pFilm, lambda[i], uSelect, uCell, uInCell, out Vector2f offset);
+                camera.GetFilm().AddSplat(pFilm + offset, component, lambda);
+            }
         }
 
         // (not in pbrt-v4) A sample for which the camera has no ray (a lens system loses part of the samples of the film): what an
@@ -3173,7 +3226,7 @@ namespace pbrt
                     else if ((bool)Lpath)
                     {
                         CHECK(pFilmNew.has_value());
-                        camera.GetFilm().AddSplat(pFilmNew.value(), Lpath, lambda);
+                        AddCameraSplat(camera, pFilmNew.value(), Lpath, lambda, sampler);
                     }
                 }
             }
@@ -3224,7 +3277,7 @@ namespace pbrt
                 if ((bool)Lpath)
                 {
                     CHECK(pFilmNew.has_value());
-                    camera.GetFilm().AddSplat(pFilmNew.value(), Lpath, lambda);
+                    AddCameraSplat(camera, pFilmNew.value(), Lpath, lambda, sampler);
                 }
             }
         }
