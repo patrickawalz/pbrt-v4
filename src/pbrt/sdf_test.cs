@@ -1195,5 +1195,94 @@ namespace pbrt
                 EXPECT_GT(tighter, tested / 4);
             }
         }
+
+        // Rays tangent to the surface, shifted inward by a depth from 1e-5 to 1e-2 times the size of the box, in a random direction of the
+        // tangent plane at a random surface point; the truth is a fine march along the ray for its first sign change
+        private static void GrazingStatistics(string expression, int maxSteps, double relaxation, int count, out int found, out int missed)
+        {
+            SdfShapeOptions options = new SdfShapeOptions();
+            options.maxSteps = maxSteps;
+            options.relaxation = relaxation;
+            SdfShape sdf = MakeShape(expression, new Transform(), 1.5, false, options);
+            SdfNode field = sdf.Field();
+            RNG rng = new RNG(107);
+            found = 0;
+            missed = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                // A random point of the surface: Newton steps from a random point of the box
+                SdfVector q = new SdfVector(2.4 * rng.Uniform<Float>() - 1.2, 2.4 * rng.Uniform<Float>() - 1.2, 2.4 * rng.Uniform<Float>() - 1.2);
+                for (int k = 0; k < 40; ++k)
+                {
+                    double f = field.Evaluate(q);
+                    SdfVector g = field.Gradient(q, 1e-6);
+                    if (Math.Abs(f) < 1e-12 || g.LengthSquared() == 0)
+                    {
+                        break;
+                    }
+                    q = q - g * (f / g.LengthSquared());
+                }
+                if (Math.Abs(field.Evaluate(q)) > 1e-9 || q.Length() > 1.4)
+                {
+                    continue;
+                }
+                SdfVector n = field.Gradient(q, 1e-6).Normalized();
+                SdfVector helper = Math.Abs(n.x) < 0.9 ? new SdfVector(1, 0, 0) : new SdfVector(0, 1, 0);
+                SdfVector e1 = SdfVector.Cross(n, helper).Normalized(), e2 = SdfVector.Cross(n, e1);
+                double angle = 2 * Math.PI * rng.Uniform<Float>();
+                SdfVector direction = e1 * Math.Cos(angle) + e2 * Math.Sin(angle);
+                double depth = 3 * Math.Pow(10, -5 + 3 * rng.Uniform<Float>());
+                SdfVector start = q - direction * 3 - n * depth;
+                Ray ray = new Ray(new Point3f((Float)start.x, (Float)start.y, (Float)start.z),
+                                  new Vector3f((Float)direction.x, (Float)direction.y, (Float)direction.z));
+                // The ray as the renderer sees it (single precision): the fine march uses the same ray
+                double tFine = -1, previous = double.NaN;
+                int fineSteps = 12000;
+                for (int s = 0; s <= fineSteps; ++s)
+                {
+                    double tt = 6.0 * s / fineSteps;
+                    Point3f pp = ray.o + (Float)tt * ray.d;
+                    if (Math.Abs(pp.x) > 1.5 || Math.Abs(pp.y) > 1.5 || Math.Abs(pp.z) > 1.5)
+                    {
+                        previous = double.NaN;
+                        continue;
+                    }
+                    double ff = field.Evaluate(new SdfVector(pp.x, pp.y, pp.z));
+                    if (!double.IsNaN(previous) && (ff < 0) != (previous < 0))
+                    {
+                        tFine = tt;
+                        break;
+                    }
+                    previous = ff;
+                }
+                if (tFine < 0)
+                {
+                    continue;
+                }
+                ++found;
+                if (!sdf.Intersect(ray))
+                {
+                    ++missed;
+                }
+            }
+        }
+
+        [TEST("Sdf", "GrazingStatistics")]
+        public static void Sdf_GrazingStatistics()
+        {
+            string[] expressions = new string[]
+            {
+                "torus(.7, .3)", "twist(box(.4, .9, .4), 1.5)", "displace(sphere(1), .08, 3, 3, .5)"
+            };
+            foreach (string expression in expressions)
+            {
+                GrazingStatistics(expression, 2048, 1.2, 800, out int foundFew, out int missedFew);
+                Console.WriteLine("GRAZE {0} maxsteps 2048: {1} of {2} grazing rays missed", expression, missedFew, foundFew);
+                // The default budget finds every ray that grazes by 3e-5 of the box or more
+                GrazingStatistics(expression, new SdfShapeOptions().maxSteps, 1.2, 800, out int found, out int missed);
+                Console.WriteLine("GRAZE {0} default maxsteps: {1} of {2} grazing rays missed", expression, missed, found);
+                EXPECT_EQ(missed, 0);
+            }
+        }
     }
 }

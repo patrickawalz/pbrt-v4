@@ -9,7 +9,7 @@
 //   Shape "sdf" "string sdf" "smoothunion(sphere(1), translate(box(.5,.5,.5), 1,0,0), .3)"
 //         "point3 pmin" [-2 -2 -2] "point3 pmax" [3 2 2]
 //
-// Optional: "float epsilon" (the hit tolerance relative to the box, 1e-8), "integer maxsteps" (8192), "float relaxation" (1.2, 1
+// Optional: "float epsilon" (the hit tolerance relative to the box, 1e-8), "integer maxsteps" (32768), "float relaxation" (1.2, 1
 // is plain sphere tracing), "float lipschitz" (a factor on the Lipschitz bound that shortens the steps, 1), "string uvmapping"
 // ("spherical", "cylindrical", "planar", "box"), "integer tessellation" (the cells along the longest side of the box used to find
 // the surface for light sampling, 64) and "integer areasubdivisions" (3).
@@ -32,7 +32,7 @@ namespace pbrt
     public sealed class SdfShapeOptions
     {
         public double epsilon = 1e-8;
-        public int maxSteps = 8192;
+        public int maxSteps = 32768;
         public double relaxation = 1.2;
         public double lipschitzFactor = 1;
         public SdfUvMapping uvMapping = SdfUvMapping.Spherical;
