@@ -512,3 +512,57 @@ of the base surface (or in object space), so the surface can overhang and curl, 
 * **Tests** (`Displaced.*`, 55 tests with `Shell.*` and `Sdf.*`, all pass; with the `Vector.*` tests 67): ranges and rectangles give the same surface; triangle ranges cover
   every cell touched; rectangle queries bound the rectangle; storages are lossless and smaller; flat nodes; creases watertight in both windings;
   expression bounds contain values; the procedural field matches the sampled grid; a traversal-cost benchmark at 1025^2 and 4097^2.
+
+## Curved patches and subdivision surfaces ray traced directly
+
+Sources: Tejima, Fujita, Matsuoka, "Direct Ray Tracing of Full-Featured Subdivision Surfaces with Bezier Clipping" (JCGT 2015); Ogaki, Tokuyoshi,
+"Direct Ray Tracing of Phong Tessellation" (EGSR 2011); Vlachos et al., "Curved PN Triangles" (2001, the surface definition only).
+
+Layout:
+- `src/ext/opensubdiv/{sdc,vtr,far}` is a strict C# port of OpenSubdiv 3.8.0 (see `PORTING.md`, and `tests/README.md` for the native-oracle comparison:
+  31 meshes, patch tables and evaluated limit points agree). `src/opensubdiv_lib/opensubdiv_lib.csproj` builds it.
+- `bezierclip.cs`: `BezierPatch4` (watertight cropping and splitting) and `BezierPatchIntersection`, the clipping of the paper (order-4 clipping, the
+  bilinear leaf, `failFlag` and the conservative split).
+- `bezierpatchshape.cs`: `BezierClipPatchShape`, a shape for one patch; the exact surface is evaluated at the hit through a `PatchSurface`.
+- `subdivsurface.cs`: `Shape "catmarksubdiv"`: feature adaptive refinement, regular B-spline patches converted exactly to Bezier, Gregory-basis end caps.
+- `curvedpatches.cs`: `Shape "curvedpatches"` (`"string type"` "pn", "phong", "gregory").
+- `phongtriangle.cs`: Phong tessellation triangles with the conic-pencil intersection of Ogaki and Tokuyoshi (`CurvedMesh` + `PhongTriangleShape`, one
+  shape per triangle with the mesh, like `Triangle`).
+- `displacedpatch.cs`: displacement of any of the above (`"string displacement"` "scalar", "vector", "shell").
+
+Which algorithm each primitive uses:
+- Phong triangles: the conic pencil of the paper (default). With `"bool phongclip" true` (or with displacement) the Bezier clipping of the exact (2,2)
+  patches is used instead.
+- PN triangles, Phong quads, Gregory quads/triangles, subdivision patches: Bezier clipping. A triangle is split into three quads (vertex, edge midpoint,
+  centroid, edge midpoint) with a bilinear map of the barycentric coordinates, which makes a cubic (PN) or quadratic (Phong) Bezier triangle an exact
+  bicubic patch (found by interpolation on a 4 x 4 grid, `BezierFit`). I did not find a paper that ray traces PN triangles, PN quads or Phong quads
+  (Ogaki and Tokuyoshi give the bilinear Phong surface for quads but no ray test), so those use the clipping of Tejima et al. on the exact Bezier form;
+  the PN quad is therefore not provided, only the Phong quad.
+- Gregory patches are rational: the Bezier proxy for the clipping has the averaged inner control points, the exact basis is evaluated at the hit.
+
+Parameters of `curvedpatches`: `type`, `P`, `indices`, `faceVertexCounts` (3 or 4), `N` (computed from the faces when absent), `uv`, `alpha` (0.75),
+`epsilon`, `pixelspread`, `maxlevel`, `uvmargin`, `bezierclip`, `conservative`, and for "gregory" 18 (triangle) or 20 (quad) control points per patch in `P`.
+`catmarksubdiv` takes `P`, `indices`, `faceVertexCounts` or `filename` (PLY), `creaseindices/creaseweights`, `cornerindices/cornerweights`, `holes`,
+`levels`, `boundary`, `creasing`, `trisub` and the clipping parameters above.
+
+Displacement (all shapes above): the displacement field is the `ShellVectorField` of `displacedmesh` (`displacementmap`, or `function` /
+`functionx,y,z` of (u, v), `displacementscale`, `displacementbias`, `resolution`, `vectorspace` "tangent"|"object", `smoothnormals`,
+`displacementdepth`), addressed by the texture coordinates of the patch. A node of the (u, v) quadtree is bounded by its cropped Bezier patch grown by the
+displacement bound; leaves are one cell of the grid, displaced at the corners (two triangles) - so the result is the displaced tessellation of the
+cell grid, and the tests compare it to exactly that.
+- `scalar`: height map along the unit normal of the limit surface, one bound for the patch.
+- `vector`: vector map in the tangent frame (or the object space), one bound for the patch.
+- `shell`: as `vector`/`scalar`, with the bound of every node from the min-max pyramid of the grid under its footprint (the shell traversal on a patch);
+  the image is the same as for `vector`, the traversal is faster for displacement that varies.
+
+Known limitations:
+- The bitwise override of the neighbours' border control points of the paper is not ported; crack-freeness comes from the uv margin, the conservative
+  split and the watertight cropping (verified with ray comparisons against tessellations, `Subdiv.*` and `Curved.*` tests).
+- The size of the leaf is a fixed epsilon (relative to the mesh diagonal) or `pixelspread` (angular size of a pixel); `Shape.Intersect` has no ray
+  differentials. A hit closer than twice that size from the ray origin is ignored (self-intersection of rays leaving the surface).
+- Single crease and infinitely sharp patches are not used (creases are isolated by adaptive refinement).
+- Texture-uv addressing of the displacement grid with non-affine uv is bounded by the corners of the footprint only (exact for the bilinear maps used here).
+- Area lights on these shapes are not supported.
+- The Gregory proxy is not a strict bound; the shape clips against the averaged patch.
+- Phong conic: the pair of lines of the degenerate conic is obtained with the adjugate (not the M11 > M22 branch of the paper), and two Newton steps polish
+  the hits; the bounding box is the box of the six control points of the quadratic Bezier triangle.
