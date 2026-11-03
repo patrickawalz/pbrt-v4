@@ -2850,8 +2850,27 @@ namespace pbrt
                 Float edgeLength = parameters.GetOneFloat("edgelength", 1.0f);
                 edgeLength *= pbrt.Options.displacementEdgeScale;
 
+                string vectorMapName = parameters.GetOneString("vectormap", "");
                 string displacementTexName = parameters.GetTexture("displacement");
-                if (displacementTexName.Length != 0)
+                if (vectorMapName.Length != 0)
+                {
+                    if (displacementTexName.Length != 0)
+                        pbrt.ErrorExit(loc, "plymesh: \"displacement\" and \"vectormap\" cannot both be given.");
+                    string vectorSpace = parameters.GetOneString("vectorspace", "tangent");
+                    if (vectorSpace != "tangent" && vectorSpace != "object")
+                        pbrt.ErrorExit(loc, "plymesh: \"vectorspace\" must be \"tangent\" or \"object\".");
+                    VectorMapImage vectorImage = new VectorMapImage(pbrt.ResolveFilename(vectorMapName),
+                                                                    parameters.GetOneFloat("vectorscale", 1),
+                                                                    parameters.GetOneFloat("vectorbias", 0));
+                    pbrt.LOG_VERBOSE("Starting to vector displace mesh \"%s\" with \"%s\"", filename, vectorMapName);
+                    int origVectorTriCount = (int)(plyMesh.triIndices.size() / 3);
+                    Transform vectorRfo = renderFromObject;
+                    plyMesh = plyMesh.Displace(
+                        (Point3f v0, Point3f v1) => pbrt.Distance(vectorRfo.Apply(v0), vectorRfo.Apply(v1)), edgeLength,
+                        (TriQuadMesh refined) => VectorTessellation.Apply(refined, vectorImage, vectorSpace == "tangent"), loc);
+                    displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origVectorTriCount;
+                }
+                else if (displacementTexName.Length != 0)
                 {
                     if (!floatTextures.TryGetValue(displacementTexName, out FloatTexture displacement))
                         pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: no such texture defined.", displacementTexName));

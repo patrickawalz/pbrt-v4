@@ -336,6 +336,15 @@ namespace pbrt
         public TriQuadMesh Displace(Func<Point3f, Point3f, Float> dist, Float maxDist, MeshDisplaceFunc displace,
                                     FileLoc loc = null)
         {
+            return Displace(dist, maxDist,
+                            (TriQuadMesh refined) => displace(refined.p.data(), refined.n.data(), refined.uv.data(), (int)refined.p.size()), loc);
+        }
+
+        // Displace with a function of the refined mesh, which also gives it the triangles (a vector displacement needs a frame at
+        // every vertex, which comes from the uv of the triangles around it)
+        public TriQuadMesh Displace(Func<Point3f, Point3f, Float> dist, Float maxDist, Action<TriQuadMesh> displace,
+                                    FileLoc loc = null)
+        {
             if (uv.empty())
                 ErrorExit(loc, "Vertex uvs are currently required by Displace(). Sorry.\n");
 
@@ -354,7 +363,7 @@ namespace pbrt
                                   edgeSplit);
 
             // Displace
-            displace(outputMesh.p.data(), outputMesh.n.data(), outputMesh.uv.data(), (int)outputMesh.p.size());
+            displace(outputMesh);
 
             outputMesh.ComputeNormals();
 

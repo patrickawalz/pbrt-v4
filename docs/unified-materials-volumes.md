@@ -431,7 +431,7 @@ Ray Traversal of Hierarchical Structures" (SIGGRAPH Asia 2024 Technical Communic
   computes, so marching would only add the approximation. Area lights on a displaced mesh error out (sampling would need a tessellated
   surrogate). Rays parallel to the base triangles are not traced (measure zero with jittered rays). The uv of a base triangle must lie
   inside one tile of the map. No texture filtering. The `ShellMapTexture` inner texture must be defined under the identity transform.
-  Vector displacement was intentionally not implemented. HDDA majorants (tighter bounds, but branch-heavy) are not implemented. The
+  HDDA majorants (tighter bounds, but branch-heavy) are not implemented. The
   procedural field is slow at very high resolution (about 4-5x the node visits of a grid).
 
 ### Additions: ranges, rectangles, creases, storage, procedural fields
@@ -460,6 +460,39 @@ Files: `shellheights.cs` (height sources and storage), `shellexpression.cs` (exp
   smoothstep, pow (numeric exponent), noise, fbm, turb are evaluated by interval arithmetic for node ranges (noise bounds reuse pbrt
   `NoiseBounds`), so no heights are stored and resolution can reach 2^20 cells. Per-thread direct-mapped caches hold samples and node ranges.
   Measured (fbm, 8 spp): 1k cells 46 s, 16k cells 208 s.
-* **Tests** (`Displaced.*`, 55 tests with `Shell.*` and `Sdf.*`, all pass): ranges and rectangles give the same surface; triangle ranges cover
+### Vector displacement
+
+Files: `vectordisplacement.cs`, tests in `vectordisplacement_test.cs` (`Vector.*`). The displacement is a vector V(u, v) in the tangent frame
+of the base surface (or in object space), so the surface can overhang and curl, which a height map cannot describe. The map is a 3 channel image
+(`"string vectormap"`, `"float vectorscale"` 1, `"float vectorbias"` 0, `"string vectorspace"` "tangent" or "object") or three expressions
+(`"string functionx"`, `"functiony"`, `"functionz"`, bounded by the interval arithmetic of the procedural fields). Two implementations of the same surface:
+
+* **Tessellated, next to pbrt-v4's scalar displacement.** `plymesh` takes `"string vectormap"` in place of `"texture displacement"`; the mesh
+  is refined by `edgelength` as before, and every vertex moves by P + Vx T + Vy B + Vz N instead of P + d N. `TriQuadMesh::Displace` gained an overload
+  that hands the callback the refined mesh (a frame needs the triangles around a vertex). The existing scalar path is unchanged.
+* **Tessellation free, in the shell framework.** `displacedmesh` takes the same parameters. Ogaki's nonlinear traversal needs a height field over
+  the prism, so a vector displacement cannot use it. Instead every base triangle is a BVH primitive whose box bounds its displaced surface, and the
+  min-max pyramid of the map has a 3D box per node. The point of a node is P(a, b) + Vx T(a, b) + Vy B(a, b) + Vz N(a, b), which is multi-affine in
+  (Vx, Vy, Vz, a, b), so the corners of the box of the vectors and of the (a, b) rectangle bound it exactly. The boxes are traversed front to back; a
+  leaf cell has two micro triangles that are clipped to the base triangle, embedded and intersected, and the clip gives two triangles that share
+  an edge the same polyline on it, so the surface is watertight. Nothing is generated and the BVH does not change when the map does.
+* **Frame.** N the unit vertex normal; T the angle weighted sum over the triangles at the vertex of dP/du, made orthogonal to N; B = s N x T with
+  s the orientation of the uv map. Inside a triangle the frame is the linear interpolation of its vertices (not renormalized: that keeps the bounds
+  exact). The tessellated path computes the frame at the vertices of the refined mesh from the refined triangles, so the two agree exactly when
+  dP/du is constant over the mesh and closely on a curved mesh.
+* **Shading normal** (`smoothnormals`): bilinear blend of central difference normals at the four corners of the cell.
+* **Measured** (Debug build): 3000 rays at an overhanging sheet (117 rays cross two or more layers) against a brute force over all micro triangles:
+  0 mismatches, worst t error 1.4e-7; zero lateral vectors against the scalar shell: 1813 hits, 0 mismatches; tessellated against shell on a flat sheet:
+  0 hit/miss disagreements, median |dt| 6e-8; on a curved cap (different frames): 3 of 624 disagreements, median |dt| 1.1e-3; procedural against the
+  sampled grid: 0 mismatches; no cracks on a curved mesh. About 17-20 nodes and 1.6 leaves per trace at 256^2 and 1024^2 cells. Render (480x320, 16 spp,
+  512^2 cells with a curl and fine ripples): shell 70 s; tessellated at edgelength 0.02, 8.9 s; at 0.008, 9.6 s; scalar shell 12 s. The tessellated
+  render converges to the shell as the edge length falls (mean absolute difference of the images 0.0131 at 0.02, 0.0061 at 0.008). The shell is
+  about 6x slower than the scalar shell and 7x slower than the tessellated mesh here: a box test per node and a clip per boundary leaf cost more than
+  the quadratic of the height traversal, and there is no majorant-tightening like the rectangular bounds. Its memory does not grow with detail.
+  `edgelength` 0.005 aborts with a stack overflow in the existing refinement (the limit noted above).
+* **Not done:** compressed storage of vector maps (float only), filtering, area lights, a per-node frame bound for very strongly bent base triangles
+  (the interpolated frame is used as is), and seams where the uv of neighbouring triangles differ (the frame is per vertex).
+
+* **Tests** (`Displaced.*`, 55 tests with `Shell.*` and `Sdf.*`, all pass; with the `Vector.*` tests 67): ranges and rectangles give the same surface; triangle ranges cover
   every cell touched; rectangle queries bound the rectangle; storages are lossless and smaller; flat nodes; creases watertight in both windings;
   expression bounds contain values; the procedural field matches the sampled grid; a traversal-cost benchmark at 1025^2 and 4097^2.

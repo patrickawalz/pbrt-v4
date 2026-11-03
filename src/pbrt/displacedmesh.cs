@@ -36,6 +36,7 @@
 //   "integer rectanglelevel" (2) and "integer rectanglepasses" (2): the smallest level of the quadtree that is bounded with
 //   rectangles, and the rounds of the projection per node,
 //   "string creases" ("weld" or "none"), "float miterlimit" (3: the largest factor on the displacement at a weld).
+// A vector displacement ("string vectormap", or "string functionx", "functiony", "functionz") is described in vectordisplacement.cs.
 // The displacement is along the vertex normals in object space, by scale * texture + offset. The uv of the base triangles should lie
 // within one tile of the map (tiles are repeated by the integer part of the uv of the triangle).
 
@@ -446,6 +447,12 @@ namespace pbrt
         public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters,
                                                 IDictionary<string, FloatTexture> floatTextures, FileLoc loc)
         {
+            if (parameters.GetOneString("vectormap", "").Length != 0 || parameters.GetOneString("functionx", "").Length != 0 ||
+                parameters.GetOneString("functiony", "").Length != 0 || parameters.GetOneString("functionz", "").Length != 0)
+            {
+                // A vector displacement (vectordisplacement.cs)
+                return VectorDisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, loc);
+            }
             string filename = parameters.GetOneString("filename", "");
             MeshData(filename, parameters.GetIntArray("indices"), parameters.GetPoint3fArray("P"), parameters.GetNormal3fArray("N"),
                      parameters.GetPoint2fArray("uv"), loc, out int[] indices, out Point3f[] p, out Normal3f[] n, out Point2f[] uvArray);
