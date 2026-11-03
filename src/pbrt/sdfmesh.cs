@@ -216,7 +216,7 @@ namespace pbrt
             double best = double.MaxValue;
             int bestTriangle = -1, bestFeature = 0;
             SdfVector bestPoint = new SdfVector(0, 0, 0);
-            int[] stack = new int[64];
+            Span<int> stack = stackalloc int[64];
             int stackSize = 0;
             stack[stackSize++] = 0;
             while (stackSize > 0)
@@ -348,7 +348,7 @@ namespace pbrt
             return values[x + countX * (y + countY * z)];
         }
 
-        private static void CubicWeights(double t, double[] w)
+        private static void CubicWeights(double t, Span<double> w)
         {
             double t2 = t * t, t3 = t2 * t;
             w[0] = -0.5 * t3 + t2 - 0.5 * t;
@@ -370,7 +370,9 @@ namespace pbrt
             double value;
             if (cubic)
             {
-                double[] wx = new double[4], wy = new double[4], wz = new double[4];
+                Span<double> wx = stackalloc double[4];
+                Span<double> wy = stackalloc double[4];
+                Span<double> wz = stackalloc double[4];
                 CubicWeights(fx, wx);
                 CubicWeights(fy, wy);
                 CubicWeights(fz, wz);
