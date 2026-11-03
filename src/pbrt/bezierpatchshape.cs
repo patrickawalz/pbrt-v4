@@ -169,7 +169,8 @@ namespace pbrt
             SdfVector direction = new SdfVector(d.x / length, d.y / length, d.z / length);
             double tMaxObject = float.IsPositiveInfinity(tMax) ? 1e30 : tMax * length;
             double eps = BezierPatchIntersection.ComputeEpsilon((center - origin).Length(), settings.pixelSpread, settings.epsilon);
-            return intersection.Test(origin, direction, 0, tMaxObject, eps, out hit);
+            // The hit is found on a leaf of the size eps, so a ray that leaves the surface (a shadow or a bounce ray) must not find its own origin again
+            return intersection.Test(origin, direction, 2 * eps, tMaxObject, eps, out hit);
         }
 
         private SurfaceInteraction InteractionFromHit(Ray ray, BezierClipHit hit)

@@ -573,5 +573,66 @@ namespace pbrt
             CHECK_GT(hits, 150);
             CHECK_LT(worst, 2e-3);
         }
+
+        [TEST("Curved", "PnRaysLeavingTheSurfaceDoNotHitItAgain")]
+        public static void PnRaysLeavingTheSurfaceDoNotHitItAgain()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                CurvedPatches.AddPnTriangle(shapes, mesh.settings, p, nn, null, f);
+            }
+            Random random = new Random(4);
+            int hits = 0, repeated = 0;
+            for (int k = 0; k < 400; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                SdfVector target = new SdfVector(random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1) * 0.6;
+                SdfVector origin = target - dir * 5;
+                Ray ray = new Ray(new Point3f((Float)origin.x, (Float)origin.y, (Float)origin.z), new Vector3f((Float)dir.x, (Float)dir.y, (Float)dir.z));
+                Shape hitShape = null;
+                Float tHit = Infinity;
+                SdfVector surfaceNormal = new SdfVector(0, 0, 1);
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    pstd.optional<ShapeIntersection> hit = shapes[s].Intersect(ray);
+                    if (hit && hit.value().tHit < tHit)
+                    {
+                        tHit = hit.value().tHit;
+                        hitShape = shapes[s];
+                        Normal3f nn = hit.value().intr.n;
+                        surfaceNormal = new SdfVector(nn.x, nn.y, nn.z).Normalized();
+                    }
+                }
+                if (hitShape == null)
+                {
+                    continue;
+                }
+                ++hits;
+                // A ray that leaves the surface from the hit point (nudged out by the precision of a point)
+                SdfVector point = origin + dir * tHit;
+                SdfVector outward = SdfVector.Dot(surfaceNormal, point) >= 0 ? surfaceNormal : -surfaceNormal;
+                SdfVector start = point + outward * 2e-6;
+                Ray leaving = new Ray(new Point3f((Float)start.x, (Float)start.y, (Float)start.z), new Vector3f((Float)outward.x, (Float)outward.y, (Float)outward.z));
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    if (shapes[s].IntersectP(leaving))
+                    {
+                        ++repeated;
+                        break;
+                    }
+                }
+            }
+            CHECK_GT(hits, 200);
+            CHECK_EQ(repeated, 0);
+        }
     }
 }
