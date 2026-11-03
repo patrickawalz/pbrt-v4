@@ -2994,8 +2994,12 @@ namespace pbrt
 
                 PLight Lp = cameraSide * lightSide;
                 Lp *= L;
-                return PolarisedPathIntegrator.Measure(Lp, pol.analyser, pol.analyserAngle, pol.measurement,
-                                                       t == 1 ? toCamera : cameraDirection, pol.cameraUp);
+                // The camera ray of the path: the light arrives along its reverse through the optics of the camera, if it has any
+                Ray cameraRay = t == 1
+                    ? new Ray(sampled.p(), -toCamera, sampled.time())
+                    : new Ray(cameraVertices[0].p(), Normalize(cameraVertices[1].p() - cameraVertices[0].p()), cameraVertices[0].time());
+                return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, Lp, pol.analyser, pol.analyserAngle, pol.measurement,
+                                                                t == 1 ? toCamera : cameraDirection, pol.cameraUp);
             }
 
             lambdaRef = lambda;

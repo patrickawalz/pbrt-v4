@@ -26,13 +26,13 @@ namespace pbrt
             -39.73f, 0.0f, 1.0f, 20.0f
         };
 
-        static RealisticCamera MakeCamera(Point2i resolution)
+        static RealisticCamera MakeCamera(Point2i resolution, string filename = "realisticcamerapolarised_test.exr")
         {
             Transform id = new Transform();
             AnimatedTransform identityA = new AnimatedTransform(id, 0, id, 1);
             Filter filter = new BoxFilter(new Vector2f(0.5f, 0.5f));
             FilmBaseParameters fp = new FilmBaseParameters(resolution, new Bounds2i(new Point2i(0, 0), resolution), filter, 35.0f,
-                                                           PixelSensor.CreateDefault(), "realisticcamerapolarised_test.exr");
+                                                           PixelSensor.CreateDefault(), filename);
             RGBFilm rgbFilm = new RGBFilm(fp, RGBColorSpace.sRGB);
             CameraBaseParameters cbp = new CameraBaseParameters(new CameraTransform(identityA), rgbFilm, null,
                                                                 new ParameterDictionary(), new FileLoc());
@@ -390,6 +390,60 @@ namespace pbrt
                         "density integral " + densityMean + " +- " + densityError + ", fraction of samples " + successFraction);
             EXPECT_NEAR(pathMean, importanceMean, 4 * Math.Sqrt(pathError * pathError + importanceError * importanceError),
                         "path " + pathMean + " +- " + pathError + ", importance " + importanceMean + " +- " + importanceError);
+        }
+
+        // The mean of the image that an integrator renders of the unit sphere with diffuse walls (Kd = 0.5) that emit (Le = 0.5),
+        // seen from its centre through the lens
+        static double RenderMean(bool bidirectional)
+        {
+            Transform identity = new Transform();
+            Shape sphere = new Sphere(identity, identity, true, 1, -1, 1, 360);
+            Material material = new DiffuseMaterial(new SpectrumConstantTexture(new ConstantSpectrum(0.5f)), null, null);
+            ConstantSpectrum Le = new ConstantSpectrum(1);
+            Float scale = 0.5f / pbrt.SpectrumToPhotometric(Le);
+            Light areaLight = new DiffuseAreaLight(identity, new MediumInterface(), Le, scale, sphere, null, new Image(), null, false);
+            List<Light> lights = new List<Light>();
+            lights.Add(areaLight);
+            List<Primitive> prims = new List<Primitive>();
+            prims.Add(new GeometricPrimitive(sphere, material, areaLight, new MediumInterface()));
+            Primitive aggregate = new BVHAggregate(prims);
+
+            Point2i resolution = new Point2i(8, 8);
+            string filename = bidirectional ? "realisticcamera_bdpt_test.exr" : "realisticcamera_volpath_test.exr";
+            RealisticCamera camera = MakeCamera(resolution, filename);
+            Sampler sampler = new ZSobolSampler(256, resolution, RandomizeStrategy.PermuteDigits);
+            Integrator integrator = bidirectional
+                ? new BDPTIntegrator(camera, sampler, aggregate, lights, 6, false, false, false)
+                : (Integrator)new VolPathIntegrator(8, camera, sampler, aggregate, lights);
+            integrator.Render();
+
+            ImageAndMetadata im = Image.Read(filename);
+            double sum = 0;
+            for (int y = 0; y < im.image.Resolution().y; ++y)
+            {
+                for (int x = 0; x < im.image.Resolution().x; ++x)
+                {
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        sum += im.image.GetChannel(new Point2i(x, y), c);
+                    }
+                }
+            }
+
+            System.IO.File.Delete(filename);
+            return sum / (im.image.Resolution().x * im.image.Resolution().y * 3);
+        }
+
+        [TEST("RealisticCameraPolarised", "BDPTMatchesVolPath")]
+        public static void RealisticCameraPolarised_BDPTMatchesVolPath()
+        {
+            // The lens system loses part of the samples of the film: bdpt still has to connect the light subpaths of those
+            // samples to the camera. In the closed emissive sphere the strategies that sample the camera carry a large part of
+            // the image, so a bdpt without them would be dark by a lot more than the tolerance
+            double volpath = RenderMean(false);
+            double bdpt = RenderMean(true);
+            EXPECT_GT(volpath, 0.0);
+            EXPECT_NEAR(volpath, bdpt, 0.015 * volpath, "volpath " + volpath + ", bdpt " + bdpt);
         }
     }
 }
