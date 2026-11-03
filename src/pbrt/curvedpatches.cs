@@ -196,6 +196,12 @@ namespace pbrt
             return new PatchTextureMap(cornerUv);
         }
 
+        public void Evaluate(double u, double v, out double textureU, out double textureV)
+        {
+            textureU = Mix(0, u, v);
+            textureV = Mix(1, u, v);
+        }
+
         // The texture coordinates and the derivatives of the position with respect to them, from the derivatives with respect to (u, v)
         public void Convert(double u, double v, SdfVector dpdu, SdfVector dpdv, out Point2f uv, out SdfVector dpdTextureU, out SdfVector dpdTextureV)
         {
@@ -648,6 +654,7 @@ namespace pbrt
             settings.clip.conservative = parameters.GetOneBool("conservative", false);
 
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            PatchDisplacement displacement0 = PatchDisplacement.Create(parameters, loc);
             if (type == "gregory")
             {
                 int offset = 0;
@@ -683,7 +690,7 @@ namespace pbrt
                         AddGregoryQuad(shapes, settings, control, null, face);
                     }
                 }
-                return shapes;
+                return displacement0 != null ? displacement0.Apply(shapes, settings) : shapes;
             }
 
             if (type != "pn" && type != "phong")
@@ -744,7 +751,8 @@ namespace pbrt
                     mesh.uv[2 * i + 1] = uvList[i].y;
                 }
             }
-            bool useClip = parameters.GetOneBool("phongclip", false);
+            PatchDisplacement displacement = PatchDisplacement.Create(parameters, loc);
+            bool useClip = parameters.GetOneBool("phongclip", false) || displacement != null;
             int cursor = 0;
             for (int f = 0; f < counts.Length; ++f)
             {
@@ -802,7 +810,7 @@ namespace pbrt
                 }
                 cursor += count;
             }
-            return shapes;
+            return displacement != null ? displacement.Apply(shapes, settings) : shapes;
         }
 
         private static void ErrorExit(FileLoc loc, string message, params object[] arguments)

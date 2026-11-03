@@ -366,5 +366,212 @@ namespace pbrt
             CHECK_LT((p1 - control[5]).Length(), 1e-9);
             CHECK_LT((p2 - control[10]).Length(), 1e-9);
         }
+
+        // A flat patch displaced by a height function: the leaves are the cells of the grid, so the triangles of the same grid are the reference
+        private static void FlatPatchAgainstGrid(PatchDisplacementMode mode, string x, string y, string z, out int total, out int missed, out int extra,
+                                                 out double worst, out int skipped)
+        {
+            PatchDisplacement displacement = new PatchDisplacement();
+            displacement.mode = mode;
+            displacement.tangentSpace = true;
+            displacement.smoothNormals = true;
+            int depth = 5;
+            if (mode == PatchDisplacementMode.Scalar)
+            {
+                displacement.field = new ShellVectorProcedural(ShellExpression.Parse("0"), ShellExpression.Parse("0"), ShellExpression.Parse(z), depth, 1);
+            }
+            else
+            {
+                displacement.field = new ShellVectorProcedural(ShellExpression.Parse(x), ShellExpression.Parse(y), ShellExpression.Parse(z), depth, 1);
+            }
+            BezierSurfaceSettings settings = Settings();
+            pstd.vector<Shape> base1 = new pstd.vector<Shape>();
+            SdfVector[] corner = { new SdfVector(0, 0, 0), new SdfVector(1, 0, 0), new SdfVector(0, 1, 0), new SdfVector(1, 1, 0) };
+            SdfVector[] normal = { new SdfVector(0, 0, 1), new SdfVector(0, 0, 1), new SdfVector(0, 0, 1), new SdfVector(0, 0, 1) };
+            CurvedPatches.AddPhongQuad(base1, settings, corner, normal, 0.75, null, 0);
+            pstd.vector<Shape> shapes = displacement.Apply(base1, settings);
+
+            int n = 1 << depth;
+            double[,] gx = new double[n + 1, n + 1];
+            SdfVector[,] grid = new SdfVector[n + 1, n + 1];
+            for (int j = 0; j <= n; ++j)
+            {
+                for (int i = 0; i <= n; ++i)
+                {
+                    displacement.field.Sample(i, j, out double vx, out double vy, out double vz);
+                    // the tangent frame of the flat patch: t = +x, b = +y (cross(n, t)), n = +z
+                    grid[i, j] = new SdfVector((double)i / n + vx, (double)j / n + vy, vz);
+                }
+            }
+            Random random = new Random(9);
+            total = 0;
+            missed = 0;
+            extra = 0;
+            skipped = 0;
+            worst = 0;
+            for (int k = 0; k < 1500; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, -0.3 - random.NextDouble()).Normalized();
+                SdfVector target = new SdfVector(random.NextDouble(), random.NextDouble(), 0);
+                SdfVector origin = target - dir * 3;
+                double expected = double.MaxValue;
+                for (int j = 0; j < n; ++j)
+                {
+                    for (int i = 0; i < n; ++i)
+                    {
+                        SubdivisionSurfaceTests.MoellerHit(origin, dir, new SdfVector[] { grid[i, j], grid[i + 1, j], grid[i, j + 1] }, out double t);
+                        if (t > 0 && t < expected)
+                        {
+                            expected = t;
+                        }
+                        SubdivisionSurfaceTests.MoellerHit(origin, dir, new SdfVector[] { grid[i + 1, j], grid[i + 1, j + 1], grid[i, j + 1] }, out t);
+                        if (t > 0 && t < expected)
+                        {
+                            expected = t;
+                        }
+                    }
+                }
+                double actual = Closest(shapes, origin, dir);
+                if (expected < double.MaxValue)
+                {
+                    ++total;
+                    if (actual == double.MaxValue)
+                    {
+                        ++missed;
+                    }
+                    else
+                    {
+                        worst = Math.Max(worst, Math.Abs(actual - expected));
+                    }
+                }
+                else if (actual < double.MaxValue)
+                {
+                    ++extra;
+                }
+            }
+        }
+
+        [TEST("Curved", "DisplacedScalarPatchMatchesTheGrid")]
+        public static void DisplacedScalarPatchMatchesTheGrid()
+        {
+            FlatPatchAgainstGrid(PatchDisplacementMode.Scalar, "0", "0", "0.08 * sin(9 * u) * cos(7 * v) + 0.05", out int total, out int missed, out int extra,
+                                 out double worst, out int skipped);
+            Console.WriteLine("scalar: hits " + total + " missed " + missed + " extra " + extra + " worst t " + worst);
+            CHECK_GT(total, 800);
+            CHECK_LT(missed, 4);
+            CHECK_LT(extra, 4);
+            CHECK_LT(worst, 1e-4);
+        }
+
+        [TEST("Curved", "DisplacedVectorPatchMatchesTheGrid")]
+        public static void DisplacedVectorPatchMatchesTheGrid()
+        {
+            FlatPatchAgainstGrid(PatchDisplacementMode.Vector, "0.05 * sin(6 * v)", "0.05 * cos(5 * u)", "0.08 * sin(9 * u) * cos(7 * v)", out int total,
+                                 out int missed, out int extra, out double worst, out int skipped);
+            Console.WriteLine("vector: hits " + total + " missed " + missed + " extra " + extra + " worst t " + worst);
+            CHECK_GT(total, 600);
+            CHECK_LT(missed, 6);
+            CHECK_LT(extra, 6);
+            CHECK_LT(worst, 1e-4);
+        }
+
+        [TEST("Curved", "DisplacedShellPatchMatchesTheGrid")]
+        public static void DisplacedShellPatchMatchesTheGrid()
+        {
+            FlatPatchAgainstGrid(PatchDisplacementMode.Shell, "0.05 * sin(6 * v)", "0.05 * cos(5 * u)", "0.08 * sin(9 * u) * cos(7 * v)", out int total,
+                                 out int missed, out int extra, out double worst, out int skipped);
+            Console.WriteLine("shell: hits " + total + " missed " + missed + " extra " + extra + " worst t " + worst);
+            CHECK_GT(total, 600);
+            CHECK_LT(missed, 6);
+            CHECK_LT(extra, 6);
+            CHECK_LT(worst, 1e-4);
+        }
+
+        // The distance of a point from the surface X(s, t) + height N(s, t), by Gauss-Newton from the best point of a coarse grid
+        private static double OffsetResidual(PhongTriangle surface, double height, SdfVector point)
+        {
+            double bs = 0, bt = 0, best = double.MaxValue;
+            int n = 24;
+            for (int j = 0; j <= n; ++j)
+            {
+                for (int i = 0; i <= n - j; ++i)
+                {
+                    double s = (double)i / n, t = (double)j / n;
+                    double d = (surface.Position(s, t) + height * surface.Normal(s, t) - point).Length();
+                    if (d < best)
+                    {
+                        best = d;
+                        bs = s;
+                        bt = t;
+                    }
+                }
+            }
+            double h = 1e-6;
+            for (int iteration = 0; iteration < 30; ++iteration)
+            {
+                SdfVector x = surface.Position(bs, bt) + height * surface.Normal(bs, bt) - point;
+                SdfVector xs = (surface.Position(bs + h, bt) + height * surface.Normal(bs + h, bt) - surface.Position(bs - h, bt) - height * surface.Normal(bs - h, bt)) / (2 * h);
+                SdfVector xt = (surface.Position(bs, bt + h) + height * surface.Normal(bs, bt + h) - surface.Position(bs, bt - h) - height * surface.Normal(bs, bt - h)) / (2 * h);
+                double a = SdfVector.Dot(xs, xs), b = SdfVector.Dot(xs, xt), c = SdfVector.Dot(xt, xt);
+                double r0 = SdfVector.Dot(xs, x), r1 = SdfVector.Dot(xt, x);
+                double det = a * c - b * b;
+                if (Math.Abs(det) < 1e-18)
+                {
+                    break;
+                }
+                bs -= (c * r0 - b * r1) / det;
+                bt -= (a * r1 - b * r0) / det;
+            }
+            return (surface.Position(bs, bt) + height * surface.Normal(bs, bt) - point).Length();
+        }
+
+        [TEST("Curved", "DisplacedCurvedPatchIsAnOffsetSurface")]
+        public static void DisplacedCurvedPatchIsAnOffsetSurface()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            PatchDisplacement displacement = new PatchDisplacement();
+            displacement.mode = PatchDisplacementMode.Shell;
+            displacement.field = new ShellVectorProcedural(ShellExpression.Parse("0"), ShellExpression.Parse("0"), ShellExpression.Parse("0.1"), 5, 1);
+            pstd.vector<Shape> clip = new pstd.vector<Shape>();
+            PhongTriangle[] surfaces = new PhongTriangle[8];
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                CurvedPatches.AddPhongTriangle(clip, mesh.settings, p, nn, mesh.alpha, null, f);
+                surfaces[f] = new PhongTriangle(p, nn, mesh.alpha);
+            }
+            pstd.vector<Shape> shapes = displacement.Apply(clip, mesh.settings);
+            Random random = new Random(21);
+            int hits = 0;
+            double worst = 0;
+            for (int k = 0; k < 300; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                SdfVector target = new SdfVector(random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1) * 0.6;
+                SdfVector origin = target - dir * 5;
+                double t = Closest(shapes, origin, dir);
+                if (t == double.MaxValue)
+                {
+                    continue;
+                }
+                ++hits;
+                SdfVector point = origin + dir * t;
+                double distance = double.MaxValue;
+                for (int f = 0; f < 8; ++f)
+                {
+                    distance = Math.Min(distance, OffsetResidual(surfaces[f], 0.1, point));
+                }
+                worst = Math.Max(worst, distance);
+            }
+            Console.WriteLine("offset surface: hits " + hits + " worst distance from the offset surface: " + worst);
+            CHECK_GT(hits, 150);
+            CHECK_LT(worst, 2e-3);
+        }
     }
 }

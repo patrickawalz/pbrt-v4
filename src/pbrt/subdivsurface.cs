@@ -427,7 +427,9 @@ namespace pbrt
             settings.clip.uvMargin = parameters.GetOneFloat("uvmargin", 1);
             settings.clip.useBezierClip = parameters.GetOneBool("bezierclip", true);
             settings.clip.conservative = parameters.GetOneBool("conservative", false);
-            return CreateShapes(settings, BuildPatches(input));
+            pstd.vector<Shape> shapes = CreateShapes(settings, BuildPatches(input));
+            PatchDisplacement displacement = PatchDisplacement.Create(parameters, loc);
+            return displacement != null ? displacement.Apply(shapes, settings) : shapes;
         }
     }
 }
