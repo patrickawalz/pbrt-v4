@@ -490,6 +490,60 @@ namespace OpenSubdiv.Far
     ///
     public class LimitStencilTableFactoryReal<REAL> where REAL : unmanaged, INumber<REAL>
     {
+        // C++ calls the templated PatchTable::EvaluateBasis<REAL>; the C# PatchTable has
+        // float and double overloads, so dispatch on REAL here (kind: 0 vertex, 1 face-varying, 2 varying).
+        private static void evaluateBasisDispatch(PatchTable patchtable, int kind, PatchTable.PatchHandle handle,
+            REAL s, REAL t, REAL[] wP, REAL[] wDs = null, REAL[] wDt = null,
+            REAL[] wDss = null, REAL[] wDst = null, REAL[] wDtt = null, int channel = 0)
+        {
+            if (typeof(REAL) == typeof(float))
+            {
+                float fs = float.CreateChecked(s);
+                float ft = float.CreateChecked(t);
+                float[] fP = (float[])(object)wP;
+                float[] fDs = (float[])(object)wDs;
+                float[] fDt = (float[])(object)wDt;
+                float[] fDss = (float[])(object)wDss;
+                float[] fDst = (float[])(object)wDst;
+                float[] fDtt = (float[])(object)wDtt;
+                if (kind == 0)
+                {
+                    patchtable.EvaluateBasis(handle, fs, ft, fP, fDs, fDt, fDss, fDst, fDtt);
+                }
+                else if (kind == 1)
+                {
+                    patchtable.EvaluateBasisFaceVarying(handle, fs, ft, fP, fDs, fDt, fDss, fDst, fDtt, channel);
+                }
+                else
+                {
+                    patchtable.EvaluateBasisVarying(handle, fs, ft, fP, fDs, fDt, fDss, fDst, fDtt);
+                }
+            }
+            else
+            {
+                double ds = double.CreateChecked(s);
+                double dt = double.CreateChecked(t);
+                double[] dP = (double[])(object)wP;
+                double[] dDs = (double[])(object)wDs;
+                double[] dDt = (double[])(object)wDt;
+                double[] dDss = (double[])(object)wDss;
+                double[] dDst = (double[])(object)wDst;
+                double[] dDtt = (double[])(object)wDtt;
+                if (kind == 0)
+                {
+                    patchtable.EvaluateBasis(handle, ds, dt, dP, dDs, dDt, dDss, dDst, dDtt);
+                }
+                else if (kind == 1)
+                {
+                    patchtable.EvaluateBasisFaceVarying(handle, ds, dt, dP, dDs, dDt, dDss, dDst, dDtt, channel);
+                }
+                else
+                {
+                    patchtable.EvaluateBasisVarying(handle, ds, dt, dP, dDs, dDt, dDss, dDst, dDtt);
+                }
+            }
+        }
+
         public enum Mode
         {
             INTERPOLATE_VERTEX = 0,           ///< vertex primvar stencils
@@ -767,17 +821,17 @@ namespace OpenSubdiv.Far
                         {
                             if (useVertexPatches)
                             {
-                                patchtable.EvaluateBasis<REAL>(
+                                evaluateBasisDispatch(patchtable, 0,
                                         handle, s, t, wP, wDs, wDt, wDss, wDst, wDtt);
                             }
                             else if (useFVarPatches)
                             {
-                                patchtable.EvaluateBasisFaceVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 1,
                                         handle, s, t, wP, wDs, wDt, wDss, wDst, wDtt, fvarChannel);
                             }
                             else
                             {
-                                patchtable.EvaluateBasisVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 2,
                                         handle, s, t, wP, wDs, wDt, wDss, wDst, wDtt);
                             }
 
@@ -791,17 +845,17 @@ namespace OpenSubdiv.Far
                         {
                             if (useVertexPatches)
                             {
-                                patchtable.EvaluateBasis<REAL>(
+                                evaluateBasisDispatch(patchtable, 0,
                                         handle, s, t, wP, wDs, wDt);
                             }
                             else if (useFVarPatches)
                             {
-                                patchtable.EvaluateBasisFaceVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 1,
                                         handle, s, t, wP, wDs, wDt, null, null, null, fvarChannel);
                             }
                             else
                             {
-                                patchtable.EvaluateBasisVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 2,
                                         handle, s, t, wP, wDs, wDt);
                             }
 
@@ -815,17 +869,17 @@ namespace OpenSubdiv.Far
                         {
                             if (useVertexPatches)
                             {
-                                patchtable.EvaluateBasis<REAL>(
+                                evaluateBasisDispatch(patchtable, 0,
                                         handle, s, t, wP);
                             }
                             else if (useFVarPatches)
                             {
-                                patchtable.EvaluateBasisFaceVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 1,
                                         handle, s, t, wP, null, null, null, null, null, fvarChannel);
                             }
                             else
                             {
-                                patchtable.EvaluateBasisVarying<REAL>(
+                                evaluateBasisDispatch(patchtable, 2,
                                         handle, s, t, wP);
                             }
 
