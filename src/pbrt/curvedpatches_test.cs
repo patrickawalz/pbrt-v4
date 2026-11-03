@@ -78,7 +78,7 @@ namespace pbrt
         }
 
         // The distance of a point from the Phong triangle: Gauss-Newton on the squared distance from the best point of a coarse grid
-        private static double SurfaceDistance(PhongTriangle surface, SdfVector point)
+        private static double SurfaceDistance(CurvedTriangle surface, SdfVector point)
         {
             double bs = 0, bt = 0, best = double.MaxValue;
             int n = 24;
@@ -633,6 +633,127 @@ namespace pbrt
             }
             CHECK_GT(hits, 200);
             CHECK_EQ(repeated, 0);
+        }
+
+        [TEST("Curved", "PnShadowRaysAgreeWithTheTessellation")]
+        public static void PnShadowRaysAgreeWithTheTessellation()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            List<SdfVector[]> tessellation = new List<SdfVector[]>();
+            int n = 48;
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                CurvedPatches.AddPnTriangle(shapes, mesh.settings, p, nn, null, f);
+                PnTriangle surface = new PnTriangle(p, nn);
+                for (int j = 0; j < n; ++j)
+                {
+                    for (int i = 0; i < n - j; ++i)
+                    {
+                        tessellation.Add(new SdfVector[] { surface.Position((double)i / n, (double)j / n), surface.Position((double)(i + 1) / n, (double)j / n),
+                                                           surface.Position((double)i / n, (double)(j + 1) / n) });
+                        if (i + j < n - 1)
+                        {
+                            tessellation.Add(new SdfVector[] { surface.Position((double)(i + 1) / n, (double)j / n),
+                                                               surface.Position((double)(i + 1) / n, (double)(j + 1) / n),
+                                                               surface.Position((double)i / n, (double)(j + 1) / n) });
+                        }
+                    }
+                }
+            }
+            SdfVector toLight = new SdfVector(3, 5, -2).Normalized();
+            Random random = new Random(8);
+            int tested = 0, spurious = 0, missing = 0;
+            for (int k = 0; k < 600; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                SdfVector target = new SdfVector(random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1, random.NextDouble() * 2 - 1) * 0.6;
+                SdfVector origin = target - dir * 5;
+                Ray ray = new Ray(new Point3f((Float)origin.x, (Float)origin.y, (Float)origin.z), new Vector3f((Float)dir.x, (Float)dir.y, (Float)dir.z));
+                Float tHit = Infinity;
+                SdfVector normal = new SdfVector(0, 0, 1);
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    pstd.optional<ShapeIntersection> hit = shapes[s].Intersect(ray);
+                    if (hit && hit.value().tHit < tHit)
+                    {
+                        tHit = hit.value().tHit;
+                        Normal3f nn = hit.value().intr.n;
+                        normal = new SdfVector(nn.x, nn.y, nn.z).Normalized();
+                    }
+                }
+                if (tHit == Infinity)
+                {
+                    continue;
+                }
+                SdfVector point = origin + dir * tHit;
+                if (SdfVector.Dot(normal, dir) > 0)
+                {
+                    normal = -normal;
+                }
+                SdfVector start = point + normal * 1e-4;
+                double expected = double.MaxValue;
+                foreach (SdfVector[] tri in tessellation)
+                {
+                    SubdivisionSurfaceTests.MoellerHit(start, toLight, tri, out double t);
+                    if (t > 0 && t < expected)
+                    {
+                        expected = t;
+                    }
+                }
+                Ray shadow = new Ray(new Point3f((Float)start.x, (Float)start.y, (Float)start.z), new Vector3f((Float)toLight.x, (Float)toLight.y, (Float)toLight.z));
+                bool blocked = false;
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    if (shapes[s].IntersectP(shadow))
+                    {
+                        blocked = true;
+                        break;
+                    }
+                }
+                ++tested;
+                if (blocked && expected == double.MaxValue)
+                {
+                    ++spurious;
+                    for (int s2 = 0; s2 < (int)shapes.size(); ++s2)
+                    {
+                        pstd.optional<ShapeIntersection> h2 = shapes[s2].Intersect(shadow);
+                        if (h2)
+                        {
+                            SdfVector hitPoint = start + toLight * h2.value().tHit;
+                            double residual = double.MaxValue;
+                            for (int f2 = 0; f2 < 8; ++f2)
+                            {
+                                SdfVector[] p2 = new SdfVector[3];
+                                SdfVector[] n2 = new SdfVector[3];
+                                for (int q = 0; q < 3; ++q)
+                                {
+                                    p2[q] = mesh.positions[mesh.indices[3 * f2 + q]];
+                                    n2[q] = mesh.normals[mesh.indices[3 * f2 + q]];
+                                }
+                                residual = Math.Min(residual, SurfaceDistance(new PnTriangle(p2, n2), hitPoint));
+                            }
+                            Console.WriteLine("residual of the reported hit point from the surface: " + residual);
+                            Console.WriteLine("spurious: face " + s2 / 3 + " quad " + s2 % 3 + " t " + h2.value().tHit + " start " + start.x + " " + start.y + " " + start.z + " dot(n,L) " + SdfVector.Dot(normal, toLight));
+                        }
+                    }
+                }
+                if (!blocked && expected < double.MaxValue)
+                {
+                    ++missing;
+                }
+            }
+            Console.WriteLine("pn shadow rays: " + tested + " spurious " + spurious + " missing " + missing);
+            CHECK_GT(tested, 200);
+            CHECK_LT(spurious, 3);
+            CHECK_LT(missing, 3);
         }
     }
 }

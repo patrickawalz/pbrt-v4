@@ -36,6 +36,9 @@ namespace pbrt
         // The angular size of a pixel in radians, 0 to use epsilon. The size of the bilinear patch is a quarter of the footprint of a pixel.
         public double pixelSpread = 0;
         public BezierClipOptions clip = BezierClipOptions.Default();
+        // The maximum level of the clipping from the size of the patch and epsilon, instead of clip.maxLevel (when it is larger): a leaf of the size
+        // of a patch of the default level is much larger than epsilon for a large patch, and a ray that grazes the surface finds the leaf and not the surface
+        public bool autoMaxLevel = true;
     }
 
     public sealed unsafe class BezierClipPatchShape : Shape
@@ -49,8 +52,14 @@ namespace pbrt
             intersection = new BezierPatchIntersection(patch);
             BezierClipOptions options = settings.clip;
             options.conservative = options.conservative || conservative;
-            intersection.Options = options;
             SdfVector low = intersection.BoundsMin, high = intersection.BoundsMax;
+            if (settings.autoMaxLevel)
+            {
+                double size = (high - low).Length();
+                int needed = size > settings.epsilon && settings.epsilon > 0 ? (int)Math.Ceiling(Math.Log(size / settings.epsilon, 2)) + 1 : 10;
+                options.maxLevel = Math.Max(options.maxLevel, Math.Min(needed, 24));
+            }
+            intersection.Options = options;
             Bounds3f result = new Bounds3f();
             for (int corner = 0; corner < 8; ++corner)
             {

@@ -649,6 +649,7 @@ namespace pbrt
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-5f) * diagonal;
             settings.pixelSpread = parameters.GetOneFloat("pixelspread", 0);
             settings.clip.maxLevel = parameters.GetOneInt("maxlevel", 10);
+            settings.autoMaxLevel = parameters.GetOneInt("maxlevel", -1) < 0;
             settings.clip.uvMargin = parameters.GetOneFloat("uvmargin", 1);
             settings.clip.useBezierClip = parameters.GetOneBool("bezierclip", true);
             settings.clip.conservative = parameters.GetOneBool("conservative", false);
