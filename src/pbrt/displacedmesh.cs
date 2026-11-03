@@ -307,38 +307,9 @@ namespace pbrt
         public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters,
                                                 IDictionary<string, FloatTexture> floatTextures, FileLoc loc)
         {
-            List<int> indexList;
-            List<Point3f> pointList;
-            List<Normal3f> normalList;
-            List<Point2f> uvList;
             string filename = parameters.GetOneString("filename", "");
-            if (filename.Length != 0)
-            {
-                TriQuadMesh ply = TriQuadMesh.ReadPLY(pbrt.ResolveFilename(filename));
-                ply.ConvertToOnlyTriangles();
-                indexList = new List<int>(ply.triIndices.ToArray());
-                pointList = new List<Point3f>(ply.p.ToArray());
-                normalList = new List<Normal3f>(ply.n.ToArray());
-                uvList = new List<Point2f>(ply.uv.ToArray());
-            }
-            else
-            {
-                indexList = parameters.GetIntArray("indices");
-                pointList = parameters.GetPoint3fArray("P");
-                normalList = parameters.GetNormal3fArray("N");
-                uvList = parameters.GetPoint2fArray("uv");
-            }
-            if (pointList.Count == 0 || indexList.Count == 0 || indexList.Count % 3 != 0)
-            {
-                pbrt.ErrorExit(loc, "displacedmesh: \"P\" and \"indices\" (a multiple of three) are required.");
-            }
-            if (uvList.Count != pointList.Count)
-            {
-                pbrt.ErrorExit(loc, "displacedmesh: \"uv\" is required, one per vertex.");
-            }
-            Point3f[] p = pointList.ToArray();
-            int[] indices = indexList.ToArray();
-            Normal3f[] n = normalList.Count == p.Length ? normalList.ToArray() : VertexNormals(p, indices);
+            MeshData(filename, parameters.GetIntArray("indices"), parameters.GetPoint3fArray("P"), parameters.GetNormal3fArray("N"),
+                     parameters.GetPoint2fArray("uv"), loc, out int[] indices, out Point3f[] p, out Normal3f[] n, out Point2f[] uvArray);
             string textureName = parameters.GetTexture("displacement");
             if (textureName.Length == 0 || !floatTextures.TryGetValue(textureName, out FloatTexture texture))
             {
@@ -376,7 +347,7 @@ namespace pbrt
                 samples[i] = (float)((samples[i] - low) / thickness);
             }
             ShellHeightField field = new ShellHeightField(resolution, resolution, samples);
-            DisplacedMesh mesh = new DisplacedMesh(renderFromObject, reverseOrientation, indices, p, n, uvList.ToArray(), field, low, high,
+            DisplacedMesh mesh = new DisplacedMesh(renderFromObject, reverseOrientation, indices, p, n, uvArray, field, low, high,
                                                    parameters.GetOneBool("smoothnormals", true));
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             for (int i = 0; i < mesh.TriangleCount(); ++i)
@@ -387,6 +358,34 @@ namespace pbrt
         }
 
         // DisplacedTriangle Private Methods
+
+        // The triangle mesh of a shape or texture: from a PLY file or from the parameters; normals are computed when they are missing
+        public static void MeshData(string filename, List<int> indexList, List<Point3f> pointList, List<Normal3f> normalList,
+                                    List<Point2f> uvList, FileLoc loc, out int[] indices, out Point3f[] p, out Normal3f[] n,
+                                    out Point2f[] uv)
+        {
+            if (filename.Length != 0)
+            {
+                TriQuadMesh ply = TriQuadMesh.ReadPLY(pbrt.ResolveFilename(filename));
+                ply.ConvertToOnlyTriangles();
+                indexList = new List<int>(ply.triIndices.ToArray());
+                pointList = new List<Point3f>(ply.p.ToArray());
+                normalList = new List<Normal3f>(ply.n.ToArray());
+                uvList = new List<Point2f>(ply.uv.ToArray());
+            }
+            if (pointList.Count == 0 || indexList.Count == 0 || indexList.Count % 3 != 0)
+            {
+                pbrt.ErrorExit(loc, "displaced mesh: \"P\" and \"indices\" (a multiple of three) are required.");
+            }
+            if (uvList.Count != pointList.Count)
+            {
+                pbrt.ErrorExit(loc, "displaced mesh: \"uv\" is required, one per vertex.");
+            }
+            p = pointList.ToArray();
+            indices = indexList.ToArray();
+            n = normalList.Count == p.Length ? normalList.ToArray() : VertexNormals(p, indices);
+            uv = uvList.ToArray();
+        }
 
         private static Normal3f[] VertexNormals(Point3f[] p, int[] indices)
         {

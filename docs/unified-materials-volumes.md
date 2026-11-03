@@ -382,3 +382,57 @@ Efficiency on that scene (rmse against 1024 spp volpath, error^2 x time, lower i
 ### Spectral MIS in bdpt: checks
 
 Chromatic glow scene (coloured sigma_a and sigma_s on a procedural emissive medium, 48x48, 256 spp, against 3072 spp volpath; ratio per channel, RMSE): bdpt restricted to volpath's strategies 0.9966/0.9980/0.9992, 0.0551 -> 0.0145 (volpath 0.0145); full bdpt 1.0007/0.9987/0.9986, 0.0450 -> 0.0129. Homogeneous chromatic fog (closed-form transmittance) with a point and an area light, against 4096 spp volpath: volpath 0.0203, bdpt restricted 0.0211, full bdpt 0.0155, all within 0.3% per channel. Gray scenes (scalar, polarised intensity and analyser, gather on and off) match the previous bdpt within noise (gather on 1.0019 against 1.0033, RMSE 0.0121 against 0.0124).
+
+## Displaced meshes and shell mapping
+
+Sources: Ogaki, "Nonlinear Ray Tracing for Displacement and Shell Mapping" (SIGGRAPH Asia 2023); Hoetzlein, "Projective Displacement
+Mapping for Ray Traced Editable Surfaces" (CGF 2025); Kuwana and Fujishiro, "An Efficient and Smooth Volume Shell Mapping by Nonlinear
+Ray Traversal of Hierarchical Structures" (SIGGRAPH Asia 2024 Technical Communications). Files: `shellprism.cs` (the geometry of a shell),
+`displacedmesh.cs` (Shape "displacedmesh"), `texture_shellmap.cs` (Texture "shellmap"), tests in `shell_test.cs` and `displacedmesh_test.cs`.
+
+* **Shell.** Each base triangle is a prism: the base vertices `Pi`, the offsets `Ni` (the vertex normal times the height of the shell), the
+  sides bilinear patches. Canonical coordinates `(alpha, beta, h)`: barycentric coordinates in the triangle `Si(h) = Pi + h Ni`, and the
+  height. The inverse map of a world point is the cubic `<q - S0(h), N(h)> = 0` (solved by splitting the interval at the critical points and
+  bisecting, not by the closed formula). A straight ray inside the prism is `alpha(h) = A(h)/D(h)`, `beta(h) = B(h)/D(h)` with quadratic
+  `A, B, D` (Ogaki Eq. 7), and in texture space the same denominators with the uv of the vertices mixed in (Eq. 8). All in double precision.
+* **Shape "displacedmesh".** `"point3 P" "integer indices" "normal N" "point2 uv"` or `"string filename"` (PLY), `"texture displacement"`,
+  `"float scale"`, `"float offset"`, `"integer resolution"` (the map is baked to a resolution x resolution grid by evaluating the float
+  texture at the uv of the grid points, 1024 by default), `"bool smoothnormals"`. Displacement is `scale * texture + offset` along the unit
+  vertex normals, in object space; the surface is `P + D N'` with `N'` the interpolated normal, which is what Hoetzlein's method also
+  displaces (the mesh is not tessellated, so the BVH never changes when the map does). Each triangle is a `Shape` whose bounds are its prism;
+  the existing BVH is Ogaki's top-level structure.
+* **Traversal (exact).** The ray enters a prism where it crosses its faces (up to two roots per bilinear side), and then a min-max quadtree over the map is
+  walked front to back. The interval of `h` in which the ray is inside the box of a node comes from four quadratic inequalities (a conservative
+  hull); a leaf is a cell of the map with two micro triangles, intersected by one cubic in `h` (`nx X(h) + ny Y(h) + (nh h + k) D(h) = 0`).
+  Nothing is stepped, so a thin feature cannot be skipped, and the prism sides are shared between neighbours (the same ruled surface through
+  the shared vertex normals), so a ray cannot fall between prisms.
+* **Hit.** The geometric normal is the displaced normal by the inverse transpose of the Jacobian `[E0 E1 Ns]` (Ogaki Eq. 12, with the cofactor
+  matrix); `dpdu` and `dpdv` come from `dX/dalpha = E0 - (n_alpha/n_h) Ns` and the uv of the base vertices. `smoothnormals` replaces the flat
+  normal of the base triangle in the displaced normal by the interpolated vertex normal (Hoetzlein Eq. 10), which removes the faceting of a low
+  polygon base mesh. `uv` is the uv of the base mesh at the hit, so the textures of the material apply as usual.
+* **Texture "shellmap".** The inner float texture is evaluated at `(u, v, w)` in place of the position (`u, v` the mesh uv times `uscale`,
+  `vscale`; `w` the height in the shell), outside every prism the value is `"float outside"` (0). Because the result is a field of the world
+  position, a `"texture"` medium driven by it (delta tracking in world space) **does scatter**: Kuwana and Fujishiro integrate in texture
+  space and have no in-scattering, here the mapping only decides where the volume appears. Density is per world volume (no Jacobian of the
+  mapping). A bounding volume hierarchy of the prisms answers the point queries. `RegionBounds` is the global range of the inner texture; with
+  `"bool tightbounds" true` the box is mapped through every prism it overlaps at a 3x3x3 lattice and the inner bounds over the hull plus 25 %
+  are used (outside the shell the value `outside` is included). That is a sample, not a proof, so it is off by default; in the checker scene
+  the mean of the image differs by 0.03 % between tight and global bounds.
+* **Measured.** `Displaced.*` and `Shell.*` tests (all pass): the cubic solver finds all 3 roots in 2000 random cubics (error < 1e-9); the
+  inverse map recovers 3000 random canonical points to 1e-8; the rational ray agrees with the inverse map to 2e-8 over 8261 points; the face
+  crossings equal a dense inside/outside scan for 600 rays; a tilted plane is exact (t error 7e-8, normal 1.5e-8, float limited); a bumpy
+  flat quad agrees with a brute-force intersection of all micro triangles on 383 rays down to a grazing angle of 3 degrees (0 missed, 0 wrong,
+  worst t error 1.2e-7); 1490 rays aimed at one-texel-wide spikes miss none; a curved cap (leaning prisms) agrees with marching through the
+  inverse map on 150 rays (0 missed, 0 wrong at 2e-3); 1996 secondary rays leaving the surface never hit it again and `IntersectP` agrees
+  with `Intersect`. The brick scene (two triangles, 1024^2 map, 32 spp, 480x320, volpath) renders in 41 s; pbrt's tessellating `plymesh`
+  displacement of the same map renders in 17 s at `edgelength` 0.02, which rounds the brick edges and loses the spikes, and aborts with a stack overflow
+  in `TriQuadMesh.ComputeNormals` at `edgelength` 0.004 (an existing limit of that path, not changed here).
+* **Not done, and why.** Hoetzlein's fixed-step marching mode is not implemented: its surface is the one the exact traversal already
+  computes, so marching would only add the approximation (and the jitter that his thin-feature sampling needs). Area lights on a displaced
+  mesh error out (sampling would need a tessellated surrogate; `SdfLightTree` could be reused). Prisms use one height range for the whole
+  map (per-triangle ranges would tighten the BVH and are safe, because the displaced surface does not depend on the prism). Rays parallel to
+  the base triangles (the denominator vanishes identically) are not traced; sub-pixel jitter makes this a measure-zero event except for
+  exactly horizontal rays over an exactly horizontal base. Where adjacent vertex normals differ strongly (a crease, `N.Ng` near 0) the
+  prisms fold and the result is wrong; there is no automatic insertion of triangles there. The uv of a base triangle must lie inside one tile of the
+  map (the tile of its centroid is used). No texture filtering: minification is left to the samples per pixel. The `ShellMapTexture` inner
+  texture must be defined under the identity transform, since it reads `(u, v, w)` where a texture reads the render space position.

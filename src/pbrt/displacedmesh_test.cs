@@ -197,7 +197,7 @@ namespace pbrt
         }
 
         // A cap of the unit sphere over [-0.7, 0.7]^2 (a grid lifted onto the sphere) with radial vertex normals and the planar uv
-        private static void Cap(int cells, out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n)
+        internal static void Cap(int cells, out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n)
         {
             int side = cells + 1;
             p = new Point3f[side * side];
@@ -322,6 +322,111 @@ namespace pbrt
             EXPECT_EQ(missed, 0);
             EXPECT_EQ(wrong, 0);
             EXPECT_EQ(spurious, 0);
+        }
+
+        [TEST("Displaced", "NarrowSpikesAreNeverMissed")]
+        public static void Displaced_NarrowSpikesAreNeverMissed()
+        {
+            Square(out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n);
+            // A few spikes about one texel wide
+            double[,] centers = new double[4, 2] { { 0.31, 0.42 }, { 0.7, 0.2 }, { 0.55, 0.8 }, { 0.12, 0.9 } };
+            Func<double, double, double> height = (double u, double v) =>
+            {
+                double h = 0;
+                for (int k = 0; k < 4; ++k)
+                {
+                    double du = u - centers[k, 0], dv = v - centers[k, 1];
+                    h = Math.Max(h, Math.Exp(-(du * du + dv * dv) / (2 * 0.012 * 0.012)));
+                }
+                return h;
+            };
+            int resolution = 64;
+            DisplacedMesh mesh = MakeMesh(p, indices, uv, n, height, resolution, 0.0, 0.5);
+            List<DisplacedTriangle> triangles = Triangles(mesh);
+            RNG rng = new RNG(8);
+            int compared = 0, missed = 0, wrong = 0;
+            for (int i = 0; i < 1500; ++i)
+            {
+                int k = i % 4;
+                Point3f target = new Point3f((Float)(2 * (centers[k, 0] + 0.02 * (rng.Uniform<Float>() - 0.5)) - 1),
+                                             (Float)(2 * (centers[k, 1] + 0.02 * (rng.Uniform<Float>() - 0.5)) - 1), (Float)(0.5 * rng.Uniform<Float>()));
+                Vector3f direction = pbrt.Normalize(new Vector3f((Float)(rng.Uniform<Float>() - 0.5), (Float)(rng.Uniform<Float>() - 0.5), -0.5f - rng.Uniform<Float>()));
+                Point3f o = target - direction * 2f;
+                Ray ray = new Ray(o, direction);
+                double expected = ReferenceHit(height, resolution, 0.0, 0.5, o, direction);
+                if (expected == double.MaxValue)
+                {
+                    continue;
+                }
+                ++compared;
+                if (!Closest(triangles, ray, out ShapeIntersection hit))
+                {
+                    ++missed;
+                }
+                else if (Math.Abs(hit.tHit - expected) > 1e-4)
+                {
+                    ++wrong;
+                }
+            }
+            Console.WriteLine("spikes: " + compared + " reference hits, " + missed + " missed, " + wrong + " wrong");
+            EXPECT_GT(compared, 400);
+            EXPECT_EQ(missed, 0);
+            EXPECT_EQ(wrong, 0);
+        }
+
+        [TEST("Displaced", "SecondaryRaysAndShadowRaysAreConsistent")]
+        public static void Displaced_SecondaryRaysAndShadowRaysAreConsistent()
+        {
+            Cap(6, out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n);
+            Func<double, double, double> height = (double u, double v) => 0.5 + 0.4 * Math.Sin(9 * u) * Math.Cos(7 * v);
+            DisplacedMesh mesh = MakeMesh(p, indices, uv, n, height, 40, 0.0, 0.12, true);
+            List<DisplacedTriangle> triangles = Triangles(mesh);
+            RNG rng = new RNG(6);
+            int tested = 0, selfHits = 0, disagreements = 0, backFacing = 0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                Point3f target = new Point3f((Float)(1.2 * rng.Uniform<Float>() - 0.6), (Float)(1.2 * rng.Uniform<Float>() - 0.6), 0.9f);
+                Vector3f direction = pbrt.Normalize(new Vector3f((Float)(0.8 * rng.Uniform<Float>() - 0.4), (Float)(0.8 * rng.Uniform<Float>() - 0.4), -1));
+                Ray ray = new Ray(target - direction * 0.5f, direction);
+                if (!Closest(triangles, ray, out ShapeIntersection hit))
+                {
+                    continue;
+                }
+                ++tested;
+                // Both normals face the side the ray came from, on the same side as each other
+                if (pbrt.Dot(hit.intr.n, hit.intr.shading.n) <= 0)
+                {
+                    ++backFacing;
+                }
+                // A ray leaving into the hemisphere above the surface must not find the surface at once
+                Vector3f up = new Vector3f(hit.intr.n.x, hit.intr.n.y, hit.intr.n.z);
+                Vector3f outgoing = pbrt.Normalize(up + new Vector3f((Float)(rng.Uniform<Float>() - 0.5), (Float)(rng.Uniform<Float>() - 0.5), (Float)(rng.Uniform<Float>() - 0.5)));
+                if (pbrt.Dot(outgoing, up) <= 0.05f)
+                {
+                    continue;
+                }
+                Ray spawned = hit.intr.SpawnRay(outgoing);
+                if (Closest(triangles, spawned, out ShapeIntersection again) && again.tHit < 1e-5f)
+                {
+                    ++selfHits;
+                }
+                // IntersectP agrees with Intersect on the same ray
+                bool any = false;
+                foreach (DisplacedTriangle triangle in triangles)
+                {
+                    any |= triangle.IntersectP(spawned, 0.3f);
+                }
+                bool closest = Closest(triangles, spawned, out ShapeIntersection near) && near.tHit <= 0.3f;
+                if (any != closest)
+                {
+                    ++disagreements;
+                }
+            }
+            Console.WriteLine("secondary rays: " + tested + " hits, " + selfHits + " self hits, " + disagreements + " IntersectP disagreements, " + backFacing + " inverted shading normals");
+            EXPECT_GT(tested, 100);
+            EXPECT_EQ(selfHits, 0);
+            EXPECT_EQ(disagreements, 0);
+            EXPECT_EQ(backFacing, 0);
         }
     }
 }

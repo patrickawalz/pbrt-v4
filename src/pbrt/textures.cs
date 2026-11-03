@@ -1934,6 +1934,8 @@ namespace pbrt
                 tex = FloatTriplanarTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "sdf")
                 tex = SdfFloatTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "shellmap")
+                tex = ShellMapTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)
