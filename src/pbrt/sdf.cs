@@ -9,6 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq.Expressions;
 
 namespace pbrt
 {
@@ -96,6 +97,13 @@ namespace pbrt
         // The signed distance (or the bounded estimate of it) at p
         public abstract double Evaluate(SdfVector p);
 
+        // The expression of the field at the point (x, y, z) for the compiled evaluator (sdfcompile.cs); the children are compiled with
+        // context.Compile. null (the default) means that the node has no compiled form and is called through its Evaluate.
+        public virtual Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return null;
+        }
+
         // An upper bound of the length of the gradient, 1 for an exact distance
         public virtual double Lipschitz()
         {
@@ -135,6 +143,12 @@ namespace pbrt
             return p.Length() - radius;
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression squared = context.Add(context.Add(context.Multiply(x, x), context.Multiply(y, y)), context.Multiply(z, z));
+            return context.Subtract(context.Sqrt(squared), context.Constant(radius));
+        }
+
         private readonly double radius;
     }
 
@@ -153,6 +167,19 @@ namespace pbrt
             return Math.Sqrt(ox * ox + oy * oy + oz * oz) + Math.Min(Math.Max(qx, Math.Max(qy, qz)), 0) - rounding;
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression qx = context.Define(context.Subtract(context.Abs(x), context.Constant(halfExtent.x)));
+            Expression qy = context.Define(context.Subtract(context.Abs(y), context.Constant(halfExtent.y)));
+            Expression qz = context.Define(context.Subtract(context.Abs(z), context.Constant(halfExtent.z)));
+            Expression ox = context.Define(context.Max(qx, context.Constant(0)));
+            Expression oy = context.Define(context.Max(qy, context.Constant(0)));
+            Expression oz = context.Define(context.Max(qz, context.Constant(0)));
+            Expression outside = context.Sqrt(context.Add(context.Add(context.Multiply(ox, ox), context.Multiply(oy, oy)), context.Multiply(oz, oz)));
+            Expression inside = context.Min(context.Max(qx, context.Max(qy, qz)), context.Constant(0));
+            return context.Subtract(context.Add(outside, inside), context.Constant(rounding));
+        }
+
         private readonly SdfVector halfExtent;
         private readonly double rounding;
     }
@@ -169,6 +196,13 @@ namespace pbrt
         {
             double qx = Math.Sqrt(p.x * p.x + p.z * p.z) - majorRadius;
             return Math.Sqrt(qx * qx + p.y * p.y) - minorRadius;
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression ring = context.Sqrt(context.Add(context.Multiply(x, x), context.Multiply(z, z)));
+            Expression qx = context.Define(context.Subtract(ring, context.Constant(majorRadius)));
+            return context.Subtract(context.Sqrt(context.Add(context.Multiply(qx, qx), context.Multiply(y, y))), context.Constant(minorRadius));
         }
 
         private readonly double majorRadius, minorRadius;
@@ -190,6 +224,17 @@ namespace pbrt
             return Math.Min(Math.Max(dx, dy), 0) + Math.Sqrt(ox * ox + oy * oy);
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression ring = context.Sqrt(context.Add(context.Multiply(x, x), context.Multiply(z, z)));
+            Expression dx = context.Define(context.Subtract(ring, context.Constant(radius)));
+            Expression dy = context.Define(context.Subtract(context.Abs(y), context.Constant(halfHeight)));
+            Expression ox = context.Define(context.Max(dx, context.Constant(0)));
+            Expression oy = context.Define(context.Max(dy, context.Constant(0)));
+            Expression inside = context.Min(context.Max(dx, dy), context.Constant(0));
+            return context.Add(inside, context.Sqrt(context.Add(context.Multiply(ox, ox), context.Multiply(oy, oy))));
+        }
+
         private readonly double radius, halfHeight;
     }
 
@@ -208,6 +253,28 @@ namespace pbrt
             double denominator = SdfVector.Dot(ba, ba);
             double h = denominator > 0 ? Math.Min(Math.Max(SdfVector.Dot(pa, ba) / denominator, 0), 1) : 0;
             return (pa - ba * h).Length() - radius;
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            SdfVector ba = b - a;
+            double denominator = SdfVector.Dot(ba, ba);
+            Expression pax = context.Define(context.Subtract(x, context.Constant(a.x)));
+            Expression pay = context.Define(context.Subtract(y, context.Constant(a.y)));
+            Expression paz = context.Define(context.Subtract(z, context.Constant(a.z)));
+            Expression h = context.Constant(0);
+            if (denominator > 0)
+            {
+                Expression projection = context.Add(context.Add(context.Multiply(pax, context.Constant(ba.x)),
+                                                                context.Multiply(pay, context.Constant(ba.y))),
+                                                    context.Multiply(paz, context.Constant(ba.z)));
+                h = context.Define(context.Clamp(context.Divide(projection, context.Constant(denominator)), 0, 1));
+            }
+            Expression dx = context.Define(context.Subtract(pax, context.Multiply(context.Constant(ba.x), h)));
+            Expression dy = context.Define(context.Subtract(pay, context.Multiply(context.Constant(ba.y), h)));
+            Expression dz = context.Define(context.Subtract(paz, context.Multiply(context.Constant(ba.z), h)));
+            Expression length = context.Sqrt(context.Add(context.Add(context.Multiply(dx, dx), context.Multiply(dy, dy)), context.Multiply(dz, dz)));
+            return context.Subtract(length, context.Constant(radius));
         }
 
         private readonly SdfVector a, b;
@@ -251,6 +318,13 @@ namespace pbrt
         public override double Evaluate(SdfVector p)
         {
             return SdfVector.Dot(p, normal) - offset;
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression dot = context.Add(context.Add(context.Multiply(x, context.Constant(normal.x)), context.Multiply(y, context.Constant(normal.y))),
+                                         context.Multiply(z, context.Constant(normal.z)));
+            return context.Subtract(dot, context.Constant(offset));
         }
 
         private readonly SdfVector normal;
@@ -480,6 +554,11 @@ namespace pbrt
             return a.IsRigorous() && b.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Min(context.Compile(a, x, y, z), context.Compile(b, x, y, z));
+        }
+
         private readonly SdfNode a, b;
     }
 
@@ -504,6 +583,11 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return a.IsRigorous() && b.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Max(context.Compile(a, x, y, z), context.Compile(b, x, y, z));
         }
 
         private readonly SdfNode a, b;
@@ -531,6 +615,13 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return a.IsRigorous() && b.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression da = context.Compile(a, x, y, z);
+            Expression db = context.Compile(b, x, y, z);
+            return context.Max(da, context.Negate(db));
         }
 
         private readonly SdfNode a, b;
@@ -572,6 +663,34 @@ namespace pbrt
             return a.IsRigorous() && b.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression da = context.Compile(a, x, y, z);
+            Expression db = context.Compile(b, x, y, z);
+            if (width <= 0)
+            {
+                // The plain minimum or maximum, as SdfBlend does for a width of 0
+                if (operation == 0)
+                {
+                    return context.Min(da, db);
+                }
+                if (operation == 1)
+                {
+                    return context.Max(da, db);
+                }
+                return context.Max(da, context.Negate(db));
+            }
+            if (operation == 0)
+            {
+                return context.SmoothMin(da, db, width, kind);
+            }
+            if (operation == 1)
+            {
+                return context.SmoothMax(da, db, width, kind);
+            }
+            return context.SmoothMax(da, context.Negate(db), width, kind);
+        }
+
         private readonly SdfNode a, b;
         private readonly double width;
         private readonly SdfBlendKind kind;
@@ -603,6 +722,13 @@ namespace pbrt
             return a.IsRigorous() && b.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression da = context.Compile(a, x, y, z);
+            Expression db = context.Compile(b, x, y, z);
+            return context.Add(context.Multiply(context.Constant(1 - t), da), context.Multiply(context.Constant(t), db));
+        }
+
         private readonly SdfNode a, b;
         private readonly double t;
     }
@@ -631,6 +757,11 @@ namespace pbrt
             return child.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Subtract(context.Compile(child, x, y, z), context.Constant(amount));
+        }
+
         private readonly SdfNode child;
         private readonly double amount;
     }
@@ -657,6 +788,11 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return child.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Subtract(context.Abs(context.Compile(child, x, y, z)), context.Constant(0.5 * thickness));
         }
 
         private readonly SdfNode child;
@@ -710,6 +846,23 @@ namespace pbrt
             return child.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression nx = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[0]), x),
+                                                                                context.Multiply(context.Constant(m[1]), y)),
+                                                                    context.Multiply(context.Constant(m[2]), z)),
+                                                        context.Constant(translation.x)));
+            Expression ny = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[3]), x),
+                                                                                context.Multiply(context.Constant(m[4]), y)),
+                                                                    context.Multiply(context.Constant(m[5]), z)),
+                                                        context.Constant(translation.y)));
+            Expression nz = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[6]), x),
+                                                                                context.Multiply(context.Constant(m[7]), y)),
+                                                                    context.Multiply(context.Constant(m[8]), z)),
+                                                        context.Constant(translation.z)));
+            return context.Compile(child, nx, ny, nz);
+        }
+
         private readonly SdfNode child;
         private readonly double[] m;
         private readonly SdfVector translation;
@@ -745,6 +898,14 @@ namespace pbrt
             return child.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression nx = context.Define(context.Divide(x, context.Constant(sx)));
+            Expression ny = context.Define(context.Divide(y, context.Constant(sy)));
+            Expression nz = context.Define(context.Divide(z, context.Constant(sz)));
+            return context.Multiply(context.Compile(child, nx, ny, nz), context.Constant(smallest));
+        }
+
         private readonly SdfNode child;
         private readonly double sx, sy, sz, smallest;
     }
@@ -775,6 +936,16 @@ namespace pbrt
             return child.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression angle = context.Define(context.Multiply(context.Constant(k), y));
+            Expression c = context.Define(context.Cos(angle));
+            Expression s = context.Define(context.Sin(angle));
+            Expression nx = context.Define(context.Subtract(context.Multiply(c, x), context.Multiply(s, z)));
+            Expression nz = context.Define(context.Add(context.Multiply(s, x), context.Multiply(c, z)));
+            return context.Compile(child, nx, y, nz);
+        }
+
         private readonly SdfNode child;
         private readonly double k, lipschitz;
     }
@@ -803,6 +974,16 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return child.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression angle = context.Define(context.Multiply(context.Constant(k), x));
+            Expression c = context.Define(context.Cos(angle));
+            Expression s = context.Define(context.Sin(angle));
+            Expression nx = context.Define(context.Subtract(context.Multiply(c, x), context.Multiply(s, y)));
+            Expression ny = context.Define(context.Add(context.Multiply(s, x), context.Multiply(c, y)));
+            return context.Compile(child, nx, ny, z);
         }
 
         private readonly SdfNode child;
@@ -849,6 +1030,28 @@ namespace pbrt
             return child.IsRigorous();
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression nx = Fold(context, x, period.x);
+            Expression ny = Fold(context, y, period.y);
+            Expression nz = Fold(context, z, period.z);
+            return context.Compile(child, nx, ny, nz);
+        }
+
+        private Expression Fold(SdfCompileContext context, Expression value, double length)
+        {
+            if (length <= 0)
+            {
+                return value;
+            }
+            Expression index = context.Define(context.Round(context.Divide(value, context.Constant(length))));
+            if (count > 0)
+            {
+                index = context.Define(context.Min(context.Max(index, context.Constant(-count)), context.Constant(count)));
+            }
+            return context.Define(context.Subtract(value, context.Multiply(context.Constant(length), index)));
+        }
+
         private readonly SdfNode child;
         private readonly SdfVector period;
         private readonly int count;
@@ -877,6 +1080,14 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return child.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression nx = axis == 0 ? context.Define(context.Abs(x)) : x;
+            Expression ny = axis == 1 ? context.Define(context.Abs(y)) : y;
+            Expression nz = axis == 2 ? context.Define(context.Abs(z)) : z;
+            return context.Compile(child, nx, ny, nz);
         }
 
         private readonly SdfNode child;
@@ -908,6 +1119,14 @@ namespace pbrt
         public override bool IsRigorous()
         {
             return child.IsRigorous();
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression qx = context.Define(context.Subtract(x, context.Clamp(x, -halfLength.x, halfLength.x)));
+            Expression qy = context.Define(context.Subtract(y, context.Clamp(y, -halfLength.y, halfLength.y)));
+            Expression qz = context.Define(context.Subtract(z, context.Clamp(z, -halfLength.z, halfLength.z)));
+            return context.Compile(child, qx, qy, qz);
         }
 
         private readonly SdfNode child;

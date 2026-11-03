@@ -603,5 +603,83 @@ namespace pbrt
             EXPECT_DEATH(() => SdfParser.Parse("box(1, 2)", context), "takes");
             EXPECT_DEATH(() => SdfParser.Parse("union(sphere(1), 3)", context), "must be a shape");
         }
+
+        [TEST("Sdf", "CompiledEvaluatorMatchesTheInterpreter")]
+        public static void CompiledEvaluatorMatchesTheInterpreter()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 4;
+            context.meshLoader = SdfMeshLoader.Load;
+            string[] expressions = new string[]
+            {
+                "sphere(1)", "box(1, .5, .7, .1)", "torus(1, .3)", "cylinder(.5, 1)", "capsule(0,0,0, 0,1,.5, .3)", "plane(0,1,0, .2)",
+                "cone(1, 2)", "ellipsoid(1, .5, .7)", "octahedron(1)", "gyroid(3, .1)",
+                "sphere(1) | translate(box(.5,.5,.5), 1, 0, 0)",
+                "sphere(1) & translate(box(.5,.5,.5), .5, 0, 0)",
+                "sphere(1) - translate(box(.5,.5,.5), .5, 0, 0)",
+                "smoothunion(sphere(1), translate(sphere(.7), 1, 0, 0), .4)",
+                "smoothintersect(sphere(1), translate(sphere(.7), 1, 0, 0), .4)",
+                "smoothsubtract(sphere(1), translate(sphere(.7), 1, 0, 0), .4)",
+                "mix(sphere(1), box(1,1,1), .3)", "offset(shell(sphere(1), .2), .05)",
+                "rotate(box(1, .2, .3), 20, 30, 40)", "rotateaxis(torus(1, .3), 1, 1, 0, 33)", "scale(sphere(1), 2, 1, 1.5)",
+                "twist(box(.3, 1, .3), 1.2)", "bend(box(1, .2, .2), .8)", "repeat(sphere(.3), 1, 1, 0, 2)", "mirror(translate(sphere(.4), 1, 0, 0), \"x\")",
+                "elongate(sphere(.4), .5, .2, .1)", "mandelbulb(8, 6)", "menger(3)", "displace(sphere(1), .1, 3, 2)",
+                "smoothunion(twist(box(.3, 1, .3), 1.2), mandelbulb(8, 6), .2)"
+            };
+            RNG rng = new RNG(5);
+            for (int e = 0; e < expressions.Length; ++e)
+            {
+                SdfNode interpreted = SdfParser.Parse(expressions[e], context);
+                SdfNode compiled = SdfCompiledNode.Compile(interpreted);
+                for (int i = 0; i < 2000; ++i)
+                {
+                    SdfVector p = new SdfVector(6 * (rng.Uniform<Float>() - .5), 6 * (rng.Uniform<Float>() - .5), 6 * (rng.Uniform<Float>() - .5));
+                    double expected = interpreted.Evaluate(p);
+                    EXPECT_NEAR(compiled.Evaluate(p), expected, 1e-12 * (1 + Math.Abs(expected)));
+                }
+                EXPECT_EQ(compiled.Lipschitz(), interpreted.Lipschitz());
+                EXPECT_EQ(compiled.IsRigorous(), interpreted.IsRigorous());
+            }
+        }
+
+        [TEST("Sdf", "CompiledEvaluatorBenchmark")]
+        public static void CompiledEvaluatorBenchmark()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 4;
+            string[] expressions = new string[]
+            {
+                "sphere(1)",
+                "smoothunion(smoothunion(sphere(1), translate(box(.5,.5,.5,.1), 1, 0, 0), .3), rotate(torus(1, .2), 30, 0, 20), .2)",
+                "twist(smoothunion(box(.3, 1, .3), translate(sphere(.5), 0, .8, 0), .2), 1.5)"
+            };
+            for (int e = 0; e < expressions.Length; ++e)
+            {
+                SdfNode interpreted = SdfParser.Parse(expressions[e], context);
+                SdfNode compiled = SdfCompiledNode.Compile(interpreted);
+                SdfVector[] points = new SdfVector[1024];
+                for (int i = 0; i < points.Length; ++i)
+                {
+                    double t = i * 0.37;
+                    points[i] = new SdfVector(Math.Sin(t) * 2, Math.Cos(t * 1.3) * 2, Math.Sin(t * .7) * 2);
+                }
+                for (int pass = 0; pass < 4; ++pass)
+                {
+                    SdfNode node = (pass & 1) == 0 ? interpreted : compiled;
+                    double sum = 0;
+                    System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                    for (int i = 0; i < 8000000; ++i)
+                    {
+                        sum += node.Evaluate(points[i & 1023]);
+                    }
+                    watch.Stop();
+                    if (pass >= 2)
+                    {
+                        Console.WriteLine("BENCH {0} {1}: {2:F1} ns/eval (checksum {3:F3})", expressions[e].Substring(0, Math.Min(30, expressions[e].Length)),
+                                          pass == 2 ? "interpreted" : "compiled", watch.Elapsed.TotalMilliseconds * 1e6 / 8000000, sum);
+                    }
+                }
+            }
+        }
     }
 }

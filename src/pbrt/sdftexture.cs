@@ -160,6 +160,10 @@ namespace pbrt
             context.domainRadius = parameters.GetOneFloat("domainradius", 2);
             context.meshLoader = SdfMeshLoader.Load;
             SdfNode field = SdfParser.Parse(expression, context);
+            if (parameters.GetOneBool("compile", true))
+            {
+                field = SdfCompiledNode.Compile(field);
+            }
             string modeName = parameters.GetOneString("mode", "solid");
             SdfDensityMode mode;
             if (modeName == "solid")

@@ -292,6 +292,25 @@ Octane's Vectron (OTOY docs; the intersection method is not documented) is an OS
 * **Volumes.** `Texture "n" "float" "sdf" "string sdf" "..." "string mode" "solid" | "exponential" | "shell" | "distance"` turns the field into a density in [0, 1] for a `"texture"` medium. `RegionBounds` over a box is exact from the Lipschitz bound (a value cannot change faster than `L` times the half diagonal), so empty and full space are skipped by the majorant grid. A field that is not rigorous (the Mandelbulb) returns [0, 1] over every box unless `"bool trustbounds" true`.
 * **Not done:** SDF emitters with a non-uniform radiance importance sampling (uniform by area only), VDB level sets as grid fields, a compiled evaluator (the tree is interpreted), and OSL-like user code.
 
+### Compiled evaluator
+
+`Shape "sdf"` and `Texture "sdf"` compile their expression tree into one `System.Linq.Expressions` lambda (sdfcompile.cs) unless
+`"bool compile" false` is given. Primitives (sphere, box, torus, cylinder, capsule, plane), the boolean and smooth operators, mix,
+offset, shell and the space operators (translate/rotate/scale, twist, bend, repeat, mirror, elongate) are emitted inline with their
+constants folded in. Nodes without a compiled form (cone, ellipsoid, octahedron, gyroid, Mandelbulb, Menger sponge, noise displacement,
+mesh) stay a call of their own `Evaluate` from inside the compiled code, so every tree compiles. The values equal the interpreter's to
+1e-12 (test `Sdf.CompiledEvaluatorMatchesTheInterpreter`). A field with fewer than two compiled nodes is left interpreted, because the
+delegate call costs more than a single primitive. Release build, 8 million evaluations of a fixed point set:
+
+| field | interpreted | compiled |
+|---|---|---|
+| `sphere(1)` | 2.9 ns | (not compiled) |
+| three smooth-unioned primitives with a rotate | 71 ns | 25 ns |
+| twist of a smooth union | 65 ns | 42 ns |
+
+A whole scene gains only as much as its fields are compiled: the showcase scene (gyroid, Mandelbulb and Menger sponge fall back) renders
+in the same time either way.
+
 ## Per-volume integrators (`volumeintegrator.cs`)
 
 As in Fong et al., every medium carries its own integrator, built from two shareable modules. The path estimators

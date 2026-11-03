@@ -538,6 +538,10 @@ namespace pbrt
                                              Math.Max(lower.z * lower.z, upper.z * upper.z));
             context.meshLoader = SdfMeshLoader.Load;
             SdfNode field = SdfParser.Parse(expression, context);
+            if (parameters.GetOneBool("compile", true))
+            {
+                field = SdfCompiledNode.Compile(field);
+            }
             return new SdfShape(renderFromObject, objectFromRender, reverseOrientation, field, lower, upper, options);
         }
 
