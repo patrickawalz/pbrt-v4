@@ -29,7 +29,7 @@ namespace pbrt
         // The largest distance from the origin of the object that the field is evaluated at (bounds the twist and bend)
         public double domainRadius = 2;
         // Called to make a field from a mesh file (name, resolution, padding); set by the code that knows how to read meshes
-        public Func<string, int, double, SdfNode> meshLoader;
+        public Func<string, int, double, string, SdfNode> meshLoader;
     }
 
     // SdfParser Definition
@@ -408,12 +408,13 @@ namespace pbrt
                     Count(a, name, 2, 2);
                     return new SdfGyroid(Number(a, 0, name, this), Number(a, 1, name, this));
                 case "mesh":
-                    Count(a, name, 1, 3);
+                    Count(a, name, 1, 4);
                     if (context.meshLoader == null)
                     {
                         Fail("mesh: no mesh loader available here");
                     }
-                    return context.meshLoader(Text(a, 0, name), (int)Number(a, 1, 64, name), Number(a, 2, 0.05, name));
+                    return context.meshLoader(Text(a, 0, name), (int)Number(a, 1, 64, name), Number(a, 2, 0.05, name),
+                                              a.Count > 3 ? Text(a, 3, name) : "auto");
                 case "union":
                     Count(a, name, 2, 2);
                     return new SdfUnion(Node(a, 0, name), Node(a, 1, name));

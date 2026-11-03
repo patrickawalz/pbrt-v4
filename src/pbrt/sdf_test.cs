@@ -366,7 +366,7 @@ namespace pbrt
         public static void Sdf_MeshDistanceIsExactAndSigned()
         {
             SphereMesh(48, 96, out SdfVector[] vertices, out int[] indices);
-            SdfNode mesh = SdfMeshLoader.FromTriangles(vertices, indices, 0, 0);
+            SdfNode mesh = SdfMeshLoader.FromTriangles(vertices, indices, 0, 0, SdfMeshSign.Automatic);
             RNG rng = new RNG(41);
             for (int i = 0; i < 3000; ++i)
             {
@@ -386,8 +386,8 @@ namespace pbrt
         public static void Sdf_BakedGridMatchesTheMeshDistance()
         {
             SphereMesh(32, 64, out SdfVector[] vertices, out int[] indices);
-            SdfNode exact = SdfMeshLoader.FromTriangles(vertices, indices, 0, 0);
-            SdfNode cubic = SdfMeshLoader.FromTriangles(vertices, indices, 48, 0.2);
+            SdfNode exact = SdfMeshLoader.FromTriangles(vertices, indices, 0, 0, SdfMeshSign.Automatic);
+            SdfNode cubic = SdfMeshLoader.FromTriangles(vertices, indices, 48, 0.2, SdfMeshSign.Automatic);
             RNG rng = new RNG(43);
             double worst = 0;
             for (int i = 0; i < 3000; ++i)
@@ -408,7 +408,7 @@ namespace pbrt
         public static void Sdf_MeshShapeRendersLikeTheAnalyticSphere()
         {
             SphereMesh(48, 96, out SdfVector[] vertices, out int[] indices);
-            SdfNode grid = SdfMeshLoader.FromTriangles(vertices, indices, 64, 0.1);
+            SdfNode grid = SdfMeshLoader.FromTriangles(vertices, indices, 64, 0.1, SdfMeshSign.Automatic);
             SdfShape shape = new SdfShape(new Transform(), new Transform(), false, grid, new Point3f(-1.3f, -1.3f, -1.3f),
                                           new Point3f(1.3f, 1.3f, 1.3f), new SdfShapeOptions());
             Sphere analytic = new Sphere(new Transform(), new Transform(), false, 1, -1, 1, 360);
@@ -680,6 +680,178 @@ namespace pbrt
                     }
                 }
             }
+        }
+
+        [TEST("Sdf", "WindingNumberMatchesTheExactSum")]
+        public static void Sdf_WindingNumberMatchesTheExactSum()
+        {
+            SphereMesh(32, 64, out SdfVector[] vertices, out int[] indices);
+            SdfMeshDistance mesh = new SdfMeshDistance(vertices, indices, SdfMeshSign.Winding);
+            RNG rng = new RNG(61);
+            double worst = 0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                SdfVector p = new SdfVector(5 * rng.Uniform<Float>() - 2.5, 5 * rng.Uniform<Float>() - 2.5, 5 * rng.Uniform<Float>() - 2.5);
+                if (Math.Abs(p.Length() - 1) < 0.02)
+                {
+                    continue;
+                }
+                double exact = mesh.WindingNumberExact(p);
+                double fast = mesh.WindingNumber(p);
+                worst = Math.Max(worst, Math.Abs(exact - fast));
+                // 1 inside a closed mesh, 0 outside
+                EXPECT_NEAR(exact, p.Length() < 1 ? 1 : 0, 2e-3);
+            }
+            Console.WriteLine("WINDING worst error of the approximation {0:E2}", worst);
+            EXPECT_LT(worst, 0.02);
+        }
+
+        [TEST("Sdf", "WindingNumberKeepsTheSignThroughHoles")]
+        public static void Sdf_WindingNumberKeepsTheSignThroughHoles()
+        {
+            SphereMesh(32, 64, out SdfVector[] vertices, out int[] indices);
+            SdfMeshDistance closedMesh = new SdfMeshDistance(vertices, indices, SdfMeshSign.Automatic);
+            EXPECT_TRUE(closedMesh.IsClosed());
+            EXPECT_FALSE(closedMesh.UsesWinding());
+            // Cut a hole in the sphere around the north pole (z > 0.8) and one on the equator
+            List<int> kept = new List<int>();
+            for (int t = 0; t < indices.Length / 3; ++t)
+            {
+                SdfVector center = (vertices[indices[3 * t]] + vertices[indices[3 * t + 1]] + vertices[indices[3 * t + 2]]) / 3.0;
+                bool pole = center.z > 0.8;
+                bool equator = Math.Abs(center.z) < 0.15 && center.x > 0.8;
+                if (!pole && !equator)
+                {
+                    kept.Add(indices[3 * t]);
+                    kept.Add(indices[3 * t + 1]);
+                    kept.Add(indices[3 * t + 2]);
+                }
+            }
+            int[] holed = kept.ToArray();
+            SdfMeshDistance winding = new SdfMeshDistance(vertices, holed, SdfMeshSign.Automatic);
+            SdfMeshDistance pseudonormal = new SdfMeshDistance(vertices, holed, SdfMeshSign.Pseudonormal);
+            EXPECT_FALSE(winding.IsClosed());
+            EXPECT_TRUE(winding.UsesWinding());
+            RNG rng = new RNG(67);
+            int windingWrong = 0, pseudonormalWrong = 0, tested = 0;
+            for (int i = 0; i < 6000; ++i)
+            {
+                SdfVector p = new SdfVector(2.4 * rng.Uniform<Float>() - 1.2, 2.4 * rng.Uniform<Float>() - 1.2, 2.4 * rng.Uniform<Float>() - 1.2);
+                // Away from the surface and from the middle of the sphere (where the hole is seen at a wide angle)
+                if (Math.Abs(p.Length() - 1) < 0.08)
+                {
+                    continue;
+                }
+                ++tested;
+                bool inside = p.Length() < 1;
+                windingWrong += (winding.Evaluate(p) < 0) != inside ? 1 : 0;
+                pseudonormalWrong += (pseudonormal.Evaluate(p) < 0) != inside ? 1 : 0;
+            }
+            Console.WriteLine("HOLES {0} points: winding wrong {1}, pseudonormal wrong {2}", tested, windingWrong, pseudonormalWrong);
+            // The winding number of a sphere with holes of this size stays above 0.5 inside and below it outside except in the
+            // narrow cones above the holes. (The pseudonormal does as well here, because these holes are small and convex: its
+            // failures are in meshes with seams, see the next test.)
+            EXPECT_LT(windingWrong, tested / 100);
+        }
+
+        [TEST("Sdf", "WindingNumberSignsAnUnweldedMesh")]
+        public static void Sdf_WindingNumberSignsAnUnweldedMesh()
+        {
+            // A torus (concave where the ring bends around its hole), counter clockwise seen from outside
+            int ringCount = 48, tubeCount = 24;
+            double major = 1, minor = 0.4;
+            SdfVector[] grid = new SdfVector[ringCount * tubeCount];
+            for (int i = 0; i < ringCount; ++i)
+            {
+                for (int j = 0; j < tubeCount; ++j)
+                {
+                    double u = 2 * Math.PI * i / ringCount, v = 2 * Math.PI * j / tubeCount;
+                    grid[i * tubeCount + j] = new SdfVector((major + minor * Math.Cos(v)) * Math.Cos(u),
+                                                            (major + minor * Math.Cos(v)) * Math.Sin(u), minor * Math.Sin(v));
+                }
+            }
+            List<int> welded = new List<int>();
+            for (int i = 0; i < ringCount; ++i)
+            {
+                for (int j = 0; j < tubeCount; ++j)
+                {
+                    int a00 = i * tubeCount + j, a10 = ((i + 1) % ringCount) * tubeCount + j;
+                    int a01 = i * tubeCount + (j + 1) % tubeCount, a11 = ((i + 1) % ringCount) * tubeCount + (j + 1) % tubeCount;
+                    welded.Add(a00); welded.Add(a10); welded.Add(a11);
+                    welded.Add(a00); welded.Add(a11); welded.Add(a01);
+                }
+            }
+            int[] indices = welded.ToArray();
+            // Every triangle with its own three vertices (as in an STL file or a flat shaded model): no edge is shared by index
+            SdfVector[] unweldedVertices = new SdfVector[indices.Length];
+            int[] unweldedIndices = new int[indices.Length];
+            for (int i = 0; i < indices.Length; ++i)
+            {
+                unweldedVertices[i] = grid[indices[i]];
+                unweldedIndices[i] = i;
+            }
+            SdfMeshDistance automatic = new SdfMeshDistance(unweldedVertices, unweldedIndices, SdfMeshSign.Automatic);
+            SdfMeshDistance pseudonormal = new SdfMeshDistance(unweldedVertices, unweldedIndices, SdfMeshSign.Pseudonormal);
+            EXPECT_FALSE(automatic.IsClosed());
+            EXPECT_TRUE(automatic.UsesWinding());
+            RNG rng = new RNG(71);
+            int windingWrong = 0, pseudonormalWrong = 0, tested = 0;
+            for (int i = 0; i < 6000; ++i)
+            {
+                SdfVector p = new SdfVector(3.2 * rng.Uniform<Float>() - 1.6, 3.2 * rng.Uniform<Float>() - 1.6, 1.2 * rng.Uniform<Float>() - 0.6);
+                double torusDistance = Math.Sqrt(Math.Pow(Math.Sqrt(p.x * p.x + p.y * p.y) - major, 2) + p.z * p.z) - minor;
+                if (Math.Abs(torusDistance) < 0.02)
+                {
+                    continue;
+                }
+                ++tested;
+                bool inside = torusDistance < 0;
+                windingWrong += (automatic.Evaluate(p) < 0) != inside ? 1 : 0;
+                pseudonormalWrong += (pseudonormal.Evaluate(p) < 0) != inside ? 1 : 0;
+            }
+            Console.WriteLine("UNWELDED {0} points: winding wrong {1}, pseudonormal wrong {2}", tested, windingWrong, pseudonormalWrong);
+            EXPECT_EQ(windingWrong, 0);
+        }
+
+        [TEST("Sdf", "WindingNumberSignsOverlappingShells")]
+        public static void Sdf_WindingNumberSignsOverlappingShells()
+        {
+            // Two closed spheres that overlap in one mesh (kitbashed parts): inside the lens shared by both the winding number is 2
+            SphereMesh(24, 48, out SdfVector[] vertices, out int[] indices);
+            int count = vertices.Length;
+            SdfVector[] merged = new SdfVector[2 * count];
+            int[] mergedIndices = new int[2 * indices.Length];
+            for (int i = 0; i < count; ++i)
+            {
+                merged[i] = vertices[i] + new SdfVector(-0.4, 0, 0);
+                merged[count + i] = vertices[i] + new SdfVector(0.4, 0, 0);
+            }
+            for (int i = 0; i < indices.Length; ++i)
+            {
+                mergedIndices[i] = indices[i];
+                mergedIndices[indices.Length + i] = count + indices[i];
+            }
+            SdfMeshDistance winding = new SdfMeshDistance(merged, mergedIndices, SdfMeshSign.Winding);
+            SdfMeshDistance pseudonormal = new SdfMeshDistance(merged, mergedIndices, SdfMeshSign.Pseudonormal);
+            EXPECT_TRUE(winding.IsClosed());
+            RNG rng = new RNG(73);
+            int windingWrong = 0, pseudonormalWrong = 0, tested = 0;
+            for (int i = 0; i < 6000; ++i)
+            {
+                SdfVector p = new SdfVector(3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5);
+                double left = (p - new SdfVector(-0.4, 0, 0)).Length() - 1, right = (p - new SdfVector(0.4, 0, 0)).Length() - 1;
+                double unionDistance = Math.Min(left, right);
+                if (Math.Abs(left) < 0.02 || Math.Abs(right) < 0.02)
+                {
+                    continue;
+                }
+                ++tested;
+                bool inside = unionDistance < 0;
+                windingWrong += (winding.Evaluate(p) < 0) != inside ? 1 : 0;
+                pseudonormalWrong += (pseudonormal.Evaluate(p) < 0) != inside ? 1 : 0;
+            }
+            Console.WriteLine("OVERLAP {0} points: winding wrong {1}, pseudonormal wrong {2}", tested, windingWrong, pseudonormalWrong);
+            EXPECT_EQ(windingWrong, 0);
         }
     }
 }

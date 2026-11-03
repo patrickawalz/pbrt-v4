@@ -11,11 +11,21 @@ using System.Collections.Generic;
 namespace pbrt
 {
 
+    // How the inside of a mesh is told from the outside: by the pseudonormal of the closest feature (exact for a closed mesh, wrong near
+    // holes), by the generalized winding number (Jacobson et al. 2013; a hole only blurs the sign), or by the pseudonormal for a closed
+    // mesh and the winding number for any other
+    public enum SdfMeshSign
+    {
+        Pseudonormal,
+        Winding,
+        Automatic
+    }
+
     // SdfMeshDistance Definition
     public sealed class SdfMeshDistance : SdfNode
     {
         // The mesh is given by its vertices and the three indices of every triangle (counter clockwise seen from outside)
-        public SdfMeshDistance(SdfVector[] vertices, int[] indices)
+        public SdfMeshDistance(SdfVector[] vertices, int[] indices, SdfMeshSign sign)
         {
             this.vertices = vertices;
             int triangleCount = indices.Length / 3;
@@ -23,6 +33,7 @@ namespace pbrt
             faceNormals = new SdfVector[triangleCount];
             vertexNormals = new SdfVector[vertices.Length];
             Dictionary<long, SdfVector> edgeSums = new Dictionary<long, SdfVector>();
+            Dictionary<long, int> edgeUses = new Dictionary<long, int>();
             for (int t = 0; t < triangleCount; ++t)
             {
                 int i0 = indices[3 * t], i1 = indices[3 * t + 1], i2 = indices[3 * t + 2];
@@ -31,15 +42,37 @@ namespace pbrt
                 double length = n.Length();
                 SdfVector faceNormal = length > 0 ? n / length : new SdfVector(0, 0, 0);
                 faceNormals[t] = faceNormal;
-                AddEdge(edgeSums, i0, i1, faceNormal);
-                AddEdge(edgeSums, i1, i2, faceNormal);
-                AddEdge(edgeSums, i2, i0, faceNormal);
+                AddEdge(edgeSums, edgeUses, i0, i1, faceNormal);
+                AddEdge(edgeSums, edgeUses, i1, i2, faceNormal);
+                AddEdge(edgeSums, edgeUses, i2, i0, faceNormal);
                 vertexNormals[i0] = vertexNormals[i0] + Angle(p1 - p0, p2 - p0) * faceNormal;
                 vertexNormals[i1] = vertexNormals[i1] + Angle(p2 - p1, p0 - p1) * faceNormal;
                 vertexNormals[i2] = vertexNormals[i2] + Angle(p0 - p2, p1 - p2) * faceNormal;
             }
             edgeNormals = edgeSums;
+            // A closed mesh has every edge in exactly two triangles
+            closed = true;
+            foreach (KeyValuePair<long, int> use in edgeUses)
+            {
+                if (use.Value != 2)
+                {
+                    closed = false;
+                    break;
+                }
+            }
+            useWinding = sign == SdfMeshSign.Winding || (sign == SdfMeshSign.Automatic && !closed);
             BuildHierarchy();
+        }
+
+        // Whether every edge of the mesh belongs to two triangles
+        public bool IsClosed()
+        {
+            return closed;
+        }
+
+        public bool UsesWinding()
+        {
+            return useWinding;
         }
 
         private static double Angle(SdfVector a, SdfVector b)
@@ -57,11 +90,13 @@ namespace pbrt
             return i < j ? (((long)i) << 32) | (uint)j : (((long)j) << 32) | (uint)i;
         }
 
-        private static void AddEdge(Dictionary<long, SdfVector> sums, int i, int j, SdfVector faceNormal)
+        private static void AddEdge(Dictionary<long, SdfVector> sums, Dictionary<long, int> uses, int i, int j, SdfVector faceNormal)
         {
             long key = EdgeKey(i, j);
             sums.TryGetValue(key, out SdfVector current);
             sums[key] = current + faceNormal;
+            uses.TryGetValue(key, out int count);
+            uses[key] = count + 1;
         }
 
         // The bounds of the mesh vertices
@@ -89,6 +124,9 @@ namespace pbrt
             public int secondChild;
             public int firstTriangle;
             public int triangleCount;
+            // For the winding number: the area vector (the sum of the area weighted normals), the area weighted center and the
+            // radius about the center of the triangles of the node
+            public double ax, ay, az, area, cx, cy, cz, radius;
         }
 
         private void BuildHierarchy()
@@ -138,6 +176,7 @@ namespace pbrt
             {
                 node.firstTriangle = begin;
                 node.triangleCount = end - begin;
+                AggregateLeaf(ref node, begin, end);
                 nodes[index] = node;
                 return index;
             }
@@ -151,8 +190,142 @@ namespace pbrt
             int middle = (begin + end) / 2;
             Build(begin, middle, centroids);
             node.secondChild = Build(middle, end, centroids);
+            AggregateChildren(ref node, nodes[index + 1], nodes[node.secondChild]);
             nodes[index] = node;
             return index;
+        }
+
+        private void AggregateLeaf(ref HierarchyNode node, int begin, int end)
+        {
+            double ax = 0, ay = 0, az = 0, area = 0, cx = 0, cy = 0, cz = 0;
+            for (int i = begin; i < end; ++i)
+            {
+                int t = order[i];
+                SdfVector p0 = vertices[indices[3 * t]], p1 = vertices[indices[3 * t + 1]], p2 = vertices[indices[3 * t + 2]];
+                SdfVector areaVector = 0.5 * SdfVector.Cross(p1 - p0, p2 - p0);
+                double triangleArea = areaVector.Length();
+                SdfVector center = (p0 + p1 + p2) / 3.0;
+                ax += areaVector.x;
+                ay += areaVector.y;
+                az += areaVector.z;
+                area += triangleArea;
+                cx += triangleArea * center.x;
+                cy += triangleArea * center.y;
+                cz += triangleArea * center.z;
+            }
+            if (area > 0)
+            {
+                cx /= area;
+                cy /= area;
+                cz /= area;
+            }
+            else
+            {
+                cx = 0.5 * (node.x0 + node.x1);
+                cy = 0.5 * (node.y0 + node.y1);
+                cz = 0.5 * (node.z0 + node.z1);
+            }
+            double radius = 0;
+            for (int i = begin; i < end; ++i)
+            {
+                int t = order[i];
+                for (int k = 0; k < 3; ++k)
+                {
+                    SdfVector v = vertices[indices[3 * t + k]];
+                    radius = Math.Max(radius, new SdfVector(v.x - cx, v.y - cy, v.z - cz).Length());
+                }
+            }
+            node.ax = ax;
+            node.ay = ay;
+            node.az = az;
+            node.area = area;
+            node.cx = cx;
+            node.cy = cy;
+            node.cz = cz;
+            node.radius = radius;
+        }
+
+        private static void AggregateChildren(ref HierarchyNode node, HierarchyNode first, HierarchyNode second)
+        {
+            node.ax = first.ax + second.ax;
+            node.ay = first.ay + second.ay;
+            node.az = first.az + second.az;
+            node.area = first.area + second.area;
+            if (node.area > 0)
+            {
+                node.cx = (first.area * first.cx + second.area * second.cx) / node.area;
+                node.cy = (first.area * first.cy + second.area * second.cy) / node.area;
+                node.cz = (first.area * first.cz + second.area * second.cz) / node.area;
+            }
+            else
+            {
+                node.cx = 0.5 * (node.x0 + node.x1);
+                node.cy = 0.5 * (node.y0 + node.y1);
+                node.cz = 0.5 * (node.z0 + node.z1);
+            }
+            double r0 = new SdfVector(first.cx - node.cx, first.cy - node.cy, first.cz - node.cz).Length() + first.radius;
+            double r1 = new SdfVector(second.cx - node.cx, second.cy - node.cy, second.cz - node.cz).Length() + second.radius;
+            node.radius = Math.Max(r0, r1);
+        }
+
+        // The signed solid angle of a triangle seen from p, divided by 4 pi (Van Oosterom and Strackee 1983): the winding number of
+        // the triangle, positive when p is on the side that the counter clockwise normal points away from
+        private static double TriangleWinding(SdfVector p, SdfVector v0, SdfVector v1, SdfVector v2)
+        {
+            SdfVector a = v0 - p, b = v1 - p, c = v2 - p;
+            double la = a.Length(), lb = b.Length(), lc = c.Length();
+            double numerator = SdfVector.Dot(a, SdfVector.Cross(b, c));
+            double denominator = la * lb * lc + SdfVector.Dot(a, b) * lc + SdfVector.Dot(a, c) * lb + SdfVector.Dot(b, c) * la;
+            return 2 * Math.Atan2(numerator, denominator) / (4 * Math.PI);
+        }
+
+        // The generalized winding number at p, 1 inside a closed mesh and 0 outside: the sum over the triangles of their solid
+        // angles, where a node of the hierarchy that is far from p compared with its radius is replaced by the dipole of its area
+        // vector (Barill et al. 2018, order 0 with beta = 4)
+        public double WindingNumber(SdfVector p)
+        {
+            double sum = 0;
+            Span<int> stack = stackalloc int[64];
+            int stackSize = 0;
+            stack[stackSize++] = 0;
+            while (stackSize > 0)
+            {
+                int nodeIndex = stack[--stackSize];
+                HierarchyNode node = nodes[nodeIndex];
+                double dx = node.cx - p.x, dy = node.cy - p.y, dz = node.cz - p.z;
+                double distanceSquared = dx * dx + dy * dy + dz * dz;
+                double reach = 4 * node.radius;
+                if (distanceSquared > reach * reach)
+                {
+                    double distance = Math.Sqrt(distanceSquared);
+                    sum += (node.ax * dx + node.ay * dy + node.az * dz) / (4 * Math.PI * distanceSquared * distance);
+                }
+                else if (node.triangleCount > 0)
+                {
+                    for (int i = 0; i < node.triangleCount; ++i)
+                    {
+                        int t = order[node.firstTriangle + i];
+                        sum += TriangleWinding(p, vertices[indices[3 * t]], vertices[indices[3 * t + 1]], vertices[indices[3 * t + 2]]);
+                    }
+                }
+                else
+                {
+                    stack[stackSize++] = node.secondChild;
+                    stack[stackSize++] = nodeIndex + 1;
+                }
+            }
+            return sum;
+        }
+
+        // The same sum over all triangles, without the approximation
+        public double WindingNumberExact(SdfVector p)
+        {
+            double sum = 0;
+            for (int t = 0; t < indices.Length / 3; ++t)
+            {
+                sum += TriangleWinding(p, vertices[indices[3 * t]], vertices[indices[3 * t + 1]], vertices[indices[3 * t + 2]]);
+            }
+            return sum;
         }
 
         // The squared distance from p to a node's box
@@ -262,6 +435,10 @@ namespace pbrt
             {
                 return double.MaxValue;
             }
+            if (useWinding)
+            {
+                return WindingNumber(p) > 0.5 ? -Math.Sqrt(best) : Math.Sqrt(best);
+            }
             SdfVector pseudonormal = faceNormals[bestTriangle];
             int i0 = indices[3 * bestTriangle], i1 = indices[3 * bestTriangle + 1], i2 = indices[3 * bestTriangle + 2];
             if (bestFeature == 1)
@@ -296,6 +473,7 @@ namespace pbrt
         private readonly int[] indices;
         private readonly SdfVector[] faceNormals, vertexNormals;
         private readonly Dictionary<long, SdfVector> edgeNormals;
+        private readonly bool closed, useWinding;
         private List<HierarchyNode> nodes;
         private int[] order;
     }
@@ -416,8 +594,9 @@ namespace pbrt
     public static class SdfMeshLoader
     {
         // Reads a PLY file and makes its signed distance field: exact for a resolution of 0 or less, otherwise baked on a grid with
-        // that many cells along the longest side of the mesh box, which is padded on every side by padding times that side
-        public static SdfNode Load(string filename, int resolution, double padding)
+        // that many cells along the longest side of the mesh box, which is padded on every side by padding times that side; sign is
+        // "auto" (the pseudonormal of a closed mesh, the winding number of any other), "winding" or "pseudonormal"
+        public static SdfNode Load(string filename, int resolution, double padding, string sign)
         {
             TriQuadMesh mesh = TriQuadMesh.ReadPLY(pbrt.ResolveFilename(filename));
             mesh.ConvertToOnlyTriangles();
@@ -435,12 +614,25 @@ namespace pbrt
             {
                 indices[i] = mesh.triIndices[i];
             }
-            return FromTriangles(vertices, indices, resolution, padding);
+            SdfMeshSign meshSign = SdfMeshSign.Automatic;
+            if (sign == "winding")
+            {
+                meshSign = SdfMeshSign.Winding;
+            }
+            else if (sign == "pseudonormal")
+            {
+                meshSign = SdfMeshSign.Pseudonormal;
+            }
+            else if (sign != "auto")
+            {
+                pbrt.ErrorExit(filename + ": the mesh sign must be \"auto\", \"winding\" or \"pseudonormal\".");
+            }
+            return FromTriangles(vertices, indices, resolution, padding, meshSign);
         }
 
-        public static SdfNode FromTriangles(SdfVector[] vertices, int[] indices, int resolution, double padding)
+        public static SdfNode FromTriangles(SdfVector[] vertices, int[] indices, int resolution, double padding, SdfMeshSign sign)
         {
-            SdfMeshDistance exact = new SdfMeshDistance(vertices, indices);
+            SdfMeshDistance exact = new SdfMeshDistance(vertices, indices, sign);
             if (resolution <= 0)
             {
                 return exact;
