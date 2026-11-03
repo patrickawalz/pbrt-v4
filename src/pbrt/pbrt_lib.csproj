@@ -18,7 +18,7 @@
     <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../ext/**/*.cs" Exclude="../ext/gtest/**;../ext/opensubdiv/tests/**;../ext/ptex/src/utils/**;../ext/ptex/src/tests/**;../ext/**/*_test.cs" />
+    <Compile Include="../ext/**/*.cs" Exclude="../ext/gtest/**;../ext/opensubdiv/sdc/**;../ext/opensubdiv/vtr/**;../ext/opensubdiv/far/**;../ext/opensubdiv/tests/**;../ext/ptex/src/utils/**;../ext/ptex/src/tests/**;../ext/**/*_test.cs" />
     <Compile Remove="cmd/**;**/*_test.cs;bin/**;obj/**" />
   </ItemGroup>
   <!-- The RGB-to-spectrum tables (rgbspectrum_*.cs) are generated at build time by rgb2spec_opt, as the pbrt-v4
