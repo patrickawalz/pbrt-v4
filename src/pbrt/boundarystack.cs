@@ -208,17 +208,6 @@ namespace pbrt
         // them see different volumes in the same place; only the forward path tracers define it.
         public static bool perEntryVolumes;
 
-        // (not in pbrt-v4) Whether the scene has a RefractiveMedium: the paths in it are curved, which only the walk of volpath
-        // follows (docs/refractive-media.md)
-        public static bool hasRefractive;
-
-        public static void RequireNoRefractive(string integrator)
-        {
-            if (hasRefractive)
-                pbrt.ErrorExit("The \"" + integrator + "\" integrator does not support refractive media: their light paths are " +
-                               "curved, and connections between points of a path are not straight lines. Use \"volpath\".");
-        }
-
         public static void RequireNoPerEntryVolumes(string integrator)
         {
             if (perEntryVolumes)

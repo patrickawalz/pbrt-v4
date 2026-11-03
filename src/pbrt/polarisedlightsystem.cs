@@ -843,18 +843,6 @@ namespace pbrt
                 return this;
             }
 
-            // (not in pbrt-v4) The transport of the polarisation along a curved path (a refractive medium): the identity, between the
-            // frame of the light that enters the path (along directionEnter, x axis referenceEnter) and the frame of the light that
-            // leaves it. The references are the same vector of the transverse plane at the two ends, carried along the path (see
-            // PolarisationTransport), which keeps its angle to the Stokes frames that follow.
-            public static Attenuation Transport(Vector3f directionEnter, Vector3f referenceEnter, Vector3f directionExit,
-                                                Vector3f referenceExit)
-            {
-                Attenuation attenuation = new Attenuation(MuellerMatrix.Diagonal(new SampledSpectrum(1.0f)));
-                attenuation.SetFrames(directionExit, referenceExit, directionEnter, referenceEnter);
-                return attenuation;
-            }
-
             // Both frames along one direction with the given reference axis for x: the sensor looking along forward
             internal Attenuation ForSensor(Vector3f direction, Vector3f reference)
             {
