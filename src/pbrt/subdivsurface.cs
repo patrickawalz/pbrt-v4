@@ -245,27 +245,34 @@ namespace pbrt
                     int k = 3 * vertices[j];
                     G[j] = new SdfVector(points[k], points[k + 1], points[k + 2]);
                 }
-                // The corners and the boundary points; the inner points are the averages of the pairs of each corner
-                // (corner c has P, Ep, Em, Fp, Fm at 5c ... 5c + 4)
-                bezier.Set(0, 0, G[0]);
-                bezier.Set(1, 0, G[1]);
-                bezier.Set(2, 0, G[7]);
-                bezier.Set(3, 0, G[5]);
-                bezier.Set(3, 1, G[6]);
-                bezier.Set(3, 2, G[12]);
-                bezier.Set(3, 3, G[10]);
-                bezier.Set(2, 3, G[11]);
-                bezier.Set(1, 3, G[17]);
-                bezier.Set(0, 3, G[15]);
-                bezier.Set(0, 2, G[16]);
-                bezier.Set(0, 1, G[2]);
-                bezier.Set(1, 1, (G[3] + G[4]) * 0.5);
-                bezier.Set(2, 1, (G[8] + G[9]) * 0.5);
-                bezier.Set(2, 2, (G[13] + G[14]) * 0.5);
-                bezier.Set(1, 2, (G[18] + G[19]) * 0.5);
+                bezier = GregoryToBezier(G);
                 return true;
             }
             return false;
+        }
+
+        // The Bezier patch of the 20 control points of a Gregory patch: the corners and the boundary points, the inner points are the averages of the
+        // pairs of each corner (corner c has P, Ep, Em, Fp, Fm at 5c ... 5c + 4)
+        public static BezierPatch4 GregoryToBezier(SdfVector[] G)
+        {
+            BezierPatch4 bezier = default;
+            bezier.Set(0, 0, G[0]);
+            bezier.Set(1, 0, G[1]);
+            bezier.Set(2, 0, G[7]);
+            bezier.Set(3, 0, G[5]);
+            bezier.Set(3, 1, G[6]);
+            bezier.Set(3, 2, G[12]);
+            bezier.Set(3, 3, G[10]);
+            bezier.Set(2, 3, G[11]);
+            bezier.Set(1, 3, G[17]);
+            bezier.Set(0, 3, G[15]);
+            bezier.Set(0, 2, G[16]);
+            bezier.Set(0, 1, G[2]);
+            bezier.Set(1, 1, (G[3] + G[4]) * 0.5);
+            bezier.Set(2, 1, (G[8] + G[9]) * 0.5);
+            bezier.Set(2, 2, (G[13] + G[14]) * 0.5);
+            bezier.Set(1, 2, (G[18] + G[19]) * 0.5);
+            return bezier;
         }
 
         // The conversion of the 16 control points of a uniform cubic B-spline patch to Bezier control points with the watertight evaluation order of

@@ -120,6 +120,11 @@ namespace pbrt
             return triangles;
         }
 
+        public static bool MoellerHit(SdfVector o, SdfVector d, SdfVector[] tri, out double t)
+        {
+            return Moeller(o, d, tri, out t);
+        }
+
         private static bool Moeller(SdfVector o, SdfVector d, SdfVector[] tri, out double t)
         {
             t = 0;
