@@ -548,6 +548,167 @@ namespace pbrt
             CHECK_LT(errors[errors.Count / 2], 2e-3);
         }
 
+        // The box to mushroom example of the vector displacement literature: the six faces of a box, each with a tile of an atlas, and an
+        // object space vector that moves every point of the box to the mushroom (a surface of revolution whose profile, a Catmull-Rom
+        // curve through control points, has an undercut cap that a height map cannot give)
+        private static readonly double[] ProfileR = new double[] { 0, 0.40, 0.75, 0.98, 1.02, 0.88, 0.60, 0.36, 0.28, 0.27, 0.30, 0.40, 0.22, 0 };
+        private static readonly double[] ProfileZ = new double[] { 1.00, 0.97, 0.85, 0.62, 0.42, 0.30, 0.36, 0.46, 0.20, -0.20, -0.58, -0.86, -0.98, -1.00 };
+
+        private static SdfVector Mushroom(SdfVector q)
+        {
+            SdfVector d = q.Normalized();
+            double s = Math.Acos(Math.Max(-1, Math.Min(1, d.z))) / Math.PI;
+            int count = ProfileR.Length - 1;
+            double x = Math.Max(0, Math.Min(1, s)) * count;
+            int k = Math.Min((int)Math.Floor(x), count - 1);
+            double t = x - k;
+            double[] r = new double[4], z = new double[4];
+            for (int m = 0; m < 4; ++m)
+            {
+                int index = Math.Max(0, Math.Min(count, k - 1 + m));
+                r[m] = ProfileR[index];
+                z[m] = ProfileZ[index];
+            }
+            Func<double[], double> curve = (double[] c) => 0.5 * ((2 * c[1]) + (-c[0] + c[2]) * t + (2 * c[0] - 5 * c[1] + 4 * c[2] - c[3]) * t * t +
+                                                                  (-c[0] + 3 * c[1] - 3 * c[2] + c[3]) * t * t * t);
+            double radius = curve(r), height = curve(z), phi = Math.Atan2(d.y, d.x);
+            return new SdfVector(radius * Math.Cos(phi), radius * Math.Sin(phi), height);
+        }
+
+        private static readonly SdfVector[][] BoxFaces = new SdfVector[][]
+        {
+            new SdfVector[] { new SdfVector(1, 0, 0), new SdfVector(0, 1, 0), new SdfVector(0, 0, 1) },
+            new SdfVector[] { new SdfVector(-1, 0, 0), new SdfVector(0, 0, 1), new SdfVector(0, 1, 0) },
+            new SdfVector[] { new SdfVector(0, 1, 0), new SdfVector(0, 0, 1), new SdfVector(1, 0, 0) },
+            new SdfVector[] { new SdfVector(0, -1, 0), new SdfVector(1, 0, 0), new SdfVector(0, 0, 1) },
+            new SdfVector[] { new SdfVector(0, 0, 1), new SdfVector(1, 0, 0), new SdfVector(0, 1, 0) },
+            new SdfVector[] { new SdfVector(0, 0, -1), new SdfVector(0, 1, 0), new SdfVector(1, 0, 0) }
+        };
+
+        // The mesh of the box (24 vertices), the vector map atlas (3 x 2 tiles of faceCells + 1 vertices, a cell of gutter between them) and
+        // the micro triangles of the displaced box for the brute force
+        private static VectorDisplacedMesh MushroomMesh(int faceCells, out List<SdfVector[]> micro)
+        {
+            int tile = faceCells + 1, width = 3 * tile, height = 2 * tile;
+            float[] values = new float[3 * width * height];
+            micro = new List<SdfVector[]>();
+            Point3f[] p = new Point3f[24];
+            Normal3f[] n = new Normal3f[24];
+            Point2f[] uv = new Point2f[24];
+            List<int> indexList = new List<int>();
+            for (int f = 0; f < 6; ++f)
+            {
+                SdfVector normal = BoxFaces[f][0], t1 = BoxFaces[f][1], t2 = BoxFaces[f][2];
+                int ox = (f % 3) * tile, oy = (f / 3) * tile;
+                SdfVector[,] grid = new SdfVector[tile, tile];
+                for (int j = 0; j < tile; ++j)
+                {
+                    for (int i = 0; i < tile; ++i)
+                    {
+                        SdfVector q = normal + t1 * (2.0 * i / faceCells - 1) + t2 * (2.0 * j / faceCells - 1);
+                        SdfVector v = Mushroom(q) - q;
+                        int offset = 3 * ((oy + j) * width + ox + i);
+                        values[offset] = (float)v.x;
+                        values[offset + 1] = (float)v.y;
+                        values[offset + 2] = (float)v.z;
+                        grid[i, j] = q + new SdfVector(values[offset], values[offset + 1], values[offset + 2]);
+                    }
+                }
+                for (int j = 0; j < faceCells; ++j)
+                {
+                    for (int i = 0; i < faceCells; ++i)
+                    {
+                        micro.Add(new SdfVector[] { grid[i, j], grid[i + 1, j], grid[i + 1, j + 1] });
+                        micro.Add(new SdfVector[] { grid[i, j], grid[i + 1, j + 1], grid[i, j + 1] });
+                    }
+                }
+                for (int k = 0; k < 4; ++k)
+                {
+                    int a = k == 1 || k == 2 ? 1 : 0, b = k >= 2 ? 1 : 0;
+                    SdfVector q = normal + t1 * (2.0 * a - 1) + t2 * (2.0 * b - 1);
+                    p[4 * f + k] = new Point3f((Float)q.x, (Float)q.y, (Float)q.z);
+                    n[4 * f + k] = new Normal3f((Float)normal.x, (Float)normal.y, (Float)normal.z);
+                    uv[4 * f + k] = new Point2f((Float)(ox + a * faceCells) / (width - 1), (Float)(oy + b * faceCells) / (height - 1));
+                }
+                indexList.AddRange(new int[] { 4 * f, 4 * f + 1, 4 * f + 2, 4 * f, 4 * f + 2, 4 * f + 3 });
+            }
+            VectorMapImage image = new VectorMapImage(width, height, values);
+            return new VectorDisplacedMesh(new Transform(), false, indexList.ToArray(), p, n, uv, new ShellVectorGrid(image), false, false);
+        }
+
+        [TEST("Vector", "BoxToMushroom")]
+        public static void Vector_BoxToMushroom()
+        {
+            VectorDisplacedMesh mesh = MushroomMesh(40, out List<SdfVector[]> micro);
+            List<VectorDisplacedTriangle> triangles = Triangles(mesh);
+
+            // Rays from all around toward points of the mushroom, and toward points on the edges of the box (where the faces meet)
+            RNG rng = new RNG(3);
+            int hits = 0, mismatches = 0, layered = 0, edgeRays = 0, edgeMisses = 0;
+            double worst = 0;
+            VectorDisplacedTriangle.ResetThreadStatistics();
+            for (int i = 0; i < 4000; ++i)
+            {
+                bool onEdge = i % 4 == 0;
+                SdfVector target;
+                if (onEdge)
+                {
+                    // A point on one of the 12 edges of the box, moved to the mushroom
+                    int edge = (int)(rng.Uniform<Float>() * 12) % 12;
+                    int axis = edge / 4, corner = edge % 4;
+                    double along = 2 * rng.Uniform<Float>() - 1;
+                    double[] c = new double[3];
+                    c[axis] = along;
+                    c[(axis + 1) % 3] = (corner & 1) != 0 ? 1 : -1;
+                    c[(axis + 2) % 3] = (corner & 2) != 0 ? 1 : -1;
+                    target = Mushroom(new SdfVector(c[0], c[1], c[2]));
+                }
+                else
+                {
+                    target = new SdfVector(2 * rng.Uniform<Float>() - 1, 2 * rng.Uniform<Float>() - 1, 2 * rng.Uniform<Float>() - 1) * 0.9;
+                }
+                double theta = Math.Acos(1 - 2 * rng.Uniform<Float>()), azimuth = TwoPi * rng.Uniform<Float>();
+                Vector3f d = new Vector3f((Float)(Math.Sin(theta) * Math.Cos(azimuth)), (Float)(Math.Sin(theta) * Math.Sin(azimuth)), (Float)Math.Cos(theta));
+                Point3f o = new Point3f((Float)(target.x - 3 * d.x), (Float)(target.y - 3 * d.y), (Float)(target.z - 3 * d.z));
+                Ray ray = new Ray(o, d);
+                double expected = BruteForce(micro, ray, out int layers);
+                double actual = Closest(triangles, ray, out SurfaceInteraction unused);
+                layered += layers >= 2 ? 1 : 0;
+                hits += expected >= 0 ? 1 : 0;
+                bool bad = (expected < 0) != (actual < 0) || (expected >= 0 && Math.Abs(expected - actual) > 3e-5);
+                mismatches += bad ? 1 : 0;
+                if (!bad && expected >= 0)
+                {
+                    worst = Math.Max(worst, Math.Abs(expected - actual));
+                }
+                if (onEdge)
+                {
+                    ++edgeRays;
+                    edgeMisses += expected >= 0 && actual < 0 ? 1 : 0;
+                }
+            }
+            ShellStatistics statistics = VectorDisplacedTriangle.ThreadStatistics();
+            Console.WriteLine("box to mushroom traversal: " + (double)statistics.nodes / statistics.traces + " nodes and " + (double)statistics.leaves / statistics.traces +
+                              " leaves per trace (a trace is one ray against one base triangle)");
+            Console.WriteLine("box to mushroom: " + triangles.Count + " base triangles, 4000 rays, " + hits + " hits, " + layered + " with two or more layers, " +
+                              mismatches + " mismatches, " + edgeRays + " rays at the edges of the box with " + edgeMisses + " leaks, worst t error " + worst);
+            CHECK_GT(hits, 1500);
+            CHECK_GT(layered, 200);
+            CHECK_LE(mismatches, 8);
+            CHECK_EQ(edgeMisses, 0);
+            CHECK_LT(worst, 2e-6);
+
+            // The cap overhangs the stem: a ray going up outside the stem (r = 0.7), below the rim, meets the underside of the cap, and its
+            // normal points down; the box alone would have given the floor of the box at z = -1
+            Ray up = new Ray(new Point3f(0.7f, 0, -1.5f), new Vector3f(0, 0, 1));
+            double t = Closest(triangles, up, out SurfaceInteraction under);
+            Console.WriteLine("undercut: t " + t + " z " + (-1.5 + t) + " normal z " + under.n.z);
+            CHECK_GT(t, 0);
+            CHECK_GT(-1.5 + t, 0.2);
+            CHECK_LT(-1.5 + t, 0.6);
+            CHECK_LT(under.n.z, -0.2);
+        }
+
         [TEST("Vector", "TraversalCostOnALargeMap")]
         public static void Vector_TraversalCostOnALargeMap()
         {

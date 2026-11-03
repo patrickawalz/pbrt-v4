@@ -402,6 +402,16 @@ namespace pbrt
                 gridCorners[6 * t + 3] = (t1.y - tileV[t]) * field.cellsY;
                 gridCorners[6 * t + 4] = (t2.x - tileU[t]) * field.cellsX;
                 gridCorners[6 * t + 5] = (t2.y - tileV[t]) * field.cellsY;
+                // The uv are single precision: a corner that is meant to be on a grid point (a tile of an atlas ends exactly on one) is
+                // off it by up to 1e-4 of a cell, which would leave a sliver between two faces whose tiles meet there. Snap it.
+                for (int k = 0; k < 6; ++k)
+                {
+                    double rounded = Math.Round(gridCorners[6 * t + k]);
+                    if (Math.Abs(gridCorners[6 * t + k] - rounded) < 1e-3)
+                    {
+                        gridCorners[6 * t + k] = rounded;
+                    }
+                }
                 // The sign that makes the cross product of the tangents of the grid point to the side of the base normal
                 double determinant = (gridCorners[6 * t + 2] - gridCorners[6 * t]) * (gridCorners[6 * t + 5] - gridCorners[6 * t + 1]) -
                                      (gridCorners[6 * t + 4] - gridCorners[6 * t]) * (gridCorners[6 * t + 3] - gridCorners[6 * t + 1]);
@@ -439,6 +449,34 @@ namespace pbrt
         {
             this.mesh = mesh;
             this.triIndex = triIndex;
+            int i0 = mesh.indices[3 * triIndex], i1 = mesh.indices[3 * triIndex + 1], i2 = mesh.indices[3 * triIndex + 2];
+            // The base point and the frame as affine functions of (a, b): X0 + a dX1 + b dX2
+            p0 = mesh.objectP[i0];
+            dp1 = mesh.objectP[i1] - p0;
+            dp2 = mesh.objectP[i2] - p0;
+            t0 = mesh.frameT[i0];
+            dt1 = mesh.frameT[i1] - t0;
+            dt2 = mesh.frameT[i2] - t0;
+            binormal0 = mesh.frameB[i0];
+            dbinormal1 = mesh.frameB[i1] - binormal0;
+            dbinormal2 = mesh.frameB[i2] - binormal0;
+            n0 = mesh.frameN[i0];
+            dn1 = mesh.frameN[i1] - n0;
+            dn2 = mesh.frameN[i2] - n0;
+            constantFrame = dt1.LengthSquared() + dt2.LengthSquared() + dbinormal1.LengthSquared() + dbinormal2.LengthSquared() + dn1.LengthSquared() +
+                            dn2.LengthSquared() < 1e-24;
+            Array.Copy(mesh.gridCorners, 6 * triIndex, corners, 0, 6);
+            double ex1 = corners[2] - corners[0], ey1 = corners[3] - corners[1], ex2 = corners[4] - corners[0], ey2 = corners[5] - corners[1];
+            double determinant = ex1 * ey2 - ex2 * ey1;
+            // (a, b) from the grid point: a = (dx ey2 - dy ex2) / det, b = (ex1 dy - ey1 dx) / det
+            aX = ey2 / determinant;
+            aY = -ex2 / determinant;
+            bX = -ey1 / determinant;
+            bY = ex1 / determinant;
+            footprintX0 = Math.Max(0, (int)Math.Floor(Math.Min(corners[0], Math.Min(corners[2], corners[4])) + 1e-9));
+            footprintX1 = Math.Min(mesh.field.cellsX, (int)Math.Ceiling(Math.Max(corners[0], Math.Max(corners[2], corners[4])) - 1e-9));
+            footprintY0 = Math.Max(0, (int)Math.Floor(Math.Min(corners[1], Math.Min(corners[3], corners[5])) + 1e-9));
+            footprintY1 = Math.Min(mesh.field.cellsY, (int)Math.Ceiling(Math.Max(corners[1], Math.Max(corners[3], corners[5])) - 1e-9));
             bounds = ComputeBounds();
         }
 
@@ -606,25 +644,15 @@ namespace pbrt
         // The point of the displaced surface at (a, b) with the vector (vx, vy, vz), in object space
         private SdfVector Embed(double a, double b, double vx, double vy, double vz)
         {
-            int i0 = mesh.indices[3 * triIndex], i1 = mesh.indices[3 * triIndex + 1], i2 = mesh.indices[3 * triIndex + 2];
-            double c = 1 - a - b;
-            SdfVector point = mesh.objectP[i0] * c + mesh.objectP[i1] * a + mesh.objectP[i2] * b;
-            SdfVector frameT = mesh.frameT[i0] * c + mesh.frameT[i1] * a + mesh.frameT[i2] * b;
-            SdfVector frameB = mesh.frameB[i0] * c + mesh.frameB[i1] * a + mesh.frameB[i2] * b;
-            SdfVector frameN = mesh.frameN[i0] * c + mesh.frameN[i1] * a + mesh.frameN[i2] * b;
-            return point + frameT * vx + frameB * vy + frameN * vz;
+            return (p0 + dp1 * a + dp2 * b) + (t0 + dt1 * a + dt2 * b) * vx + (binormal0 + dbinormal1 * a + dbinormal2 * b) * vy + (n0 + dn1 * a + dn2 * b) * vz;
         }
 
         // (a, b) of a grid point
         private void GridToBarycentric(double x, double y, out double a, out double b)
         {
-            double[] g = mesh.gridCorners;
-            int k = 6 * triIndex;
-            double ex1 = g[k + 2] - g[k], ey1 = g[k + 3] - g[k + 1], ex2 = g[k + 4] - g[k], ey2 = g[k + 5] - g[k + 1];
-            double determinant = ex1 * ey2 - ex2 * ey1;
-            double dx = x - g[k], dy = y - g[k + 1];
-            a = (dx * ey2 - dy * ex2) / determinant;
-            b = (ex1 * dy - ey1 * dx) / determinant;
+            double dx = x - corners[0], dy = y - corners[1];
+            a = dx * aX + dy * aY;
+            b = dx * bX + dy * bY;
         }
 
         // The box of the displaced surface of the triangle in render space
@@ -702,9 +730,7 @@ namespace pbrt
         // Does the rectangle [x0, x1] x [y0, y1] (grid units) touch the uv triangle of this base triangle?
         private bool RectangleTouchesTriangle(double x0, double y0, double x1, double y1)
         {
-            double[] full = mesh.gridCorners;
-            double[] g = new double[6];
-            Array.Copy(full, 6 * triIndex, g, 0, 6);
+            double[] g = corners;
             double minX = Math.Min(g[0], Math.Min(g[2], g[4])), maxX = Math.Max(g[0], Math.Max(g[2], g[4]));
             double minY = Math.Min(g[1], Math.Min(g[3], g[5])), maxY = Math.Max(g[1], Math.Max(g[3], g[5]));
             if (maxX < x0 || minX > x1 || maxY < y0 || minY > y1)
@@ -754,17 +780,37 @@ namespace pbrt
             b0 = Math.Max(0, b0);
             a1 = Math.Min(1, a1);
             b1 = Math.Min(1, b1);
+            if (constantFrame)
+            {
+                // The frame is one matrix: the point is P(a, b) + F V with P affine in (a, b), so every component is the sum of the
+                // ranges of the terms
+                double[] vb = ws.box;
+                double rx = p0.x + Math.Min(dp1.x * a0, dp1.x * a1) + Math.Min(dp2.x * b0, dp2.x * b1);
+                double sx = p0.x + Math.Max(dp1.x * a0, dp1.x * a1) + Math.Max(dp2.x * b0, dp2.x * b1);
+                double ry = p0.y + Math.Min(dp1.y * a0, dp1.y * a1) + Math.Min(dp2.y * b0, dp2.y * b1);
+                double sy = p0.y + Math.Max(dp1.y * a0, dp1.y * a1) + Math.Max(dp2.y * b0, dp2.y * b1);
+                double rz = p0.z + Math.Min(dp1.z * a0, dp1.z * a1) + Math.Min(dp2.z * b0, dp2.z * b1);
+                double sz = p0.z + Math.Max(dp1.z * a0, dp1.z * a1) + Math.Max(dp2.z * b0, dp2.z * b1);
+                double fx0 = rx + Math.Min(t0.x * vb[0], t0.x * vb[3]) + Math.Min(binormal0.x * vb[1], binormal0.x * vb[4]) + Math.Min(n0.x * vb[2], n0.x * vb[5]);
+                double fx1 = sx + Math.Max(t0.x * vb[0], t0.x * vb[3]) + Math.Max(binormal0.x * vb[1], binormal0.x * vb[4]) + Math.Max(n0.x * vb[2], n0.x * vb[5]);
+                double fy0 = ry + Math.Min(t0.y * vb[0], t0.y * vb[3]) + Math.Min(binormal0.y * vb[1], binormal0.y * vb[4]) + Math.Min(n0.y * vb[2], n0.y * vb[5]);
+                double fy1 = sy + Math.Max(t0.y * vb[0], t0.y * vb[3]) + Math.Max(binormal0.y * vb[1], binormal0.y * vb[4]) + Math.Max(n0.y * vb[2], n0.y * vb[5]);
+                double fz0 = rz + Math.Min(t0.z * vb[0], t0.z * vb[3]) + Math.Min(binormal0.z * vb[1], binormal0.z * vb[4]) + Math.Min(n0.z * vb[2], n0.z * vb[5]);
+                double fz1 = sz + Math.Max(t0.z * vb[0], t0.z * vb[3]) + Math.Max(binormal0.z * vb[1], binormal0.z * vb[4]) + Math.Max(n0.z * vb[2], n0.z * vb[5]);
+                double fastPad = 1e-9 * (Math.Abs(fx0) + Math.Abs(fy0) + Math.Abs(fz0) + Math.Abs(fx1) + Math.Abs(fy1) + Math.Abs(fz1) + 1);
+                low = new SdfVector(fx0 - fastPad, fy0 - fastPad, fz0 - fastPad);
+                high = new SdfVector(fx1 + fastPad, fy1 + fastPad, fz1 + fastPad);
+                return;
+            }
             double lx = double.MaxValue, ly = double.MaxValue, lz = double.MaxValue;
             double hx = double.MinValue, hy = double.MinValue, hz = double.MinValue;
-            int i0 = mesh.indices[3 * triIndex], i1 = mesh.indices[3 * triIndex + 1], i2 = mesh.indices[3 * triIndex + 2];
             for (int corner = 0; corner < 4; ++corner)
             {
                 double a = (corner & 1) != 0 ? a1 : a0, b = (corner & 2) != 0 ? b1 : b0;
-                double c = 1 - a - b;
-                SdfVector point = mesh.objectP[i0] * c + mesh.objectP[i1] * a + mesh.objectP[i2] * b;
-                SdfVector frameT = mesh.frameT[i0] * c + mesh.frameT[i1] * a + mesh.frameT[i2] * b;
-                SdfVector frameB = mesh.frameB[i0] * c + mesh.frameB[i1] * a + mesh.frameB[i2] * b;
-                SdfVector frameN = mesh.frameN[i0] * c + mesh.frameN[i1] * a + mesh.frameN[i2] * b;
+                SdfVector point = p0 + dp1 * a + dp2 * b;
+                SdfVector frameT = t0 + dt1 * a + dt2 * b;
+                SdfVector frameB = binormal0 + dbinormal1 * a + dbinormal2 * b;
+                SdfVector frameN = n0 + dn1 * a + dn2 * b;
                 // For a fixed (a, b) the point is affine in the vector, so every component is extreme at the ends of the box of the
                 // vectors: P + sum over the three frame axes of the smaller and the larger of axis * low and axis * high
                 double[] box = ws.box;
@@ -1074,7 +1120,8 @@ namespace pbrt
             int[] dx = new int[] { 1, -1, 0, 0 }, dy = new int[] { 0, 0, 1, -1 };
             for (int k = 0; k < 4; ++k)
             {
-                int gx = Math.Max(0, Math.Min(field.cellsX, x + dx[k])), gy = Math.Max(0, Math.Min(field.cellsY, y + dy[k]));
+                // Only samples of the footprint of this triangle: an atlas has the data of other faces right next to it
+                int gx = Math.Max(footprintX0, Math.Min(footprintX1, x + dx[k])), gy = Math.Max(footprintY0, Math.Min(footprintY1, y + dy[k]));
                 field.Sample(gx, gy, out double vx, out double vy, out double vz);
                 GridToBarycentric(gx, gy, out double a, out double b);
                 neighbor[k] = Embed(a, b, vx, vy, vz);
@@ -1145,6 +1192,14 @@ namespace pbrt
         private readonly VectorDisplacedMesh mesh;
         private readonly int triIndex;
         private readonly Bounds3f bounds;
+        // The base point, the frame and the map from the grid to (a, b) of this triangle
+        private readonly SdfVector p0, dp1, dp2, t0, dt1, dt2, binormal0, dbinormal1, dbinormal2, n0, dn1, dn2;
+        private readonly double[] corners = new double[6];
+        // True when the frame does not vary over the triangle (a flat triangle with equal normals, or an object space map)
+        private readonly bool constantFrame;
+        // The grid points the triangle touches (the smoothing of the normals stays inside)
+        private readonly int footprintX0, footprintX1, footprintY0, footprintY1;
+        private readonly double aX, aY, bX, bY;
     }
 
     // Vector displacement of a tessellated mesh: the refined vertices move by the vector of the map in their frames

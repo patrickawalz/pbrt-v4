@@ -490,6 +490,22 @@ of the base surface (or in object space), so the surface can overhang and curl, 
   about 6x slower than the scalar shell and 7x slower than the tessellated mesh here: a box test per node and a clip per boundary leaf cost more than
   the quadratic of the height traversal, and there is no majorant-tightening like the rectangular bounds. Its memory does not grow with detail.
   `edgelength` 0.005 aborts with a stack overflow in the existing refinement (the limit noted above).
+* **Box to mushroom** (the standard example): a box of six separate quads (24 vertices) with an object space vector map in a 3 x 2 atlas (a tile of
+  256^2 vertices per face, a cell of gutter between tiles) that moves every point of the box to a mushroom: the point q goes to the surface of revolution
+  at the polar angle of q/|q| (profile: a Catmull-Rom curve with an undercut cap, stem and foot), so the cap overhangs the stem, which a height map cannot give.
+  Test `Vector.BoxToMushroom` (6 faces, 40 cells each): 4000 rays against a brute force of all micro triangles, 0 mismatches, 0 leaks in 1000 rays aimed
+  at the 12 edges of the box where faces meet, worst t error 2.4e-7; a ray going up at r = 0.7 meets the underside of the cap (z = 0.33, normal z = -0.96)
+  where the box would have given its floor. Renders (480x320, 16 spp): undisplaced box 7.8 s; pbrt scalar displacement (the normal component of the vectors) 9.0 s,
+  which cannot undercut; vector tessellated (edgelength 0.02) 10.1 s; vector shell 467 s (mean absolute difference from the tessellated image 0.0018, which is
+  the noise). Two bugs were found by looking at the render and are fixed: (1) the smoothing of the shading normals read the neighbouring tile of the atlas at
+  the border of a face, a dark line along two edges of the box (the stencil is now clamped to the footprint of the triangle); (2) uv are single precision, so a
+  corner that is meant to be on a grid point was off it by up to 1e-4 of a cell and left slivers between faces, a dotted line (corners within 1e-3 of a grid point
+  are snapped; the worst t error of the test fell from 1.1e-5 to 2.4e-7).
+* **Why the shell is slow here, and what was done.** 12 traces of about 24 nodes per ray, four child boxes per node. The box of a node is the sum of the range
+  of the base point and the range of the vector, which is loose when the two vary in opposite directions (the box to mushroom map is exactly that: V = target - q).
+  A node whose frame is constant (object space, or a flat triangle) now takes a cheaper path with the same box, and the per triangle constants are cached:
+  762 s to 422 s. Subdividing the base mesh did not help (47 s to 41 s at 1 spp). The remaining cost is the loose box; a box of the displaced positions themselves
+  (a pyramid of P + V per triangle) would be tighter but costs memory, and is not implemented.
 * **Not done:** compressed storage of vector maps (float only), filtering, area lights, a per-node frame bound for very strongly bent base triangles
   (the interpolated frame is used as is), and seams where the uv of neighbouring triangles differ (the frame is per vertex).
 
