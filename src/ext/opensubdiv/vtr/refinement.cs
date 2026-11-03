@@ -17,7 +17,7 @@ using IndexVector = OpenSubdiv.Vtr.StdVector<int>;
 //
 //  Declaration for the main refinement class (Refinement) and its pre-requisites:
 //
-namespace OpenSubdiv.Vtr
+namespace OpenSubdiv.Vtr.Internal
 {
     //
     //  Refinement:
@@ -1565,7 +1565,7 @@ namespace OpenSubdiv.Vtr
 
                 refineFVar.applyRefinement();
 
-                _child._fvarChannels.Add(childFVar);
+                _child._fvarChannels.PushBack(childFVar);
                 this._fvarChannels.Add(refineFVar);
             }
         }

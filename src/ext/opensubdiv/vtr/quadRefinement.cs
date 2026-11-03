@@ -14,7 +14,7 @@ using LocalIndexArray = OpenSubdiv.Vtr.Array<ushort>;
 using ConstLocalIndexArray = OpenSubdiv.Vtr.ConstArray<ushort>;
 using IndexVector = OpenSubdiv.Vtr.StdVector<int>;
 
-namespace OpenSubdiv.Vtr
+namespace OpenSubdiv.Vtr.Internal
 {
     //
     //  QuadRefinement:

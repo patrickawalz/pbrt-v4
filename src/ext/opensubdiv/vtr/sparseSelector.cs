@@ -9,7 +9,7 @@ using System.Collections.Generic;
 
 using ConstIndexArray = OpenSubdiv.Vtr.ConstArray<int>;
 
-namespace OpenSubdiv.Vtr
+namespace OpenSubdiv.Vtr.Internal
 {
     //
     //  SparseSelector:

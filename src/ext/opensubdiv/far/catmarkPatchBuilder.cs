@@ -290,6 +290,11 @@ namespace OpenSubdiv.Far
             return _size;
         }
 
+        public void SetWeight(int i, REAL weight)
+        {
+            _weights[i] = weight;
+        }
+
         public void Assign(int rowEntry, int index, REAL weight)
         {
             _indices[rowEntry] = index;

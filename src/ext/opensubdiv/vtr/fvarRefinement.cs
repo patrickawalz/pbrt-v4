@@ -14,17 +14,17 @@ using LocalIndexArray = OpenSubdiv.Vtr.Array<ushort>;
 using ConstLocalIndexArray = OpenSubdiv.Vtr.ConstArray<ushort>;
 using SiblingArray = OpenSubdiv.Vtr.Array<ushort>;
 using ConstSiblingArray = OpenSubdiv.Vtr.ConstArray<ushort>;
-using ValueTagArray = OpenSubdiv.Vtr.Array<OpenSubdiv.Vtr.FVarLevel.ValueTag>;
-using ConstValueTagArray = OpenSubdiv.Vtr.ConstArray<OpenSubdiv.Vtr.FVarLevel.ValueTag>;
-using CreaseEndPairArray = OpenSubdiv.Vtr.Array<OpenSubdiv.Vtr.FVarLevel.CreaseEndPair>;
-using ConstCreaseEndPairArray = OpenSubdiv.Vtr.ConstArray<OpenSubdiv.Vtr.FVarLevel.CreaseEndPair>;
+using ValueTagArray = OpenSubdiv.Vtr.Array<OpenSubdiv.Vtr.Internal.FVarLevel.ValueTag>;
+using ConstValueTagArray = OpenSubdiv.Vtr.ConstArray<OpenSubdiv.Vtr.Internal.FVarLevel.ValueTag>;
+using CreaseEndPairArray = OpenSubdiv.Vtr.Array<OpenSubdiv.Vtr.Internal.FVarLevel.CreaseEndPair>;
+using ConstCreaseEndPairArray = OpenSubdiv.Vtr.ConstArray<OpenSubdiv.Vtr.Internal.FVarLevel.CreaseEndPair>;
 
 //
 //  FVarRefinement:
 //      Analogous to Refinement -- retains data to facilitate refinement and
 //  population of refined face-varying data channels.
 //
-namespace OpenSubdiv.Vtr
+namespace OpenSubdiv.Vtr.Internal
 {
     //
     //  FVarRefinement:
