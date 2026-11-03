@@ -33,9 +33,9 @@ namespace pbrt
         // goes through on its way from there to the film (for light that goes along -ray.d at the origin), sensorDirection the
         // direction that the light has at the film and sensorUp the direction of the up of the image on the film. A camera
         // without such optics (the default) returns false and the sensor is at the origin of the ray, looking along ray.d with the
-        // up of the camera.
-        public virtual bool PolarisedSensor(Ray ray, out PolarisedLightSystem.Attenuation optics, out Vector3f sensorDirection,
-                                            out Vector3f sensorUp)
+        // up of the camera. The optics may depend on the wavelength (in nanometres) of the light.
+        public virtual bool PolarisedSensor(Ray ray, Float wavelength, out PolarisedLightSystem.Attenuation optics,
+                                            out Vector3f sensorDirection, out Vector3f sensorUp)
         {
             optics = default;
             sensorDirection = default;

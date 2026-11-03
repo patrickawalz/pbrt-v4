@@ -991,6 +991,8 @@ namespace pbrt
             // (not in pbrt-v4) The conic constant and the coefficients A4, A6, ..., A16 of the aspheric terms of the surface, in
             // millimetres like the lens file; null for a sphere
             public double[] aspheric;
+            // (not in pbrt-v4) The Abbe number of the glass behind the interface, 0 for a glass without dispersion
+            public Float abbeNumber;
 
             public override string ToString()
             {
@@ -1038,6 +1040,26 @@ namespace pbrt
             return sagMm / 1000;
         }
 
+        // (not in pbrt-v4) The wavelengths of the lines F, C and d in micrometres
+        const double WavelengthF = 0.4861327;
+        const double WavelengthC = 0.6562725;
+        const double WavelengthD = 0.5875618;
+
+        // (not in pbrt-v4) The index of refraction of the medium behind an interface at a wavelength in nanometres (0 is the
+        // d line, which is the index of the lens file). The dispersion is the Cauchy relation n = n_d + B (1 / lambda^2 - 1 /
+        // lambda_d^2), with the B that gives n_F - n_C = (n_d - 1) / V_d for the Abbe number V_d.
+        static Float ElementEta(LensElementInterface element, Float wavelength)
+        {
+            if (element.eta == 0 || element.abbeNumber == 0 || wavelength <= 0)
+            {
+                return element.eta;
+            }
+
+            double b = ((element.eta - 1.0) / element.abbeNumber) / (1 / (WavelengthF * WavelengthF) - 1 / (WavelengthC * WavelengthC));
+            double lambda = wavelength * 1e-3;
+            return (Float)(element.eta + b * (1 / (lambda * lambda) - 1 / (WavelengthD * WavelengthD)));
+        }
+
         public override pstd.optional<CameraRayDifferential> GenerateRayDifferential(CameraSample sample,
                                                                                      ref SampledWavelengths lambda)
         {
@@ -1057,7 +1079,7 @@ namespace pbrt
         // uniformly on the part of the front element within its aperture, so that is what pdfPos is, and pdfDir is p / pdfPos:
         // the strategies that sample the position (t = 1) and those that sample the ray (t > 1) are then compared through the
         // one density p, and the weights of the strategies are right.
-        bool FindFilmSample(Ray ray, out Point2f pRaster, out Float pdfPupil, out Float cosFilm, out Float weight)
+        bool FindFilmSample(Ray ray, Float wavelength, out Point2f pRaster, out Float pdfPupil, out Float cosFilm, out Float weight)
         {
             pRaster = default;
             pdfPupil = 0;
@@ -1074,7 +1096,7 @@ namespace pbrt
             Float back = 1e-3f * std.max(1, LensFrontZ());
             Ray rScene = new Ray(oCamera - back * dCamera, dCamera);
             Ray rFilm;
-            if (TraceLensesFromScene(rScene, &rFilm) == 0 || rFilm.d.z >= 0)
+            if (TraceLensesFromScene(rScene, &rFilm, null, wavelength) == 0 || rFilm.d.z >= 0)
             {
                 return false;
             }
@@ -1113,13 +1135,26 @@ namespace pbrt
 
             pdfPupil = 1 / pupilBounds.Area();
             // The transmission of the aperture image: what GenerateRay() gets from tracing this sample out
-            weight = TraceLensesFromFilm(new Ray(pFilm, pPupil - pFilm), null);
+            weight = TraceLensesFromFilm(new Ray(pFilm, pPupil - pFilm), null, wavelength);
             return weight != 0;
         }
 
         // The front element is sampled uniformly by area within its aperture. The area within a radius r is
         //   A(r) = integral of 2 pi r' sqrt(1 + sag'(r')^2) dr',
         // tabulated against r^2, where the integrand is smooth, and inverted by interpolation.
+        // (not in pbrt-v4) Whether the index of refraction of some element depends on the wavelength. The rays of a dispersive
+        // camera have the first wavelength of the sample and the others are terminated, as for the dispersion of a dielectric.
+        bool dispersive;
+
+        // The wavelengths that the density of the rays tries, and the wavelengths that bound the exit pupil: the nominal one
+        // (0) and the ends of the visible range
+        static readonly Float[] nominalWavelengths = { 0 };
+        static readonly Float[] dispersiveWavelengths = { 0, 400, 700 };
+        Float[] ProbeWavelengths()
+        {
+            return dispersive ? dispersiveWavelengths : nominalWavelengths;
+        }
+
         const int FrontAreaTableSize = 2048;
         double[] frontAreaTable;
         Float frontArea;
@@ -1198,7 +1233,14 @@ namespace pbrt
 
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
         {
-            if (!FindFilmSample(ray, out Point2f pRaster, out _, out _, out Float weight))
+            Float wavelength = 0;
+            if (dispersive)
+            {
+                lambda.TerminateSecondary();
+                wavelength = lambda[0];
+            }
+
+            if (!FindFilmSample(ray, wavelength, out Point2f pRaster, out _, out _, out Float weight))
             {
                 return new SampledSpectrum(0.0f);
             }
@@ -1219,7 +1261,19 @@ namespace pbrt
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
             *pdfPos = *pdfDir = 0;
-            if (!FindFilmSample(ray, out Point2f pRaster, out Float pdfPupil, out Float cosFilm, out _))
+            // The density of the ray that GenerateRay() would sample: it does not depend on the wavelength, except where the
+            // ray is within the aperture for some wavelengths only, and that is found with the first wavelength that passes
+            Point2f pRaster = default;
+            Float pdfPupil = 0;
+            Float cosFilm = 0;
+            bool found = false;
+            Float[] wavelengths = ProbeWavelengths();
+            for (int i = 0; i < wavelengths.Length && !found; ++i)
+            {
+                found = FindFilmSample(ray, wavelengths[i], out pRaster, out pdfPupil, out cosFilm, out _);
+            }
+
+            if (!found)
             {
                 return;
             }
@@ -1382,7 +1436,7 @@ namespace pbrt
         // RealisticCamera Method Definitions
         public RealisticCamera(CameraBaseParameters baseParameters, List<Float> lensParameters, Float focusDistance,
                                Float setApertureDiameter, Image apertureImage, Allocator alloc,
-                               List<Float> asphericParameters = null)
+                               List<Float> asphericParameters = null, List<Float> abbeNumbers = null)
             : base(baseParameters)
         {
             elementInterfaces = new pstd.vector<LensElementInterface>();
@@ -1438,8 +1492,10 @@ namespace pbrt
                     thickness = thickness,
                     eta = eta,
                     apertureRadius = apertureDiameter / 2,
-                    aspheric = aspheric
+                    aspheric = aspheric,
+                    abbeNumber = abbeNumbers != null ? abbeNumbers[i / 4] : 0
                 });
+                dispersive |= eta > 1 && abbeNumbers != null && abbeNumbers[i / 4] > 0;
             }
             ComputeFrontAreaTable();
 
@@ -1460,7 +1516,7 @@ namespace pbrt
             FindMinimumDifferentials(this);
         }
 
-        Float TraceLensesFromFilm(Ray rCamera, Ray* rOut)
+        Float TraceLensesFromFilm(Ray rCamera, Ray* rOut, Float wavelength = 0)
         {
             Float elementZ = 0, weight = 1;
             // Transform _rCamera_ from camera to lens system space
@@ -1514,9 +1570,9 @@ namespace pbrt
                 if (!isStop)
                 {
                     Vector3f w;
-                    Float eta_i = element.eta;
+                    Float eta_i = ElementEta(element, wavelength);
                     Float eta_t = (i > 0 && elementInterfaces[(ulong)(i - 1)].eta != 0)
-                                      ? elementInterfaces[(ulong)(i - 1)].eta
+                                      ? ElementEta(elementInterfaces[(ulong)(i - 1)], wavelength)
                                       : 1;
                     if (!pbrt.Refract(pbrt.Normalize(-rLens.d), n, eta_t / eta_i, null, &w))
                         return 0;
@@ -1608,10 +1664,19 @@ namespace pbrt
                                             pbrt.Lerp(u[1], projRearBounds.pMin.y, projRearBounds.pMax.y),
                                             LensRearZ());
 
-                // Expand pupil bounds if ray makes it through the lens system
-                if (!pbrt.Inside(new Point2f(pRear.x, pRear.y), pupilBounds) &&
-                    TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null) != 0)
-                    pupilBounds = pbrt.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
+                // Expand pupil bounds if ray makes it through the lens system (at any of the wavelengths of a dispersive one)
+                if (!pbrt.Inside(new Point2f(pRear.x, pRear.y), pupilBounds))
+                {
+                    Float[] wavelengths = ProbeWavelengths();
+                    for (int k = 0; k < wavelengths.Length; ++k)
+                    {
+                        if (TraceLensesFromFilm(new Ray(pFilm, pRear - pFilm), null, wavelengths[k]) != 0)
+                        {
+                            pupilBounds = pbrt.Union(pupilBounds, new Point2f(pRear.x, pRear.y));
+                            break;
+                        }
+                    }
+                }
             }
 
             // Return degenerate bounds if no rays made it through the lens system
@@ -1651,6 +1716,14 @@ namespace pbrt
 
         public override pstd.optional<CameraRay> GenerateRay(CameraSample sample, ref SampledWavelengths lambda)
         {
+            // (not in pbrt-v4) A dispersive camera traces the first wavelength of the sample, whether or not the ray gets through
+            Float wavelength = 0;
+            if (dispersive)
+            {
+                lambda.TerminateSecondary();
+                wavelength = lambda[0];
+            }
+
             // Find point on film, _pFilm_, corresponding to _sample.pFilm_
             Point2f s = new Point2f(sample.pFilm.x / film.FullResolution().x, sample.pFilm.y / film.FullResolution().y);
             Point2f pFilm2 = physicalExtent.Lerp(s);
@@ -1662,7 +1735,7 @@ namespace pbrt
                 return default;
             Ray rFilm = new Ray(pFilm, eps.value().pPupil - pFilm);
             Ray ray;
-            Float weight = TraceLensesFromFilm(rFilm, &ray);
+            Float weight = TraceLensesFromFilm(rFilm, &ray, wavelength);
             if (weight == 0)
                 return default;
 
@@ -1708,8 +1781,8 @@ namespace pbrt
             recorder.attenuation = transmission * recorder.attenuation;
         }
 
-        public override bool PolarisedSensor(Ray ray, out PolarisedLightSystem.Attenuation optics, out Vector3f sensorDirection,
-                                             out Vector3f sensorUp)
+        public override bool PolarisedSensor(Ray ray, Float wavelength, out PolarisedLightSystem.Attenuation optics,
+                                             out Vector3f sensorDirection, out Vector3f sensorUp)
         {
             optics = default;
             sensorDirection = default;
@@ -1722,7 +1795,7 @@ namespace pbrt
             // Start a little in front of the first element so that the trace meets it
             Float back = 1e-3f * std.max(1, LensFrontZ());
             Ray rScene = new Ray(oCamera - back * pbrt.Normalize(dCamera), pbrt.Normalize(dCamera));
-            if (TraceLensesFromScene(rScene, &rFilm, recorder) == 0)
+            if (TraceLensesFromScene(rScene, &rFilm, recorder, wavelength) == 0)
                 return false;
             optics = recorder.attenuation;
             // The light arrives at the film along the direction of the ray that ends there; the up of the image is -y on the film
@@ -1732,7 +1805,7 @@ namespace pbrt
             return true;
         }
 
-        Float TraceLensesFromScene(Ray rCamera, Ray* rOut, LensMueller recorder = null)
+        Float TraceLensesFromScene(Ray rCamera, Ray* rOut, LensMueller recorder = null, Float wavelength = 0)
         {
             Float elementZ = -LensFrontZ();
             // Transform _rCamera_ from camera to lens system space
@@ -1771,8 +1844,8 @@ namespace pbrt
                     Vector3f wt;
                     Float eta_i = (i == 0 || elementInterfaces[(ulong)(i - 1)].eta == 0)
                                       ? 1
-                                      : elementInterfaces[(ulong)(i - 1)].eta;
-                    Float eta_t = (elementInterfaces[(ulong)i].eta != 0) ? elementInterfaces[(ulong)i].eta : 1;
+                                      : ElementEta(elementInterfaces[(ulong)(i - 1)], wavelength);
+                    Float eta_t = (elementInterfaces[(ulong)i].eta != 0) ? ElementEta(elementInterfaces[(ulong)i], wavelength) : 1;
                     if (!pbrt.Refract(pbrt.Normalize(-rLens.d), n, eta_t / eta_i, null, &wt))
                         return 0;
                     if (recorder != null)
@@ -2151,6 +2224,19 @@ namespace pbrt
                 return null;
             }
 
+            // (not in pbrt-v4) The Abbe numbers of the glasses behind the interfaces, in the order of the lens file: 0 for no dispersion
+            List<Float> abbeNumbers = parameters.GetFloatArray("abbenumbers");
+            if (abbeNumbers.Count == 0)
+            {
+                abbeNumbers = null;
+            }
+            else if (abbeNumbers.Count != lensParameters.Count / 4)
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"abbenumbers\" needs a value for each of the %d interfaces of the lens, read %d.",
+                                                        (int)(lensParameters.Count / 4), (int)abbeNumbers.Count));
+                return null;
+            }
+
             int builtinRes = 256;
             Func<Point2f[], Image> rasterize = (Point2f[] vert) =>
             {
@@ -2282,7 +2368,7 @@ namespace pbrt
             }
 
             return new RealisticCamera(cameraBaseParameters, lensParameters, focusDistance, apertureDiameter,
-                                       apertureImage, alloc, asphericParameters);
+                                       apertureImage, alloc, asphericParameters, abbeNumbers);
         }
 
         // RealisticCamera Private Members

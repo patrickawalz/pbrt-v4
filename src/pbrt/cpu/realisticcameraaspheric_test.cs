@@ -93,11 +93,32 @@ namespace pbrt
             return pbrt.Normalize(new Vector3f((Float)(radial * x), (Float)(radial * y), 1));
         }
 
+        // The index of refraction of the medium behind interface i of the double Gauss lens at a wavelength in nanometres (0 is the
+        // d line): the Cauchy relation through n_d with the n_F - n_C = (n_d - 1) / V_d of the Abbe number
+        static double Eta(int interfaceIndex, double wavelength, Float[] abbeNumbers)
+        {
+            double nd = RealisticCameraPolarisedTests.doubleGauss[interfaceIndex * 4 + 2];
+            if (nd == 0)
+            {
+                return 1;
+            }
+
+            if (abbeNumbers == null || abbeNumbers[interfaceIndex] == 0 || wavelength <= 0)
+            {
+                return nd;
+            }
+
+            double b = ((nd - 1) / abbeNumbers[interfaceIndex]) / (1 / (0.4861327 * 0.4861327) - 1 / (0.6562725 * 0.6562725));
+            double l = wavelength * 1e-3;
+            return nd + b * (1 / (l * l) - 1 / (0.5875618 * 0.5875618));
+        }
+
         // The refraction of light through the lens, found with bisection for the intersections and finite differences for the
         // normals, written without the camera's code. The light starts at the point pCamera of the front element (camera space)
         // with the direction travel. Returns false for total internal reflection or a missed interface (the apertures are not
         // tested).
-        static bool Trace(Point3f pCamera, Vector3f travelCamera, out Vector3f exitCamera)
+        internal static bool Trace(Point3f pCamera, Vector3f travelCamera, bool aspheric, Float wavelength, Float[] abbeNumbers,
+                                   out Vector3f exitCamera)
         {
             exitCamera = default;
             Float[] lens = RealisticCameraPolarisedTests.doubleGauss;
@@ -105,7 +126,7 @@ namespace pbrt
             double[] p = { pCamera.x, pCamera.y, -pCamera.z };
             double[] d = { travelCamera.x, travelCamera.y, -travelCamera.z };
             double r0 = Math.Sqrt(p[0] * p[0] + p[1] * p[1]);
-            double elementZ = p[2] - Sag(0, r0);
+            double elementZ = p[2] - Sag(0, r0, aspheric);
             int count = lens.Length / 4;
             for (int i = 0; i < count; ++i)
             {
@@ -128,7 +149,7 @@ namespace pbrt
                         double middle = 0.5 * (low + high);
                         double x = p[0] + middle * d[0];
                         double y = p[1] + middle * d[1];
-                        double f = p[2] + middle * d[2] - elementZ - Sag(i, Math.Sqrt(x * x + y * y));
+                        double f = p[2] + middle * d[2] - elementZ - Sag(i, Math.Sqrt(x * x + y * y), aspheric);
                         if (f < 0)
                         {
                             low = middle;
@@ -144,7 +165,7 @@ namespace pbrt
                 }
 
                 double r = Math.Sqrt(p[0] * p[0] + p[1] * p[1]);
-                double radial = r > 0 ? Slope(i, r) / r : 0;
+                double radial = r > 0 ? Slope(i, r, aspheric) / r : 0;
                 double nx = -radial * p[0];
                 double ny = -radial * p[1];
                 double nz = 1;
@@ -162,8 +183,8 @@ namespace pbrt
                     cosIn = -cosIn;
                 }
 
-                double etaIn = (i == 0 || lens[(i - 1) * 4 + 2] == 0) ? 1 : lens[(i - 1) * 4 + 2];
-                double etaOut = lens[i * 4 + 2] == 0 ? 1 : lens[i * 4 + 2];
+                double etaIn = i == 0 ? 1 : Eta(i - 1, wavelength, abbeNumbers);
+                double etaOut = Eta(i, wavelength, abbeNumbers);
                 double eta = etaOut / etaIn;
                 double sin2Out = (1 - cosIn * cosIn) / (eta * eta);
                 if (sin2Out >= 1)
@@ -210,13 +231,13 @@ namespace pbrt
 
                 Point3f pLens = sample.value().pLens.p();
                 Ray ray = new Ray(pLens, -sample.value().wi);
-                if (!camera.PolarisedSensor(ray, out PolarisedLightSystem.Attenuation optics, out Vector3f sensorDirection,
+                if (!camera.PolarisedSensor(ray, 0, out PolarisedLightSystem.Attenuation optics, out Vector3f sensorDirection,
                                             out Vector3f sensorUp))
                 {
                     continue;
                 }
 
-                if (!Trace(pLens, -ray.d, out Vector3f expected))
+                if (!Trace(pLens, -ray.d, true, 0, null, out Vector3f expected))
                 {
                     continue;
                 }
@@ -256,9 +277,9 @@ namespace pbrt
                 }
 
                 Ray ray = new Ray(sample.value().pLens.p(), -sample.value().wi);
-                bool hitSpheres = spheres.PolarisedSensor(ray, out PolarisedLightSystem.Attenuation opticsA, out Vector3f directionA,
+                bool hitSpheres = spheres.PolarisedSensor(ray, 0, out PolarisedLightSystem.Attenuation opticsA, out Vector3f directionA,
                                                           out Vector3f upA);
-                bool hitNearly = nearlySpheres.PolarisedSensor(ray, out PolarisedLightSystem.Attenuation opticsB,
+                bool hitNearly = nearlySpheres.PolarisedSensor(ray, 0, out PolarisedLightSystem.Attenuation opticsB,
                                                                out Vector3f directionB, out Vector3f upB);
                 EXPECT_EQ(hitSpheres, hitNearly);
                 if (!hitSpheres || !hitNearly)

@@ -2998,7 +2998,7 @@ namespace pbrt
                 Ray cameraRay = t == 1
                     ? new Ray(sampled.p(), -toCamera, sampled.time())
                     : new Ray(cameraVertices[0].p(), Normalize(cameraVertices[1].p() - cameraVertices[0].p()), cameraVertices[0].time());
-                return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, Lp, pol.analyser, pol.analyserAngle, pol.measurement,
+                return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, lambdaRef[0], Lp, pol.analyser, pol.analyserAngle, pol.measurement,
                                                                 t == 1 ? toCamera : cameraDirection, pol.cameraUp);
             }
 
@@ -4648,7 +4648,7 @@ namespace pbrt
             try
             {
                 PathWalk.Run(ctx, hook);
-                return Finish(hook.L, hook.pL, hook.cameraDirection, new Ray(ray));
+                return Finish(hook.L, hook.pL, hook.cameraDirection, new Ray(ray), lambdaRef[0]);
             }
             finally
             {
@@ -5150,11 +5150,11 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) The radiance of the path: the scalar one, or what the sensor measures of the Stokes vector
-        SampledSpectrum Finish(SampledSpectrum L, PLight pL, Vector3f cameraDirection, Ray cameraRay)
+        SampledSpectrum Finish(SampledSpectrum L, PLight pL, Vector3f cameraDirection, Ray cameraRay, Float wavelength)
         {
             if (!polarised)
                 return L;
-            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, pL, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, wavelength, pL, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
         }
 
         // (not in pbrt-v4) Forward next event estimation of the emission of a medium (after "Line Integration for Rendering
