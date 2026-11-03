@@ -1,0 +1,5062 @@
+scheme catmark
+uniform 3
+level 0 verts 5 edges 8 faces 5 faceverts 16
+fv 0 1 2
+fe 0 1 2
+fhole 0
+fv 0 2 3
+fe 2 3 4
+fhole 0
+fv 0 3 4
+fe 4 5 6
+fhole 0
+fv 0 4 1
+fe 6 7 0
+fhole 0
+fv 4 3 2 1
+fe 5 3 1 7
+fhole 0
+ev 0 1
+ef 0 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 1 2
+ef 0 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 2 0
+ef 0 1
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 2 3
+ef 1 4
+esharp 1.5 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 3 0
+ef 1 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 3 4
+ef 2 4
+esharp 3 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 4 0
+ef 2 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 4 1
+ef 3 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ve 0 2 4 6
+vf 0 1 2 3
+vfl 0 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 1 0 7
+vf 0 3 4
+vfl 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 2 1 3
+vf 0 4 1
+vfl 2 2 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 2
+ve 4 3 5
+vf 1 4 2
+vfl 2 1 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 4
+ve 6 5 7
+vf 2 4 3
+vfl 2 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 2
+level 1 verts 18 edges 32 faces 16 faceverts 64
+fv 0 10 5 12
+fe 16 0 2 21
+fhole 0
+fv 1 11 5 10
+fe 18 1 0 17
+fhole 0
+fv 2 12 5 11
+fe 20 2 1 19
+fhole 0
+fv 0 12 6 14
+fe 21 3 5 25
+fhole 0
+fv 2 13 6 12
+fe 22 4 3 20
+fhole 0
+fv 3 14 6 13
+fe 24 5 4 23
+fhole 0
+fv 0 14 7 16
+fe 25 6 8 29
+fhole 0
+fv 3 15 7 14
+fe 26 7 6 24
+fhole 0
+fv 4 16 7 15
+fe 28 8 7 27
+fhole 0
+fv 0 16 8 10
+fe 29 9 11 16
+fhole 0
+fv 4 17 8 16
+fe 30 10 9 28
+fhole 0
+fv 1 10 8 17
+fe 17 11 10 31
+fhole 0
+fv 4 15 9 17
+fe 27 12 15 30
+fhole 0
+fv 15 3 13 9
+fe 26 23 13 12
+fhole 0
+fv 9 13 2 11
+fe 13 22 19 14
+fhole 0
+fv 17 9 11 1
+fe 15 14 18 31
+fhole 0
+ev 5 10
+ef 0 1
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 5 11
+ef 1 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 5 12
+ef 2 0
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 6 12
+ef 3 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 6 13
+ef 4 5
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 6 14
+ef 5 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 7 14
+ef 6 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 7 15
+ef 7 8
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 7 16
+ef 8 6
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 8 16
+ef 9 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 8 17
+ef 10 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 8 10
+ef 11 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 9 15
+ef 12 13
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 9 13
+ef 13 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 9 11
+ef 14 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 9 17
+ef 15 12
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 10 0
+ef 0 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 10 1
+ef 1 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 11 1
+ef 1 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 11 2
+ef 2 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 12 2
+ef 2 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 12 0
+ef 0 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 13 2
+ef 4 14
+esharp 0.5 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 13 3
+ef 5 13
+esharp 0.875 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 14 3
+ef 5 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 14 0
+ef 3 6
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 15 3
+ef 7 13
+esharp 1.625 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 15 4
+ef 8 12
+esharp 2 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 16 4
+ef 8 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 16 0
+ef 6 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 17 4
+ef 10 12
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 17 1
+ef 11 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ve 16 21 25 29
+vf 0 3 6 9
+vfl 0 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 18 17 31
+vf 1 11 15
+vfl 0 0 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 20 19 22
+vf 2 14 4
+vfl 0 2 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 2
+ve 24 23 26
+vf 5 13 7
+vfl 0 1 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 4
+ve 28 27 30
+vf 8 12 10
+vfl 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 2
+ve 2 0 1
+vf 0 1 2
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 5 3 4
+vf 3 4 5
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 8 6 7
+vf 6 7 8
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 11 9 10
+vf 9 10 11
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 15 12 13 14
+vf 12 13 14 15
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 17 0 16 11
+vf 1 0 9 11
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 19 1 18 14
+vf 2 1 15 14
+vfl 3 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 21 2 20 3
+vf 0 2 4 3
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 23 4 22 13
+vf 5 4 14 13
+vfl 3 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 4
+ve 25 5 24 6
+vf 3 5 7 6
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 27 7 26 12
+vf 8 7 13 12
+vfl 3 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 4
+ve 29 8 28 9
+vf 6 8 10 9
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 31 10 30 15
+vf 11 10 12 15
+vfl 3 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+level 2 verts 66 edges 128 faces 64 faceverts 256
+fv 0 50 18 55
+fe 97 0 3 107
+fhole 0
+fv 50 10 34 18
+fe 96 65 1 0
+fhole 0
+fv 18 34 5 36
+fe 1 64 68 2
+fhole 0
+fv 55 18 36 12
+fe 3 2 69 106
+fhole 0
+fv 1 52 19 51
+fe 101 4 7 99
+fhole 0
+fv 52 11 35 19
+fe 100 67 5 4
+fhole 0
+fv 19 35 5 34
+fe 5 66 64 6
+fhole 0
+fv 51 19 34 10
+fe 7 6 65 98
+fhole 0
+fv 2 54 20 53
+fe 105 8 11 103
+fhole 0
+fv 54 12 36 20
+fe 104 69 9 8
+fhole 0
+fv 20 36 5 35
+fe 9 68 66 10
+fhole 0
+fv 53 20 35 11
+fe 11 10 67 102
+fhole 0
+fv 0 55 21 59
+fe 107 12 15 115
+fhole 0
+fv 55 12 37 21
+fe 106 71 13 12
+fhole 0
+fv 21 37 6 39
+fe 13 70 74 14
+fhole 0
+fv 59 21 39 14
+fe 15 14 75 114
+fhole 0
+fv 2 56 22 54
+fe 109 16 19 105
+fhole 0
+fv 56 13 38 22
+fe 108 73 17 16
+fhole 0
+fv 22 38 6 37
+fe 17 72 70 18
+fhole 0
+fv 54 22 37 12
+fe 19 18 71 104
+fhole 0
+fv 3 58 23 57
+fe 113 20 23 111
+fhole 0
+fv 58 14 39 23
+fe 112 75 21 20
+fhole 0
+fv 23 39 6 38
+fe 21 74 72 22
+fhole 0
+fv 57 23 38 13
+fe 23 22 73 110
+fhole 0
+fv 0 59 24 63
+fe 115 24 27 123
+fhole 0
+fv 59 14 40 24
+fe 114 77 25 24
+fhole 0
+fv 24 40 7 42
+fe 25 76 80 26
+fhole 0
+fv 63 24 42 16
+fe 27 26 81 122
+fhole 0
+fv 3 60 25 58
+fe 117 28 31 113
+fhole 0
+fv 60 15 41 25
+fe 116 79 29 28
+fhole 0
+fv 25 41 7 40
+fe 29 78 76 30
+fhole 0
+fv 58 25 40 14
+fe 31 30 77 112
+fhole 0
+fv 4 62 26 61
+fe 121 32 35 119
+fhole 0
+fv 62 16 42 26
+fe 120 81 33 32
+fhole 0
+fv 26 42 7 41
+fe 33 80 78 34
+fhole 0
+fv 61 26 41 15
+fe 35 34 79 118
+fhole 0
+fv 0 63 27 50
+fe 123 36 39 97
+fhole 0
+fv 63 16 43 27
+fe 122 83 37 36
+fhole 0
+fv 27 43 8 45
+fe 37 82 86 38
+fhole 0
+fv 50 27 45 10
+fe 39 38 87 96
+fhole 0
+fv 4 64 28 62
+fe 125 40 43 121
+fhole 0
+fv 64 17 44 28
+fe 124 85 41 40
+fhole 0
+fv 28 44 8 43
+fe 41 84 82 42
+fhole 0
+fv 62 28 43 16
+fe 43 42 83 120
+fhole 0
+fv 1 51 29 65
+fe 99 44 47 127
+fhole 0
+fv 51 10 45 29
+fe 98 87 45 44
+fhole 0
+fv 29 45 8 44
+fe 45 86 84 46
+fhole 0
+fv 65 29 44 17
+fe 47 46 85 126
+fhole 0
+fv 4 61 30 64
+fe 119 48 51 125
+fhole 0
+fv 61 15 46 30
+fe 118 89 49 48
+fhole 0
+fv 30 46 9 49
+fe 49 88 94 50
+fhole 0
+fv 64 30 49 17
+fe 51 50 95 124
+fhole 0
+fv 15 60 31 46
+fe 116 52 55 89
+fhole 0
+fv 60 3 57 31
+fe 117 111 53 52
+fhole 0
+fv 31 57 13 47
+fe 53 110 91 54
+fhole 0
+fv 46 31 47 9
+fe 55 54 90 88
+fhole 0
+fv 9 47 32 48
+fe 90 56 59 92
+fhole 0
+fv 47 13 56 32
+fe 91 108 57 56
+fhole 0
+fv 32 56 2 53
+fe 57 109 103 58
+fhole 0
+fv 48 32 53 11
+fe 59 58 102 93
+fhole 0
+fv 17 49 33 65
+fe 95 60 63 126
+fhole 0
+fv 49 9 48 33
+fe 94 92 61 60
+fhole 0
+fv 33 48 11 52
+fe 61 93 100 62
+fhole 0
+fv 65 33 52 1
+fe 63 62 101 127
+fhole 0
+ev 18 50
+ef 0 1
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 18 34
+ef 1 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 18 36
+ef 2 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 18 55
+ef 3 0
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 19 52
+ef 4 5
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 19 35
+ef 5 6
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 19 34
+ef 6 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 19 51
+ef 7 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 20 54
+ef 8 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 20 36
+ef 9 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 20 35
+ef 10 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 20 53
+ef 11 8
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 21 55
+ef 12 13
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 21 37
+ef 13 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 21 39
+ef 14 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 21 59
+ef 15 12
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 22 56
+ef 16 17
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 22 38
+ef 17 18
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 22 37
+ef 18 19
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 22 54
+ef 19 16
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 23 58
+ef 20 21
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 23 39
+ef 21 22
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 23 38
+ef 22 23
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 23 57
+ef 23 20
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 24 59
+ef 24 25
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 24 40
+ef 25 26
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 24 42
+ef 26 27
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 24 63
+ef 27 24
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 25 60
+ef 28 29
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 25 41
+ef 29 30
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 25 40
+ef 30 31
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 25 58
+ef 31 28
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 26 62
+ef 32 33
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 26 42
+ef 33 34
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 26 41
+ef 34 35
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 26 61
+ef 35 32
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 27 63
+ef 36 37
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 27 43
+ef 37 38
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 27 45
+ef 38 39
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 27 50
+ef 39 36
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 28 64
+ef 40 41
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 28 44
+ef 41 42
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 28 43
+ef 42 43
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 28 62
+ef 43 40
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 29 51
+ef 44 45
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 29 45
+ef 45 46
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 29 44
+ef 46 47
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 29 65
+ef 47 44
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 30 61
+ef 48 49
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 30 46
+ef 49 50
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 30 49
+ef 50 51
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 30 64
+ef 51 48
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 31 60
+ef 52 53
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 31 57
+ef 53 54
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 31 47
+ef 54 55
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 31 46
+ef 55 52
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 32 47
+ef 56 57
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 32 56
+ef 57 58
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 32 53
+ef 58 59
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 32 48
+ef 59 56
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 33 49
+ef 60 61
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 33 48
+ef 61 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 33 52
+ef 62 63
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 33 65
+ef 63 60
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 34 5
+ef 2 6
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 34 10
+ef 1 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 35 5
+ef 6 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 35 11
+ef 5 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 36 5
+ef 10 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 36 12
+ef 9 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 37 6
+ef 14 18
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 37 12
+ef 13 19
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 38 6
+ef 18 22
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 38 13
+ef 17 23
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 39 6
+ef 22 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 39 14
+ef 21 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 40 7
+ef 26 30
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 40 14
+ef 25 31
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 41 7
+ef 30 34
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 41 15
+ef 29 35
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 42 7
+ef 34 26
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 42 16
+ef 33 27
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 43 8
+ef 38 42
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 43 16
+ef 37 43
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 44 8
+ef 42 46
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 44 17
+ef 41 47
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 45 8
+ef 46 38
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 45 10
+ef 45 39
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 46 9
+ef 50 55
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 46 15
+ef 49 52
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 47 9
+ef 55 56
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 47 13
+ef 54 57
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 48 9
+ef 56 61
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 48 11
+ef 59 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 49 9
+ef 61 50
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 49 17
+ef 60 51
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 50 10
+ef 1 39
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 50 0
+ef 0 36
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 51 10
+ef 7 45
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 51 1
+ef 4 44
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 52 11
+ef 5 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 52 1
+ef 4 63
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 53 11
+ef 11 59
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 53 2
+ef 8 58
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 54 12
+ef 9 19
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 54 2
+ef 8 16
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 55 12
+ef 3 13
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 55 0
+ef 0 12
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 56 13
+ef 17 57
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 56 2
+ef 16 58
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 57 13
+ef 23 54
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 57 3
+ef 20 53
+esharp 0.0625 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 58 14
+ef 21 31
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 58 3
+ef 20 28
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 59 14
+ef 15 25
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 59 0
+ef 12 24
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 60 15
+ef 29 52
+esharp 0.71875 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 60 3
+ef 28 53
+esharp 0.4375 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 61 15
+ef 35 49
+esharp 0.90625 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 61 4
+ef 32 48
+esharp 1 nonmanifold 0 boundary 0 infsharp 0 semisharp 1
+ev 62 16
+ef 33 43
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 62 4
+ef 32 40
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 63 16
+ef 27 37
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 63 0
+ef 24 36
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 64 17
+ef 41 51
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 64 4
+ef 40 48
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 65 17
+ef 47 60
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 65 1
+ef 44 63
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ve 97 107 115 123
+vf 0 12 24 36
+vfl 0 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 101 99 127
+vf 4 44 63
+vfl 0 0 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 105 103 109
+vf 8 58 16
+vfl 0 2 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 113 111 117
+vf 20 53 28
+vfl 0 1 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 4
+ve 121 119 125
+vf 32 48 40
+vfl 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 2
+ve 68 64 66
+vf 2 6 10
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 74 70 72
+vf 14 18 22
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 80 76 78
+vf 26 30 34
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 86 82 84
+vf 38 42 46
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 94 88 90 92
+vf 50 55 56 61
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 98 65 96 87
+vf 7 1 39 45
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 102 67 100 93
+vf 11 5 62 59
+vfl 3 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 106 69 104 71
+vf 3 9 19 13
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 110 73 108 91
+vf 23 17 57 54
+vfl 3 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 114 75 112 77
+vf 15 21 31 25
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 118 79 116 89
+vf 35 29 52 49
+vfl 3 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 4
+ve 122 81 120 83
+vf 27 33 43 37
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 126 85 124 95
+vf 47 41 51 60
+vfl 3 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 3 0 1 2
+vf 0 1 2 3
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 7 4 5 6
+vf 4 5 6 7
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 11 8 9 10
+vf 8 9 10 11
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 15 12 13 14
+vf 12 13 14 15
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 19 16 17 18
+vf 16 17 18 19
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 23 20 21 22
+vf 20 21 22 23
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 27 24 25 26
+vf 24 25 26 27
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 31 28 29 30
+vf 28 29 30 31
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 35 32 33 34
+vf 32 33 34 35
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 39 36 37 38
+vf 36 37 38 39
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 43 40 41 42
+vf 40 41 42 43
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 47 44 45 46
+vf 44 45 46 47
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 51 48 49 50
+vf 48 49 50 51
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 55 52 53 54
+vf 52 53 54 55
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 59 56 57 58
+vf 56 57 58 59
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 63 60 61 62
+vf 60 61 62 63
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 64 1 65 6
+vf 2 1 7 6
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 66 5 67 10
+vf 6 5 11 10
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 68 9 69 2
+vf 10 9 3 2
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 70 13 71 18
+vf 14 13 19 18
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 72 17 73 22
+vf 18 17 23 22
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 74 21 75 14
+vf 22 21 15 14
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 76 25 77 30
+vf 26 25 31 30
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 78 29 79 34
+vf 30 29 35 34
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 80 33 81 26
+vf 34 33 27 26
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 82 37 83 42
+vf 38 37 43 42
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 84 41 85 46
+vf 42 41 47 46
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 86 45 87 38
+vf 46 45 39 38
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 88 49 89 55
+vf 50 49 52 55
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 90 54 91 56
+vf 55 54 57 56
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 92 59 93 61
+vf 56 59 62 61
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 94 60 95 50
+vf 61 60 51 50
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 96 0 97 39
+vf 1 0 36 39
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 99 7 98 44
+vf 4 7 45 44
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 100 4 101 62
+vf 5 4 63 62
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 103 11 102 58
+vf 8 11 59 58
+vfl 3 0 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 104 8 105 19
+vf 9 8 16 19
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 107 3 106 12
+vf 0 3 13 12
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 108 16 109 57
+vf 17 16 58 57
+vfl 0 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 111 23 110 53
+vf 20 23 54 53
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 2
+ve 112 20 113 31
+vf 21 20 28 31
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 115 15 114 24
+vf 12 15 25 24
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 116 28 117 52
+vf 29 28 53 52
+vfl 0 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 4
+ve 119 35 118 48
+vf 32 35 49 48
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 4
+ve 120 32 121 43
+vf 33 32 40 43
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 123 27 122 36
+vf 24 27 37 36
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 124 40 125 51
+vf 41 40 48 51
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 127 47 126 63
+vf 44 47 60 63
+vfl 3 0 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+level 3 verts 258 edges 512 faces 256 faceverts 1024
+fv 0 227 66 237
+fe 451 0 3 471
+fhole 0
+fv 227 50 130 66
+fe 450 257 1 0
+fhole 0
+fv 66 130 18 133
+fe 1 256 262 2
+fhole 0
+fv 237 66 133 55
+fe 3 2 263 470
+fhole 0
+fv 50 226 67 130
+fe 448 4 7 257
+fhole 0
+fv 226 10 195 67
+fe 449 387 5 4
+fhole 0
+fv 67 195 34 131
+fe 5 386 259 6
+fhole 0
+fv 130 67 131 18
+fe 7 6 258 256
+fhole 0
+fv 18 131 68 132
+fe 258 8 11 260
+fhole 0
+fv 131 34 194 68
+fe 259 384 9 8
+fhole 0
+fv 68 194 5 198
+fe 9 385 393 10
+fhole 0
+fv 132 68 198 36
+fe 11 10 392 261
+fhole 0
+fv 55 133 69 236
+fe 263 12 15 468
+fhole 0
+fv 133 18 132 69
+fe 262 260 13 12
+fhole 0
+fv 69 132 36 199
+fe 13 261 394 14
+fhole 0
+fv 236 69 199 12
+fe 15 14 395 469
+fhole 0
+fv 1 231 70 229
+fe 459 16 19 455
+fhole 0
+fv 231 52 134 70
+fe 458 265 17 16
+fhole 0
+fv 70 134 19 137
+fe 17 264 270 18
+fhole 0
+fv 229 70 137 51
+fe 19 18 271 454
+fhole 0
+fv 52 230 71 134
+fe 456 20 23 265
+fhole 0
+fv 230 11 197 71
+fe 457 391 21 20
+fhole 0
+fv 71 197 35 135
+fe 21 390 267 22
+fhole 0
+fv 134 71 135 19
+fe 23 22 266 264
+fhole 0
+fv 19 135 72 136
+fe 266 24 27 268
+fhole 0
+fv 135 35 196 72
+fe 267 388 25 24
+fhole 0
+fv 72 196 5 194
+fe 25 389 385 26
+fhole 0
+fv 136 72 194 34
+fe 27 26 384 269
+fhole 0
+fv 51 137 73 228
+fe 271 28 31 452
+fhole 0
+fv 137 19 136 73
+fe 270 268 29 28
+fhole 0
+fv 73 136 34 195
+fe 29 269 386 30
+fhole 0
+fv 228 73 195 10
+fe 31 30 387 453
+fhole 0
+fv 2 235 74 233
+fe 467 32 35 463
+fhole 0
+fv 235 54 138 74
+fe 466 273 33 32
+fhole 0
+fv 74 138 20 141
+fe 33 272 278 34
+fhole 0
+fv 233 74 141 53
+fe 35 34 279 462
+fhole 0
+fv 54 234 75 138
+fe 464 36 39 273
+fhole 0
+fv 234 12 199 75
+fe 465 395 37 36
+fhole 0
+fv 75 199 36 139
+fe 37 394 275 38
+fhole 0
+fv 138 75 139 20
+fe 39 38 274 272
+fhole 0
+fv 20 139 76 140
+fe 274 40 43 276
+fhole 0
+fv 139 36 198 76
+fe 275 392 41 40
+fhole 0
+fv 76 198 5 196
+fe 41 393 389 42
+fhole 0
+fv 140 76 196 35
+fe 43 42 388 277
+fhole 0
+fv 53 141 77 232
+fe 279 44 47 460
+fhole 0
+fv 141 20 140 77
+fe 278 276 45 44
+fhole 0
+fv 77 140 35 197
+fe 45 277 390 46
+fhole 0
+fv 232 77 197 11
+fe 47 46 391 461
+fhole 0
+fv 0 237 78 245
+fe 471 48 51 487
+fhole 0
+fv 237 55 142 78
+fe 470 281 49 48
+fhole 0
+fv 78 142 21 145
+fe 49 280 286 50
+fhole 0
+fv 245 78 145 59
+fe 51 50 287 486
+fhole 0
+fv 55 236 79 142
+fe 468 52 55 281
+fhole 0
+fv 236 12 201 79
+fe 469 399 53 52
+fhole 0
+fv 79 201 37 143
+fe 53 398 283 54
+fhole 0
+fv 142 79 143 21
+fe 55 54 282 280
+fhole 0
+fv 21 143 80 144
+fe 282 56 59 284
+fhole 0
+fv 143 37 200 80
+fe 283 396 57 56
+fhole 0
+fv 80 200 6 204
+fe 57 397 405 58
+fhole 0
+fv 144 80 204 39
+fe 59 58 404 285
+fhole 0
+fv 59 145 81 244
+fe 287 60 63 484
+fhole 0
+fv 145 21 144 81
+fe 286 284 61 60
+fhole 0
+fv 81 144 39 205
+fe 61 285 406 62
+fhole 0
+fv 244 81 205 14
+fe 63 62 407 485
+fhole 0
+fv 2 239 82 235
+fe 475 64 67 467
+fhole 0
+fv 239 56 146 82
+fe 474 289 65 64
+fhole 0
+fv 82 146 22 149
+fe 65 288 294 66
+fhole 0
+fv 235 82 149 54
+fe 67 66 295 466
+fhole 0
+fv 56 238 83 146
+fe 472 68 71 289
+fhole 0
+fv 238 13 203 83
+fe 473 403 69 68
+fhole 0
+fv 83 203 38 147
+fe 69 402 291 70
+fhole 0
+fv 146 83 147 22
+fe 71 70 290 288
+fhole 0
+fv 22 147 84 148
+fe 290 72 75 292
+fhole 0
+fv 147 38 202 84
+fe 291 400 73 72
+fhole 0
+fv 84 202 6 200
+fe 73 401 397 74
+fhole 0
+fv 148 84 200 37
+fe 75 74 396 293
+fhole 0
+fv 54 149 85 234
+fe 295 76 79 464
+fhole 0
+fv 149 22 148 85
+fe 294 292 77 76
+fhole 0
+fv 85 148 37 201
+fe 77 293 398 78
+fhole 0
+fv 234 85 201 12
+fe 79 78 399 465
+fhole 0
+fv 3 243 86 241
+fe 483 80 83 479
+fhole 0
+fv 243 58 150 86
+fe 482 297 81 80
+fhole 0
+fv 86 150 23 153
+fe 81 296 302 82
+fhole 0
+fv 241 86 153 57
+fe 83 82 303 478
+fhole 0
+fv 58 242 87 150
+fe 480 84 87 297
+fhole 0
+fv 242 14 205 87
+fe 481 407 85 84
+fhole 0
+fv 87 205 39 151
+fe 85 406 299 86
+fhole 0
+fv 150 87 151 23
+fe 87 86 298 296
+fhole 0
+fv 23 151 88 152
+fe 298 88 91 300
+fhole 0
+fv 151 39 204 88
+fe 299 404 89 88
+fhole 0
+fv 88 204 6 202
+fe 89 405 401 90
+fhole 0
+fv 152 88 202 38
+fe 91 90 400 301
+fhole 0
+fv 57 153 89 240
+fe 303 92 95 476
+fhole 0
+fv 153 23 152 89
+fe 302 300 93 92
+fhole 0
+fv 89 152 38 203
+fe 93 301 402 94
+fhole 0
+fv 240 89 203 13
+fe 95 94 403 477
+fhole 0
+fv 0 245 90 253
+fe 487 96 99 503
+fhole 0
+fv 245 59 154 90
+fe 486 305 97 96
+fhole 0
+fv 90 154 24 157
+fe 97 304 310 98
+fhole 0
+fv 253 90 157 63
+fe 99 98 311 502
+fhole 0
+fv 59 244 91 154
+fe 484 100 103 305
+fhole 0
+fv 244 14 207 91
+fe 485 411 101 100
+fhole 0
+fv 91 207 40 155
+fe 101 410 307 102
+fhole 0
+fv 154 91 155 24
+fe 103 102 306 304
+fhole 0
+fv 24 155 92 156
+fe 306 104 107 308
+fhole 0
+fv 155 40 206 92
+fe 307 408 105 104
+fhole 0
+fv 92 206 7 210
+fe 105 409 417 106
+fhole 0
+fv 156 92 210 42
+fe 107 106 416 309
+fhole 0
+fv 63 157 93 252
+fe 311 108 111 500
+fhole 0
+fv 157 24 156 93
+fe 310 308 109 108
+fhole 0
+fv 93 156 42 211
+fe 109 309 418 110
+fhole 0
+fv 252 93 211 16
+fe 111 110 419 501
+fhole 0
+fv 3 247 94 243
+fe 491 112 115 483
+fhole 0
+fv 247 60 158 94
+fe 490 313 113 112
+fhole 0
+fv 94 158 25 161
+fe 113 312 318 114
+fhole 0
+fv 243 94 161 58
+fe 115 114 319 482
+fhole 0
+fv 60 246 95 158
+fe 488 116 119 313
+fhole 0
+fv 246 15 209 95
+fe 489 415 117 116
+fhole 0
+fv 95 209 41 159
+fe 117 414 315 118
+fhole 0
+fv 158 95 159 25
+fe 119 118 314 312
+fhole 0
+fv 25 159 96 160
+fe 314 120 123 316
+fhole 0
+fv 159 41 208 96
+fe 315 412 121 120
+fhole 0
+fv 96 208 7 206
+fe 121 413 409 122
+fhole 0
+fv 160 96 206 40
+fe 123 122 408 317
+fhole 0
+fv 58 161 97 242
+fe 319 124 127 480
+fhole 0
+fv 161 25 160 97
+fe 318 316 125 124
+fhole 0
+fv 97 160 40 207
+fe 125 317 410 126
+fhole 0
+fv 242 97 207 14
+fe 127 126 411 481
+fhole 0
+fv 4 251 98 249
+fe 499 128 131 495
+fhole 0
+fv 251 62 162 98
+fe 498 321 129 128
+fhole 0
+fv 98 162 26 165
+fe 129 320 326 130
+fhole 0
+fv 249 98 165 61
+fe 131 130 327 494
+fhole 0
+fv 62 250 99 162
+fe 496 132 135 321
+fhole 0
+fv 250 16 211 99
+fe 497 419 133 132
+fhole 0
+fv 99 211 42 163
+fe 133 418 323 134
+fhole 0
+fv 162 99 163 26
+fe 135 134 322 320
+fhole 0
+fv 26 163 100 164
+fe 322 136 139 324
+fhole 0
+fv 163 42 210 100
+fe 323 416 137 136
+fhole 0
+fv 100 210 7 208
+fe 137 417 413 138
+fhole 0
+fv 164 100 208 41
+fe 139 138 412 325
+fhole 0
+fv 61 165 101 248
+fe 327 140 143 492
+fhole 0
+fv 165 26 164 101
+fe 326 324 141 140
+fhole 0
+fv 101 164 41 209
+fe 141 325 414 142
+fhole 0
+fv 248 101 209 15
+fe 143 142 415 493
+fhole 0
+fv 0 253 102 227
+fe 503 144 147 451
+fhole 0
+fv 253 63 166 102
+fe 502 329 145 144
+fhole 0
+fv 102 166 27 169
+fe 145 328 334 146
+fhole 0
+fv 227 102 169 50
+fe 147 146 335 450
+fhole 0
+fv 63 252 103 166
+fe 500 148 151 329
+fhole 0
+fv 252 16 213 103
+fe 501 423 149 148
+fhole 0
+fv 103 213 43 167
+fe 149 422 331 150
+fhole 0
+fv 166 103 167 27
+fe 151 150 330 328
+fhole 0
+fv 27 167 104 168
+fe 330 152 155 332
+fhole 0
+fv 167 43 212 104
+fe 331 420 153 152
+fhole 0
+fv 104 212 8 216
+fe 153 421 429 154
+fhole 0
+fv 168 104 216 45
+fe 155 154 428 333
+fhole 0
+fv 50 169 105 226
+fe 335 156 159 448
+fhole 0
+fv 169 27 168 105
+fe 334 332 157 156
+fhole 0
+fv 105 168 45 217
+fe 157 333 430 158
+fhole 0
+fv 226 105 217 10
+fe 159 158 431 449
+fhole 0
+fv 4 255 106 251
+fe 507 160 163 499
+fhole 0
+fv 255 64 170 106
+fe 506 337 161 160
+fhole 0
+fv 106 170 28 173
+fe 161 336 342 162
+fhole 0
+fv 251 106 173 62
+fe 163 162 343 498
+fhole 0
+fv 64 254 107 170
+fe 504 164 167 337
+fhole 0
+fv 254 17 215 107
+fe 505 427 165 164
+fhole 0
+fv 107 215 44 171
+fe 165 426 339 166
+fhole 0
+fv 170 107 171 28
+fe 167 166 338 336
+fhole 0
+fv 28 171 108 172
+fe 338 168 171 340
+fhole 0
+fv 171 44 214 108
+fe 339 424 169 168
+fhole 0
+fv 108 214 8 212
+fe 169 425 421 170
+fhole 0
+fv 172 108 212 43
+fe 171 170 420 341
+fhole 0
+fv 62 173 109 250
+fe 343 172 175 496
+fhole 0
+fv 173 28 172 109
+fe 342 340 173 172
+fhole 0
+fv 109 172 43 213
+fe 173 341 422 174
+fhole 0
+fv 250 109 213 16
+fe 175 174 423 497
+fhole 0
+fv 1 229 110 257
+fe 455 176 179 511
+fhole 0
+fv 229 51 174 110
+fe 454 345 177 176
+fhole 0
+fv 110 174 29 177
+fe 177 344 350 178
+fhole 0
+fv 257 110 177 65
+fe 179 178 351 510
+fhole 0
+fv 51 228 111 174
+fe 452 180 183 345
+fhole 0
+fv 228 10 217 111
+fe 453 431 181 180
+fhole 0
+fv 111 217 45 175
+fe 181 430 347 182
+fhole 0
+fv 174 111 175 29
+fe 183 182 346 344
+fhole 0
+fv 29 175 112 176
+fe 346 184 187 348
+fhole 0
+fv 175 45 216 112
+fe 347 428 185 184
+fhole 0
+fv 112 216 8 214
+fe 185 429 425 186
+fhole 0
+fv 176 112 214 44
+fe 187 186 424 349
+fhole 0
+fv 65 177 113 256
+fe 351 188 191 508
+fhole 0
+fv 177 29 176 113
+fe 350 348 189 188
+fhole 0
+fv 113 176 44 215
+fe 189 349 426 190
+fhole 0
+fv 256 113 215 17
+fe 191 190 427 509
+fhole 0
+fv 4 249 114 255
+fe 495 192 195 507
+fhole 0
+fv 249 61 178 114
+fe 494 353 193 192
+fhole 0
+fv 114 178 30 181
+fe 193 352 358 194
+fhole 0
+fv 255 114 181 64
+fe 195 194 359 506
+fhole 0
+fv 61 248 115 178
+fe 492 196 199 353
+fhole 0
+fv 248 15 219 115
+fe 493 435 197 196
+fhole 0
+fv 115 219 46 179
+fe 197 434 355 198
+fhole 0
+fv 178 115 179 30
+fe 199 198 354 352
+fhole 0
+fv 30 179 116 180
+fe 354 200 203 356
+fhole 0
+fv 179 46 218 116
+fe 355 432 201 200
+fhole 0
+fv 116 218 9 224
+fe 201 433 445 202
+fhole 0
+fv 180 116 224 49
+fe 203 202 444 357
+fhole 0
+fv 64 181 117 254
+fe 359 204 207 504
+fhole 0
+fv 181 30 180 117
+fe 358 356 205 204
+fhole 0
+fv 117 180 49 225
+fe 205 357 446 206
+fhole 0
+fv 254 117 225 17
+fe 207 206 447 505
+fhole 0
+fv 15 246 118 219
+fe 489 208 211 435
+fhole 0
+fv 246 60 182 118
+fe 488 361 209 208
+fhole 0
+fv 118 182 31 185
+fe 209 360 366 210
+fhole 0
+fv 219 118 185 46
+fe 211 210 367 434
+fhole 0
+fv 60 247 119 182
+fe 490 212 215 361
+fhole 0
+fv 247 3 241 119
+fe 491 479 213 212
+fhole 0
+fv 119 241 57 183
+fe 213 478 363 214
+fhole 0
+fv 182 119 183 31
+fe 215 214 362 360
+fhole 0
+fv 31 183 120 184
+fe 362 216 219 364
+fhole 0
+fv 183 57 240 120
+fe 363 476 217 216
+fhole 0
+fv 120 240 13 221
+fe 217 477 439 218
+fhole 0
+fv 184 120 221 47
+fe 219 218 438 365
+fhole 0
+fv 46 185 121 218
+fe 367 220 223 432
+fhole 0
+fv 185 31 184 121
+fe 366 364 221 220
+fhole 0
+fv 121 184 47 220
+fe 221 365 436 222
+fhole 0
+fv 218 121 220 9
+fe 223 222 437 433
+fhole 0
+fv 9 220 122 222
+fe 437 224 227 441
+fhole 0
+fv 220 47 186 122
+fe 436 369 225 224
+fhole 0
+fv 122 186 32 189
+fe 225 368 374 226
+fhole 0
+fv 222 122 189 48
+fe 227 226 375 440
+fhole 0
+fv 47 221 123 186
+fe 438 228 231 369
+fhole 0
+fv 221 13 238 123
+fe 439 473 229 228
+fhole 0
+fv 123 238 56 187
+fe 229 472 371 230
+fhole 0
+fv 186 123 187 32
+fe 231 230 370 368
+fhole 0
+fv 32 187 124 188
+fe 370 232 235 372
+fhole 0
+fv 187 56 239 124
+fe 371 474 233 232
+fhole 0
+fv 124 239 2 233
+fe 233 475 463 234
+fhole 0
+fv 188 124 233 53
+fe 235 234 462 373
+fhole 0
+fv 48 189 125 223
+fe 375 236 239 442
+fhole 0
+fv 189 32 188 125
+fe 374 372 237 236
+fhole 0
+fv 125 188 53 232
+fe 237 373 460 238
+fhole 0
+fv 223 125 232 11
+fe 239 238 461 443
+fhole 0
+fv 17 225 126 256
+fe 447 240 243 509
+fhole 0
+fv 225 49 190 126
+fe 446 377 241 240
+fhole 0
+fv 126 190 33 193
+fe 241 376 382 242
+fhole 0
+fv 256 126 193 65
+fe 243 242 383 508
+fhole 0
+fv 49 224 127 190
+fe 444 244 247 377
+fhole 0
+fv 224 9 222 127
+fe 445 441 245 244
+fhole 0
+fv 127 222 48 191
+fe 245 440 379 246
+fhole 0
+fv 190 127 191 33
+fe 247 246 378 376
+fhole 0
+fv 33 191 128 192
+fe 378 248 251 380
+fhole 0
+fv 191 48 223 128
+fe 379 442 249 248
+fhole 0
+fv 128 223 11 230
+fe 249 443 457 250
+fhole 0
+fv 192 128 230 52
+fe 251 250 456 381
+fhole 0
+fv 65 193 129 257
+fe 383 252 255 510
+fhole 0
+fv 193 33 192 129
+fe 382 380 253 252
+fhole 0
+fv 129 192 52 231
+fe 253 381 458 254
+fhole 0
+fv 257 129 231 1
+fe 255 254 459 511
+fhole 0
+ev 66 227
+ef 0 1
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 66 130
+ef 1 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 66 133
+ef 2 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 66 237
+ef 3 0
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 67 226
+ef 4 5
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 67 195
+ef 5 6
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 67 131
+ef 6 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 67 130
+ef 7 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 68 131
+ef 8 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 68 194
+ef 9 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 68 198
+ef 10 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 68 132
+ef 11 8
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 69 133
+ef 12 13
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 69 132
+ef 13 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 69 199
+ef 14 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 69 236
+ef 15 12
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 70 231
+ef 16 17
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 70 134
+ef 17 18
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 70 137
+ef 18 19
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 70 229
+ef 19 16
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 71 230
+ef 20 21
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 71 197
+ef 21 22
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 71 135
+ef 22 23
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 71 134
+ef 23 20
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 72 135
+ef 24 25
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 72 196
+ef 25 26
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 72 194
+ef 26 27
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 72 136
+ef 27 24
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 73 137
+ef 28 29
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 73 136
+ef 29 30
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 73 195
+ef 30 31
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 73 228
+ef 31 28
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 74 235
+ef 32 33
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 74 138
+ef 33 34
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 74 141
+ef 34 35
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 74 233
+ef 35 32
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 75 234
+ef 36 37
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 75 199
+ef 37 38
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 75 139
+ef 38 39
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 75 138
+ef 39 36
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 76 139
+ef 40 41
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 76 198
+ef 41 42
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 76 196
+ef 42 43
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 76 140
+ef 43 40
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 77 141
+ef 44 45
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 77 140
+ef 45 46
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 77 197
+ef 46 47
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 77 232
+ef 47 44
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 78 237
+ef 48 49
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 78 142
+ef 49 50
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 78 145
+ef 50 51
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 78 245
+ef 51 48
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 79 236
+ef 52 53
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 79 201
+ef 53 54
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 79 143
+ef 54 55
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 79 142
+ef 55 52
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 80 143
+ef 56 57
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 80 200
+ef 57 58
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 80 204
+ef 58 59
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 80 144
+ef 59 56
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 81 145
+ef 60 61
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 81 144
+ef 61 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 81 205
+ef 62 63
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 81 244
+ef 63 60
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 82 239
+ef 64 65
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 82 146
+ef 65 66
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 82 149
+ef 66 67
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 82 235
+ef 67 64
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 83 238
+ef 68 69
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 83 203
+ef 69 70
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 83 147
+ef 70 71
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 83 146
+ef 71 68
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 84 147
+ef 72 73
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 84 202
+ef 73 74
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 84 200
+ef 74 75
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 84 148
+ef 75 72
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 85 149
+ef 76 77
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 85 148
+ef 77 78
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 85 201
+ef 78 79
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 85 234
+ef 79 76
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 86 243
+ef 80 81
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 86 150
+ef 81 82
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 86 153
+ef 82 83
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 86 241
+ef 83 80
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 87 242
+ef 84 85
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 87 205
+ef 85 86
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 87 151
+ef 86 87
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 87 150
+ef 87 84
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 88 151
+ef 88 89
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 88 204
+ef 89 90
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 88 202
+ef 90 91
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 88 152
+ef 91 88
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 89 153
+ef 92 93
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 89 152
+ef 93 94
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 89 203
+ef 94 95
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 89 240
+ef 95 92
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 90 245
+ef 96 97
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 90 154
+ef 97 98
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 90 157
+ef 98 99
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 90 253
+ef 99 96
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 91 244
+ef 100 101
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 91 207
+ef 101 102
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 91 155
+ef 102 103
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 91 154
+ef 103 100
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 92 155
+ef 104 105
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 92 206
+ef 105 106
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 92 210
+ef 106 107
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 92 156
+ef 107 104
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 93 157
+ef 108 109
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 93 156
+ef 109 110
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 93 211
+ef 110 111
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 93 252
+ef 111 108
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 94 247
+ef 112 113
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 94 158
+ef 113 114
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 94 161
+ef 114 115
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 94 243
+ef 115 112
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 95 246
+ef 116 117
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 95 209
+ef 117 118
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 95 159
+ef 118 119
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 95 158
+ef 119 116
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 96 159
+ef 120 121
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 96 208
+ef 121 122
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 96 206
+ef 122 123
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 96 160
+ef 123 120
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 97 161
+ef 124 125
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 97 160
+ef 125 126
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 97 207
+ef 126 127
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 97 242
+ef 127 124
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 98 251
+ef 128 129
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 98 162
+ef 129 130
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 98 165
+ef 130 131
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 98 249
+ef 131 128
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 99 250
+ef 132 133
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 99 211
+ef 133 134
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 99 163
+ef 134 135
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 99 162
+ef 135 132
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 100 163
+ef 136 137
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 100 210
+ef 137 138
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 100 208
+ef 138 139
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 100 164
+ef 139 136
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 101 165
+ef 140 141
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 101 164
+ef 141 142
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 101 209
+ef 142 143
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 101 248
+ef 143 140
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 102 253
+ef 144 145
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 102 166
+ef 145 146
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 102 169
+ef 146 147
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 102 227
+ef 147 144
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 103 252
+ef 148 149
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 103 213
+ef 149 150
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 103 167
+ef 150 151
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 103 166
+ef 151 148
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 104 167
+ef 152 153
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 104 212
+ef 153 154
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 104 216
+ef 154 155
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 104 168
+ef 155 152
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 105 169
+ef 156 157
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 105 168
+ef 157 158
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 105 217
+ef 158 159
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 105 226
+ef 159 156
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 106 255
+ef 160 161
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 106 170
+ef 161 162
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 106 173
+ef 162 163
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 106 251
+ef 163 160
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 107 254
+ef 164 165
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 107 215
+ef 165 166
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 107 171
+ef 166 167
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 107 170
+ef 167 164
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 108 171
+ef 168 169
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 108 214
+ef 169 170
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 108 212
+ef 170 171
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 108 172
+ef 171 168
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 109 173
+ef 172 173
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 109 172
+ef 173 174
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 109 213
+ef 174 175
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 109 250
+ef 175 172
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 110 229
+ef 176 177
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 110 174
+ef 177 178
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 110 177
+ef 178 179
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 110 257
+ef 179 176
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 111 228
+ef 180 181
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 111 217
+ef 181 182
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 111 175
+ef 182 183
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 111 174
+ef 183 180
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 112 175
+ef 184 185
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 112 216
+ef 185 186
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 112 214
+ef 186 187
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 112 176
+ef 187 184
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 113 177
+ef 188 189
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 113 176
+ef 189 190
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 113 215
+ef 190 191
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 113 256
+ef 191 188
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 114 249
+ef 192 193
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 114 178
+ef 193 194
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 114 181
+ef 194 195
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 114 255
+ef 195 192
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 115 248
+ef 196 197
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 115 219
+ef 197 198
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 115 179
+ef 198 199
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 115 178
+ef 199 196
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 116 179
+ef 200 201
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 116 218
+ef 201 202
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 116 224
+ef 202 203
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 116 180
+ef 203 200
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 117 181
+ef 204 205
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 117 180
+ef 205 206
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 117 225
+ef 206 207
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 117 254
+ef 207 204
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 118 246
+ef 208 209
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 118 182
+ef 209 210
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 118 185
+ef 210 211
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 118 219
+ef 211 208
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 119 247
+ef 212 213
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 119 241
+ef 213 214
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 119 183
+ef 214 215
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 119 182
+ef 215 212
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 120 183
+ef 216 217
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 120 240
+ef 217 218
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 120 221
+ef 218 219
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 120 184
+ef 219 216
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 121 185
+ef 220 221
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 121 184
+ef 221 222
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 121 220
+ef 222 223
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 121 218
+ef 223 220
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 122 220
+ef 224 225
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 122 186
+ef 225 226
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 122 189
+ef 226 227
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 122 222
+ef 227 224
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 123 221
+ef 228 229
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 123 238
+ef 229 230
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 123 187
+ef 230 231
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 123 186
+ef 231 228
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 124 187
+ef 232 233
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 124 239
+ef 233 234
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 124 233
+ef 234 235
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 124 188
+ef 235 232
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 125 189
+ef 236 237
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 125 188
+ef 237 238
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 125 232
+ef 238 239
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 125 223
+ef 239 236
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 126 225
+ef 240 241
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 126 190
+ef 241 242
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 126 193
+ef 242 243
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 126 256
+ef 243 240
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 127 224
+ef 244 245
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 127 222
+ef 245 246
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 127 191
+ef 246 247
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 127 190
+ef 247 244
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 128 191
+ef 248 249
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 128 223
+ef 249 250
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 128 230
+ef 250 251
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 128 192
+ef 251 248
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 129 193
+ef 252 253
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 129 192
+ef 253 254
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 129 231
+ef 254 255
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 129 257
+ef 255 252
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 130 18
+ef 2 7
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 130 50
+ef 1 4
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 131 18
+ef 7 8
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 131 34
+ef 6 9
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 132 18
+ef 8 13
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 132 36
+ef 11 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 133 18
+ef 13 2
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 133 55
+ef 12 3
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 134 19
+ef 18 23
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 134 52
+ef 17 20
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 135 19
+ef 23 24
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 135 35
+ef 22 25
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 136 19
+ef 24 29
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 136 34
+ef 27 30
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 137 19
+ef 29 18
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 137 51
+ef 28 19
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 138 20
+ef 34 39
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 138 54
+ef 33 36
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 139 20
+ef 39 40
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 139 36
+ef 38 41
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 140 20
+ef 40 45
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 140 35
+ef 43 46
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 141 20
+ef 45 34
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 141 53
+ef 44 35
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 142 21
+ef 50 55
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 142 55
+ef 49 52
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 143 21
+ef 55 56
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 143 37
+ef 54 57
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 144 21
+ef 56 61
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 144 39
+ef 59 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 145 21
+ef 61 50
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 145 59
+ef 60 51
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 146 22
+ef 66 71
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 146 56
+ef 65 68
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 147 22
+ef 71 72
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 147 38
+ef 70 73
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 148 22
+ef 72 77
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 148 37
+ef 75 78
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 149 22
+ef 77 66
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 149 54
+ef 76 67
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 150 23
+ef 82 87
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 150 58
+ef 81 84
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 151 23
+ef 87 88
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 151 39
+ef 86 89
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 152 23
+ef 88 93
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 152 38
+ef 91 94
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 153 23
+ef 93 82
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 153 57
+ef 92 83
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 154 24
+ef 98 103
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 154 59
+ef 97 100
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 155 24
+ef 103 104
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 155 40
+ef 102 105
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 156 24
+ef 104 109
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 156 42
+ef 107 110
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 157 24
+ef 109 98
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 157 63
+ef 108 99
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 158 25
+ef 114 119
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 158 60
+ef 113 116
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 159 25
+ef 119 120
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 159 41
+ef 118 121
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 160 25
+ef 120 125
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 160 40
+ef 123 126
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 161 25
+ef 125 114
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 161 58
+ef 124 115
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 162 26
+ef 130 135
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 162 62
+ef 129 132
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 163 26
+ef 135 136
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 163 42
+ef 134 137
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 164 26
+ef 136 141
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 164 41
+ef 139 142
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 165 26
+ef 141 130
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 165 61
+ef 140 131
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 166 27
+ef 146 151
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 166 63
+ef 145 148
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 167 27
+ef 151 152
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 167 43
+ef 150 153
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 168 27
+ef 152 157
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 168 45
+ef 155 158
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 169 27
+ef 157 146
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 169 50
+ef 156 147
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 170 28
+ef 162 167
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 170 64
+ef 161 164
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 171 28
+ef 167 168
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 171 44
+ef 166 169
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 172 28
+ef 168 173
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 172 43
+ef 171 174
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 173 28
+ef 173 162
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 173 62
+ef 172 163
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 174 29
+ef 178 183
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 174 51
+ef 177 180
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 175 29
+ef 183 184
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 175 45
+ef 182 185
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 176 29
+ef 184 189
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 176 44
+ef 187 190
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 177 29
+ef 189 178
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 177 65
+ef 188 179
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 178 30
+ef 194 199
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 178 61
+ef 193 196
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 179 30
+ef 199 200
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 179 46
+ef 198 201
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 180 30
+ef 200 205
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 180 49
+ef 203 206
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 181 30
+ef 205 194
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 181 64
+ef 204 195
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 182 31
+ef 210 215
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 182 60
+ef 209 212
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 183 31
+ef 215 216
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 183 57
+ef 214 217
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 184 31
+ef 216 221
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 184 47
+ef 219 222
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 185 31
+ef 221 210
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 185 46
+ef 220 211
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 186 32
+ef 226 231
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 186 47
+ef 225 228
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 187 32
+ef 231 232
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 187 56
+ef 230 233
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 188 32
+ef 232 237
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 188 53
+ef 235 238
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 189 32
+ef 237 226
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 189 48
+ef 236 227
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 190 33
+ef 242 247
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 190 49
+ef 241 244
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 191 33
+ef 247 248
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 191 48
+ef 246 249
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 192 33
+ef 248 253
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 192 52
+ef 251 254
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 193 33
+ef 253 242
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 193 65
+ef 252 243
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 194 34
+ef 9 27
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 194 5
+ef 10 26
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 195 34
+ef 6 30
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 195 10
+ef 5 31
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 196 35
+ef 25 43
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 196 5
+ef 26 42
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 197 35
+ef 22 46
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 197 11
+ef 21 47
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 198 36
+ef 41 11
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 198 5
+ef 42 10
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 199 36
+ef 38 14
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 199 12
+ef 37 15
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 200 37
+ef 57 75
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 200 6
+ef 58 74
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 201 37
+ef 54 78
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 201 12
+ef 53 79
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 202 38
+ef 73 91
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 202 6
+ef 74 90
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 203 38
+ef 70 94
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 203 13
+ef 69 95
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 204 39
+ef 89 59
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 204 6
+ef 90 58
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 205 39
+ef 86 62
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 205 14
+ef 85 63
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 206 40
+ef 105 123
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 206 7
+ef 106 122
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 207 40
+ef 102 126
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 207 14
+ef 101 127
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 208 41
+ef 121 139
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 208 7
+ef 122 138
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 209 41
+ef 118 142
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 209 15
+ef 117 143
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 210 42
+ef 137 107
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 210 7
+ef 138 106
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 211 42
+ef 134 110
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 211 16
+ef 133 111
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 212 43
+ef 153 171
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 212 8
+ef 154 170
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 213 43
+ef 150 174
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 213 16
+ef 149 175
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 214 44
+ef 169 187
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 214 8
+ef 170 186
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 215 44
+ef 166 190
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 215 17
+ef 165 191
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 216 45
+ef 185 155
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 216 8
+ef 186 154
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 217 45
+ef 182 158
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 217 10
+ef 181 159
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 218 46
+ef 201 220
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 218 9
+ef 202 223
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 219 46
+ef 198 211
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 219 15
+ef 197 208
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 220 47
+ef 222 225
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 220 9
+ef 223 224
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 221 47
+ef 219 228
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 221 13
+ef 218 229
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 222 48
+ef 227 246
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 222 9
+ef 224 245
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 223 48
+ef 236 249
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 223 11
+ef 239 250
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 224 49
+ef 244 203
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 224 9
+ef 245 202
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 225 49
+ef 241 206
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 225 17
+ef 240 207
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 226 50
+ef 4 156
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 226 10
+ef 5 159
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 227 50
+ef 1 147
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 227 0
+ef 0 144
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 228 51
+ef 28 180
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 228 10
+ef 31 181
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 229 51
+ef 19 177
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 229 1
+ef 16 176
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 230 52
+ef 20 251
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 230 11
+ef 21 250
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 231 52
+ef 17 254
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 231 1
+ef 16 255
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 232 53
+ef 44 238
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 232 11
+ef 47 239
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 233 53
+ef 35 235
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 233 2
+ef 32 234
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 234 54
+ef 36 76
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 234 12
+ef 37 79
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 235 54
+ef 33 67
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 235 2
+ef 32 64
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 236 55
+ef 12 52
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 236 12
+ef 15 53
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 237 55
+ef 3 49
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 237 0
+ef 0 48
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 238 56
+ef 68 230
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 238 13
+ef 69 229
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 239 56
+ef 65 233
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 239 2
+ef 64 234
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 240 57
+ef 92 217
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 240 13
+ef 95 218
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 241 57
+ef 83 214
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 241 3
+ef 80 213
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 242 58
+ef 84 124
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 242 14
+ef 85 127
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 243 58
+ef 81 115
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 243 3
+ef 80 112
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 244 59
+ef 60 100
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 244 14
+ef 63 101
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 245 59
+ef 51 97
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 245 0
+ef 48 96
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 246 60
+ef 116 209
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 246 15
+ef 117 208
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 247 60
+ef 113 212
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 247 3
+ef 112 213
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 248 61
+ef 140 196
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 248 15
+ef 143 197
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 249 61
+ef 131 193
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 249 4
+ef 128 192
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 250 62
+ef 132 172
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 250 16
+ef 133 175
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 251 62
+ef 129 163
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 251 4
+ef 128 160
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 252 63
+ef 108 148
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 252 16
+ef 111 149
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 253 63
+ef 99 145
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 253 0
+ef 96 144
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 254 64
+ef 164 204
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 254 17
+ef 165 207
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 255 64
+ef 161 195
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 255 4
+ef 160 192
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 256 65
+ef 188 243
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 256 17
+ef 191 240
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 257 65
+ef 179 252
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ev 257 1
+ef 176 255
+esharp 0 nonmanifold 0 boundary 0 infsharp 0 semisharp 0
+ve 451 471 487 503
+vf 0 48 96 144
+vfl 0 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 459 455 511
+vf 16 176 255
+vfl 0 0 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 467 463 475
+vf 32 234 64
+vfl 0 2 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 483 479 491
+vf 80 213 112
+vfl 0 1 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 499 495 507
+vf 128 192 160
+vfl 0 0 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 393 385 389
+vf 10 26 42
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 405 397 401
+vf 58 74 90
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 417 409 413
+vf 106 122 138
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 429 421 425
+vf 154 170 186
+vfl 2 2 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 0 infsharp 0 semisharp 0 rule 1
+ve 445 433 437 441
+vf 202 223 224 245
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 453 387 449 431
+vf 31 5 159 181
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 461 391 457 443
+vf 47 21 250 239
+vfl 3 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 469 395 465 399
+vf 15 37 79 53
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 477 403 473 439
+vf 95 69 229 218
+vfl 3 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 485 407 481 411
+vf 63 85 127 101
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 493 415 489 435
+vf 143 117 208 197
+vfl 3 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 501 419 497 423
+vf 111 133 175 149
+vfl 3 1 3 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 509 427 505 447
+vf 191 165 207 240
+vfl 3 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 262 256 258 260
+vf 2 7 8 13
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 270 264 266 268
+vf 18 23 24 29
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 278 272 274 276
+vf 34 39 40 45
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 286 280 282 284
+vf 50 55 56 61
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 294 288 290 292
+vf 66 71 72 77
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 302 296 298 300
+vf 82 87 88 93
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 310 304 306 308
+vf 98 103 104 109
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 318 312 314 316
+vf 114 119 120 125
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 326 320 322 324
+vf 130 135 136 141
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 334 328 330 332
+vf 146 151 152 157
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 342 336 338 340
+vf 162 167 168 173
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 350 344 346 348
+vf 178 183 184 189
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 358 352 354 356
+vf 194 199 200 205
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 366 360 362 364
+vf 210 215 216 221
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 374 368 370 372
+vf 226 231 232 237
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 382 376 378 380
+vf 242 247 248 253
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 384 259 386 269
+vf 9 6 30 27
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 388 267 390 277
+vf 25 22 46 43
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 392 275 394 261
+vf 41 38 14 11
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 396 283 398 293
+vf 57 54 78 75
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 400 291 402 301
+vf 73 70 94 91
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 404 299 406 285
+vf 89 86 62 59
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 408 307 410 317
+vf 105 102 126 123
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 412 315 414 325
+vf 121 118 142 139
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 416 323 418 309
+vf 137 134 110 107
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 420 331 422 341
+vf 153 150 174 171
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 424 339 426 349
+vf 169 166 190 187
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 428 347 430 333
+vf 185 182 158 155
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 432 355 434 367
+vf 201 198 211 220
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 436 365 438 369
+vf 222 219 228 225
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 440 375 442 379
+vf 227 236 249 246
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 444 377 446 357
+vf 244 241 206 203
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 448 257 450 335
+vf 4 1 147 156
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 454 271 452 345
+vf 19 28 180 177
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 456 265 458 381
+vf 20 17 254 251
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 462 279 460 373
+vf 35 44 238 235
+vfl 3 0 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 464 273 466 295
+vf 36 33 67 76
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 470 263 468 281
+vf 3 12 52 49
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 472 289 474 371
+vf 68 65 233 230
+vfl 0 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 478 303 476 363
+vf 83 92 217 214
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 480 297 482 319
+vf 84 81 115 124
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 486 287 484 305
+vf 51 60 100 97
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 488 313 490 361
+vf 116 113 212 209
+vfl 0 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 494 327 492 353
+vf 131 140 196 193
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 496 321 498 343
+vf 132 129 163 172
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 502 311 500 329
+vf 99 108 148 145
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 504 337 506 359
+vf 164 161 195 204
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 510 351 508 383
+vf 179 188 243 252
+vfl 3 0 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 3 0 1 2
+vf 0 1 2 3
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 7 4 5 6
+vf 4 5 6 7
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 11 8 9 10
+vf 8 9 10 11
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 15 12 13 14
+vf 12 13 14 15
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 19 16 17 18
+vf 16 17 18 19
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 23 20 21 22
+vf 20 21 22 23
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 27 24 25 26
+vf 24 25 26 27
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 31 28 29 30
+vf 28 29 30 31
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 35 32 33 34
+vf 32 33 34 35
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 39 36 37 38
+vf 36 37 38 39
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 43 40 41 42
+vf 40 41 42 43
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 47 44 45 46
+vf 44 45 46 47
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 51 48 49 50
+vf 48 49 50 51
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 55 52 53 54
+vf 52 53 54 55
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 59 56 57 58
+vf 56 57 58 59
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 63 60 61 62
+vf 60 61 62 63
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 67 64 65 66
+vf 64 65 66 67
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 71 68 69 70
+vf 68 69 70 71
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 75 72 73 74
+vf 72 73 74 75
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 79 76 77 78
+vf 76 77 78 79
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 83 80 81 82
+vf 80 81 82 83
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 87 84 85 86
+vf 84 85 86 87
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 91 88 89 90
+vf 88 89 90 91
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 95 92 93 94
+vf 92 93 94 95
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 99 96 97 98
+vf 96 97 98 99
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 103 100 101 102
+vf 100 101 102 103
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 107 104 105 106
+vf 104 105 106 107
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 111 108 109 110
+vf 108 109 110 111
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 115 112 113 114
+vf 112 113 114 115
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 119 116 117 118
+vf 116 117 118 119
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 123 120 121 122
+vf 120 121 122 123
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 127 124 125 126
+vf 124 125 126 127
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 131 128 129 130
+vf 128 129 130 131
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 135 132 133 134
+vf 132 133 134 135
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 139 136 137 138
+vf 136 137 138 139
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 143 140 141 142
+vf 140 141 142 143
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 147 144 145 146
+vf 144 145 146 147
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 151 148 149 150
+vf 148 149 150 151
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 155 152 153 154
+vf 152 153 154 155
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 159 156 157 158
+vf 156 157 158 159
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 163 160 161 162
+vf 160 161 162 163
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 167 164 165 166
+vf 164 165 166 167
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 171 168 169 170
+vf 168 169 170 171
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 175 172 173 174
+vf 172 173 174 175
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 179 176 177 178
+vf 176 177 178 179
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 183 180 181 182
+vf 180 181 182 183
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 187 184 185 186
+vf 184 185 186 187
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 191 188 189 190
+vf 188 189 190 191
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 195 192 193 194
+vf 192 193 194 195
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 199 196 197 198
+vf 196 197 198 199
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 203 200 201 202
+vf 200 201 202 203
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 207 204 205 206
+vf 204 205 206 207
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 211 208 209 210
+vf 208 209 210 211
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 215 212 213 214
+vf 212 213 214 215
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 219 216 217 218
+vf 216 217 218 219
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 223 220 221 222
+vf 220 221 222 223
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 227 224 225 226
+vf 224 225 226 227
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 231 228 229 230
+vf 228 229 230 231
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 235 232 233 234
+vf 232 233 234 235
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 239 236 237 238
+vf 236 237 238 239
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 243 240 241 242
+vf 240 241 242 243
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 247 244 245 246
+vf 244 245 246 247
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 251 248 249 250
+vf 248 249 250 251
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 255 252 253 254
+vf 252 253 254 255
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 256 1 257 7
+vf 2 1 4 7
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 258 6 259 8
+vf 7 6 9 8
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 260 11 261 13
+vf 8 11 14 13
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 262 12 263 2
+vf 13 12 3 2
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 264 17 265 23
+vf 18 17 20 23
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 266 22 267 24
+vf 23 22 25 24
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 268 27 269 29
+vf 24 27 30 29
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 270 28 271 18
+vf 29 28 19 18
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 272 33 273 39
+vf 34 33 36 39
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 274 38 275 40
+vf 39 38 41 40
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 276 43 277 45
+vf 40 43 46 45
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 278 44 279 34
+vf 45 44 35 34
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 280 49 281 55
+vf 50 49 52 55
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 282 54 283 56
+vf 55 54 57 56
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 284 59 285 61
+vf 56 59 62 61
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 286 60 287 50
+vf 61 60 51 50
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 288 65 289 71
+vf 66 65 68 71
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 290 70 291 72
+vf 71 70 73 72
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 292 75 293 77
+vf 72 75 78 77
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 294 76 295 66
+vf 77 76 67 66
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 296 81 297 87
+vf 82 81 84 87
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 298 86 299 88
+vf 87 86 89 88
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 300 91 301 93
+vf 88 91 94 93
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 302 92 303 82
+vf 93 92 83 82
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 304 97 305 103
+vf 98 97 100 103
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 306 102 307 104
+vf 103 102 105 104
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 308 107 309 109
+vf 104 107 110 109
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 310 108 311 98
+vf 109 108 99 98
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 312 113 313 119
+vf 114 113 116 119
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 314 118 315 120
+vf 119 118 121 120
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 316 123 317 125
+vf 120 123 126 125
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 318 124 319 114
+vf 125 124 115 114
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 320 129 321 135
+vf 130 129 132 135
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 322 134 323 136
+vf 135 134 137 136
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 324 139 325 141
+vf 136 139 142 141
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 326 140 327 130
+vf 141 140 131 130
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 328 145 329 151
+vf 146 145 148 151
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 330 150 331 152
+vf 151 150 153 152
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 332 155 333 157
+vf 152 155 158 157
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 334 156 335 146
+vf 157 156 147 146
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 336 161 337 167
+vf 162 161 164 167
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 338 166 339 168
+vf 167 166 169 168
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 340 171 341 173
+vf 168 171 174 173
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 342 172 343 162
+vf 173 172 163 162
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 344 177 345 183
+vf 178 177 180 183
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 346 182 347 184
+vf 183 182 185 184
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 348 187 349 189
+vf 184 187 190 189
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 350 188 351 178
+vf 189 188 179 178
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 352 193 353 199
+vf 194 193 196 199
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 354 198 355 200
+vf 199 198 201 200
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 356 203 357 205
+vf 200 203 206 205
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 358 204 359 194
+vf 205 204 195 194
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 360 209 361 215
+vf 210 209 212 215
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 362 214 363 216
+vf 215 214 217 216
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 364 219 365 221
+vf 216 219 222 221
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 366 220 367 210
+vf 221 220 211 210
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 368 225 369 231
+vf 226 225 228 231
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 370 230 371 232
+vf 231 230 233 232
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 372 235 373 237
+vf 232 235 238 237
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 374 236 375 226
+vf 237 236 227 226
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 376 241 377 247
+vf 242 241 244 247
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 378 246 379 248
+vf 247 246 249 248
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 380 251 381 253
+vf 248 251 254 253
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 382 252 383 242
+vf 253 252 243 242
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 385 9 384 26
+vf 10 9 27 26
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 386 5 387 30
+vf 6 5 31 30
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 389 25 388 42
+vf 26 25 43 42
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 390 21 391 46
+vf 22 21 47 46
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 393 41 392 10
+vf 42 41 11 10
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 394 37 395 14
+vf 38 37 15 14
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 397 57 396 74
+vf 58 57 75 74
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 398 53 399 78
+vf 54 53 79 78
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 401 73 400 90
+vf 74 73 91 90
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 402 69 403 94
+vf 70 69 95 94
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 405 89 404 58
+vf 90 89 59 58
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 406 85 407 62
+vf 86 85 63 62
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 409 105 408 122
+vf 106 105 123 122
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 410 101 411 126
+vf 102 101 127 126
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 413 121 412 138
+vf 122 121 139 138
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 414 117 415 142
+vf 118 117 143 142
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 417 137 416 106
+vf 138 137 107 106
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 418 133 419 110
+vf 134 133 111 110
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 421 153 420 170
+vf 154 153 171 170
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 422 149 423 174
+vf 150 149 175 174
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 425 169 424 186
+vf 170 169 187 186
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 426 165 427 190
+vf 166 165 191 190
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 429 185 428 154
+vf 186 185 155 154
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 430 181 431 158
+vf 182 181 159 158
+vfl 1 2 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 433 201 432 223
+vf 202 201 220 223
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 434 197 435 211
+vf 198 197 208 211
+vfl 1 2 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 437 222 436 224
+vf 223 222 225 224
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 438 218 439 228
+vf 219 218 229 228
+vfl 2 3 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 441 227 440 245
+vf 224 227 246 245
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 442 239 443 249
+vf 236 239 250 249
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 445 244 444 202
+vf 245 244 203 202
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 446 240 447 206
+vf 241 240 207 206
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 449 4 448 159
+vf 5 4 156 159
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 450 0 451 147
+vf 1 0 144 147
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 452 31 453 180
+vf 28 31 181 180
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 455 19 454 176
+vf 16 19 177 176
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 457 20 456 250
+vf 21 20 251 250
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 458 16 459 254
+vf 17 16 255 254
+vfl 0 1 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 460 47 461 238
+vf 44 47 239 238
+vfl 3 0 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 463 35 462 234
+vf 32 35 235 234
+vfl 3 0 2 3
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 465 36 464 79
+vf 37 36 76 79
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 466 32 467 67
+vf 33 32 64 67
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 468 15 469 52
+vf 12 15 53 52
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 471 3 470 48
+vf 0 3 49 48
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 473 68 472 229
+vf 69 68 230 229
+vfl 0 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 474 64 475 233
+vf 65 64 234 233
+vfl 0 1 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 476 95 477 217
+vf 92 95 218 217
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 479 83 478 213
+vf 80 83 214 213
+vfl 3 0 1 2
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 481 84 480 127
+vf 85 84 124 127
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 482 80 483 115
+vf 81 80 112 115
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 484 63 485 100
+vf 60 63 101 100
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 487 51 486 96
+vf 48 51 97 96
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 489 116 488 208
+vf 117 116 209 208
+vfl 0 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 490 112 491 212
+vf 113 112 213 212
+vfl 0 1 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 492 143 493 196
+vf 140 143 197 196
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 495 131 494 192
+vf 128 131 193 192
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 497 132 496 175
+vf 133 132 172 175
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 498 128 499 163
+vf 129 128 160 163
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 500 111 501 148
+vf 108 111 149 148
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 503 99 502 144
+vf 96 99 145 144
+vfl 3 0 0 1
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 505 164 504 207
+vf 165 164 204 207
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 506 160 507 195
+vf 161 160 192 195
+vfl 0 1 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 508 191 509 243
+vf 188 191 240 243
+vfl 3 0 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+ve 511 179 510 255
+vf 176 179 252 255
+vfl 3 0 3 0
+vsharp 0 nonmanifold 0 boundary 0 corner 0 regular 1 infsharp 0 semisharp 0 rule 1
+pt 0 0 2
+pt 0 -2 0
+pt 2 0 0
+pt 0 2 0
+pt -2 0 0
+pt 0 0 1.16666667
+pt 0 -0.814814815 0.37037037
+pt 0.814814815 0 0.37037037
+pt 0 1.5 0
+pt -0.814814815 0 0.37037037
+pt 0.666666667 -0.666666667 0.666666667
+pt 0.666666667 0.666666667 0.666666667
+pt -0.666666667 0.666666667 0.666666667
+pt -0.666666667 -0.666666667 0.666666667
+pt 0 0 0
+pt 0 -0.833333333 0.833333333
+pt 0.666666667 -0.666666667 0.166666667
+pt 0.833333333 0 0.833333333
+pt 1 1 0
+pt 0 0.833333333 0.833333333
+pt -1 1 0
+pt -0.833333333 0 0.833333333
+pt -0.666666667 -0.666666667 0.166666667
+pt 0 0 1.01041667
+pt 0 -0.737654321 0.385802469
+pt 0.793209877 0.0555555556 0.358024691
+pt 0 1.375 0
+pt -0.793209877 0.0555555556 0.358024691
+pt 0.550411523 -0.550411523 0.636316872
+pt 0.605967078 0.625 0.598251029
+pt -0.605967078 0.625 0.598251029
+pt -0.550411523 -0.550411523 0.636316872
+pt 6.9388939e-18 0.0732060185 0.0486111111
+pt -6.9388939e-18 -0.690972222 0.769097222
+pt 0.532118056 -0.521701389 0.254340278
+pt 0.696180556 0.00520833333 0.766493056
+pt 0.807273582 0.889485677 0.0711624711
+pt 0 0.765625 0.729166667
+pt -0.851851852 0.9375 0.0462962963
+pt -0.696180556 0.00520833333 0.766493056
+pt -0.532118056 -0.521701389 0.254340278
+pt 0.375 -0.375 0.875
+pt 0.333333333 -0.74537037 0.509259259
+pt 0.74537037 -0.333333333 0.509259259
+pt 0.375 0.375 0.875
+pt 0.828703704 0.416666667 0.467592593
+pt 0.416666667 1 0.375
+pt -0.375 0.375 0.875
+pt -0.416666667 1 0.375
+pt -0.828703704 0.416666667 0.467592593
+pt -0.375 -0.375 0.875
+pt -0.74537037 -0.333333333 0.509259259
+pt -0.333333333 -0.74537037 0.509259259
+pt -0.62037037 0.0833333333 0.134259259
+pt 0 0.875 0
+pt 0.62037037 0.0833333333 0.134259259
+pt 0 -0.537037037 0.175925926
+pt 0.34375 -0.655092593 0.721064815
+pt 0.603009259 -0.603009259 0.462962963
+pt 0.655092593 -0.34375 0.721064815
+pt 0.675925926 0.364583333 0.710648148
+pt 0.728009259 0.770833333 0.377314815
+pt 0.364583333 0.71875 0.6875
+pt -0.364583333 0.71875 0.6875
+pt -0.728009259 0.770833333 0.377314815
+pt -0.675925926 0.364583333 0.710648148
+pt -0.655092593 -0.34375 0.721064815
+pt -0.603009259 -0.603009259 0.462962963
+pt -0.34375 -0.655092593 0.721064815
+pt -0.405092593 0.489583333 0.0335648148
+pt 0.405092593 0.489583333 0.0335648148
+pt 0.321759259 -0.280092593 0.119212963
+pt -0.321759259 -0.280092593 0.119212963
+pt 0 -0.395833333 0.9375
+pt 0 -0.784722222 0.555555556
+pt 0.25 -0.690972222 0.305555556
+pt 0.711805556 -0.229166667 0.295138889
+pt 0.805555556 0.0208333333 0.545138889
+pt 0.395833333 0 0.9375
+pt 0.861689815 0.4375 0.21412037
+pt 0.481770833 1.23046875 0.01171875
+pt 0 1.08333333 0.395833333
+pt 0 0.395833333 0.9375
+pt -0.5 1.25 0
+pt -0.907407407 0.5 0.185185185
+pt -0.805555556 0.0208333333 0.545138889
+pt -0.395833333 0 0.9375
+pt -0.711805556 -0.229166667 0.295138889
+pt -0.25 -0.690972222 0.305555556
+pt 0 0 0.974609375
+pt 0 -0.724794239 0.388374486
+pt 0.787969393 0.0659722222 0.355774177
+pt -0.00284830729 1.27038574 0.0669352214
+pt -0.795588992 0.0763888889 0.350951646
+pt 0.536694102 -0.536694102 0.635245199
+pt 0.592249657 0.619212963 0.592892661
+pt -0.592249657 0.619212963 0.592892661
+pt -0.536694102 -0.536694102 0.635245199
+pt 0 0.0883427373 0.0629340278
+pt -6.9388939e-18 -0.657190394 0.7510489
+pt 0.502730758 -0.486454716 0.274721499
+pt 0.665328414 0.00813802083 0.74697989
+pt 0.715421323 0.811981201 0.114984583
+pt 6.9388939e-18 0.747070312 0.703125
+pt -0.802004214 0.907775879 0.0652420609
+pt -0.665328414 0.00813802083 0.74697989
+pt -0.502730758 -0.486454716 0.274721499
+pt 0.361166369 -0.361003609 0.852892212
+pt 0.316610705 -0.71463829 0.51015193
+pt 0.719656736 -0.311592259 0.507724087
+pt 0.365940675 0.371419271 0.847550255
+pt 0.799422621 0.408402337 0.464228092
+pt 0.404053456 0.976178487 0.370824712
+pt -0.365940675 0.371419271 0.847550255
+pt -0.406458976 0.978759766 0.369337545
+pt -0.804405181 0.415011936 0.461126885
+pt -0.361166369 -0.361003609 0.852892212
+pt -0.719656736 -0.311592259 0.507724087
+pt -0.316610705 -0.71463829 0.51015193
+pt -0.602920344 0.100414135 0.145925263
+pt -0.00240551984 0.867703191 0.00998687744
+pt 0.597937784 0.093804536 0.14902647
+pt -3.46944695e-18 -0.510843159 0.193338276
+pt 0.331024547 -0.623143326 0.708960262
+pt 0.572443456 -0.570815852 0.471321012
+pt 0.623957128 -0.330210745 0.708553361
+pt 0.650975357 0.361979167 0.693356361
+pt 0.695999522 0.751378377 0.379364956
+pt 0.358042776 0.704427083 0.666184414
+pt -0.358042776 0.704427083 0.666184414
+pt -0.701177903 0.757161458 0.376398534
+pt -0.650975357 0.361979167 0.693356361
+pt -0.623957128 -0.330210745 0.708553361
+pt -0.572443456 -0.570815852 0.471321012
+pt -0.331024547 -0.623143326 0.708960262
+pt -0.386574074 0.490605107 0.0456452546
+pt 0.381395693 0.484822026 0.0486116763
+pt 0.305365668 -0.253237124 0.136311849
+pt -0.305365668 -0.253237124 0.136311849
+pt 0 -0.378219039 0.910065828
+pt 0 -0.757161458 0.548339844
+pt 0.232304326 -0.663818359 0.318675854
+pt 0.69317853 -0.20268193 0.304714627
+pt 0.785707827 0.0288085937 0.533971716
+pt 0.379032841 0.000813802083 0.909658927
+pt 0.812010023 0.398005168 0.23665195
+pt 0.395632709 1.1363678 0.0610244186
+pt -0.000284830729 1.05877686 0.382995605
+pt 0 0.387207031 0.905273438
+pt -0.451473165 1.19491673 0.0254031641
+pt -0.884112511 0.496250576 0.190770373
+pt -0.786422164 0.0297851563 0.533519604
+pt -0.379032841 0.000813802083 0.909658927
+pt -0.693892867 -0.201705367 0.304262514
+pt -0.232304326 -0.663818359 0.318675854
+pt 0.192708333 -0.192708333 0.940104167
+pt 0.1796875 -0.529224537 0.825665509
+pt 0.481063529 -0.481063529 0.738361626
+pt 0.53052662 -0.178385417 0.825014468
+pt 0.145833333 -0.739679784 0.43904321
+pt 0.429615162 -0.64026331 0.383029514
+pt 0.457626029 -0.638470936 0.582400977
+pt 0.169270833 -0.719039352 0.638744213
+pt 0.76398534 -0.121527778 0.426890432
+pt 0.725549769 -0.162760417 0.635489005
+pt 0.638470936 -0.457626029 0.582400977
+pt 0.64807581 -0.421802662 0.380425347
+pt 0.192708333 0.192708333 0.940104167
+pt 0.535734954 0.186197917 0.822410301
+pt 0.505369084 0.520833333 0.717849794
+pt 0.184895833 0.563802083 0.807291667
+pt 0.822289738 0.232638889 0.396219136
+pt 0.80641909 0.628621419 0.282547562
+pt 0.709651492 0.544270833 0.538451646
+pt 0.751591435 0.201822917 0.622468171
+pt 0.224609375 1.17220052 0.195638021
+pt 0.1953125 0.891927083 0.546875
+pt 0.528806584 0.778645833 0.509516461
+pt 0.608430085 0.97269694 0.208799009
+pt -0.192708333 0.192708333 0.940104167
+pt -0.184895833 0.563802083 0.807291667
+pt -0.505369084 0.520833333 0.717849794
+pt -0.535734954 0.186197917 0.822410301
+pt -0.229166667 1.17708333 0.192708333
+pt -0.624131944 0.989583333 0.199652778
+pt -0.528806584 0.778645833 0.509516461
+pt -0.1953125 0.891927083 0.546875
+pt -0.833719136 0.248263889 0.38898534
+pt -0.751591435 0.201822917 0.622468171
+pt -0.709651492 0.544270833 0.538451646
+pt -0.828993056 0.65625 0.269097222
+pt -0.192708333 -0.192708333 0.940104167
+pt -0.53052662 -0.178385417 0.825014468
+pt -0.481063529 -0.481063529 0.738361626
+pt -0.1796875 -0.529224537 0.825665509
+pt -0.76398534 -0.121527778 0.426890432
+pt -0.64807581 -0.421802662 0.380425347
+pt -0.638470936 -0.457626029 0.582400977
+pt -0.725549769 -0.162760417 0.635489005
+pt -0.145833333 -0.739679784 0.43904321
+pt -0.169270833 -0.719039352 0.638744213
+pt -0.457626029 -0.638470936 0.582400977
+pt -0.429615162 -0.64026331 0.383029514
+pt -0.758198302 0.102430556 0.243152006
+pt -0.696180556 0.502604167 0.0998263889
+pt -0.336805556 0.0915075231 0.083912037
+pt -0.54651331 -0.236906829 0.200737847
+pt -0.439236111 0.888020833 0.0199652778
+pt -0.00455729167 1.18261719 0.0029296875
+pt 0.423534252 0.87113444 0.029111509
+pt 1.73472348e-18 0.481843171 0.0289351852
+pt 0.336805556 0.0915075231 0.083912037
+pt 0.67360659 0.474975586 0.113276729
+pt 0.746768904 0.0868055556 0.250385802
+pt 0.54651331 -0.236906829 0.200737847
+pt -0.275969329 -0.50745081 0.213758681
+pt 0 -0.256004051 0.115740741
+pt 0.275969329 -0.50745081 0.213758681
+pt 0 -0.664158951 0.293209877
+pt 0.186848958 -0.373191551 0.894567419
+pt 0.344875257 -0.510095165 0.790022987
+pt 0.510420685 -0.344549736 0.789860227
+pt 0.373517072 -0.186523438 0.894404659
+pt 0.289695457 -0.704071422 0.409221885
+pt 0.455895946 -0.656778469 0.484413178
+pt 0.325995049 -0.689493313 0.612867316
+pt 0.162109375 -0.747202932 0.535650559
+pt 0.760115258 -0.149197049 0.529194396
+pt 0.691120917 -0.324367445 0.612053514
+pt 0.658731594 -0.453942821 0.483762137
+pt 0.717309269 -0.27645761 0.402928482
+pt 0.374819155 0.188476562 0.893753617
+pt 0.523007491 0.361653646 0.781477061
+pt 0.357462063 0.544596354 0.771910365
+pt 0.188151042 0.381835937 0.889973958
+pt 0.829775587 0.428856744 0.340119915
+pt 0.768195886 0.590098063 0.416476654
+pt 0.741468139 0.381835937 0.58479014
+pt 0.802035108 0.217990451 0.507854697
+pt 0.209147135 1.03686523 0.378336589
+pt 0.376342271 0.847330729 0.529722865
+pt 0.570478149 0.880544027 0.367657571
+pt 0.43286924 1.09384155 0.197788945
+pt -0.188151042 0.381835937 0.889973958
+pt -0.357462063 0.544596354 0.771910365
+pt -0.523007491 0.361653646 0.781477061
+pt -0.374819155 0.188476562 0.893753617
+pt -0.442491319 1.10416667 0.191840278
+pt -0.574403614 0.884765625 0.365371013
+pt -0.376342271 0.847330729 0.529722865
+pt -0.210286458 1.03808594 0.377604167
+pt -0.804892458 0.221896701 0.506046248
+pt -0.741468139 0.381835938 0.58479014
+pt -0.773839378 0.597005208 0.413114069
+pt -0.849705826 0.455295139 0.327715085
+pt -0.373517072 -0.186523437 0.894404659
+pt -0.510420685 -0.344549736 0.789860227
+pt -0.344875257 -0.510095165 0.790022987
+pt -0.186848958 -0.373191551 0.894567419
+pt -0.717309269 -0.27645761 0.402928482
+pt -0.658731594 -0.453942821 0.483762137
+pt -0.691120917 -0.324367445 0.612053514
+pt -0.760115258 -0.149197049 0.529194396
+pt -0.162109375 -0.747202932 0.535650559
+pt -0.325995049 -0.689493313 0.612867316
+pt -0.455895946 -0.656778469 0.484413178
+pt -0.289695457 -0.704071422 0.409221885
+pt -0.745539159 0.297092014 0.16560571
+pt -0.514612269 0.291757089 0.087890625
+pt -0.456362124 -0.0855396412 0.134530527
+pt -0.659221885 -0.0700774016 0.218322
+pt -0.235948351 1.04890951 0.00572374132
+pt 0.225186948 1.03980509 0.0109399866
+pt 0.207156711 0.679390236 0.0229028772
+pt -0.211082176 0.683611834 0.0206163194
+pt 0.508968777 0.284849944 0.09125321
+pt 0.72560892 0.270653619 0.17801054
+pt 0.656364535 -0.0739836516 0.220130449
+pt 0.456362124 -0.0855396412 0.134530527
+pt -0.149432147 -0.395146123 0.156159578
+pt 0.149432147 -0.395146123 0.156159578
+pt 0.131492332 -0.599904755 0.24711251
+pt -0.131492332 -0.599904755 0.24711251
+pt 0.45821277 -0.581259645 0.669536073
+pt 0.173177083 -0.648582176 0.73864294
+pt 0.562379437 -0.562379437 0.566020448
+pt 0.553204572 -0.546694155 0.370189525
+pt 0.581259645 -0.45821277 0.669536073
+pt 0.651837384 -0.169921875 0.737015336
+pt 0.624228395 0.513671875 0.641300154
+pt 0.664858218 0.189453125 0.730504919
+pt 0.643108603 0.6796875 0.505883488
+pt 0.737533004 0.815409342 0.234955964
+pt 0.50118152 0.660807292 0.628279321
+pt 0.186197917 0.735026042 0.692708333
+pt -0.50118152 0.660807292 0.628279321
+pt -0.186197917 0.735026042 0.692708333
+pt -0.643108603 0.6796875 0.505883488
+pt -0.758246528 0.838541667 0.223090278
+pt -0.624228395 0.513671875 0.641300154
+pt -0.664858218 0.189453125 0.730504919
+pt -0.581259645 -0.45821277 0.669536073
+pt -0.651837384 -0.169921875 0.737015336
+pt -0.562379437 -0.562379437 0.566020448
+pt -0.553204572 -0.546694155 0.370189525
+pt -0.45821277 -0.581259645 0.669536073
+pt -0.173177083 -0.648582176 0.73864294
+pt -0.185474537 0.284035012 0.048755787
+pt -0.598090278 0.704427083 0.0499131944
+pt 0.185474537 0.284035012 0.048755787
+pt 0.577376754 0.681294759 0.0617788809
+pt 0.164641204 -0.0928457755 0.091869213
+pt 0.419089988 -0.386537905 0.197012442
+pt -0.164641204 -0.0928457755 0.091869213
+pt -0.419089988 -0.386537905 0.197012442
+pt 0 -0.536313657 0.83948206
+pt 0 -0.1953125 0.95703125
+pt 0 -0.728443287 0.650535301
+pt 0 -0.750434028 0.454861111
+pt 0.371925637 -0.590096933 0.289171007
+pt 0.0989583333 -0.708116319 0.355902778
+pt 0.609628183 -0.352394387 0.28266059
+pt 0.753942419 -0.0520833333 0.332609954
+pt 0.744719329 0.0162760417 0.64239728
+pt 0.796260127 0.046875 0.431568287
+pt 0.539568866 0.00325520833 0.837854456
+pt 0.1953125 0 0.95703125
+pt 0.787247269 0.607645671 0.170276783
+pt 0.805989583 0.203125 0.3046875
+pt 0.580252188 0.990946452 0.0801979348
+pt 0.179545085 1.24398804 0.0496520996
+pt 6.9388939e-18 0.908203125 0.5546875
+pt -0.00113932292 1.2019043 0.196044922
+pt 0 0.572265625 0.8203125
+pt 0 0.1953125 0.95703125
+pt -0.655641909 1.07196045 0.0353348343
+pt -0.212554932 1.27519226 0.0275115967
+pt -0.874143247 0.712219238 0.118962041
+pt -0.850308642 0.277777778 0.271604938
+pt -0.744719329 0.0162760417 0.64239728
+pt -0.799117477 0.05078125 0.429759838
+pt -0.539568866 0.00325520833 0.837854456
+pt -0.1953125 0 0.95703125
+pt -0.609628183 -0.352394387 0.28266059
+pt -0.756799769 -0.0481770833 0.330801505
+pt -0.371925637 -0.590096933 0.289171007
+pt -0.0989583333 -0.708116319 0.355902778
+limit 0 0 0.962962963 t1 0 -2.33333333 0 t2 2.33333333 0 0
+limit 0 -0.722222222 0.388888889 t1 0.935339678 0.143600302 -0.311779893 t2 -3.88578059e-16 -0.287200603 0.623559785
+limit 0.785397377 0.0659722222 0.35628858 t1 0.137583576 -0.163381859 0.703352117 t2 -0.293217329 -1.09872154 -0.231987561
+limit -0.00713941786 1.24373796 0.0869386461 t1 0.0650206282 -0.243197199 0.928489104 t2 1.67523618 0.0222673512 -0.394391897
+limit -0.797546136 0.0849247685 0.347760738 t1 -0.0457363533 -0.317074546 0.77154832 t2 -0.339328198 1.56948877 -0.607756962
+limit 0.533950617 -0.533950617 0.635030864 t1 0.443353051 0.71852651 0.328801644 t2 -0.71852651 -0.443353051 0.328801644
+limit 0.589506173 0.618055556 0.591820988 t1 -0.830646238 0.42120544 0.336227932 t2 0.331233323 -1.01059047 0.482128661
+limit -0.589506173 0.618055556 0.591820988 t1 -0.331233323 -1.01059047 0.482128661 t2 0.830646238 0.42120544 0.336227932
+limit -0.533950617 -0.533950617 0.635030864 t1 0.71852651 -0.443353051 0.328801644 t2 -0.443353051 0.71852651 0.328801644
+limit -3.46944695e-18 0.0931069959 0.0679012346 t1 -2.07407407 -2.24537037 0.259259259 t2 -2.07407407 2.24537037 -0.259259259
+limit -3.08395285e-18 -0.646090535 0.744855967 t1 0 -1.14814815 -1.12962963 t2 2.08333333 0 0
+limit 0.493312757 -0.474794239 0.281378601 t1 1.43981481 1.43981481 -0.0416666667 t2 0.791666667 -0.958333333 1.04166667
+limit 0.655349794 0.00925925926 0.740226337 t1 -1.23148148 -0.0833333333 1.1712963 t2 -0.0833333333 -2.16666667 0.0416666667
+limit 0.685788002 0.786675347 0.129509066 t1 -1.27604167 2.2734375 -0.518229167 t2 0.958333333 0.791666667 1.04166667
+limit 3.08395285e-18 0.740740741 0.694444444 t1 -5.55111512e-17 -2 1.58333333 t2 2.25 0 0
+limit -0.74903047 0.857485171 0.0928226675 t1 -1.33581091 -2.15771484 0.483814381 t2 -0.958333333 0.791666667 1.04166667
+limit -0.655349794 0.00925925926 0.740226337 t1 1.23148148 -0.0833333333 1.1712963 t2 -0.0833333333 2.16666667 -0.0416666667
+limit -0.493312757 -0.474794239 0.281378601 t1 1.43981481 -1.43981481 0.0416666667 t2 -0.791666667 -0.958333333 1.04166667
+limit 0.356258216 -0.355968864 0.845856732 t1 0.177051183 1.93348122 0.618618184 t2 -1.93348122 -0.177051183 0.621222351
+limit 0.311191665 -0.704495849 0.510396126 t1 -1.74728331 -0.541682742 0.317306456 t2 -0.196646734 -0.0807452418 -1.21365419
+limit 0.711102716 -0.304584798 0.507237369 t1 0.152793853 0.268695345 -1.24707433 t2 0.60852302 1.81412359 0.28128215
+limit 0.362431056 0.369791667 0.838803334 t1 -2.00292567 0.130208333 0.641123328 t2 0.107606739 -2.13020833 0.724746013
+limit 0.790183683 0.406025451 0.462897267 t1 0.193167478 -2.22686089 0.563200272 t2 0.52069569 0.303249783 -1.46083402
+limit 0.39937114 0.968573676 0.369112438 t1 0.335028252 1.46036784 -1.97969011 t2 -2.16263885 0.938069661 0.0669136204
+limit -0.362431056 0.369791667 0.838803334 t1 -0.107606739 -2.13020833 0.724746013 t2 2.00292567 0.130208333 0.641123328
+limit -0.402634888 0.972077546 0.367119627 t1 2.18492798 0.9140625 0.0793467078 t2 -0.39377572 1.5234375 -2.0155607
+limit -0.7965017 0.414303627 0.458991519 t1 -0.63442001 0.452256944 -1.53113747 t2 -0.170878344 -2.25086806 0.575633359
+limit -0.356258216 -0.355968864 0.845856732 t1 1.93348122 -0.177051183 0.621222351 t2 -0.177051183 1.93348122 0.618618184
+limit -0.711102716 -0.304584798 0.507237369 t1 -0.60852302 1.81412359 0.28128215 t2 -0.152793853 0.268695345 -1.24707433
+limit -0.311191665 -0.704495849 0.510396126 t1 0.196646734 -0.0807452418 -1.21365419 t2 1.74728331 -0.541682742 0.317306456
+limit -0.596871249 0.10553305 0.149661887 t1 -0.850163966 -2.17592593 0.781876929 t2 -1.72776813 2.28096065 0.182629244
+limit -0.00326374823 0.864270371 0.0133739832 t1 -2.60328957 -2.10866066 0.0555645978 t2 -2.6397479 2.19573749 -0.103868273
+limit 0.590553231 0.0972548748 0.153567635 t1 -1.61404381 -2.13195349 -0.252932702 t2 -0.872453101 2.15191876 -0.769443842
+limit -1.54197642e-18 -0.501915616 0.198779364 t1 -1.67563657 -1.22718943 0.541280864 t2 -1.67563657 1.22718943 -0.541280864
+limit 0.327585591 -0.612661465 0.704800383 t1 1.72987397 0.398019547 -0.420074588 t2 0.109375 1.06481481 1.05150463
+limit 0.562603595 -0.56028878 0.47463706 t1 0.0551054527 -0.0967721193 1.18467078 t2 -1.21064815 -1.21064815 0.00520833333
+limit 0.613818873 -0.326428184 0.704221679 t1 -0.418852881 -1.7507073 -0.409657922 t2 1.07523148 0.119791667 -1.05671296
+limit 0.642561157 0.361979167 0.687421411 t1 -0.234825103 1.97395833 -0.545396091 t2 -1.29398148 -0.119791667 1.16608796
+limit 0.685182283 0.744701244 0.380806908 t1 -0.554088702 -0.821289062 1.64033163 t2 1.16970486 -1.74023437 0.297960069
+limit 0.356327875 0.699363426 0.65919353 t1 1.91390175 -0.453125 -0.384516461 t2 0.109375 1.796875 -1.4375
+limit -0.356327875 0.699363426 0.65919353 t1 -1.91390175 -0.453125 -0.384516461 t2 0.109375 -1.796875 1.4375
+limit -0.691911723 0.752314815 0.376914723 t1 0.675218621 -0.958333333 1.71039095 t2 1.18344907 1.71875 -0.289351852
+limit -0.642561157 0.361979167 0.687421411 t1 0.234825103 1.97395833 -0.545396091 t2 -1.29398148 0.119791667 -1.16608796
+limit -0.613818873 -0.326428184 0.704221679 t1 0.418852881 -1.7507073 -0.409657922 t2 1.07523148 -0.119791667 1.05671296
+limit -0.562603595 -0.56028878 0.47463706 t1 -0.0551054527 -0.0967721193 1.18467078 t2 -1.21064815 1.21064815 -0.00520833333
+limit -0.327585591 -0.612661465 0.704800383 t1 -1.72987397 0.398019547 -0.420074588 t2 0.109375 -1.06481481 -1.05150463
+limit -0.380401235 0.490805041 0.0497685185 t1 2.44907407 -2.49884259 -0.0115740741 t2 -1.80787037 -2.3431713 0.403935185
+limit 0.373671795 0.483191471 0.0536607028 t1 -2.32794416 -2.36179832 -0.0816333912 t2 -1.79412616 2.36465567 -0.412543403
+limit 0.300090021 -0.244470165 0.142039609 t1 -1.50347222 1.75462963 -0.635416667 t2 1.83506944 1.85648148 -0.131365741
+limit -0.300090021 -0.244470165 0.142039609 t1 1.50347222 1.75462963 -0.635416667 t2 1.83506944 -1.85648148 0.131365741
+limit 0 -0.372427984 0.900977366 t1 0 -2.03703704 -0.699074074 t2 2.23958333 0 -4.4408921e-16
+limit 0 -0.747920953 0.545438957 t1 0 -0.129243827 -1.18209877 t2 1.92708333 -4.4408921e-16 8.8817842e-16
+limit 0.226015947 -0.655039009 0.323152435 t1 1.65162037 0.72820216 -0.402391975 t2 0.932291667 -0.625 0.963541667
+limit 0.687366041 -0.193222737 0.307977538 t1 0.893422068 1.82523148 0.295910494 t2 0.36255787 -1.203125 1.08738426
+limit 0.779090578 0.0316358025 0.529685357 t1 -0.315297068 -0.194444444 1.27816358 t2 -0.252025463 -2.1875 0.129050926
+limit 0.373585391 0.00115740741 0.900398663 t1 -2.05787037 -0.0208333333 0.709490741 t2 -0.0104166667 -2.25 0.00520833333
+limit 0.795436948 0.384229118 0.244478872 t1 -0.164002218 2.40223524 -0.788423515 t2 0.625 0.932291667 0.963541667
+limit 0.368154267 1.1070794 0.0768662441 t1 -2.41474067 1.52315267 -0.16152615 t2 1.24479167 0.307291667 1.11979167
+limit -0.000506365741 1.05038339 0.378797743 t1 0.00911458333 -1.74023437 2.13997396 t2 2.52213542 -0.009765625 0.005859375
+limit 0 0.384259259 0.894675926 t1 0 -2.25 0.8125 t2 2.26041667 0 4.4408921e-16
+limit -0.408533575 1.14880244 0.0517596806 t1 -2.60199201 -1.2950236 0.0552729854 t2 -1.23567708 0.317057292 1.11393229
+limit -0.848379965 0.456085959 0.210803834 t1 0.0285945939 -2.54592556 0.873785325 t2 -0.625 0.932291667 0.963541667
+limit -0.780360511 0.0333719136 0.528881602 t1 0.338155864 -0.225694444 1.29263117 t2 -0.274884259 2.21875 -0.143518519
+limit -0.373585391 0.00115740741 0.900398663 t1 2.05787037 -0.0208333333 0.709490741 t2 -0.0104166667 2.25 -0.00520833333
+limit -0.688635974 -0.191486626 0.307173783 t1 0.916280864 -1.85648148 -0.281442901 t2 -0.339699074 -1.234375 1.10185185
+limit -0.226015947 -0.655039009 0.323152435 t1 1.65162037 -0.72820216 0.402391975 t2 -0.932291667 -0.625 0.963541667
+limit 0.190173518 -0.190051448 0.930584203 t1 0.0517206388 2.23280265 0.371165586 t2 -2.2342675 -0.0531854826 0.372630429
+limit 0.177411003 -0.521107754 0.819013249 t1 0.0848293226 1.64267357 0.926646794 t2 -2.07169194 -0.15613647 0.297098544
+limit 0.475803668 -0.475681597 0.733201624 t1 0.32623651 1.41546271 0.69853673 t2 -1.41399786 -0.324771667 0.700001574
+limit 0.522757964 -0.175760793 0.818190405 t1 0.17583048 2.09138596 0.287170159 t2 -1.66236758 -0.104523333 0.936575179
+limit 0.141258362 -0.731516325 0.439243856 t1 -1.70769686 -0.288949472 0.290443452 t2 -0.336910546 0.239533601 -1.07043256
+limit 0.421689397 -0.629736225 0.386536803 t1 -1.58029564 -0.950695148 0.23891471 t2 -0.489900314 0.40190721 -1.16904427
+limit 0.452464502 -0.628346389 0.582651169 t1 -1.40703986 -0.738727167 0.299933456 t2 0.012068216 -0.42769201 -1.1032241
+limit 0.166697073 -0.708656942 0.635810911 t1 -1.95161545 -0.232370133 0.230948491 t2 -0.0586846748 -0.585949054 -1.21348691
+limit 0.758910728 -0.113538605 0.425489889 t1 -0.0489079982 0.534528819 -1.16754477 t2 0.476645387 1.90238544 0.1918664
+limit 0.716517165 -0.158829566 0.631880423 t1 0.649190518 0.122188364 -1.24512121 t2 0.321816024 2.04132356 0.186049222
+limit 0.628951466 -0.451859425 0.582409666 t1 0.441336759 0.00157653223 -1.1078492 t2 0.749442227 1.41775492 0.293843504
+limit 0.639242136 -0.412176201 0.383429159 t1 -0.292604548 0.599465201 -1.20401516 t2 0.994079841 1.62394256 0.197352029
+limit 0.19059549 0.191813151 0.929719971 t1 -2.24425014 0.0423177083 0.375784164 t2 0.0417379999 -2.28515625 0.399673776
+limit 0.528945874 0.185913086 0.81473529 t1 -1.7314865 -0.00179036458 0.969867722 t2 0.0936907231 -2.15804036 0.341241782
+limit 0.502128658 0.519813569 0.710484667 t1 -1.58630689 0.218352141 0.74992649 t2 0.153927483 -1.78685619 0.8946205
+limit 0.183598913 0.56016258 0.798289456 t1 -2.1538317 0.169108073 0.288272308 t2 0.015710399 -2.10563151 1.17257678
+limit 0.813277425 0.228077759 0.396307047 t1 -0.171817261 -2.23955366 0.554659337 t2 0.0306668694 -0.0326953464 -1.21844247
+limit 0.789349053 0.616548585 0.287869662 t1 0.568982128 -2.30316247 0.627186308 t2 0.108214735 0.120396084 -1.476756
+limit 0.700029864 0.541957769 0.537190837 t1 0.555586942 -1.79161609 0.500953444 t2 0.828067094 0.484293337 -1.34194998
+limit 0.742756121 0.201631028 0.618339304 t1 0.0136430214 -2.19567447 0.353795715 t2 0.817534239 0.181243049 -1.33273733
+limit 0.213110877 1.15286983 0.202757736 t1 -0.129392428 1.20028941 -1.94059863 t2 -2.53885356 0.648867289 0.0111056041
+limit 0.193710019 0.885194072 0.541526413 t1 0.137522725 1.79081472 -1.87297608 t2 -2.26775015 0.368731181 0.148970019
+limit 0.524324804 0.771750234 0.507991753 t1 0.426947061 1.28286376 -1.55137441 t2 -1.59321828 0.980587147 0.160109019
+limit 0.589736631 0.954500622 0.216371791 t1 0.0500972104 0.662401835 -1.72401921 t2 -1.83038974 1.66291555 -0.211168485
+limit -0.19059549 0.191813151 0.929719971 t1 -0.0417379999 -2.28515625 0.399673776 t2 2.24425014 0.0423177083 0.375784164
+limit -0.183598913 0.56016258 0.798289456 t1 -0.015710399 -2.10563151 1.17257678 t2 2.1538317 0.169108073 0.288272308
+limit -0.502128658 0.519813569 0.710484667 t1 -0.153927483 -1.78685619 0.8946205 t2 1.58630689 0.218352141 0.74992649
+limit -0.528945874 0.185913086 0.81473529 t1 -0.0936907231 -2.15804036 0.341241782 t2 1.7314865 -0.00179036458 0.969867722
+limit -0.222045002 1.16148803 0.197222464 t1 2.62020699 0.546436628 0.0720086942 t2 -0.0566515589 1.37619114 -2.06036505
+limit -0.613065524 0.979713466 0.202593649 t1 1.90827081 1.57123915 -0.171899886 t2 -0.470793681 1.11555068 -1.97523557
+limit -0.52497163 0.772451644 0.50761398 t1 1.59599114 0.977385344 0.161588274 t2 -0.450232821 1.30811451 -1.56497423
+limit -0.193919255 0.885401408 0.541403723 t1 2.26958601 0.366149902 0.150457186 t2 -0.145055198 1.79827881 -1.87739293
+limit -0.828503684 0.250351729 0.386128844 t1 -0.270538895 0.351366679 -1.39068971 t2 0.308859931 -2.42314402 0.640753004
+limit -0.743231851 0.202275782 0.618039662 t1 -0.834660534 0.20445421 -1.34352445 t2 -0.00937479906 -2.20130751 0.35644481
+limit -0.700939167 0.543069471 0.536648672 t1 -0.860802 0.524314598 -1.36146794 t2 -0.555391121 -1.79078957 0.500818658
+limit -0.818870239 0.652456802 0.27029498 t1 -0.581749119 0.692709181 -1.7581211 t2 -0.551172767 -2.28666094 0.628755891
+limit -0.190173518 -0.190051448 0.930584203 t1 2.2342675 -0.0531854826 0.372630429 t2 -0.0517206388 2.23280265 0.371165586
+limit -0.522757964 -0.175760793 0.818190405 t1 1.66236758 -0.104523333 0.936575179 t2 -0.17583048 2.09138596 0.287170159
+limit -0.475803668 -0.475681597 0.733201624 t1 1.41399786 -0.324771667 0.700001574 t2 -0.32623651 1.41546271 0.69853673
+limit -0.177411003 -0.521107754 0.819013249 t1 2.07169194 -0.15613647 0.297098544 t2 -0.0848293226 1.64267357 0.926646794
+limit -0.759797036 -0.112326944 0.424928935 t1 -0.495694384 1.92842711 0.179810073 t2 0.0298590013 0.560570485 -1.1796011
+limit -0.639261979 -0.412149074 0.3834166 t1 -0.994794178 1.62491912 0.196899916 t2 0.291890211 0.600441764 -1.20446727
+limit -0.628951466 -0.451859425 0.582409666 t1 -0.749442227 1.41775492 0.293843504 t2 -0.441336759 0.00157653223 -1.1078492
+limit -0.716537008 -0.158802439 0.631867864 t1 -0.322530362 2.04230013 0.18559711 t2 -0.649904855 0.123164927 -1.24557332
+limit -0.141258362 -0.731516325 0.439243856 t1 0.336910546 0.239533601 -1.07043256 t2 1.70769686 -0.288949472 0.290443452
+limit -0.166697073 -0.708656942 0.635810911 t1 0.0586846748 -0.585949054 -1.21348691 t2 1.95161545 -0.232370133 0.230948491
+limit -0.452464502 -0.628346389 0.582651169 t1 -0.012068216 -0.42769201 -1.1032241 t2 1.40703986 -0.738727167 0.299933456
+limit -0.421689397 -0.629736225 0.386536803 t1 0.489900314 0.40190721 -1.16904427 t2 1.58029564 -0.950695148 0.23891471
+limit -0.754310149 0.109352732 0.245213292 t1 -0.0474914425 -2.10305758 0.979301704 t2 -1.14723532 2.06535142 0.304665993
+limit -0.68733444 0.501630391 0.103730318 t1 -0.888250092 -2.43105655 0.688578382 t2 -2.13474622 2.49485581 0.188727579
+limit -0.332447486 0.0966631101 0.0884887109 t1 -1.60526229 -2.21006944 0.516756788 t2 -2.08401301 2.29432509 -0.0235897111
+limit -0.539620314 -0.228046935 0.20564247 t1 -0.901401849 -1.60275608 0.889267156 t2 -1.44924437 1.90424262 0.124392663
+limit -0.429813489 0.880693603 0.0253353933 t1 -2.18326731 -2.04216862 0.252255087 t2 -2.64273672 2.29777877 0.0938871525
+limit -0.00858599855 1.16174522 0.0162648438 t1 -2.50863683 -1.12444775 -0.268283032 t2 -2.59851618 1.40278014 0.0876135296
+limit 0.406291185 0.855688095 0.0389908449 t1 -2.22444577 -1.84204865 -0.346590678 t2 -2.11234905 2.1413091 -0.29594054
+limit -0.000646826662 0.482368116 0.0331739967 t1 -2.33608924 -2.35499827 0.153392368 t2 -2.35660214 2.38345083 -0.168471442
+limit 0.331538183 0.0955514084 0.0890308767 t1 -2.0512781 -2.25430383 0.00407174193 t2 -1.60545811 2.21089596 -0.516891574
+limit 0.657813254 0.465722174 0.121305 t1 -1.66121184 -1.92254271 -0.470092679 t2 -0.906059454 2.44755809 -0.687008799
+limit 0.73908389 0.0870787617 0.255391495 t1 -0.907363295 -1.68128939 -0.476913232 t2 -0.184534112 1.91946722 -0.893208037
+limit 0.539144584 -0.22869169 0.205942112 t1 -1.43211807 -1.88103146 -0.135179779 t2 -0.905670072 1.59712304 -0.886618061
+limit -0.270657512 -0.497786366 0.219472459 t1 -1.31964337 -1.16599603 0.795792945 t2 -1.72618273 1.28843708 -0.301381052
+limit -3.46944695e-18 -0.248027074 0.121249394 t1 -1.86702474 -1.80838729 0.387565707 t2 -1.86702474 1.80838729 -0.387565707
+limit 0.270657512 -0.497786366 0.219472459 t1 -1.72618273 -1.28843708 0.301381052 t2 -1.31964337 1.16599603 -0.795792945
+limit -1.73472348e-18 -0.657055165 0.2981818 t1 -1.38641131 -0.646797337 0.630197282 t2 -1.38641131 0.646797337 -0.630197282
+limit 0.184506235 -0.36788699 0.886359181 t1 2.16305781 0.103869277 -0.340780125 t2 0.0807251479 2.0106377 0.679685491
+limit 0.340511983 -0.502412382 0.784347025 t1 0.186447081 1.5606594 0.851976434 t2 -1.81411153 -0.288608378 0.523029594
+limit 0.502918747 -0.340005617 0.784111926 t1 -1.56586773 -0.191655414 0.855231642 t2 -0.29707192 -1.82257507 -0.518472303
+limit 0.368393356 -0.18399987 0.886124083 t1 -0.109077611 -2.16826614 -0.337524916 t2 2.01910124 0.0891886896 -0.684242782
+limit 0.283929742 -0.694470455 0.411563603 t1 0.484346869 -0.309047872 1.14089426 t2 -1.70188119 -0.606109745 0.342023936
+limit 0.448077529 -0.646329094 0.486014549 t1 -1.5232245 -0.859780896 0.2412029 t2 -0.157517924 -0.00606232317 -1.19696221
+limit 0.321206789 -0.679080107 0.61097637 t1 -0.0710398984 -0.540119438 -1.1833486 t2 1.73224304 0.480020657 -0.345717191
+limit 0.159341666 -0.737493458 0.534528093 t1 1.88213333 0.255405253 -0.236058867 t2 0.130049592 0.119130578 1.19812363
+limit 0.75252368 -0.144253173 0.527009968 t1 -0.396753633 -2.02557951 -0.163974087 t2 0.231471435 0.243439349 -1.25434832
+limit 0.681678245 -0.318608651 0.609695386 t1 0.568548257 0.0994687178 -1.19691197 t2 0.520276733 1.77249912 0.325263632
+limit 0.649397429 -0.445009194 0.484968662 t1 0.881699299 1.54514291 0.224384324 t2 -0.0554329829 -0.206888583 1.21285847
+limit 0.709970873 -0.268371052 0.404280577 t1 0.161189075 -0.634303466 1.20972383 t2 -0.709336018 -1.80615636 -0.281241962
+limit 0.370467044 0.187970197 0.884591366 t1 -0.0760914995 2.22265625 -0.371869374 t2 -2.0512193 0.04296875 0.698449154
+limit 0.517265777 0.360677083 0.774049135 t1 -1.69694412 0.0677083333 0.910634484 t2 0.179450392 -2.01888021 0.629290043
+limit 0.354859012 0.541521991 0.763847473 t1 0.0553706919 -1.984375 1.07592673 t2 1.93173306 -0.266276042 -0.5306934
+limit 0.186579924 0.379738137 0.880096366 t1 2.19604392 -0.09765625 -0.342572499 t2 -0.0486070923 2.21744792 -0.789812002
+limit 0.816678976 0.420867732 0.343327812 t1 -0.0733554667 0.0389065213 1.35967164 t2 0.116064127 -2.3605584 0.680475054
+limit 0.758027511 0.5855014 0.41632625 t1 0.604294514 -2.05630832 0.52352315 t2 0.569802241 0.520144992 -1.53921408
+limit 0.73248254 0.380180265 0.581299882 t1 0.874933439 0.290656196 -1.3639868 t2 -0.242228818 2.06611803 -0.516648909
+limit 0.793911983 0.218010608 0.50533609 t1 0.0851234467 2.26591661 -0.428030006 t2 -0.422641456 -0.200883653 1.36049536
+limit 0.206921899 1.0288182 0.375471194 t1 2.42770398 -0.499328613 -0.0719041864 t2 0.172575146 1.66130575 -2.09552442
+limit 0.373148398 0.840979117 0.525448611 t1 0.27628857 1.60858154 -1.7564323 t2 -2.01029095 0.683664958 0.224542186
+limit 0.562962836 0.873349225 0.367358137 t1 -1.73921436 1.34527588 -0.0474886168 t2 -0.469445374 -1.15843709 1.80573125
+limit 0.416562025 1.07454399 0.205155888 t1 0.0535110034 -0.958282471 1.8553453 t2 2.29732096 -1.20737712 0.0725107703
+limit -0.186579924 0.379738137 0.880096366 t1 -2.19604392 -0.09765625 -0.342572499 t2 -0.0486070923 -2.21744792 0.789812002
+limit -0.354859012 0.541521991 0.763847473 t1 -0.0553706919 -1.984375 1.07592673 t2 1.93173306 0.266276042 0.5306934
+limit -0.517265777 0.360677083 0.774049135 t1 1.69694412 0.0677083333 0.910634484 t2 0.179450392 2.01888021 -0.629290043
+limit -0.370467044 0.187970197 0.884591366 t1 0.0760914995 2.22265625 -0.371869374 t2 -2.0512193 -0.04296875 -0.698449154
+limit -0.432713084 1.09161232 0.195102037 t1 0.263563525 -1.28892899 2.05586627 t2 2.38706524 1.10655212 -0.0233678622
+limit -0.568137449 0.878960503 0.364335955 t1 1.76139725 1.31966146 -0.0356545782 t2 -0.562588413 1.2594401 -1.86013053
+limit -0.373556366 0.841417101 0.52519951 t1 -0.290975437 1.62434896 -1.76539995 t2 -2.0130771 -0.680664062 -0.226096322
+limit -0.208595782 1.03047689 0.374489671 t1 -2.44239085 -0.478678385 -0.0838015207 t2 0.202705038 -1.69116211 2.11319183
+limit -0.797717827 0.223168644 0.502938953 t1 -0.119269226 2.3109809 -0.449222769 t2 -0.491146637 0.293728299 -1.40364382
+limit -0.733272293 0.381215037 0.580811663 t1 -0.903364519 0.327907986 -1.38156266 t2 -0.239442676 -2.06911892 0.518203045
+limit -0.765301935 0.594395014 0.411988923 t1 -0.602727945 -2.04969618 0.522444862 t2 0.700741866 -0.680230035 1.61728596
+limit -0.841761013 0.454353521 0.327585776 t1 0.464549375 -0.496049669 1.61001939 t2 0.0261227957 2.44149441 -0.725127546
+limit -0.368393356 -0.18399987 0.886124083 t1 0.109077611 -2.16826614 -0.337524916 t2 2.01910124 -0.0891886896 0.684242782
+limit -0.502918747 -0.340005617 0.784111926 t1 1.56586773 -0.191655414 0.855231642 t2 -0.29707192 1.82257507 0.518472303
+limit -0.340511983 -0.502412382 0.784347025 t1 -0.186447081 1.5606594 0.851976434 t2 -1.81411153 0.288608378 -0.523029594
+limit -0.184506235 -0.36788699 0.886359181 t1 -2.16305781 0.103869277 -0.340780125 t2 0.0807251479 -2.0106377 -0.679685491
+limit -0.710129614 -0.268154038 0.404180107 t1 -0.155474376 -0.642115966 1.21334073 t2 -0.712193367 1.81006261 0.279433513
+limit -0.649397429 -0.445009194 0.484968662 t1 -0.881699299 1.54514291 0.224384324 t2 -0.0554329829 0.206888583 -1.21285847
+limit -0.681678245 -0.318608651 0.609695386 t1 -0.568548257 0.0994687178 -1.19691197 t2 0.520276733 -1.77249912 -0.325263632
+limit -0.752682421 -0.144036159 0.526909499 t1 0.402468332 -2.03339201 -0.160357189 t2 0.234328784 -0.247345599 1.25615676
+limit -0.159341666 -0.737493458 0.534528093 t1 -1.88213333 0.255405253 -0.236058867 t2 0.130049592 -0.119130578 -1.19812363
+limit -0.321206789 -0.679080107 0.61097637 t1 0.0710398984 -0.540119438 -1.1833486 t2 1.73224304 -0.480020657 0.345717191
+limit -0.448077529 -0.646329094 0.486014549 t1 1.5232245 -0.859780896 0.2412029 t2 -0.157517924 0.00606232317 1.19696221
+limit -0.283929742 -0.694470455 0.411563603 t1 -0.484346869 -0.309047872 1.14089426 t2 -1.70188119 0.606109745 -0.342023936
+limit -0.738682207 0.299220741 0.168476863 t1 1.67538641 -2.35166309 -0.263734794 t2 -0.368845999 -2.3969704 0.856376742
+limit -0.508588459 0.294684767 0.0918414164 t1 -1.28372155 -2.33767361 0.602587288 t2 -2.13929278 2.4474103 0.0958899981
+limit -0.450716079 -0.0783118731 0.139309186 t1 -1.78032166 2.1156684 0.0557846258 t2 1.23788942 1.96918403 -0.702877845
+limit -0.653388297 -0.0625924318 0.221751691 t1 0.528416763 1.82060185 -0.946674865 t2 1.28308859 -2.0441985 -0.248872733
+limit -0.228332056 1.03850426 0.0116422951 t1 2.6785722 -1.93258992 -0.0929552714 t2 -2.61807138 -1.73781049 0.0856419316
+limit 0.210633706 1.02309462 0.0207146225 t1 -2.38074183 -1.58129318 -0.30537358 t2 -2.55617834 1.86849184 -0.152452257
+limit 0.202821143 0.67725005 0.0270866111 t1 -2.28395137 2.28961182 -0.233477557 t2 2.52230835 2.31061808 0.00405205621
+limit -0.208403725 0.682423344 0.0243135303 t1 2.29144739 2.24822998 -0.212675872 t2 2.61266525 -2.41462199 0.0519013581
+limit 0.501314035 0.285791154 0.0961787429 t1 1.28528812 -2.34428575 0.603665576 t2 -2.00835315 -2.28732526 -0.173961875
+limit 0.713600169 0.265734951 0.1842189 t1 -1.2841925 -1.8167069 -0.514082544 t2 -0.458787329 2.31603439 -0.811724251
+limit 0.649582453 -0.0677504677 0.224148827 t1 -0.562562542 1.77553756 -0.925482102 t2 1.21458341 1.95135385 0.292021198
+limit 0.449926327 -0.079346645 0.139797404 t1 1.75189058 2.07841661 0.0733604902 t2 1.24067556 -1.96618313 0.701323709
+limit -0.146723492 -0.386303142 0.161869588 t1 1.82313368 -1.54609134 0.342496142 t2 -1.63925058 -1.5042378 0.588167921
+limit 0.146723492 -0.386303142 0.161869588 t1 -1.82313368 -1.54609134 0.342496142 t2 -1.63925058 1.5042378 -0.588167921
+limit 0.128494325 -0.591022926 0.252168799 t1 -1.38216146 0.915063175 -0.743152006 t2 1.6577691 0.949610581 -0.475489487
+limit -0.128494325 -0.591022926 0.252168799 t1 1.38216146 0.915063175 -0.743152006 t2 1.6577691 -0.949610581 0.475489487
+limit 0.454765181 -0.573272849 0.66696934 t1 1.295447 0.524793167 -0.462194037 t2 0.131510417 0.913194444 0.904513889
+limit 0.171156532 -0.637668074 0.733579729 t1 1.99496849 0.201356739 -0.25548161 t2 0.060546875 1.13078704 1.11378762
+limit 0.554808584 -0.554519232 0.568029091 t1 -0.218152542 0.207735875 1.02659358 t2 -1.04926215 -1.04926215 0.000651041667
+limit 0.543303201 -0.535490701 0.375028578 t1 0.411924511 -0.505674511 1.18274177 t2 -1.31438079 -1.31438079 0.017578125
+limit 0.573417525 -0.454620506 0.666897002 t1 -0.5300015 -1.30065533 -0.459589871 t2 0.914496528 0.1328125 -0.905164931
+limit 0.641574324 -0.167250282 0.731626604 t1 -0.248231739 -2.04184349 -0.23204411 t2 1.16594329 0.095703125 -1.13136574
+limit 0.617483401 0.513553321 0.636984287 t1 -0.355088306 1.62594039 -0.633959191 t2 -1.17751736 -0.1328125 1.03667535
+limit 0.655583776 0.18963397 0.724318237 t1 -0.0772247942 2.13932292 -0.328478652 t2 -1.28703704 -0.095703125 1.19191262
+limit 0.635018073 0.674837591 0.506354233 t1 -0.628263581 -0.82482458 1.33955607 t2 1.04414424 -1.37508138 0.177580657
+limit 0.716993935 0.79929154 0.2426858 t1 -0.106512627 -0.370361328 1.591181 t2 1.19666884 -2.05004883 0.433892144
+limit 0.498831057 0.656963333 0.623529426 t1 1.47036019 -0.53942419 -0.447616598 t2 0.131510417 1.5 -1.2109375
+limit 0.185165984 0.729492187 0.684829747 t1 2.16597544 -0.259114583 -0.221129115 t2 0.060546875 1.95117188 -1.54947917
+limit -0.498831057 0.656963333 0.623529426 t1 -1.47036019 -0.53942419 -0.447616598 t2 0.131510417 -1.5 1.2109375
+limit -0.185165984 0.729492187 0.684829747 t1 -2.16597544 -0.259114583 -0.221129115 t2 0.060546875 -1.95117188 1.54947917
+limit -0.635859253 0.675789288 0.50586771 t1 0.658546061 -0.859085648 1.3570709 t2 1.04586227 1.37239583 -0.17650463
+limit -0.745422252 0.831269441 0.226216355 t1 0.584847407 -0.904866536 1.8688141 t2 1.23738155 1.98083496 -0.40914804
+limit -0.617483401 0.513553321 0.636984287 t1 0.355088306 1.62594039 -0.633959191 t2 -1.17751736 0.1328125 -1.03667535
+limit -0.655583776 0.18963397 0.724318237 t1 0.0772247942 2.13932292 -0.328478652 t2 -1.28703704 0.095703125 -1.19191262
+limit -0.573417525 -0.454620506 0.666897002 t1 0.5300015 -1.30065533 -0.459589871 t2 0.914496528 -0.1328125 0.905164931
+limit -0.641574324 -0.167250282 0.731626604 t1 0.248231739 -2.04184349 -0.23204411 t2 1.16594329 -0.095703125 1.13136574
+limit -0.554808584 -0.554519232 0.568029091 t1 0.218152542 0.207735875 1.02659358 t2 -1.04926215 1.04926215 -0.000651041667
+limit -0.543303201 -0.535490701 0.375028578 t1 -0.411924511 -0.505674511 1.18274177 t2 -1.31438079 1.31438079 -0.017578125
+limit -0.454765181 -0.573272849 0.66696934 t1 -1.295447 0.524793167 -0.462194037 t2 0.131510417 -0.913194444 -0.904513889
+limit -0.171156532 -0.637668074 0.733579729 t1 -1.99496849 0.201356739 -0.25548161 t2 0.060546875 -1.13078704 -1.11378762
+limit -0.182388117 0.286675347 0.0531925154 t1 2.29282407 -2.39322917 0.101273148 t2 -2.00086806 -2.33007812 0.330295139
+limit -0.586691774 0.699622386 0.0551147461 t1 2.46581127 -2.47749385 -0.124177156 t2 -1.54980921 -2.29326262 0.470345956
+limit 0.181546937 0.285723651 0.0536790385 t1 -2.26254159 -2.3589681 0.0837583189 t2 -1.99915003 2.33276367 -0.331371166
+limit 0.558263457 0.667644485 0.0715841913 t1 -1.98747649 -1.94298864 -0.401810258 t2 -1.5090965 2.36247649 -0.495090061
+limit 0.161932549 -0.0859053498 0.0971338092 t1 -1.80642361 2.03819444 -0.443576389 t2 2.00426794 2.07653356 -0.192057292
+limit 0.411530671 -0.376221708 0.203245563 t1 -1.16521991 1.39467593 -0.834780093 t2 1.62680845 1.62948495 -0.0802228009
+limit -0.161932549 -0.0859053498 0.0971338092 t1 1.80642361 2.03819444 -0.443576389 t2 2.00426794 -2.07653356 0.192057292
+limit -0.411530671 -0.376221708 0.203245563 t1 1.16521991 1.39467593 -0.834780093 t2 1.62680845 -1.62948495 0.0802228009
+limit 0 -0.527777778 0.831886574 t1 -2.77555756e-17 -1.66666667 -0.947916667 t2 2.15755208 0 0
+limit 0 -0.192386831 0.946534208 t1 0 -2.25925926 -0.383101852 t2 2.30598958 0 0
+limit 0 -0.718232918 0.646240569 t1 2.77555756e-17 -0.597125772 -1.21682099 t2 2.02473958 -4.4408921e-16 4.4408921e-16
+limit 0 -0.743412334 0.453335762 t1 0 0.207642104 -0.999356996 t2 1.68880208 0 2.22044605e-16
+limit 0.364076968 -0.579741887 0.294750407 t1 1.6328125 1.08019869 -0.264949846 t2 0.906901042 -0.795572917 1.01236979
+limit 0.0949475952 -0.701727582 0.358854345 t1 1.44936343 0.398477688 -0.433224023 t2 0.840494792 -0.448567708 0.844401042
+limit 0.601722581 -0.342038002 0.287645212 t1 1.16317033 1.71788194 0.175829475 t2 0.601309317 -1.10221354 1.07472512
+limit 0.750183636 -0.0449861754 0.334225948 t1 0.607739358 1.67505787 0.317435057 t2 0.120081019 -1.19205729 1.01569734
+limit 0.736307361 0.018132716 0.637182249 t1 -0.726972415 -0.131944444 1.28250386 t2 -0.15910735 -2.18489583 0.0799334491
+limit 0.791723711 0.0498167438 0.428635027 t1 -0.00682789995 -0.230902778 1.1125418 t2 -0.327184606 -2.0390625 0.171947338
+limit 0.531684028 0.00390625 0.829933449 t1 -1.71354167 -0.046875 0.971354167 t2 -0.03515625 -2.19270833 0.017578125
+limit 0.192531507 0.000144675926 0.94646187 t1 -2.26446759 -0.00520833333 0.385706019 t2 -0.00130208333 -2.30729167 0.000651041667
+limit 0.763779963 0.588135519 0.18136492 t1 -0.626829548 2.45309787 -0.70806508 t2 0.795572917 0.906901042 1.01236979
+limit 0.796599239 0.196610816 0.308706471 t1 0.101344481 2.03285048 -0.722536691 t2 0.448567708 0.840494792 0.844401042
+limit 0.550807623 0.962617097 0.0956752447 t1 -1.93600803 1.93448893 -0.303846571 t2 1.10742188 0.594401042 1.07877604
+limit 0.160234145 1.21002324 0.0703563455 t1 -2.46567451 0.879521688 0.0384707981 t2 1.33576457 -0.0609181722 1.12621562
+limit -6.32957176e-05 0.90097385 0.548217773 t1 0.00227864583 -1.85172526 1.90999349 t2 2.35432943 -0.00122070312 0.000732421875
+limit -0.00230944598 1.18162183 0.203414776 t1 0.0421244303 -1.29066467 1.9430186 t2 2.62663778 -0.0519561768 0.0345916748
+limit 0 0.567708333 0.810619213 t1 -2.77555756e-17 -2.14583333 1.203125 t2 2.22786458 0 0
+limit 0 0.193865741 0.945746528 t1 0 -2.3125 0.411458333 t2 2.30859375 0 0
+limit -0.605345243 1.02134998 0.0632493879 t1 -2.08002133 -1.75867081 0.234795041 t2 -1.10628255 0.595621745 1.07804362
+limit -0.184808182 1.23061268 0.0565375615 t1 -2.65134486 -0.59469223 -0.214261232 t2 -1.28566488 -0.00896199544 1.09162394
+limit -0.82730653 0.665066283 0.143596142 t1 -0.567341369 -2.43668281 0.722430571 t2 -0.795572917 0.906901042 1.01236979
+limit -0.828960452 0.247021428 0.285972184 t1 0.393421817 -2.42922974 0.90796564 t2 -0.448567708 0.840494792 0.844401042
+limit -0.736466103 0.0183497299 0.637081779 t1 0.732687114 -0.139756944 1.28612076 t2 -0.161964699 2.18880208 -0.0817418981
+limit -0.796579397 0.0568455826 0.425422016 t1 0.0787680041 -0.343315972 1.16310603 t2 -0.417221258 2.17621528 -0.233965085
+limit -0.531684028 0.00390625 0.829933449 t1 1.71354167 -0.046875 0.971354167 t2 -0.03515625 2.19270833 -0.017578125
+limit -0.192531507 0.000144675926 0.94646187 t1 2.26446759 -0.00520833333 0.385706019 t2 -0.00130208333 2.30729167 -0.000651041667
+limit -0.601881323 -0.341820988 0.287544742 t1 1.16888503 -1.72569444 -0.172212577 t2 -0.598451968 -1.10611979 1.07653356
+limit -0.755039321 -0.0379573367 0.331012937 t1 0.679679462 -1.78747106 -0.26687082 t2 -0.0300443673 -1.32921007 1.07771508
+limit -0.364076968 -0.579741887 0.294750407 t1 1.6328125 -1.08019869 0.264949846 t2 -0.906901042 -0.795572917 1.01236979
+limit -0.0949475952 -0.701727582 0.358854345 t1 1.44936343 -0.398477688 0.433224023 t2 -0.840494792 -0.448567708 0.844401042
