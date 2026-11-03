@@ -11,11 +11,31 @@
 // it cannot skip a thin feature, and neighbouring prisms share their side faces (bilinear patches through the shared vertex normals),
 // so the surface is watertight.
 //
+// Beyond the paper:
+//  * Every prism has the range of heights of its own part of the map (the cells under its uv triangle), not the range of the whole map,
+//    so the prisms are tight. The side faces stay shared between neighbours because they are the ruled surfaces through the shared
+//    displacement directions, whatever heights the two prisms span (see DisplacedMesh).
+//  * The quadtree nodes can be bounded with rectangular min-max queries (Thonat et al., "RMIP", SIGGRAPH Asia 2023; "rectangles"): the
+//    part of the ray inside a node is projected to texture space, the heights under its bounding rectangle limit the heights of the
+//    ray, and the two steps alternate. The leaves stay exact, so the surface is the same as without.
+//  * Hard edges (vertices at one position with different normals) are welded for the displacement so that the prisms stay watertight,
+//    with a miter factor that keeps the displacement distance (Hoetzlein 2025, Sec. 5.4, fixes the singularity of his parallel offset
+//    prisms at creases by inserting triangles; Ogaki's prisms have none, but they would open cracks at a hard edge).
+//  * The map can be stored compactly, and nodes in which the heights are a plane are intersected without descending (shellheights.cs).
+//  * The displacement can be a procedural function of (u, v), bounded with interval arithmetic (shellexpression.cs).
+//
 // Parameters (as for "trianglemesh"; "plymesh" is read with "string filename"):
 //   "point3 P", "integer indices", "normal N" (optional; area weighted vertex normals otherwise), "point2 uv" (required),
-//   "texture displacement" (required: any float texture, evaluated at the uv of the grid points), "float scale" (1), "float offset" (0),
-//   "integer resolution" (the grid is resolution x resolution points, default 1024), "bool smoothnormals" (true: the shading normal keeps
-//   the smoothness of the interpolated vertex normals, Hoetzlein 2025, Eq. 10).
+//   "texture displacement" (any float texture, evaluated at the uv of the grid points) or "string function" (an expression of u and v,
+//   see shellexpression.cs), "float scale" (1), "float offset" (0),
+//   "integer resolution" (the grid is resolution x resolution points, default 1024, or 4096 for a function), "bool smoothnormals"
+//   (true: the shading normal keeps the smoothness of the interpolated vertex normals, Hoetzlein 2025, Eq. 10),
+//   "string storage" ("float", "fixed16" or "packed": how the grid of heights is stored), "float flatness" (the deviation, in
+//   normalized heights, up to which a node of the pyramid is intersected as two triangles over its corners; 0: only exact planes,
+//   negative: never), "bool tightranges" (true: a height range per prism), "bool rectangles" (false: RMIP bounds, which visit fewer nodes but cost more per node),
+//   "integer rectanglelevel" (2) and "integer rectanglepasses" (2): the smallest level of the quadtree that is bounded with
+//   rectangles, and the rounds of the projection per node,
+//   "string creases" ("weld" or "none"), "float miterlimit" (3: the largest factor on the displacement at a weld).
 // The displacement is along the vertex normals in object space, by scale * texture + offset. The uv of the base triangles should lie
 // within one tile of the map (tiles are repeated by the integer part of the uv of the triangle).
 
@@ -24,120 +44,6 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
-
-    // ShellHeightField Definition: the displacement map as normalized heights in [0, 1] on a grid of points, with a pyramid of the
-    // minimum and the maximum over the cells (a cell is the square between four neighbouring points)
-    public sealed class ShellHeightField
-    {
-        // ShellHeightField Public Methods
-        public ShellHeightField(int width, int height, float[] heights)
-        {
-            this.width = width;
-            this.height = height;
-            this.heights = heights;
-            cellsX = width - 1;
-            cellsY = height - 1;
-            int levelCount = 1;
-            int sizeX = cellsX, sizeY = cellsY;
-            while (sizeX > 1 || sizeY > 1)
-            {
-                sizeX = (sizeX + 1) / 2;
-                sizeY = (sizeY + 1) / 2;
-                ++levelCount;
-            }
-            levels = levelCount;
-            levelWidth = new int[levels];
-            levelHeight = new int[levels];
-            minimum = new float[levels][];
-            maximum = new float[levels][];
-            levelWidth[0] = cellsX;
-            levelHeight[0] = cellsY;
-            minimum[0] = new float[cellsX * cellsY];
-            maximum[0] = new float[cellsX * cellsY];
-            for (int j = 0; j < cellsY; ++j)
-            {
-                for (int i = 0; i < cellsX; ++i)
-                {
-                    float h00 = Sample(i, j), h10 = Sample(i + 1, j), h01 = Sample(i, j + 1), h11 = Sample(i + 1, j + 1);
-                    minimum[0][j * cellsX + i] = Math.Min(Math.Min(h00, h10), Math.Min(h01, h11));
-                    maximum[0][j * cellsX + i] = Math.Max(Math.Max(h00, h10), Math.Max(h01, h11));
-                }
-            }
-            for (int level = 1; level < levels; ++level)
-            {
-                int w = (levelWidth[level - 1] + 1) / 2, h = (levelHeight[level - 1] + 1) / 2;
-                levelWidth[level] = w;
-                levelHeight[level] = h;
-                minimum[level] = new float[w * h];
-                maximum[level] = new float[w * h];
-                for (int j = 0; j < h; ++j)
-                {
-                    for (int i = 0; i < w; ++i)
-                    {
-                        float low = float.MaxValue, high = float.MinValue;
-                        for (int dy = 0; dy < 2; ++dy)
-                        {
-                            for (int dx = 0; dx < 2; ++dx)
-                            {
-                                int ci = 2 * i + dx, cj = 2 * j + dy;
-                                if (ci < levelWidth[level - 1] && cj < levelHeight[level - 1])
-                                {
-                                    low = Math.Min(low, minimum[level - 1][cj * levelWidth[level - 1] + ci]);
-                                    high = Math.Max(high, maximum[level - 1][cj * levelWidth[level - 1] + ci]);
-                                }
-                            }
-                        }
-                        minimum[level][j * w + i] = low;
-                        maximum[level][j * w + i] = high;
-                    }
-                }
-            }
-        }
-
-        public float Sample(int x, int y)
-        {
-            return heights[y * width + x];
-        }
-
-        public int LevelWidth(int level)
-        {
-            return levelWidth[level];
-        }
-
-        public int LevelHeight(int level)
-        {
-            return levelHeight[level];
-        }
-
-        public void NodeRange(int level, int i, int j, out double low, out double high)
-        {
-            low = minimum[level][j * levelWidth[level] + i];
-            high = maximum[level][j * levelWidth[level] + i];
-        }
-
-        // The height of the surface made of the micro triangles, at the grid position (gx, gy)
-        public double Value(double gx, double gy)
-        {
-            gx = Math.Min(Math.Max(gx, 0), cellsX);
-            gy = Math.Min(Math.Max(gy, 0), cellsY);
-            int i = Math.Min((int)Math.Floor(gx), cellsX - 1), j = Math.Min((int)Math.Floor(gy), cellsY - 1);
-            double fx = gx - i, fy = gy - j;
-            double h00 = Sample(i, j), h10 = Sample(i + 1, j), h01 = Sample(i, j + 1), h11 = Sample(i + 1, j + 1);
-            if (fx >= fy)
-            {
-                return h00 + fx * (h10 - h00) + fy * (h11 - h10);
-            }
-            return h00 + fx * (h11 - h01) + fy * (h01 - h00);
-        }
-
-        // ShellHeightField Public Members
-        public readonly int width, height, cellsX, cellsY, levels;
-
-        // ShellHeightField Private Members
-        private readonly float[] heights;
-        private readonly int[] levelWidth, levelHeight;
-        private readonly float[][] minimum, maximum;
-    }
 
     // ShellWorkspace Definition: the scratch memory of one thread
     internal sealed class ShellWorkspace
@@ -150,6 +56,7 @@ namespace pbrt
         public readonly double[] heights = new double[10];
         public readonly double[] roots = new double[3];
         public readonly double[] quadraticRoots = new double[2];
+        public readonly double[] boundsRoots = new double[2];
         public readonly double[] inverseHeights = new double[3];
         public readonly double[] inverseAlphas = new double[3];
         public readonly double[] inverseBetas = new double[3];
@@ -159,44 +66,137 @@ namespace pbrt
         public readonly double[] stackT = new double[256];
         public readonly double[] stackLow = new double[256];
         public readonly double[] stackHigh = new double[256];
+        public readonly int[] childI = new int[4];
+        public readonly int[] childJ = new int[4];
+        public readonly double[] childT = new double[4];
+        public readonly double[] childLow = new double[4];
+        public readonly double[] childHigh = new double[4];
+
+        // The map of the heights of the triangle to the heights of the prism: height = heightBase + heightScale * h
+        public double heightBase, heightScale, inverseHeightScale;
+        public bool useRectangles;
+        public int rectangleMinimumLevel, rectanglePasses;
+        public ShellStatistics statistics = new ShellStatistics();
+    }
+
+    // ShellStatistics Definition: what the traversal did on one thread
+    public sealed class ShellStatistics
+    {
+        public long traces, nodes, leaves;
     }
 
     // ShellHit Definition
     internal struct ShellHit
     {
         public double t, h, alpha, beta;
-        public int cellX, cellY, triangle;
+        public int cellX, cellY, cellSize, triangle;
         public double tileU, tileV;
     }
 
-    // DisplacedMesh Definition
+    // DisplacedMeshOptions Definition
+    public sealed class DisplacedMeshOptions
+    {
+        public bool smoothNormals = true;
+        public bool tightRanges = true;
+        public bool rectangleBounds = false;
+        // The smallest level of the quadtree whose nodes are bounded with rectangles, and the number of rounds of projecting the ray to
+        // texture space and clipping its heights
+        public int rectangleMinimumLevel = 2;
+        public int rectanglePasses = 2;
+        public bool weldCreases = true;
+        public double miterLimit = 3;
+    }
+
+    // DisplacedMesh Definition: the prisms of the triangles of the mesh. Vertex v has the displacement direction D(v) (the vertex normal,
+    // or the welded direction at a hard edge) and a point of the displaced surface is P + d D with d the distance in object space. The
+    // prism of a triangle spans the distances d0 + heightBase * thickness to d0 + (heightBase + heightScale) * thickness. Its side
+    // faces are the ruled surfaces (1 - s) (P0 + d D0) + s (P1 + d D1) for those distances, so two triangles that share an edge share
+    // the surface of the side whatever their ranges are: the prisms are watertight.
     public sealed class DisplacedMesh
     {
         // DisplacedMesh Public Methods
         public DisplacedMesh(Transform renderFromObject, bool reverseOrientation, int[] indices, Point3f[] p, Normal3f[] n, Point2f[] uv,
-                             ShellHeightField field, double minimumDisplacement, double maximumDisplacement, bool smoothNormals)
+                             ShellHeights field, double minimumDisplacement, double maximumDisplacement, DisplacedMeshOptions options)
         {
             this.indices = indices;
             this.uv = uv;
             this.field = field;
             this.reverseOrientation = reverseOrientation;
-            this.smoothNormals = smoothNormals;
+            smoothNormals = options.smoothNormals;
+            rectangleBounds = options.rectangleBounds;
+            rectangleMinimumLevel = options.rectangleMinimumLevel;
+            rectanglePasses = options.rectanglePasses;
             int vertexCount = p.Length;
-            baseP = new SdfVector[vertexCount];
-            offset = new SdfVector[vertexCount];
+            renderP = new SdfVector[vertexCount];
             shadingN = new SdfVector[vertexCount];
+            SdfVector[] directions = options.weldCreases ? WeldedDirections(p, n, indices, options.miterLimit) : null;
+            SdfVector[] renderDirection = new SdfVector[vertexCount];
             for (int i = 0; i < vertexCount; ++i)
             {
                 Normal3f unit = pbrt.Normalize(n[i]);
-                Vector3f up = new Vector3f(unit.x, unit.y, unit.z);
-                Point3f bottom = p[i] + up * (Float)minimumDisplacement;
-                Vector3f height = up * (Float)(maximumDisplacement - minimumDisplacement);
-                Point3f renderBottom = renderFromObject.Apply(bottom);
-                Vector3f renderHeight = renderFromObject.Apply(height);
-                baseP[i] = new SdfVector(renderBottom.x, renderBottom.y, renderBottom.z);
-                offset[i] = new SdfVector(renderHeight.x, renderHeight.y, renderHeight.z);
+                Point3f renderPoint = renderFromObject.Apply(p[i]);
+                renderP[i] = new SdfVector(renderPoint.x, renderPoint.y, renderPoint.z);
+                Vector3f direction = directions != null ? new Vector3f((Float)directions[i].x, (Float)directions[i].y, (Float)directions[i].z)
+                                                        : new Vector3f(unit.x, unit.y, unit.z);
+                Vector3f renderVector = renderFromObject.Apply(direction);
+                renderDirection[i] = new SdfVector(renderVector.x, renderVector.y, renderVector.z);
                 Normal3f renderNormal = pbrt.Normalize(renderFromObject.Apply(unit));
                 shadingN[i] = new SdfVector(renderNormal.x, renderNormal.y, renderNormal.z);
+            }
+            int triangleCount = indices.Length / 3;
+            triangleBase = new SdfVector[3 * triangleCount];
+            triangleOffset = new SdfVector[3 * triangleCount];
+            heightBase = new double[triangleCount];
+            heightScale = new double[triangleCount];
+            triangleEmpty = new bool[triangleCount];
+            gridCorners = new double[6 * triangleCount];
+            tileU = new double[triangleCount];
+            tileV = new double[triangleCount];
+            double thickness = maximumDisplacement - minimumDisplacement;
+            const double minimumExtent = 1e-4;
+            for (int t = 0; t < triangleCount; ++t)
+            {
+                // The uv triangle in grid units of the tile that holds its centroid
+                Point2f t0 = uv[indices[3 * t]], t1 = uv[indices[3 * t + 1]], t2 = uv[indices[3 * t + 2]];
+                tileU[t] = Math.Floor(((double)t0.x + t1.x + t2.x) / 3);
+                tileV[t] = Math.Floor(((double)t0.y + t1.y + t2.y) / 3);
+                gridCorners[6 * t] = (t0.x - tileU[t]) * field.cellsX;
+                gridCorners[6 * t + 1] = (t0.y - tileV[t]) * field.cellsY;
+                gridCorners[6 * t + 2] = (t1.x - tileU[t]) * field.cellsX;
+                gridCorners[6 * t + 3] = (t1.y - tileV[t]) * field.cellsY;
+                gridCorners[6 * t + 4] = (t2.x - tileU[t]) * field.cellsX;
+                gridCorners[6 * t + 5] = (t2.y - tileV[t]) * field.cellsY;
+                // A little more than the range in either case: the surface often touches the lowest and the highest height of the whole
+                // map exactly (a flat floor), and a hit on the face of the prism must be inside it
+                double low = -2e-6, high = 1 + 2e-6;
+                if (options.tightRanges)
+                {
+                    if (field.TriangleRange(gridCorners[6 * t], gridCorners[6 * t + 1], gridCorners[6 * t + 2], gridCorners[6 * t + 3],
+                                            gridCorners[6 * t + 4], gridCorners[6 * t + 5], out double rangeLow, out double rangeHigh))
+                    {
+                        // A little more than the range, and never thinner than a minimum, so that the prism is not degenerate
+                        low = rangeLow - 2e-6;
+                        high = rangeHigh + 2e-6;
+                        if (high - low < minimumExtent)
+                        {
+                            double middle = 0.5 * (low + high);
+                            low = middle - 0.5 * minimumExtent;
+                            high = middle + 0.5 * minimumExtent;
+                        }
+                    }
+                    else
+                    {
+                        triangleEmpty[t] = true;
+                    }
+                }
+                heightBase[t] = low;
+                heightScale[t] = high - low;
+                for (int k = 0; k < 3; ++k)
+                {
+                    int v = indices[3 * t + k];
+                    triangleBase[3 * t + k] = renderP[v] + renderDirection[v] * (minimumDisplacement + low * thickness);
+                    triangleOffset[3 * t + k] = renderDirection[v] * ((high - low) * thickness);
+                }
             }
         }
 
@@ -207,10 +207,139 @@ namespace pbrt
 
         // DisplacedMesh Public Members
         public readonly int[] indices;
-        public readonly SdfVector[] baseP, offset, shadingN;
+        public readonly SdfVector[] renderP, shadingN, triangleBase, triangleOffset;
+        public readonly double[] heightBase, heightScale;
+        // The corners (x0, y0, x1, y1, x2, y2) of the uv triangle of every triangle in grid units of its tile, and the tile
+        public readonly double[] gridCorners, tileU, tileV;
+        public readonly bool[] triangleEmpty;
         public readonly Point2f[] uv;
-        public readonly ShellHeightField field;
-        public readonly bool reverseOrientation, smoothNormals;
+        public readonly ShellHeights field;
+        public readonly bool reverseOrientation, smoothNormals, rectangleBounds;
+        public readonly int rectangleMinimumLevel, rectanglePasses;
+
+        // DisplacedMesh Private Methods
+
+        // The unit normal of a triangle, on the side that the normals of its vertices point to (the winding of a mesh need not agree with
+        // them); zero for a degenerate triangle
+        private static SdfVector OrientedFaceNormal(SdfVector a, SdfVector b, SdfVector c, SdfVector vertexNormalSum)
+        {
+            SdfVector faceNormal = SdfVector.Cross(b - a, c - a);
+            if (faceNormal.Length() == 0)
+            {
+                return faceNormal;
+            }
+            faceNormal = faceNormal.Normalized();
+            return SdfVector.Dot(faceNormal, vertexNormalSum) < 0 ? -faceNormal : faceNormal;
+        }
+
+        // The displacement directions: the vertex normal, except at a position where vertices have different normals (a hard edge or
+        // corner). There the direction is the same for all the vertices at the position, the average of the normals of the faces there
+        // weighted by their angles at it, and it is scaled by the miter factor 1 / (smallest cosine to a face normal), so that the
+        // distance to each face's plane is at least the displacement distance (limited by miterLimit).
+        private static SdfVector[] WeldedDirections(Point3f[] p, Normal3f[] n, int[] indices, double miterLimit)
+        {
+            int vertexCount = p.Length;
+            Bounds3f box = new Bounds3f(p[0]);
+            for (int i = 1; i < vertexCount; ++i)
+            {
+                box = pbrt.Union(box, p[i]);
+            }
+            double cell = 1e-6 * Math.Max((double)pbrt.Length(box.pMax - box.pMin), 1e-12);
+            Dictionary<(long, long, long), int> groupOf = new Dictionary<(long, long, long), int>();
+            int[] group = new int[vertexCount];
+            List<int> first = new List<int>();
+            for (int i = 0; i < vertexCount; ++i)
+            {
+                (long, long, long) key = ((long)Math.Round(p[i].x / cell), (long)Math.Round(p[i].y / cell), (long)Math.Round(p[i].z / cell));
+                if (!groupOf.TryGetValue(key, out int id))
+                {
+                    id = first.Count;
+                    groupOf.Add(key, id);
+                    first.Add(i);
+                }
+                group[i] = id;
+            }
+            SdfVector[] unit = new SdfVector[vertexCount];
+            for (int i = 0; i < vertexCount; ++i)
+            {
+                Normal3f normal = pbrt.Normalize(n[i]);
+                unit[i] = new SdfVector(normal.x, normal.y, normal.z);
+            }
+            bool[] crease = new bool[first.Count];
+            for (int i = 0; i < vertexCount; ++i)
+            {
+                if (SdfVector.Dot(unit[i], unit[first[group[i]]]) < 1 - 1e-6)
+                {
+                    crease[group[i]] = true;
+                }
+            }
+            SdfVector[] sum = new SdfVector[first.Count];
+            for (int t = 0; t < indices.Length / 3; ++t)
+            {
+                SdfVector[] corner = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    corner[k] = new SdfVector(p[indices[3 * t + k]].x, p[indices[3 * t + k]].y, p[indices[3 * t + k]].z);
+                }
+                SdfVector faceNormal = OrientedFaceNormal(corner[0], corner[1], corner[2], unit[indices[3 * t]] + unit[indices[3 * t + 1]] +
+                                                                                                   unit[indices[3 * t + 2]]);
+                if (faceNormal.Length() == 0)
+                {
+                    continue;
+                }
+                for (int k = 0; k < 3; ++k)
+                {
+                    int g = group[indices[3 * t + k]];
+                    if (!crease[g])
+                    {
+                        continue;
+                    }
+                    SdfVector e0 = corner[(k + 1) % 3] - corner[k], e1 = corner[(k + 2) % 3] - corner[k];
+                    double denominator = e0.Length() * e1.Length();
+                    double angle = denominator > 0 ? Math.Acos(Math.Min(Math.Max(SdfVector.Dot(e0, e1) / denominator, -1), 1)) : 0;
+                    sum[g] = sum[g] + faceNormal * angle;
+                }
+            }
+            SdfVector[] welded = new SdfVector[first.Count];
+            double[] smallestCosine = new double[first.Count];
+            for (int g = 0; g < first.Count; ++g)
+            {
+                welded[g] = crease[g] && sum[g].Length() > 0 ? sum[g].Normalized() : unit[first[g]];
+                smallestCosine[g] = 1;
+            }
+            for (int t = 0; t < indices.Length / 3; ++t)
+            {
+                SdfVector a = new SdfVector(p[indices[3 * t]].x, p[indices[3 * t]].y, p[indices[3 * t]].z);
+                SdfVector b = new SdfVector(p[indices[3 * t + 1]].x, p[indices[3 * t + 1]].y, p[indices[3 * t + 1]].z);
+                SdfVector c = new SdfVector(p[indices[3 * t + 2]].x, p[indices[3 * t + 2]].y, p[indices[3 * t + 2]].z);
+                SdfVector faceNormal = OrientedFaceNormal(a, b, c, unit[indices[3 * t]] + unit[indices[3 * t + 1]] + unit[indices[3 * t + 2]]);
+                if (faceNormal.Length() == 0)
+                {
+                    continue;
+                }
+                for (int k = 0; k < 3; ++k)
+                {
+                    int g = group[indices[3 * t + k]];
+                    if (crease[g])
+                    {
+                        smallestCosine[g] = Math.Min(smallestCosine[g], SdfVector.Dot(welded[g], faceNormal));
+                    }
+                }
+            }
+            SdfVector[] directions = new SdfVector[vertexCount];
+            for (int i = 0; i < vertexCount; ++i)
+            {
+                int g = group[i];
+                if (!crease[g])
+                {
+                    directions[i] = unit[i];
+                    continue;
+                }
+                double factor = smallestCosine[g] > 1 / miterLimit ? 1 / smallestCosine[g] : miterLimit;
+                directions[i] = welded[g] * factor;
+            }
+            return directions;
+        }
     }
 
     // DisplacedTriangle Definition
@@ -229,10 +358,9 @@ namespace pbrt
             bool first = true;
             for (int k = 0; k < 3; ++k)
             {
-                int v = mesh.indices[3 * triIndex + k];
                 for (int level = 0; level < 2; ++level)
                 {
-                    SdfVector q = mesh.baseP[v] + mesh.offset[v] * level;
+                    SdfVector q = mesh.triangleBase[3 * triIndex + k] + mesh.triangleOffset[3 * triIndex + k] * level;
                     Point3f point = new Point3f((Float)q.x, (Float)q.y, (Float)q.z);
                     box = first ? new Bounds3f(point) : pbrt.Union(box, point);
                     first = false;
@@ -271,7 +399,7 @@ namespace pbrt
         public override Float Area()
         {
             int i0 = mesh.indices[3 * triIndex], i1 = mesh.indices[3 * triIndex + 1], i2 = mesh.indices[3 * triIndex + 2];
-            return (Float)(0.5 * SdfVector.Cross(mesh.baseP[i1] - mesh.baseP[i0], mesh.baseP[i2] - mesh.baseP[i0]).Length());
+            return (Float)(0.5 * SdfVector.Cross(mesh.renderP[i1] - mesh.renderP[i0], mesh.renderP[i2] - mesh.renderP[i0]).Length());
         }
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
@@ -303,6 +431,17 @@ namespace pbrt
             return pbrt.StringPrintf("[ DisplacedTriangle triIndex: %d ]", triIndex);
         }
 
+        // What the traversal did on the calling thread since the last reset
+        public static ShellStatistics ThreadStatistics()
+        {
+            return Workspace().statistics;
+        }
+
+        public static void ResetThreadStatistics()
+        {
+            Workspace().statistics = new ShellStatistics();
+        }
+
         // Creates the triangles of the mesh from the parameters
         public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters,
                                                 IDictionary<string, FloatTexture> floatTextures, FileLoc loc)
@@ -310,45 +449,91 @@ namespace pbrt
             string filename = parameters.GetOneString("filename", "");
             MeshData(filename, parameters.GetIntArray("indices"), parameters.GetPoint3fArray("P"), parameters.GetNormal3fArray("N"),
                      parameters.GetPoint2fArray("uv"), loc, out int[] indices, out Point3f[] p, out Normal3f[] n, out Point2f[] uvArray);
-            string textureName = parameters.GetTexture("displacement");
-            if (textureName.Length == 0 || !floatTextures.TryGetValue(textureName, out FloatTexture texture))
-            {
-                pbrt.ErrorExit(loc, "displacedmesh: \"texture displacement\" must name a float texture.");
-                return null;
-            }
             double scale = parameters.GetOneFloat("scale", 1), offsetValue = parameters.GetOneFloat("offset", 0);
-            int resolution = Math.Max(2, parameters.GetOneInt("resolution", 1024));
-            float[] samples = new float[resolution * resolution];
-            pbrt.ParallelFor(0, resolution, (int row) =>
+            string function = parameters.GetOneString("function", "");
+            string textureName = parameters.GetTexture("displacement");
+            ShellHeights field;
+            double low, high;
+            if (function.Length != 0)
             {
-                for (int column = 0; column < resolution; ++column)
+                int resolution = Math.Max(2, parameters.GetOneInt("resolution", 4096));
+                int depth = 1;
+                while ((1 << depth) < resolution - 1 && depth < 24)
                 {
-                    TextureEvalContext ctx = default;
-                    ctx.p = new Point3f(0, 0, 0);
-                    ctx.uv = new Point2f((Float)column / (resolution - 1), (Float)row / (resolution - 1));
-                    samples[row * resolution + column] = (float)(scale * new UniversalTextureEvaluator().Apply(texture, ctx) + offsetValue);
+                    ++depth;
                 }
-            });
-            double low = double.MaxValue, high = double.MinValue;
-            for (int i = 0; i < samples.Length; ++i)
-            {
-                low = Math.Min(low, samples[i]);
-                high = Math.Max(high, samples[i]);
+                try
+                {
+                    ShellProceduralField procedural = new ShellProceduralField(ShellExpression.Parse(function), depth, scale, offsetValue);
+                    field = procedural;
+                    low = procedural.Low();
+                    high = procedural.High();
+                }
+                catch (FormatException e)
+                {
+                    pbrt.ErrorExit(loc, "displacedmesh: \"string function\": " + e.Message);
+                    return null;
+                }
             }
-            double thickness = high - low;
-            if (thickness < 1e-9)
+            else
             {
-                // A constant map: a very thin shell, so that the prism is not degenerate
-                thickness = 1e-6;
-                high = low + thickness;
+                if (textureName.Length == 0 || !floatTextures.TryGetValue(textureName, out FloatTexture texture))
+                {
+                    pbrt.ErrorExit(loc, "displacedmesh: \"texture displacement\" must name a float texture (or give a \"string function\").");
+                    return null;
+                }
+                int resolution = Math.Max(2, parameters.GetOneInt("resolution", 1024));
+                float[] samples = new float[resolution * resolution];
+                pbrt.ParallelFor(0, resolution, (int row) =>
+                {
+                    for (int column = 0; column < resolution; ++column)
+                    {
+                        TextureEvalContext ctx = default;
+                        ctx.p = new Point3f(0, 0, 0);
+                        ctx.uv = new Point2f((Float)column / (resolution - 1), (Float)row / (resolution - 1));
+                        samples[row * resolution + column] = (float)(scale * new UniversalTextureEvaluator().Apply(texture, ctx) + offsetValue);
+                    }
+                });
+                low = double.MaxValue;
+                high = double.MinValue;
+                for (int i = 0; i < samples.Length; ++i)
+                {
+                    low = Math.Min(low, samples[i]);
+                    high = Math.Max(high, samples[i]);
+                }
+                double thickness = high - low;
+                if (thickness < 1e-9)
+                {
+                    // A constant map: a very thin shell, so that the prism is not degenerate
+                    thickness = 1e-6;
+                    high = low + thickness;
+                }
+                for (int i = 0; i < samples.Length; ++i)
+                {
+                    samples[i] = (float)((samples[i] - low) / thickness);
+                }
+                string storageName = parameters.GetOneString("storage", "float");
+                ShellStorage storage = storageName == "fixed16" ? ShellStorage.Fixed16 : storageName == "packed" ? ShellStorage.Packed : ShellStorage.Float32;
+                if (storageName != "float" && storageName != "fixed16" && storageName != "packed")
+                {
+                    pbrt.ErrorExit(loc, "displacedmesh: \"storage\" must be \"float\", \"fixed16\" or \"packed\".");
+                }
+                field = new ShellHeightField(resolution, resolution, samples, storage, parameters.GetOneFloat("flatness", 0));
             }
-            for (int i = 0; i < samples.Length; ++i)
+            DisplacedMeshOptions options = new DisplacedMeshOptions();
+            options.smoothNormals = parameters.GetOneBool("smoothnormals", true);
+            options.tightRanges = parameters.GetOneBool("tightranges", true);
+            options.rectangleBounds = parameters.GetOneBool("rectangles", false);
+            options.rectangleMinimumLevel = Math.Max(1, parameters.GetOneInt("rectanglelevel", 2));
+            options.rectanglePasses = Math.Max(1, parameters.GetOneInt("rectanglepasses", 2));
+            string creases = parameters.GetOneString("creases", "weld");
+            if (creases != "weld" && creases != "none")
             {
-                samples[i] = (float)((samples[i] - low) / thickness);
+                pbrt.ErrorExit(loc, "displacedmesh: \"creases\" must be \"weld\" or \"none\".");
             }
-            ShellHeightField field = new ShellHeightField(resolution, resolution, samples);
-            DisplacedMesh mesh = new DisplacedMesh(renderFromObject, reverseOrientation, indices, p, n, uvArray, field, low, high,
-                                                   parameters.GetOneBool("smoothnormals", true));
+            options.weldCreases = creases == "weld";
+            options.miterLimit = Math.Max(1, parameters.GetOneFloat("miterlimit", 3));
+            DisplacedMesh mesh = new DisplacedMesh(renderFromObject, reverseOrientation, indices, p, n, uvArray, field, low, high, options);
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             for (int i = 0; i < mesh.TriangleCount(); ++i)
             {
@@ -445,22 +630,10 @@ namespace pbrt
             return true;
         }
 
-        // The interval of heights in which the ray is inside the box of a node of the quadtree (conservatively: the hull of the
-        // heights inside), clipped to the range [lowest, highest] of the heights of the ray in the prism
-        private bool NodeInterval(ShellWorkspace ws, int level, int i, int j, double lowest, double highest, out double low, out double high)
+        // Narrows [low, high] to the heights in which the ray is inside the box [x0, x1] x [y0, y1] of the grid (conservatively: the
+        // hull of the heights inside)
+        private static bool BoxInterval(ShellWorkspace ws, double x0, double x1, double y0, double y1, ref double low, ref double high)
         {
-            low = lowest;
-            high = highest;
-            mesh.field.NodeRange(level, i, j, out double nodeLow, out double nodeHigh);
-            const double slack = 1e-6;
-            low = Math.Max(low, nodeLow - slack);
-            high = Math.Min(high, nodeHigh + slack);
-            if (low > high)
-            {
-                return false;
-            }
-            double x0 = (double)i * (1 << level), x1 = (double)(i + 1) * (1 << level);
-            double y0 = (double)j * (1 << level), y1 = (double)(j + 1) * (1 << level);
             double[] d = ws.ray.denominator;
             return Hull(ws.gx[0] - x0 * d[0], ws.gx[1] - x0 * d[1], ws.gx[2] - x0 * d[2], ref low, ref high, ws.quadraticRoots) &&
                    Hull(x1 * d[0] - ws.gx[0], x1 * d[1] - ws.gx[1], x1 * d[2] - ws.gx[2], ref low, ref high, ws.quadraticRoots) &&
@@ -468,49 +641,142 @@ namespace pbrt
                    Hull(y1 * d[0] - ws.gy[0], y1 * d[1] - ws.gy[1], y1 * d[2] - ws.gy[2], ref low, ref high, ws.quadraticRoots);
         }
 
-        // The vertices of a micro triangle of the cell (i, j) in (grid x, grid y, height)
-        private void MicroTriangle(int i, int j, int triangle, out double ax, out double ay, out double ah, out double bx, out double by,
-                                   out double bh, out double cx, out double cy, out double ch)
+        // The extremes of g(h) / D(h) for h in [low, high]: at the ends and where the derivative (g' D - g D') / D^2 vanishes, which is
+        // the root of a quadratic because the cubic terms cancel
+        private static void Extremes(ShellWorkspace ws, double[] g, double low, double high, ref double minimum, ref double maximum)
         {
-            ShellHeightField field = mesh.field;
-            double h00 = field.Sample(i, j), h10 = field.Sample(i + 1, j), h01 = field.Sample(i, j + 1), h11 = field.Sample(i + 1, j + 1);
+            double[] d = ws.ray.denominator;
+            double c0 = g[1] * d[0] - g[0] * d[1], c1 = 2 * g[2] * d[0] - 2 * g[0] * d[2], c2 = g[2] * d[1] - g[1] * d[2];
+            int count = ShellPolynomial.QuadraticRoots(c0, c1, c2, low, high, ws.boundsRoots);
+            for (int k = 0; k < count; ++k)
+            {
+                double value = ShellRay.Polynomial(g, ws.boundsRoots[k]) / ShellRay.Polynomial(d, ws.boundsRoots[k]);
+                minimum = Math.Min(minimum, value);
+                maximum = Math.Max(maximum, value);
+            }
+        }
+
+        // The interval of heights in which the ray is inside the box of a node of the quadtree (conservatively: the hull of the
+        // heights inside), clipped to the range [lowest, highest] of the heights of the ray in the prism. With rectangular bounds
+        // (RMIP) the part of the ray inside the box is projected to texture space; the heights of the map under the bounding rectangle
+        // of the projection limit the heights of the ray, which shrinks the part inside the box, and so on.
+        private bool NodeInterval(ShellWorkspace ws, int level, int i, int j, double lowest, double highest, out double low, out double high)
+        {
+            ++ws.statistics.nodes;
+            ShellHeights field = mesh.field;
+            low = lowest;
+            high = highest;
+            field.NodeRange(level, i, j, out double nodeLow, out double nodeHigh);
+            const double slack = 1e-6;
+            low = Math.Max(low, (nodeLow - slack - ws.heightBase) * ws.inverseHeightScale);
+            high = Math.Min(high, (nodeHigh + slack - ws.heightBase) * ws.inverseHeightScale);
+            if (low > high)
+            {
+                return false;
+            }
+            double x0 = (double)i * (1 << level), x1 = (double)(i + 1) * (1 << level);
+            double y0 = (double)j * (1 << level), y1 = (double)(j + 1) * (1 << level);
+            if (!BoxInterval(ws, x0, x1, y0, y1, ref low, ref high))
+            {
+                return false;
+            }
+            if (ws.useRectangles && level >= ws.rectangleMinimumLevel)
+            {
+                double[] d = ws.ray.denominator;
+                for (int pass = 0; pass < ws.rectanglePasses; ++pass)
+                {
+                    double dLow = ShellRay.Polynomial(d, low), dHigh = ShellRay.Polynomial(d, high);
+                    if (!(dLow > 0) || !(dHigh > 0))
+                    {
+                        break;
+                    }
+                    double xa = ShellRay.Polynomial(ws.gx, low) / dLow, xb = ShellRay.Polynomial(ws.gx, high) / dHigh;
+                    double ya = ShellRay.Polynomial(ws.gy, low) / dLow, yb = ShellRay.Polynomial(ws.gy, high) / dHigh;
+                    double rx0 = Math.Min(xa, xb), rx1 = Math.Max(xa, xb), ry0 = Math.Min(ya, yb), ry1 = Math.Max(ya, yb);
+                    Extremes(ws, ws.gx, low, high, ref rx0, ref rx1);
+                    Extremes(ws, ws.gy, low, high, ref ry0, ref ry1);
+                    rx0 = Math.Max(rx0, x0);
+                    rx1 = Math.Min(rx1, x1);
+                    ry0 = Math.Max(ry0, y0);
+                    ry1 = Math.Min(ry1, y1);
+                    if (rx0 > rx1 + 1e-9 || ry0 > ry1 + 1e-9)
+                    {
+                        return false;
+                    }
+                    if (!field.RectangleRange(rx0, ry0, rx1, ry1, out double rangeLow, out double rangeHigh))
+                    {
+                        return false;
+                    }
+                    double newLow = Math.Max(low, (rangeLow - slack - ws.heightBase) * ws.inverseHeightScale);
+                    double newHigh = Math.Min(high, (rangeHigh + slack - ws.heightBase) * ws.inverseHeightScale);
+                    if (newLow > newHigh)
+                    {
+                        return false;
+                    }
+                    bool shrunk = newHigh - newLow < 0.8 * (high - low);
+                    low = newLow;
+                    high = newHigh;
+                    if (!shrunk)
+                    {
+                        break;
+                    }
+                    if (!BoxInterval(ws, x0, x1, y0, y1, ref low, ref high))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        // The vertices of a micro triangle over the square of the grid with the corner (i, j) and the given size, in (grid x, grid y,
+        // height)
+        private void MicroTriangle(int i, int j, int size, int triangle, out double ax, out double ay, out double ah, out double bx,
+                                   out double by, out double bh, out double cx, out double cy, out double ch)
+        {
+            ShellHeights field = mesh.field;
+            double h00 = field.Sample(i, j), h10 = field.Sample(i + size, j), h01 = field.Sample(i, j + size);
+            double h11 = field.Sample(i + size, j + size);
             ax = i;
             ay = j;
             ah = h00;
             if (triangle == 0)
             {
-                bx = i + 1;
+                bx = i + size;
                 by = j;
                 bh = h10;
-                cx = i + 1;
-                cy = j + 1;
+                cx = i + size;
+                cy = j + size;
                 ch = h11;
             }
             else
             {
-                bx = i + 1;
-                by = j + 1;
+                bx = i + size;
+                by = j + size;
                 bh = h11;
                 cx = i;
-                cy = j + 1;
+                cy = j + size;
                 ch = h01;
             }
         }
 
-        // Intersects the two micro triangles of a leaf with the ray; updates the hit when one is closer than tBest
-        private bool IntersectCell(ShellWorkspace ws, SdfVector o, SdfVector w, int i, int j, double low, double high, double tileU,
-                                   double tileV, ref double tBest, ref ShellHit best)
+        // Intersects the two micro triangles of a leaf (a cell, or a flat node) with the ray; updates the hit when one is closer than
+        // tBest
+        private bool IntersectCell(ShellWorkspace ws, SdfVector o, SdfVector w, int i, int j, int size, double low, double high,
+                                   double tileU, double tileV, ref double tBest, ref ShellHit best)
         {
+            ++ws.statistics.leaves;
             bool found = false;
             double[] d = ws.ray.denominator;
             for (int triangle = 0; triangle < 2; ++triangle)
             {
-                MicroTriangle(i, j, triangle, out double ax, out double ay, out double ah, out double bx, out double by, out double bh,
+                MicroTriangle(i, j, size, triangle, out double ax, out double ay, out double ah, out double bx, out double by, out double bh,
                               out double cx, out double cy, out double ch);
-                // The plane of the micro triangle: nx x + ny y + nh h + k = 0
+                // The plane of the micro triangle: nx x + ny y + nh H + k = 0 with the height H = heightBase + heightScale h of the map
                 double ux = bx - ax, uy = by - ay, uh = bh - ah, vx = cx - ax, vy = cy - ay, vh = ch - ah;
-                double nx = uy * vh - uh * vy, ny = uh * vx - ux * vh, nh = ux * vy - uy * vx;
-                double k = -(nx * ax + ny * ay + nh * ah);
+                double nx = uy * vh - uh * vy, ny = uh * vx - ux * vh, nHeight = ux * vy - uy * vx;
+                double k0 = -(nx * ax + ny * ay + nHeight * ah);
+                double nh = nHeight * ws.heightScale, k = k0 + nHeight * ws.heightBase;
                 // nx X(h) + ny Y(h) + (nh h + k) D(h) = 0
                 double c0 = nx * ws.gx[0] + ny * ws.gy[0] + k * d[0];
                 double c1 = nx * ws.gx[1] + ny * ws.gy[1] + k * d[1] + nh * d[0];
@@ -522,7 +788,7 @@ namespace pbrt
                     double h = ws.roots[r];
                     double denominator = ShellRay.Polynomial(d, h);
                     double gx = ShellRay.Polynomial(ws.gx, h) / denominator, gy = ShellRay.Polynomial(ws.gy, h) / denominator;
-                    double fx = gx - i, fy = gy - j;
+                    double fx = (gx - i) / size, fy = (gy - j) / size;
                     const double tolerance = 1e-9;
                     bool inside = triangle == 0 ? (fx >= fy - tolerance && fx <= 1 + tolerance && fy >= -tolerance)
                                                 : (fy >= fx - tolerance && fy <= 1 + tolerance && fx >= -tolerance);
@@ -547,6 +813,7 @@ namespace pbrt
                     best.beta = beta;
                     best.cellX = i;
                     best.cellY = j;
+                    best.cellSize = size;
                     best.triangle = triangle;
                     best.tileU = tileU;
                     best.tileV = tileV;
@@ -563,16 +830,23 @@ namespace pbrt
             SdfVector o = new SdfVector(ray.o.x, ray.o.y, ray.o.z);
             SdfVector direction = new SdfVector(ray.d.x, ray.d.y, ray.d.z);
             dirLength = direction.Length();
-            if (dirLength == 0)
+            if (dirLength == 0 || mesh.triangleEmpty[triIndex])
             {
                 return false;
             }
             SdfVector w = direction / dirLength;
             double tMax = double.IsInfinity(tMaxRay) ? double.MaxValue : tMaxRay * dirLength;
             ShellWorkspace ws = Workspace();
+            ++ws.statistics.traces;
             int v0 = mesh.indices[3 * triIndex], v1 = mesh.indices[3 * triIndex + 1], v2 = mesh.indices[3 * triIndex + 2];
             ShellPrism prism = ws.prism;
-            prism.Set(mesh.baseP[v0], mesh.baseP[v1], mesh.baseP[v2], mesh.offset[v0], mesh.offset[v1], mesh.offset[v2]);
+            SetPrism(prism);
+            ws.heightBase = mesh.heightBase[triIndex];
+            ws.heightScale = mesh.heightScale[triIndex];
+            ws.inverseHeightScale = 1 / ws.heightScale;
+            ws.useRectangles = mesh.rectangleBounds;
+            ws.rectangleMinimumLevel = mesh.rectangleMinimumLevel;
+            ws.rectanglePasses = mesh.rectanglePasses;
 
             // Where the ray is inside the prism
             int crossings = prism.FaceCrossings(o, w, tMax, ws.distances, ws.heights, ws.quadraticRoots);
@@ -650,17 +924,14 @@ namespace pbrt
             }
 
             // The ray in grid coordinates of the displacement map (Ogaki, Eq. 8, with the uv of the base vertices)
-            ShellHeightField field = mesh.field;
-            Point2f t0 = mesh.uv[v0], t1 = mesh.uv[v1], t2 = mesh.uv[v2];
-            double tileU = Math.Floor(((double)t0.x + t1.x + t2.x) / 3), tileV = Math.Floor(((double)t0.y + t1.y + t2.y) / 3);
-            double g0x = (t0.x - tileU) * field.cellsX, g0y = (t0.y - tileV) * field.cellsY;
-            double g1x = (t1.x - tileU) * field.cellsX, g1y = (t1.y - tileV) * field.cellsY;
-            double g2x = (t2.x - tileU) * field.cellsX, g2y = (t2.y - tileV) * field.cellsY;
+            ShellHeights field = mesh.field;
+            double tileU = mesh.tileU[triIndex], tileV = mesh.tileV[triIndex];
+            int cornerBase = 6 * triIndex;
             for (int c = 0; c < 3; ++c)
             {
                 double a = ws.ray.alpha[c], b = ws.ray.beta[c], dd = ws.ray.denominator[c];
-                ws.gx[c] = (dd - a - b) * g0x + a * g1x + b * g2x;
-                ws.gy[c] = (dd - a - b) * g0y + a * g1y + b * g2y;
+                ws.gx[c] = (dd - a - b) * mesh.gridCorners[cornerBase] + a * mesh.gridCorners[cornerBase + 2] + b * mesh.gridCorners[cornerBase + 4];
+                ws.gy[c] = (dd - a - b) * mesh.gridCorners[cornerBase + 1] + a * mesh.gridCorners[cornerBase + 3] + b * mesh.gridCorners[cornerBase + 5];
             }
 
             // Front to back traversal of the quadtree
@@ -681,8 +952,6 @@ namespace pbrt
             ws.stackHigh[sp] = rootHigh;
             ++sp;
             bool hit = false;
-            int[] childI = new int[4], childJ = new int[4];
-            double[] childT = new double[4], childLow = new double[4], childHigh = new double[4];
             while (sp > 0)
             {
                 --sp;
@@ -692,9 +961,9 @@ namespace pbrt
                 {
                     continue;
                 }
-                if (level == 0)
+                if (level == 0 || field.IsFlat(level, i, j))
                 {
-                    if (IntersectCell(ws, o, w, i, j, low, high, tileU, tileV, ref tBest, ref best))
+                    if (IntersectCell(ws, o, w, i << level, j << level, 1 << level, low, high, tileU, tileV, ref tBest, ref best))
                     {
                         hit = true;
                         if (anyHit)
@@ -723,11 +992,11 @@ namespace pbrt
                         double dEnter = ShellRay.Polynomial(ws.ray.denominator, enter);
                         double tEnter = SdfVector.Dot(w, prism.Point(a / dEnter, b / dEnter, enter) - o);
                         int slot = children++;
-                        childI[slot] = ci;
-                        childJ[slot] = cj;
-                        childT[slot] = tEnter;
-                        childLow[slot] = nodeLow;
-                        childHigh[slot] = nodeHigh;
+                        ws.childI[slot] = ci;
+                        ws.childJ[slot] = cj;
+                        ws.childT[slot] = tEnter;
+                        ws.childLow[slot] = nodeLow;
+                        ws.childHigh[slot] = nodeHigh;
                     }
                 }
                 // Push the farthest first so that the nearest is popped first
@@ -736,22 +1005,28 @@ namespace pbrt
                     int farthest = 0;
                     for (int k = 1; k < children; ++k)
                     {
-                        if (childT[k] > childT[farthest])
+                        if (ws.childT[k] > ws.childT[farthest])
                         {
                             farthest = k;
                         }
                     }
                     ws.stackLevel[sp] = level - 1;
-                    ws.stackI[sp] = childI[farthest];
-                    ws.stackJ[sp] = childJ[farthest];
-                    ws.stackT[sp] = childT[farthest];
-                    ws.stackLow[sp] = childLow[farthest];
-                    ws.stackHigh[sp] = childHigh[farthest];
+                    ws.stackI[sp] = ws.childI[farthest];
+                    ws.stackJ[sp] = ws.childJ[farthest];
+                    ws.stackT[sp] = ws.childT[farthest];
+                    ws.stackLow[sp] = ws.childLow[farthest];
+                    ws.stackHigh[sp] = ws.childHigh[farthest];
                     ++sp;
-                    childT[farthest] = double.MinValue;
+                    ws.childT[farthest] = double.MinValue;
                 }
             }
             return hit;
+        }
+
+        private void SetPrism(ShellPrism prism)
+        {
+            prism.Set(mesh.triangleBase[3 * triIndex], mesh.triangleBase[3 * triIndex + 1], mesh.triangleBase[3 * triIndex + 2],
+                      mesh.triangleOffset[3 * triIndex], mesh.triangleOffset[3 * triIndex + 1], mesh.triangleOffset[3 * triIndex + 2]);
         }
 
         // The surface interaction at a hit (see Ogaki, Sec. 4.3, and Hoetzlein, Eq. 10)
@@ -760,16 +1035,17 @@ namespace pbrt
             ShellWorkspace ws = Workspace();
             int v0 = mesh.indices[3 * triIndex], v1 = mesh.indices[3 * triIndex + 1], v2 = mesh.indices[3 * triIndex + 2];
             ShellPrism prism = ws.prism;
-            prism.Set(mesh.baseP[v0], mesh.baseP[v1], mesh.baseP[v2], mesh.offset[v0], mesh.offset[v1], mesh.offset[v2]);
-            ShellHeightField field = mesh.field;
+            SetPrism(prism);
+            ShellHeights field = mesh.field;
             double alpha = hit.alpha, beta = hit.beta, h = hit.h;
             SdfVector p = prism.Point(alpha, beta, h);
 
-            // The plane of the micro triangle in grid coordinates, as a plane of (alpha, beta, h)
-            MicroTriangle(hit.cellX, hit.cellY, hit.triangle, out double ax, out double ay, out double ah, out double bx, out double by,
-                          out double bh, out double cx, out double cy, out double ch);
+            // The plane of the micro triangle in grid coordinates, as a plane of (alpha, beta, h): the height H of the map is
+            // heightBase + heightScale h
+            MicroTriangle(hit.cellX, hit.cellY, hit.cellSize, hit.triangle, out double ax, out double ay, out double ah, out double bx,
+                          out double by, out double bh, out double cx, out double cy, out double ch);
             double ux = bx - ax, uy = by - ay, uh = bh - ah, vx = cx - ax, vy = cy - ay, vh = ch - ah;
-            double nx = uy * vh - uh * vy, ny = uh * vx - ux * vh, nh = ux * vy - uy * vx;
+            double nx = uy * vh - uh * vy, ny = uh * vx - ux * vh, nh = (ux * vy - uy * vx) * mesh.heightScale[triIndex];
             Point2f t0 = mesh.uv[v0], t1 = mesh.uv[v1], t2 = mesh.uv[v2];
             double g1x = (double)(t1.x - t0.x) * field.cellsX, g1y = (double)(t1.y - t0.y) * field.cellsY;
             double g2x = (double)(t2.x - t0.x) * field.cellsX, g2y = (double)(t2.y - t0.y) * field.cellsY;

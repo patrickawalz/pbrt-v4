@@ -8,7 +8,7 @@ namespace pbrt
 {
     public static unsafe class DisplacedMeshTests
     {
-        private static DisplacedMesh MakeMesh(Point3f[] p, int[] indices, Point2f[] uv, Normal3f[] n, Func<double, double, double> height,
+        internal static DisplacedMesh MakeMesh(Point3f[] p, int[] indices, Point2f[] uv, Normal3f[] n, Func<double, double, double> height,
                                               int resolution, double minimum, double maximum, bool smooth = false)
         {
             float[] samples = new float[resolution * resolution];
@@ -20,10 +20,12 @@ namespace pbrt
                 }
             }
             ShellHeightField field = new ShellHeightField(resolution, resolution, samples);
-            return new DisplacedMesh(new Transform(), false, indices, p, n, uv, field, minimum, maximum, smooth);
+            DisplacedMeshOptions options = new DisplacedMeshOptions();
+            options.smoothNormals = smooth;
+            return new DisplacedMesh(new Transform(), false, indices, p, n, uv, field, minimum, maximum, options);
         }
 
-        private static List<DisplacedTriangle> Triangles(DisplacedMesh mesh)
+        internal static List<DisplacedTriangle> Triangles(DisplacedMesh mesh)
         {
             List<DisplacedTriangle> list = new List<DisplacedTriangle>();
             for (int i = 0; i < mesh.TriangleCount(); ++i)
@@ -33,7 +35,7 @@ namespace pbrt
             return list;
         }
 
-        private static bool Closest(List<DisplacedTriangle> triangles, Ray ray, out ShapeIntersection hit)
+        internal static bool Closest(List<DisplacedTriangle> triangles, Ray ray, out ShapeIntersection hit)
         {
             hit = default;
             bool found = false;
@@ -52,7 +54,7 @@ namespace pbrt
         }
 
         // A square of side 2 in the plane z = 0 with normals +z and uv in [0, 1]
-        private static void Square(out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n)
+        internal static void Square(out Point3f[] p, out int[] indices, out Point2f[] uv, out Normal3f[] n)
         {
             p = new Point3f[4] { new Point3f(-1, -1, 0), new Point3f(1, -1, 0), new Point3f(1, 1, 0), new Point3f(-1, 1, 0) };
             indices = new int[6] { 0, 1, 2, 0, 2, 3 };
@@ -232,7 +234,8 @@ namespace pbrt
             for (int t = 0; t < mesh.TriangleCount(); ++t)
             {
                 int v0 = mesh.indices[3 * t], v1 = mesh.indices[3 * t + 1], v2 = mesh.indices[3 * t + 2];
-                prism.Set(mesh.baseP[v0], mesh.baseP[v1], mesh.baseP[v2], mesh.offset[v0], mesh.offset[v1], mesh.offset[v2]);
+                prism.Set(mesh.triangleBase[3 * t], mesh.triangleBase[3 * t + 1], mesh.triangleBase[3 * t + 2], mesh.triangleOffset[3 * t],
+                          mesh.triangleOffset[3 * t + 1], mesh.triangleOffset[3 * t + 2]);
                 int count = prism.Inverse(q, 0, 1, heights, alphas, betas);
                 for (int k = 0; k < count; ++k)
                 {
@@ -241,7 +244,7 @@ namespace pbrt
                         Point2f t0 = mesh.uv[v0], t1 = mesh.uv[v1], t2 = mesh.uv[v2];
                         double u = t0.x + alphas[k] * (t1.x - t0.x) + betas[k] * (t2.x - t0.x);
                         double v = t0.y + alphas[k] * (t1.y - t0.y) + betas[k] * (t2.y - t0.y);
-                        return heights[k] <= mesh.field.Value(u * mesh.field.cellsX, v * mesh.field.cellsY);
+                        return mesh.heightBase[t] + mesh.heightScale[t] * heights[k] <= mesh.field.Value(u * mesh.field.cellsX, v * mesh.field.cellsY);
                     }
                 }
             }

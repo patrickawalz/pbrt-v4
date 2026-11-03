@@ -428,11 +428,38 @@ Ray Traversal of Hierarchical Structures" (SIGGRAPH Asia 2024 Technical Communic
   displacement of the same map renders in 17 s at `edgelength` 0.02, which rounds the brick edges and loses the spikes, and aborts with a stack overflow
   in `TriQuadMesh.ComputeNormals` at `edgelength` 0.004 (an existing limit of that path, not changed here).
 * **Not done, and why.** Hoetzlein's fixed-step marching mode is not implemented: its surface is the one the exact traversal already
-  computes, so marching would only add the approximation (and the jitter that his thin-feature sampling needs). Area lights on a displaced
-  mesh error out (sampling would need a tessellated surrogate; `SdfLightTree` could be reused). Prisms use one height range for the whole
-  map (per-triangle ranges would tighten the BVH and are safe, because the displaced surface does not depend on the prism). Rays parallel to
-  the base triangles (the denominator vanishes identically) are not traced; sub-pixel jitter makes this a measure-zero event except for
-  exactly horizontal rays over an exactly horizontal base. Where adjacent vertex normals differ strongly (a crease, `N.Ng` near 0) the
-  prisms fold and the result is wrong; there is no automatic insertion of triangles there. The uv of a base triangle must lie inside one tile of the
-  map (the tile of its centroid is used). No texture filtering: minification is left to the samples per pixel. The `ShellMapTexture` inner
-  texture must be defined under the identity transform, since it reads `(u, v, w)` where a texture reads the render space position.
+  computes, so marching would only add the approximation. Area lights on a displaced mesh error out (sampling would need a tessellated
+  surrogate). Rays parallel to the base triangles are not traced (measure zero with jittered rays). The uv of a base triangle must lie
+  inside one tile of the map. No texture filtering. The `ShellMapTexture` inner texture must be defined under the identity transform.
+  Vector displacement was intentionally not implemented. HDDA majorants (tighter bounds, but branch-heavy) are not implemented. The
+  procedural field is slow at very high resolution (about 4-5x the node visits of a grid).
+
+### Additions: ranges, rectangles, creases, storage, procedural fields
+
+Files: `shellheights.cs` (height sources and storage), `shellexpression.cs` (expression language), tests in `displacedmesh_advanced_test.cs`.
+
+* **Per-triangle height ranges** (`"bool tightranges"`, default true). The prism of each triangle spans only the heights its uv footprint
+  touches (a quadtree query over the cells the triangle overlaps, padded by 2e-6, minimum extent 1e-4); the map is renormalized to that range
+  (`H = heightBase + heightScale h`). Side faces are shared ruled surfaces, so watertightness holds whatever the neighbours span. About 16 % fewer
+  node visits on multi-triangle meshes, render time within noise.
+* **RMIP-style rectangular queries** (`"bool rectangles"`, default **false**; `rectanglelevel`, `rectanglepasses`). Four power-of-two windows over
+  a coarse block table of rounded-outward ushort min/max values bound the ray's texture-space bounding rectangle, and the height interval is
+  clipped and re-projected. Node visits fall 14-37 %, images are bit-identical, but wall-clock time did not improve: 1k and 4k bricks and a
+  grazing scene were a wash, and the procedural scene was slower (107 s versus 57 s) because each extra polynomial solve costs more than the
+  nodes it saves. Kept as an option. RMIP is covered by a patent (US12494012); check before shipping it enabled.
+* **Creases** (`"string creases"` "weld" or "none", `"float miterlimit"` default 3). Vertices at the same position (quantized 1e-6 of the bbox
+  diagonal) whose supplied normals disagree get the angle-weighted average of the face normals (oriented to the vertex normals, so winding does
+  not matter) times a miter factor 1/min cos, capped by the limit. This makes neighbouring prisms share side faces, so there are no cracks. Hoetzlein's
+  crease singularity does not arise in this formulation; the weld is the equivalent fix.
+* **Storage** (`"string storage"` "float", "fixed16", "packed"). Fixed16 is 2 bytes per height. Packed is lossless over fixed16: 16x16
+  blocks, a plane predictor with 8.8 fixed-point slopes, bit-packed residuals. The pyramid has no level 0 (computed from corners) and uses ushort
+  min/max. `"float flatness"` (default 0) marks nodes whose heights are within the tolerance of the two corner triangles; they are intersected as
+  one coarse cell. In the 1k render, float, fixed16 and packed took 20.9, 20.9 and 23.5 s; fixed16 and packed images are identical to each other
+  and differ from float by at most 0.10 in one pixel (16-bit quantization of the heights).
+* **Procedural displacement** (`"string function"`). Expressions in `u`, `v` with sin, cos, abs, sqrt, exp, floor, fract, min, max, clamp, mix,
+  smoothstep, pow (numeric exponent), noise, fbm, turb are evaluated by interval arithmetic for node ranges (noise bounds reuse pbrt
+  `NoiseBounds`), so no heights are stored and resolution can reach 2^20 cells. Per-thread direct-mapped caches hold samples and node ranges.
+  Measured (fbm, 8 spp): 1k cells 46 s, 16k cells 208 s.
+* **Tests** (`Displaced.*`, 55 tests with `Shell.*` and `Sdf.*`, all pass): ranges and rectangles give the same surface; triangle ranges cover
+  every cell touched; rectangle queries bound the rectangle; storages are lossless and smaller; flat nodes; creases watertight in both windings;
+  expression bounds contain values; the procedural field matches the sampled grid; a traversal-cost benchmark at 1025^2 and 4097^2.
