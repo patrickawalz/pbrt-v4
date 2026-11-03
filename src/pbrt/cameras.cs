@@ -993,6 +993,14 @@ namespace pbrt
             public double[] aspheric;
             // (not in pbrt-v4) The Abbe number of the glass behind the interface, 0 for a glass without dispersion
             public Float abbeNumber;
+            // (not in pbrt-v4) The Sellmeier coefficients B1, B2, B3, C1, C2, C3 (C in micrometres squared) of the glass behind the
+            // interface, null when the glass has none
+            public double[] sellmeier;
+            // (not in pbrt-v4) The Cauchy coefficients A, B, C (micrometres) of the glass behind the interface, null when it has none
+            public double[] cauchy;
+            // (not in pbrt-v4) The index of the Sellmeier or Cauchy relation at the d line; the relation is offset to the index of
+            // the lens file there
+            public double glassIndexD;
 
             public override string ToString()
             {
@@ -1045,12 +1053,81 @@ namespace pbrt
         const double WavelengthC = 0.6562725;
         const double WavelengthD = 0.5875618;
 
+        // (not in pbrt-v4) The number of values per interface of the Sellmeier and Cauchy coefficients parameters
+        const int SellmeierValuesPerInterface = 6;
+        const int CauchyValuesPerInterface = 3;
+
+        // (not in pbrt-v4) Sellmeier: n^2 = 1 + sum_i B_i l^2 / (l^2 - C_i), the wavelength l in micrometres
+        public static double SellmeierIndex(double[] coefficients, double lambda)
+        {
+            double lambda2 = lambda * lambda;
+            double n2 = 1;
+            for (int i = 0; i < 3; ++i)
+            {
+                n2 += coefficients[i] * lambda2 / (lambda2 - coefficients[3 + i]);
+            }
+
+            return n2 > 0 ? Math.Sqrt(n2) : 0;
+        }
+
+        // (not in pbrt-v4) Cauchy: n = A + B / l^2 + C / l^4, the wavelength l in micrometres
+        public static double CauchyIndex(double[] coefficients, double lambda)
+        {
+            double lambda2 = lambda * lambda;
+            return coefficients[0] + coefficients[1] / lambda2 + coefficients[2] / (lambda2 * lambda2);
+        }
+
+        // (not in pbrt-v4) The Sellmeier coefficients of a catalogue glass by name (ignoring case, spaces, hyphens and underscores),
+        // null for an unknown name
+        public static double[] CatalogueGlass(string name)
+        {
+            string key = name.ToUpperInvariant().Replace(" ", "").Replace("-", "").Replace("_", "");
+            switch (key)
+            {
+                case "BK7":
+                case "NBK7":
+                {
+                    return new double[] { 1.03961212, 0.231792344, 1.01046945, 0.00600069867, 0.0200179144, 103.560653 };
+                }
+                case "SF11":
+                {
+                    return new double[] { 1.73759695, 0.313747346, 1.89878101, 0.013188707, 0.0623068142, 155.23629 };
+                }
+                case "FUSEDSILICA":
+                case "SILICA":
+                {
+                    return new double[] { 0.6961663, 0.4079426, 0.8974794, 0.00467914825849, 0.013512063073959999, 97.93400253792099 };
+                }
+                default:
+                {
+                    return null;
+                }
+            }
+        }
+
         // (not in pbrt-v4) The index of refraction of the medium behind an interface at a wavelength in nanometres (0 is the
-        // d line, which is the index of the lens file). The dispersion is the Cauchy relation n = n_d + B (1 / lambda^2 - 1 /
-        // lambda_d^2), with the B that gives n_F - n_C = (n_d - 1) / V_d for the Abbe number V_d.
+        // d line, which is the index of the lens file). With Sellmeier or Cauchy coefficients the dispersion is that relation,
+        // offset so that the d line keeps the index of the lens file: n = n_file + n_model(lambda) - n_model(lambda_d).
+        // Otherwise it is the Cauchy relation n = n_d + B (1 / lambda^2 - 1 / lambda_d^2), with the B that gives
+        // n_F - n_C = (n_d - 1) / V_d for the Abbe number V_d.
         static Float ElementEta(LensElementInterface element, Float wavelength)
         {
-            if (element.eta == 0 || element.abbeNumber == 0 || wavelength <= 0)
+            if (element.eta == 0 || wavelength <= 0)
+            {
+                return element.eta;
+            }
+
+            if (element.sellmeier != null)
+            {
+                return (Float)(element.eta + SellmeierIndex(element.sellmeier, wavelength * 1e-3) - element.glassIndexD);
+            }
+
+            if (element.cauchy != null)
+            {
+                return (Float)(element.eta + CauchyIndex(element.cauchy, wavelength * 1e-3) - element.glassIndexD);
+            }
+
+            if (element.abbeNumber == 0)
             {
                 return element.eta;
             }
@@ -1436,7 +1513,9 @@ namespace pbrt
         // RealisticCamera Method Definitions
         public RealisticCamera(CameraBaseParameters baseParameters, List<Float> lensParameters, Float focusDistance,
                                Float setApertureDiameter, Image apertureImage, Allocator alloc,
-                               List<Float> asphericParameters = null, List<Float> abbeNumbers = null)
+                               List<Float> asphericParameters = null, List<Float> abbeNumbers = null,
+                               List<Float> sellmeierParameters = null, List<Float> cauchyParameters = null,
+                               List<string> glassNames = null)
             : base(baseParameters)
         {
             elementInterfaces = new pstd.vector<LensElementInterface>();
@@ -1485,6 +1564,48 @@ namespace pbrt
                     aspheric = any ? values : null;
                 }
 
+                // (not in pbrt-v4) The glass model of the interface: a catalogue name, else Sellmeier coefficients, else Cauchy
+                // coefficients, else the Abbe number. All zero (or an empty name) is no model.
+                double[] sellmeier = null;
+                double[] cauchy = null;
+                if (glassNames != null && glassNames[i / 4].Length > 0 && glassNames[i / 4] != "none")
+                {
+                    sellmeier = CatalogueGlass(glassNames[i / 4]);
+                    if (sellmeier == null)
+                    {
+                        pbrt.ErrorExit(pbrt.StringPrintf("\"%s\" is not a glass of the catalogue (BK7, SF11, fused silica).",
+                                                         glassNames[i / 4]));
+                    }
+                }
+
+                if (sellmeier == null && sellmeierParameters != null)
+                {
+                    int first = i / 4 * SellmeierValuesPerInterface;
+                    double[] values = new double[SellmeierValuesPerInterface];
+                    bool any = false;
+                    for (int k = 0; k < SellmeierValuesPerInterface; ++k)
+                    {
+                        values[k] = sellmeierParameters[first + k];
+                        any |= values[k] != 0;
+                    }
+
+                    sellmeier = any ? values : null;
+                }
+
+                if (sellmeier == null && cauchyParameters != null)
+                {
+                    int first = i / 4 * CauchyValuesPerInterface;
+                    double[] values = new double[CauchyValuesPerInterface];
+                    bool any = false;
+                    for (int k = 0; k < CauchyValuesPerInterface; ++k)
+                    {
+                        values[k] = cauchyParameters[first + k];
+                        any |= values[k] != 0;
+                    }
+
+                    cauchy = any ? values : null;
+                }
+
                 // Add element interface to end of _elementInterfaces_
                 elementInterfaces.push_back(new LensElementInterface
                 {
@@ -1493,9 +1614,13 @@ namespace pbrt
                     eta = eta,
                     apertureRadius = apertureDiameter / 2,
                     aspheric = aspheric,
-                    abbeNumber = abbeNumbers != null ? abbeNumbers[i / 4] : 0
+                    abbeNumber = abbeNumbers != null ? abbeNumbers[i / 4] : 0,
+                    sellmeier = eta > 1 ? sellmeier : null,
+                    cauchy = eta > 1 ? cauchy : null,
+                    glassIndexD = sellmeier != null ? SellmeierIndex(sellmeier, WavelengthD)
+                                                    : cauchy != null ? CauchyIndex(cauchy, WavelengthD) : 0
                 });
-                dispersive |= eta > 1 && abbeNumbers != null && abbeNumbers[i / 4] > 0;
+                dispersive |= eta > 1 && ((abbeNumbers != null && abbeNumbers[i / 4] > 0) || sellmeier != null || cauchy != null);
             }
             ComputeFrontAreaTable();
 
@@ -2237,6 +2362,49 @@ namespace pbrt
                 return null;
             }
 
+            // (not in pbrt-v4) The glass of the interfaces, in the order of the lens file: a catalogue name per interface ("none" or
+            // "" for no glass), or 6 Sellmeier values (B1 B2 B3 C1 C2 C3, C in micrometres squared) or 3 Cauchy values (A B C,
+            // micrometres) per interface with all zero for no glass. The name takes precedence over Sellmeier, which takes
+            // precedence over Cauchy, which takes precedence over the Abbe number. The index of the lens file stays the index at
+            // the d line.
+            List<string> glassNames = parameters.GetStringArray("glassnames");
+            if (glassNames.Count == 0)
+            {
+                glassNames = null;
+            }
+            else if (glassNames.Count != lensParameters.Count / 4)
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"glassnames\" needs a name for each of the %d interfaces of the lens, read %d.",
+                                                        (int)(lensParameters.Count / 4), (int)glassNames.Count));
+                return null;
+            }
+
+            List<Float> sellmeierParameters = parameters.GetFloatArray("sellmeiercoefficients");
+            if (sellmeierParameters.Count == 0)
+            {
+                sellmeierParameters = null;
+            }
+            else if (sellmeierParameters.Count != lensParameters.Count / 4 * SellmeierValuesPerInterface)
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"sellmeiercoefficients\" needs %d values for each of the %d interfaces of the " +
+                                                        "lens, read %d.", SellmeierValuesPerInterface,
+                                                        (int)(lensParameters.Count / 4), (int)sellmeierParameters.Count));
+                return null;
+            }
+
+            List<Float> cauchyParameters = parameters.GetFloatArray("cauchycoefficients");
+            if (cauchyParameters.Count == 0)
+            {
+                cauchyParameters = null;
+            }
+            else if (cauchyParameters.Count != lensParameters.Count / 4 * CauchyValuesPerInterface)
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"cauchycoefficients\" needs %d values for each of the %d interfaces of the " +
+                                                        "lens, read %d.", CauchyValuesPerInterface,
+                                                        (int)(lensParameters.Count / 4), (int)cauchyParameters.Count));
+                return null;
+            }
+
             int builtinRes = 256;
             Func<Point2f[], Image> rasterize = (Point2f[] vert) =>
             {
@@ -2368,7 +2536,8 @@ namespace pbrt
             }
 
             return new RealisticCamera(cameraBaseParameters, lensParameters, focusDistance, apertureDiameter,
-                                       apertureImage, alloc, asphericParameters, abbeNumbers);
+                                       apertureImage, alloc, asphericParameters, abbeNumbers,
+                                       sellmeierParameters, cauchyParameters, glassNames);
         }
 
         // RealisticCamera Private Members

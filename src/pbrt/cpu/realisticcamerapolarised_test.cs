@@ -27,7 +27,9 @@ namespace pbrt
         };
 
         internal static RealisticCamera MakeCamera(Point2i resolution, string filename = "realisticcamerapolarised_test.exr",
-                                                   List<Float> asphericParameters = null, List<Float> abbeNumbers = null)
+                                                   List<Float> asphericParameters = null, List<Float> abbeNumbers = null,
+                                                   List<Float> sellmeierParameters = null, List<Float> cauchyParameters = null,
+                                                   List<string> glassNames = null)
         {
             Transform id = new Transform();
             AnimatedTransform identityA = new AnimatedTransform(id, 0, id, 1);
@@ -39,7 +41,7 @@ namespace pbrt
                                                                 new ParameterDictionary(), new FileLoc());
             List<Float> lensParameters = new List<Float>(doubleGauss);
             return new RealisticCamera(cbp, lensParameters, 5.0f, 17.1f, new Image((Allocator)null), null, asphericParameters,
-                                       abbeNumbers);
+                                       abbeNumbers, sellmeierParameters, cauchyParameters, glassNames);
         }
 
         // The refraction of a ray at a spherical interface of a lens in lens space, written without the camera's code: the
@@ -396,7 +398,7 @@ namespace pbrt
 
         // The mean of the image that an integrator renders of the unit sphere with diffuse walls (Kd = 0.5) that emit (Le = 0.5),
         // seen from its centre through the lens
-        internal static double RenderMean(bool bidirectional, List<Float> abbeNumbers = null)
+        internal static double RenderMean(bool bidirectional, List<Float> abbeNumbers = null, List<string> glassNames = null)
         {
             Transform identity = new Transform();
             Shape sphere = new Sphere(identity, identity, true, 1, -1, 1, 360);
@@ -412,7 +414,7 @@ namespace pbrt
 
             Point2i resolution = new Point2i(8, 8);
             string filename = bidirectional ? "realisticcamera_bdpt_test.exr" : "realisticcamera_volpath_test.exr";
-            RealisticCamera camera = MakeCamera(resolution, filename, null, abbeNumbers);
+            RealisticCamera camera = MakeCamera(resolution, filename, null, abbeNumbers, null, null, glassNames);
             Sampler sampler = new ZSobolSampler(256, resolution, RandomizeStrategy.PermuteDigits);
             Integrator integrator = bidirectional
                 ? new BDPTIntegrator(camera, sampler, aggregate, lights, 6, false, false, false)
