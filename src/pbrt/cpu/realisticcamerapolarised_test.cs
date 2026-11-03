@@ -178,6 +178,15 @@ namespace pbrt
             return centreZ - radius;
         }
 
+        // The normal of the front element, towards the scene, at a point of it in camera space, which is lens space with z flipped
+        static Vector3f FrontNormal(Point3f p, Float vertexZ)
+        {
+            Float radius = doubleGauss[0] * 0.001f;
+            Vector3f fromCentre = new Vector3f(p.x, p.y, -p.z - (vertexZ + radius));
+            Vector3f nLens = fromCentre * (1 / radius);
+            return pbrt.Normalize(new Vector3f(nLens.x, nLens.y, -nLens.z));
+        }
+
         [TEST("RealisticCameraPolarised", "LensMuellerMatchesJones")]
         public static void RealisticCameraPolarised_LensMuellerMatchesJones()
         {
@@ -241,6 +250,146 @@ namespace pbrt
             }
 
             EXPECT_GT(tested, 400);
+        }
+
+        [TEST("RealisticCameraPolarised", "ImportanceMatchesGenerateRay")]
+        public static void RealisticCameraPolarised_ImportanceMatchesGenerateRay()
+        {
+            // The weight of GenerateRay() is We cos(theta) / (pdfPos pdfDir) of the ray, and the film position of the ray is the
+            // sample's
+            Point2i resolution = new Point2i(64, 48);
+            RealisticCamera camera = MakeCamera(resolution);
+            RNG rng = new RNG(3);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            int tested = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                CameraSample sample = new CameraSample
+                {
+                    pFilm = new Point2f(resolution.x * rng.Uniform<Float>(), resolution.y * rng.Uniform<Float>()),
+                    pLens = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
+                    time = 0,
+                    filterWeight = 1
+                };
+                pstd.optional<CameraRay> cameraRay = camera.GenerateRay(sample, ref lambda);
+                if (!cameraRay.has_value())
+                {
+                    continue;
+                }
+
+                Ray ray = cameraRay.value().ray;
+                Point2f pRaster;
+                SampledSpectrum we = camera.We(ray, ref lambda, &pRaster);
+                Float pdfPos, pdfDir;
+                camera.PDF_We(ray, &pdfPos, &pdfDir);
+                if (we[0] == 0)
+                {
+                    // A ray on the very edge of an aperture may miss on the way back
+                    continue;
+                }
+
+                EXPECT_NEAR(sample.pFilm.x, pRaster.x, 2e-3f * resolution.x);
+                EXPECT_NEAR(sample.pFilm.y, pRaster.y, 2e-3f * resolution.y);
+                Float cosTheta = std.abs(pbrt.Dot(FrontNormal(ray.o, FrontVertexZ(ray.o)), ray.d));
+                Float expected = we[0] * cosTheta / (pdfPos * pdfDir);
+                EXPECT_NEAR(cameraRay.value().weight[0], expected, 2e-3f * cameraRay.value().weight[0]);
+                ++tested;
+            }
+
+            EXPECT_GT(tested, 2000);
+        }
+
+        [TEST("RealisticCameraPolarised", "ImportanceAndDensityIntegrals")]
+        public static void RealisticCameraPolarised_ImportanceAndDensityIntegrals()
+        {
+            // Integrating over the rays that leave the front element (the projected area and the solid angle): the density
+            // gives one, and the importance gives the mean of the weight of GenerateRay(), the irradiance of an environment of
+            // radiance one averaged over the film
+            Point2i resolution = new Point2i(64, 64);
+            RealisticCamera camera = MakeCamera(resolution);
+            RNG rng = new RNG(5);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+
+            Float vertexZ = 0;
+            bool haveVertex = false;
+            int nPath = 400000;
+            double pathSum = 0;
+            double pathSum2 = 0;
+            int nSuccess = 0;
+            for (int i = 0; i < nPath; ++i)
+            {
+                CameraSample sample = new CameraSample
+                {
+                    pFilm = new Point2f(resolution.x * rng.Uniform<Float>(), resolution.y * rng.Uniform<Float>()),
+                    pLens = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
+                    time = 0,
+                    filterWeight = 1
+                };
+                pstd.optional<CameraRay> cameraRay = camera.GenerateRay(sample, ref lambda);
+                Float w = 0;
+                if (cameraRay.has_value())
+                {
+                    w = cameraRay.value().weight[0];
+                    ++nSuccess;
+                    if (!haveVertex)
+                    {
+                        vertexZ = FrontVertexZ(cameraRay.value().ray.o);
+                        haveVertex = true;
+                    }
+                }
+
+                pathSum += w;
+                pathSum2 += (double)w * w;
+            }
+
+            double pathMean = pathSum / nPath;
+            double pathError = Math.Sqrt((pathSum2 / nPath - pathMean * pathMean) / nPath);
+
+            Float radius = doubleGauss[0] * 0.001f;
+            Float frontRadius = doubleGauss[3] * 0.0005f;
+            Float cosAlphaMax = std.sqrt(1 - pbrt.Sqr(frontRadius / radius));
+            Float capArea = 2 * pbrt.Pi * radius * radius * (1 - cosAlphaMax);
+            Float cosMax = std.cos(pbrt.Radians(45.0f));
+            Float coneSolidAngle = 2 * pbrt.Pi * (1 - cosMax);
+            int nRays = 1500000;
+            double densitySum = 0;
+            double densitySum2 = 0;
+            double importanceSum = 0;
+            double importanceSum2 = 0;
+            for (int i = 0; i < nRays; ++i)
+            {
+                Float cosAlpha = 1 - rng.Uniform<Float>() * (1 - cosAlphaMax);
+                Float sinAlpha = std.sqrt(1 - cosAlpha * cosAlpha);
+                Float phiPoint = 2 * pbrt.Pi * rng.Uniform<Float>();
+                Point3f origin = new Point3f(radius * sinAlpha * std.cos(phiPoint), radius * sinAlpha * std.sin(phiPoint),
+                                             -(vertexZ + radius - radius * cosAlpha));
+                Vector3f normal = new Vector3f(sinAlpha * std.cos(phiPoint), sinAlpha * std.sin(phiPoint), cosAlpha);
+                Float cosTheta = 1 - rng.Uniform<Float>() * (1 - cosMax);
+                Float sinTheta = std.sqrt(std.max(0.0f, 1 - cosTheta * cosTheta));
+                Float phi = 2 * pbrt.Pi * rng.Uniform<Float>();
+                Ray ray = new Ray(origin, new Vector3f(sinTheta * std.cos(phi), sinTheta * std.sin(phi), cosTheta));
+                Float pdfPos, pdfDir;
+                camera.PDF_We(ray, &pdfPos, &pdfDir);
+                SampledSpectrum we = camera.We(ray, ref lambda);
+                double density = (double)pdfPos * pdfDir * capArea * coneSolidAngle;
+                double importance = (double)we[0] * pbrt.AbsDot(normal, ray.d) * capArea * coneSolidAngle;
+                densitySum += density;
+                densitySum2 += density * density;
+                importanceSum += importance;
+                importanceSum2 += importance * importance;
+            }
+
+            // The density is that of the rays that GenerateRay() produces, which is a part of all samples
+            double successFraction = (double)nSuccess / nPath;
+            double successError = Math.Sqrt(successFraction * (1 - successFraction) / nPath);
+            double densityMean = densitySum / nRays;
+            double densityError = Math.Sqrt((densitySum2 / nRays - densityMean * densityMean) / nRays);
+            double importanceMean = importanceSum / nRays;
+            double importanceError = Math.Sqrt((importanceSum2 / nRays - importanceMean * importanceMean) / nRays);
+            EXPECT_NEAR(successFraction, densityMean, 4 * Math.Sqrt(successError * successError + densityError * densityError),
+                        "density integral " + densityMean + " +- " + densityError + ", fraction of samples " + successFraction);
+            EXPECT_NEAR(pathMean, importanceMean, 4 * Math.Sqrt(pathError * pathError + importanceError * importanceError),
+                        "path " + pathMean + " +- " + pathError + ", importance " + importanceMean + " +- " + importanceError);
         }
     }
 }

@@ -1003,21 +1003,183 @@ namespace pbrt
             return CameraBase.GenerateRayDifferential(this, sample, ref lambda);
         }
 
+        // (not in pbrt-v4) Importance, densities and connections of the realistic camera for bidirectional methods. A camera
+        // vertex is a point on the front element of the lens system, with the normal of that surface and the area measure of
+        // it. The importance of a ray that leaves the lens system is
+        //   We = T / A_film
+        // for the rays that GenerateRay() can produce, and zero for the others: the radiance theorem (the etendue
+        // dA cos(theta) dw of the film is that of the exit ray in the air on both sides of a lens system) turns the weight of
+        // GenerateRay(), T cos^4 / (pdf_pupil z^2), and its density on the film and the pupil into a constant. The joint density
+        // of the position and the direction of the exit ray, in the surface area and the solid angle, is
+        //   p = pdf_pupil z^2 |n . w_exit| / (A_film cos^4(theta_film)).
+        // Bidirectional path tracing needs the density of a direction given the position, and SampleWi() chooses the position
+        // uniformly on the part of the front element within its aperture, so that is what pdfPos is, and pdfDir is p / pdfPos:
+        // the strategies that sample the position (t = 1) and those that sample the ray (t > 1) are then compared through the
+        // one density p, and the weights of the strategies are right.
+        bool FindFilmSample(Ray ray, out Point2f pRaster, out Float pdfPupil, out Float cosFilm, out Float weight)
+        {
+            pRaster = default;
+            pdfPupil = 0;
+            cosFilm = 0;
+            weight = 0;
+            // The light goes along -ray.d through the optics, from the front element to the film
+            Vector3f dCamera = pbrt.Normalize(CameraFromRender(-ray.d, ray.time));
+            if (dCamera.z >= 0)
+            {
+                return false;
+            }
+
+            Point3f oCamera = CameraFromRender(ray.o, ray.time);
+            Float back = 1e-3f * std.max(1, LensFrontZ());
+            Ray rScene = new Ray(oCamera - back * dCamera, dCamera);
+            Ray rFilm;
+            if (TraceLensesFromScene(rScene, &rFilm) == 0 || rFilm.d.z >= 0)
+            {
+                return false;
+            }
+
+            Float tFilm = -rFilm.o.z / rFilm.d.z;
+            Point3f pFilm = rFilm.o + tFilm * rFilm.d;
+            Point2f pFilm2 = new Point2f(-pFilm.x, pFilm.y);
+            if (!pbrt.Inside(pFilm2, physicalExtent))
+            {
+                return false;
+            }
+
+            Vector2f s = physicalExtent.Offset(pFilm2);
+            pRaster = new Point2f(s.x * film.FullResolution().x, s.y * film.FullResolution().y);
+
+            // The pupil sample that gives the ray: the film to pupil direction is the reverse of the light direction
+            Vector3f dFilm = -pbrt.Normalize(rFilm.d);
+            cosFilm = dFilm.z;
+            Point3f pPupil = pFilm + dFilm * (LensRearZ() / dFilm.z);
+            Float rFilmRadius = std.sqrt(pbrt.Sqr(pFilm.x) + pbrt.Sqr(pFilm.y));
+            int rIndex = (int)(rFilmRadius / (film.Diagonal() / 2) * exitPupilBounds.size());
+            rIndex = std.min((int)exitPupilBounds.size() - 1, rIndex);
+            Bounds2f pupilBounds = exitPupilBounds[(ulong)rIndex];
+            if (pupilBounds.IsDegenerate())
+            {
+                return false;
+            }
+
+            Float sinTheta = (rFilmRadius != 0) ? pFilm.y / rFilmRadius : 0;
+            Float cosTheta = (rFilmRadius != 0) ? pFilm.x / rFilmRadius : 1;
+            Point2f pLens = new Point2f(cosTheta * pPupil.x + sinTheta * pPupil.y, -sinTheta * pPupil.x + cosTheta * pPupil.y);
+            if (!pbrt.Inside(pLens, pupilBounds))
+            {
+                return false;
+            }
+
+            pdfPupil = 1 / pupilBounds.Area();
+            // The transmission of the aperture image: what GenerateRay() gets from tracing this sample out
+            weight = TraceLensesFromFilm(new Ray(pFilm, pPupil - pFilm), null);
+            return weight != 0;
+        }
+
+        Float FrontElementRadius()
+        {
+            return elementInterfaces[0].apertureRadius;
+        }
+
+        // The sphere of the front element in lens space: its centre is on the axis at -LensFrontZ + radius
+        Float FrontElementCentreZ()
+        {
+            return -LensFrontZ() + elementInterfaces[0].curvatureRadius;
+        }
+
+        // The area of the part of the front element within its aperture
+        Float FrontElementArea()
+        {
+            Float radius = std.abs(elementInterfaces[0].curvatureRadius);
+            Float cosAlpha = std.sqrt(std.max(0.0f, 1 - pbrt.Sqr(FrontElementRadius() / radius)));
+            return 2 * Pi * pbrt.Sqr(radius) * (1 - cosAlpha);
+        }
+
+        // The normal of the front element, towards the scene, at a point of it (in camera space)
+        Normal3f FrontElementNormal(Point3f pCamera)
+        {
+            Float radius = elementInterfaces[0].curvatureRadius;
+            Vector3f fromCentre = new Vector3f(pCamera.x, pCamera.y, -pCamera.z - FrontElementCentreZ());
+            Vector3f nLens = fromCentre * (radius > 0 ? 1 / radius : -1 / radius);
+            // Towards the scene: the scene is at lower z in lens space
+            return (Normal3f)pbrt.Normalize(new Vector3f(nLens.x, nLens.y, -nLens.z));
+        }
+
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
         {
-            pbrt.LOG_FATAL("We() unimplemented for RealisticCamera");
-            return default;
+            if (!FindFilmSample(ray, out Point2f pRaster, out _, out _, out Float weight))
+            {
+                return new SampledSpectrum(0.0f);
+            }
+
+            if (pRaster2 != null)
+            {
+                *pRaster2 = pRaster;
+            }
+
+            if (!pbrt.Inside(pRaster, film.SampleBounds()))
+            {
+                return new SampledSpectrum(0.0f);
+            }
+
+            return new SampledSpectrum(weight / physicalExtent.Area());
         }
 
         public override void PDF_We(Ray ray, Float* pdfPos, Float* pdfDir)
         {
-            pbrt.LOG_FATAL("PDF_We() unimplemented for RealisticCamera");
+            *pdfPos = *pdfDir = 0;
+            if (!FindFilmSample(ray, out Point2f pRaster, out Float pdfPupil, out Float cosFilm, out _))
+            {
+                return;
+            }
+
+            if (!pbrt.Inside(pRaster, film.SampleBounds()))
+            {
+                return;
+            }
+
+            // The point of the ray on the front element: within its aperture
+            Point3f oCamera = CameraFromRender(ray.o, ray.time);
+            if (pbrt.Sqr(oCamera.x) + pbrt.Sqr(oCamera.y) > pbrt.Sqr(FrontElementRadius()) * (1 + 1e-4f))
+            {
+                return;
+            }
+
+            Vector3f wCamera = pbrt.Normalize(CameraFromRender(ray.d, ray.time));
+            Float cosSurface = pbrt.AbsDot(FrontElementNormal(oCamera), wCamera);
+            Float p = pdfPupil * pbrt.Sqr(LensRearZ()) * cosSurface / (physicalExtent.Area() * pbrt.Pow4(cosFilm));
+            Float area = FrontElementArea();
+            *pdfPos = 1 / area;
+            *pdfDir = p * area;
         }
 
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
-            pbrt.LOG_FATAL("SampleWi() unimplemented for RealisticCamera");
-            return default;
+            // Uniformly sample the front element within its aperture
+            Float radius = elementInterfaces[0].curvatureRadius;
+            Float cosAlphaMax = std.sqrt(std.max(0.0f, 1 - pbrt.Sqr(FrontElementRadius() / radius)));
+            Float cosAlpha = 1 - u.x * (1 - cosAlphaMax);
+            Float sinAlpha = std.sqrt(std.max(0.0f, 1 - cosAlpha * cosAlpha));
+            Float phi = 2 * Pi * u.y;
+            Float zLens = FrontElementCentreZ() - radius * cosAlpha;
+            Point3f pCamera = new Point3f(std.abs(radius) * sinAlpha * std.cos(phi), std.abs(radius) * sinAlpha * std.sin(phi), -zLens);
+            Point3f pLensRender = RenderFromCamera(pCamera, reference.time);
+            Normal3f n = (Normal3f)pbrt.Normalize(RenderFromCamera((Vector3f)FrontElementNormal(pCamera), reference.time));
+            Interaction lensIntr = new Interaction(pLensRender, n, reference.time, medium);
+
+            // Find incident direction to camera _wi_ at _ref_
+            Vector3f wi = lensIntr.p() - reference.p();
+            Float dist = pbrt.Length(wi);
+            wi /= dist;
+
+            // The density of the point, converted to the solid angle at the reference
+            Float pdf = pbrt.Sqr(dist) / (pbrt.AbsDot(lensIntr.n, wi) * FrontElementArea());
+
+            Point2f pRaster;
+            SampledSpectrum Wi = We(new Ray(lensIntr.SpawnRay(-wi)), ref lambda, &pRaster);
+            if (!Wi)
+                return default;
+            return new CameraWiSample(Wi, wi, pdf, pRaster, reference, lensIntr);
         }
 
         // RealisticCamera Private Methods

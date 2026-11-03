@@ -561,9 +561,21 @@ namespace pbrt
                     L = new SampledSpectrum(0.0f);
                 }
             }
+            else
+            {
+                NoCameraRay(cameraSample, ref lambda, sampler, scratchBuffer);
+            }
             // Add camera ray's contribution to image
             camera.GetFilm().AddSample(pPixel, L, lambda, visibleSurface,
                                        cameraSample.filterWeight);
+        }
+
+        // (not in pbrt-v4) A sample for which the camera has no ray (a lens system loses part of the samples of the film): what an
+        // integrator that also starts at the lights does with it. A bidirectional integrator has one light subpath per sample, and
+        // a sample without a camera ray still has its light subpath and its connections to the camera.
+        protected virtual void NoCameraRay(CameraSample cameraSample, ref SampledWavelengths lambda, Sampler sampler,
+                                           ScratchBuffer scratchBuffer)
+        {
         }
 
         public abstract SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda,
@@ -911,8 +923,8 @@ namespace pbrt
                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("lightpath");
-            if (!(camera is PerspectiveCamera))
-                ErrorExit("Only the \"perspective\" camera is currently supported with the " +
+            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera))
+                ErrorExit("Only the \"perspective\" and \"realistic\" cameras are currently supported with the " +
                           "\"lightpath\" integrator.");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             return new LightPathIntegrator(maxDepth, camera, sampler, aggregate, lights);
@@ -3181,6 +3193,38 @@ namespace pbrt
             return L;
         }
 
+        protected override void NoCameraRay(CameraSample cameraSample, ref SampledWavelengths lambda, Sampler sampler,
+                                            ScratchBuffer scratchBuffer)
+        {
+            // Without a camera subpath only the strategies that sample the camera (t = 1) remain; the weights of the strategies are
+            // the same as for a sample with a camera ray, as they are the densities of the path
+            Vertex[] cameraVertices = new Vertex[maxDepth + 2];
+            for (int i = 0; i < cameraVertices.Length; ++i) cameraVertices[i] = new Vertex();
+            Vertex[] lightVertices = new Vertex[maxDepth + 1];
+            for (int i = 0; i < lightVertices.Length; ++i) lightVertices[i] = new Vertex();
+            int nLight = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratchBuffer,
+                                                   unidirectionalStrategies ? 1 : maxDepth + 1,
+                                                   camera.SampleTime(cameraSample.time), lightSampler, lightVertices,
+                                                   regularize, sensor != null);
+            for (int s = 0; s <= nLight; ++s)
+            {
+                int depth = s - 1;
+                if ((s == 1 && !BDPT.IsVolumeEmission(lightVertices[0])) || depth < 0 || depth > maxDepth)
+                    continue;
+                if (!StrategyAllowed(s, 1))
+                    continue;
+                pstd.optional<Point2f> pFilmNew = default;
+                Float misWeight = 0.0f;
+                SampledSpectrum Lpath = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, 1, lightSampler,
+                                                        camera, sampler, ref pFilmNew, ref misWeight, sensor, default);
+                if ((bool)Lpath)
+                {
+                    CHECK(pFilmNew.has_value());
+                    camera.GetFilm().AddSplat(pFilmNew.value(), Lpath, lambda);
+                }
+            }
+        }
+
         public override string ToString()
         {
             return StringPrintf("[ BDPTIntegrator maxDepth: %d visualizeStrategies: %s " +
@@ -3192,8 +3236,8 @@ namespace pbrt
                                             Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("bdpt");
-            if (!(camera is PerspectiveCamera))
-                ErrorExit("Only the \"perspective\" camera is currently supported with the " +
+            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera))
+                ErrorExit("Only the \"perspective\" and \"realistic\" cameras are currently supported with the " +
                           "\"bdpt\" integrator.");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             bool visualizeStrategies = parameters.GetOneBool("visualizestrategies", false);
