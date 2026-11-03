@@ -836,8 +836,11 @@ namespace pbrt
             SdfMeshDistance winding = new SdfMeshDistance(merged, mergedIndices, SdfMeshSign.Winding);
             SdfMeshDistance pseudonormal = new SdfMeshDistance(merged, mergedIndices, SdfMeshSign.Pseudonormal);
             EXPECT_TRUE(winding.IsClosed());
+            // The automatic choice sees that the two signs disagree for this closed mesh
+            SdfMeshDistance automatic = new SdfMeshDistance(merged, mergedIndices, SdfMeshSign.Automatic);
+            EXPECT_TRUE(automatic.UsesWinding());
             RNG rng = new RNG(73);
-            int windingWrong = 0, pseudonormalWrong = 0, tested = 0;
+            int windingWrong = 0, pseudonormalWrong = 0, automaticWrong = 0, tested = 0;
             for (int i = 0; i < 6000; ++i)
             {
                 SdfVector p = new SdfVector(3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5, 3 * rng.Uniform<Float>() - 1.5);
@@ -851,9 +854,12 @@ namespace pbrt
                 bool inside = unionDistance < 0;
                 windingWrong += (winding.Evaluate(p) < 0) != inside ? 1 : 0;
                 pseudonormalWrong += (pseudonormal.Evaluate(p) < 0) != inside ? 1 : 0;
+                automaticWrong += (automatic.Evaluate(p) < 0) != inside ? 1 : 0;
             }
-            Console.WriteLine("OVERLAP {0} points: winding wrong {1}, pseudonormal wrong {2}", tested, windingWrong, pseudonormalWrong);
+            Console.WriteLine("OVERLAP {0} points: winding wrong {1}, automatic wrong {2}, pseudonormal wrong {3}", tested, windingWrong,
+                              automaticWrong, pseudonormalWrong);
             EXPECT_EQ(windingWrong, 0);
+            EXPECT_EQ(automaticWrong, 0);
         }
 
         // The mean and the relative standard deviation of the estimate of the integral over the surface of |cos at the light| / d^2
@@ -993,6 +999,201 @@ namespace pbrt
             // The field is a lower bound of the distance outside the band, and never changes sign across the surface
             EXPECT_LT(grid.Evaluate(new SdfVector(0.7, 0, 0)), 0);
             EXPECT_GT(grid.Evaluate(new SdfVector(1.3, 0.3, 0.2)), 0);
+        }
+
+        // A torus mesh (closed, outward counter clockwise) as vertices and indices
+        private static void TorusMesh(int ringCount, int tubeCount, double major, double minor, out SdfVector[] vertices, out int[] indices)
+        {
+            vertices = new SdfVector[ringCount * tubeCount];
+            for (int i = 0; i < ringCount; ++i)
+            {
+                for (int j = 0; j < tubeCount; ++j)
+                {
+                    double u = 2 * Math.PI * i / ringCount, v = 2 * Math.PI * j / tubeCount;
+                    vertices[i * tubeCount + j] = new SdfVector((major + minor * Math.Cos(v)) * Math.Cos(u),
+                                                                (major + minor * Math.Cos(v)) * Math.Sin(u), minor * Math.Sin(v));
+                }
+            }
+            List<int> list = new List<int>();
+            for (int i = 0; i < ringCount; ++i)
+            {
+                for (int j = 0; j < tubeCount; ++j)
+                {
+                    int a00 = i * tubeCount + j, a10 = ((i + 1) % ringCount) * tubeCount + j;
+                    int a01 = i * tubeCount + (j + 1) % tubeCount, a11 = ((i + 1) % ringCount) * tubeCount + (j + 1) % tubeCount;
+                    list.Add(a00); list.Add(a10); list.Add(a11);
+                    list.Add(a00); list.Add(a11); list.Add(a01);
+                }
+            }
+            indices = list.ToArray();
+        }
+
+        // The fraction of random points that a mesh signs differently from the analytic torus, away from the surface
+        private static double TorusSignErrors(SdfMeshDistance mesh, double major, double minor, ulong seed)
+        {
+            RNG rng = new RNG(seed);
+            int wrong = 0, tested = 0;
+            for (int i = 0; i < 6000; ++i)
+            {
+                SdfVector p = new SdfVector(3.2 * rng.Uniform<Float>() - 1.6, 3.2 * rng.Uniform<Float>() - 1.6, 1.2 * rng.Uniform<Float>() - 0.6);
+                double distance = Math.Sqrt(Math.Pow(Math.Sqrt(p.x * p.x + p.y * p.y) - major, 2) + p.z * p.z) - minor;
+                if (Math.Abs(distance) < 0.03)
+                {
+                    continue;
+                }
+                ++tested;
+                wrong += (mesh.Evaluate(p) < 0) != (distance < 0) ? 1 : 0;
+            }
+            return (double)wrong / tested;
+        }
+
+        [TEST("Sdf", "AutomaticSignHandlesScatteredHolesAndLargeOpenings")]
+        public static void Sdf_AutomaticSignHandlesScatteredHolesAndLargeOpenings()
+        {
+            TorusMesh(64, 32, 1, 0.4, out SdfVector[] vertices, out int[] indices);
+            // Many holes: every 25th triangle is missing (a perforated surface with 80 holes of one triangle) ...
+            List<int> perforated = new List<int>();
+            // ... and a large opening: a quarter of the ring (a third of the area of the tube is missing around the opening) is cut away
+            List<int> opened = new List<int>();
+            for (int t = 0; t < indices.Length / 3; ++t)
+            {
+                if (t % 25 != 0)
+                {
+                    perforated.Add(indices[3 * t]); perforated.Add(indices[3 * t + 1]); perforated.Add(indices[3 * t + 2]);
+                }
+                SdfVector center = (vertices[indices[3 * t]] + vertices[indices[3 * t + 1]] + vertices[indices[3 * t + 2]]) / 3.0;
+                double angle = Math.Atan2(center.y, center.x);
+                if (!(angle > 0 && angle < 0.5 * Math.PI))
+                {
+                    opened.Add(indices[3 * t]); opened.Add(indices[3 * t + 1]); opened.Add(indices[3 * t + 2]);
+                }
+            }
+            // The torus with a quarter of the ring removed is an open tube: its ends are two large openings
+            double[] perforatedErrors = new double[2], openedErrors = new double[2];
+            SdfMeshSign[] signs = new SdfMeshSign[] { SdfMeshSign.Pseudonormal, SdfMeshSign.Automatic };
+            for (int k = 0; k < 2; ++k)
+            {
+                perforatedErrors[k] = TorusSignErrors(new SdfMeshDistance(vertices, perforated.ToArray(), signs[k]), 1, 0.4, 89);
+                openedErrors[k] = TorusSignErrors(new SdfMeshDistance(vertices, opened.ToArray(), signs[k]), 1, 0.4, 91);
+            }
+            Console.WriteLine("SCATTERED HOLES wrong: pseudonormal {0:P2}, automatic {1:P2}", perforatedErrors[0], perforatedErrors[1]);
+            Console.WriteLine("OPEN TUBE wrong: pseudonormal {0:P2}, automatic {1:P2}", openedErrors[0], openedErrors[1]);
+            EXPECT_LT(perforatedErrors[1], 0.01);
+            // An open tube has no inside; the points in the tube where the missing quarter is are the ones that cannot be signed
+            EXPECT_LT(openedErrors[1], 0.06);
+        }
+
+        [TEST("Sdf", "SpatiallyVaryingMixBlendsByTheWeightField")]
+        public static void Sdf_SpatiallyVaryingMixBlendsByTheWeightField()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 2 * Math.Sqrt(3);
+            SdfNode sphere = SdfParser.Parse("sphere(1)", context);
+            SdfNode box = SdfParser.Parse("box(.8, .8, .8)", context);
+            SdfNode mixed = SdfParser.Parse("mix(sphere(1), box(.8, .8, .8), ramp(plane(1, 0, 0, 0), -.5, .5))", context);
+            RNG rng = new RNG(97);
+            for (int i = 0; i < 2000; ++i)
+            {
+                SdfVector p = new SdfVector(4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2);
+                double a = sphere.Evaluate(p), b = box.Evaluate(p), got = mixed.Evaluate(p);
+                if (p.x <= -0.5)
+                {
+                    EXPECT_NEAR(got, a, 1e-12);
+                }
+                else if (p.x >= 0.5)
+                {
+                    EXPECT_NEAR(got, b, 1e-12);
+                }
+                else
+                {
+                    EXPECT_GE(got, Math.Min(a, b) - 1e-12);
+                    EXPECT_LE(got, Math.Max(a, b) + 1e-12);
+                }
+            }
+            // A weight field reverses with the order of the ramp
+            SdfNode reversed = SdfParser.Parse("mix(sphere(1), box(.8, .8, .8), ramp(plane(1, 0, 0, 0), .5, -.5))", context);
+            EXPECT_NEAR(reversed.Evaluate(new SdfVector(1.5, 0.2, 0.1)), sphere.Evaluate(new SdfVector(1.5, 0.2, 0.1)), 1e-12);
+            EXPECT_NEAR(reversed.Evaluate(new SdfVector(-1.5, 0.2, 0.1)), box.Evaluate(new SdfVector(-1.5, 0.2, 0.1)), 1e-12);
+        }
+
+        [TEST("Sdf", "SpatiallyVaryingMixKeepsItsLipschitzBound")]
+        public static void Sdf_SpatiallyVaryingMixKeepsItsLipschitzBound()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 2 * Math.Sqrt(3);
+            string[] expressions = new string[]
+            {
+                "mix(sphere(1), box(.8, .8, .8), ramp(plane(1, 0, 0, 0), -.5, .5))",
+                "mix(torus(1, .3), sphere(.9), noiseweight(1.5, 3, .5))",
+                "mix(sphere(1), translate(box(.5, .5, .5), .5, 0, 0), ramp(sphere(1.2), -.6, .6))"
+            };
+            RNG rng = new RNG(101);
+            for (int e = 0; e < expressions.Length; ++e)
+            {
+                SdfNode node = SdfParser.Parse(expressions[e], context);
+                double bound = node.Lipschitz();
+                double worst = 0;
+                for (int i = 0; i < 20000; ++i)
+                {
+                    SdfVector p = new SdfVector(4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2);
+                    SdfVector q = p + new SdfVector(0.02 * (rng.Uniform<Float>() - .5), 0.02 * (rng.Uniform<Float>() - .5), 0.02 * (rng.Uniform<Float>() - .5));
+                    double distance = (p - q).Length();
+                    worst = Math.Max(worst, Math.Abs(node.Evaluate(p) - node.Evaluate(q)) / distance);
+                }
+                Console.WriteLine("MIX {0}: bound {1:F2}, largest slope found {2:F2}", expressions[e], bound, worst);
+                EXPECT_LE(worst, bound);
+            }
+            CheckNoMissedHits("mix(sphere(1), box(.7, .7, .7), ramp(plane(1, 0, 0, 0), -.8, .8))", 2, 400);
+            CheckNoMissedHits("mix(torus(1, .3), sphere(.9), noiseweight(1.5, 3, .5))", 2, 400);
+        }
+
+        [TEST("Sdf", "LocalLipschitzBoundsHoldInTheirBalls")]
+        public static void Sdf_LocalLipschitzBoundsHoldInTheirBalls()
+        {
+            SdfParseContext context = new SdfParseContext();
+            context.domainRadius = 2 * Math.Sqrt(3);
+            string[] expressions = new string[]
+            {
+                "mix(sphere(1), box(.8, .8, .8), ramp(plane(1, 0, 0, 0), -.5, .5))",
+                "mix(torus(1, .3), sphere(.9), noiseweight(1.5, 3, .5))",
+                "translate(rotate(mix(sphere(1), box(.5, .5, .5), ramp(sphere(1.2), -.6, .6)), 10, 20, 30), .2, 0, 0) | sphere(.3)",
+                "offset(smoothunion(mix(sphere(1), box(.5, .5, .5), ramp(plane(0, 1, 0, 0), -.4, .4)), sphere(.5), .2), .05)"
+            };
+            RNG rng = new RNG(103);
+            for (int e = 0; e < expressions.Length; ++e)
+            {
+                SdfNode node = SdfParser.Parse(expressions[e], context);
+                EXPECT_TRUE(node.HasLocalBounds());
+                int tighter = 0, tested = 0;
+                for (int i = 0; i < 400; ++i)
+                {
+                    SdfVector center = new SdfVector(4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2);
+                    double radius = 0.05 + 0.8 * rng.Uniform<Float>();
+                    double bound = node.Lipschitz(center, radius);
+                    EXPECT_LE(bound, node.Lipschitz() * (1 + 1e-12));
+                    ++tested;
+                    if (bound < 0.9 * node.Lipschitz())
+                    {
+                        ++tighter;
+                    }
+                    for (int k = 0; k < 40; ++k)
+                    {
+                        SdfVector direction = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>())) is Vector3f v
+                                                  ? new SdfVector(v.x, v.y, v.z) : center;
+                        SdfVector p = center + direction * (radius * rng.Uniform<Float>());
+                        SdfVector q = p + new SdfVector(0.01 * (rng.Uniform<Float>() - .5), 0.01 * (rng.Uniform<Float>() - .5),
+                                                        0.01 * (rng.Uniform<Float>() - .5));
+                        if ((q - center).Length() > radius)
+                        {
+                            continue;
+                        }
+                        double slope = Math.Abs(node.Evaluate(p) - node.Evaluate(q)) / (p - q).Length();
+                        EXPECT_LE(slope, bound * (1 + 1e-9) + 1e-9);
+                    }
+                }
+                Console.WriteLine("LOCAL {0}: global {1:F2}, tighter than 90% of it in {2} of {3} balls", expressions[e], node.Lipschitz(), tighter, tested);
+                EXPECT_GT(tighter, tested / 4);
+            }
         }
     }
 }

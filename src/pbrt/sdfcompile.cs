@@ -172,6 +172,7 @@ namespace pbrt
             this.nativeNodes = nativeNodes;
             lipschitz = source.Lipschitz();
             rigorous = source.IsRigorous();
+            localBounds = source.HasLocalBounds();
         }
 
         // Compiles a field; a field with fewer than two nodes that have a compiled form (a single primitive, which the delegate call would only
@@ -204,6 +205,16 @@ namespace pbrt
             return lipschitz;
         }
 
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return source.Lipschitz(center, radius);
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return localBounds;
+        }
+
         public override bool IsRigorous()
         {
             return rigorous;
@@ -216,7 +227,7 @@ namespace pbrt
         private readonly SdfNode source;
         private readonly Func<double, double, double, double> function;
         private readonly double lipschitz;
-        private readonly bool rigorous;
+        private readonly bool rigorous, localBounds;
     }
 
 }  // namespace pbrt

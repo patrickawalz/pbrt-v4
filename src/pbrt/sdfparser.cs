@@ -442,8 +442,22 @@ namespace pbrt
                     Count(a, name, 3, 4);
                     return new SdfSmoothCombine(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this), BlendKind(a, 3, name), 2);
                 case "mix":
+                    Count(a, name, 3, 4);
+                    if (a.Count > 2 && a[2] is SdfNode)
+                    {
+                        // The weight is a field (ramp, noise, ...); the optional fourth argument is the largest difference of the two
+                        // fields in the domain, to tighten the Lipschitz bound
+                        return new SdfMixField(Node(a, 0, name), Node(a, 1, name), Node(a, 2, name), context.domainRadius,
+                                               Number(a, 3, 0, name));
+                    }
                     Count(a, name, 3, 3);
                     return new SdfMix(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this));
+                case "ramp":
+                    Count(a, name, 3, 3);
+                    return new SdfRamp(Node(a, 0, name), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "noiseweight":
+                    Count(a, name, 1, 3);
+                    return new SdfNoiseWeight(Number(a, 0, name, this), (int)Number(a, 1, 3, name), Number(a, 2, 0.5, name));
                 case "offset":
                     Count(a, name, 2, 2);
                     return new SdfOffset(Node(a, 0, name), Number(a, 1, name, this));

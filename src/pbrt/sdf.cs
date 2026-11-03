@@ -110,6 +110,20 @@ namespace pbrt
             return 1;
         }
 
+        // An upper bound of the length of the gradient within the ball of the given radius about center, never above Lipschitz(): the
+        // bound that segment tracing (Galin et al. 2020) uses to take longer steps where the field is tame (a blend whose weight does
+        // not change near the point, say). The default is the global bound.
+        public virtual double Lipschitz(SdfVector center, double radius)
+        {
+            return Lipschitz();
+        }
+
+        // Whether Lipschitz(center, radius) can be smaller than Lipschitz() for this field
+        public virtual bool HasLocalBounds()
+        {
+            return false;
+        }
+
         // Whether Lipschitz() is a proven bound of the gradient (false for fractal distance estimates, whose bound only holds near
         // the surface); the bounds that a density texture derives from the field are only used for rigorous fields
         public virtual bool IsRigorous()
@@ -549,6 +563,16 @@ namespace pbrt
             return Math.Max(a.Lipschitz(), b.Lipschitz());
         }
 
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return Math.Max(a.Lipschitz(center, radius), b.Lipschitz(center, radius));
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return a.HasLocalBounds() || b.HasLocalBounds();
+        }
+
         public override bool IsRigorous()
         {
             return a.IsRigorous() && b.IsRigorous();
@@ -578,6 +602,16 @@ namespace pbrt
         public override double Lipschitz()
         {
             return Math.Max(a.Lipschitz(), b.Lipschitz());
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return Math.Max(a.Lipschitz(center, radius), b.Lipschitz(center, radius));
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return a.HasLocalBounds() || b.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -610,6 +644,16 @@ namespace pbrt
         public override double Lipschitz()
         {
             return Math.Max(a.Lipschitz(), b.Lipschitz());
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return Math.Max(a.Lipschitz(center, radius), b.Lipschitz(center, radius));
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return a.HasLocalBounds() || b.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -656,6 +700,16 @@ namespace pbrt
         public override double Lipschitz()
         {
             return Math.Max(a.Lipschitz(), b.Lipschitz());
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return Math.Max(a.Lipschitz(center, radius), b.Lipschitz(center, radius));
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return a.HasLocalBounds() || b.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -717,6 +771,16 @@ namespace pbrt
             return (1 - t) * a.Lipschitz() + t * b.Lipschitz();
         }
 
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return (1 - t) * a.Lipschitz(center, radius) + t * b.Lipschitz(center, radius);
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return a.HasLocalBounds() || b.HasLocalBounds();
+        }
+
         public override bool IsRigorous()
         {
             return a.IsRigorous() && b.IsRigorous();
@@ -731,6 +795,168 @@ namespace pbrt
 
         private readonly SdfNode a, b;
         private readonly double t;
+    }
+
+    // Octane's mixing of two fields with a weight that varies in space: (1 - t(p)) a + t(p) b, where t is the value of another field
+    // clamped to [0, 1] (a ramp or a noise below, or any field). The gradient of the blend is (1 - t) grad a + t grad b + (b - a) grad t,
+    // so the Lipschitz bound is that of the larger of a and b plus the bound of t times the largest difference |a - b| in the domain,
+    // which is at most |a(0) - b(0)| + (La + Lb) times the radius of the domain (or the maximum that is given).
+    public sealed class SdfMixField : SdfNode
+    {
+        public SdfMixField(SdfNode a, SdfNode b, SdfNode weight, double domainRadius, double maxDifference)
+        {
+            this.a = a;
+            this.b = b;
+            this.weight = weight;
+            SdfVector origin = new SdfVector(0, 0, 0);
+            double difference = maxDifference > 0 ? maxDifference
+                                                  : Math.Abs(a.Evaluate(origin) - b.Evaluate(origin)) +
+                                                    (a.Lipschitz() + b.Lipschitz()) * domainRadius;
+            lipschitz = Math.Max(a.Lipschitz(), b.Lipschitz()) + weight.Lipschitz() * difference;
+        }
+
+        public override double Evaluate(SdfVector p)
+        {
+            double t = Math.Min(Math.Max(weight.Evaluate(p), 0), 1);
+            return (1 - t) * a.Evaluate(p) + t * b.Evaluate(p);
+        }
+
+        public override double Lipschitz()
+        {
+            return lipschitz;
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            double boundA = a.Lipschitz(center, radius), boundB = b.Lipschitz(center, radius);
+            double boundWeight = weight.Lipschitz(center, radius);
+            // The weight over the ball lies within reach of its value at the center
+            double w = weight.Evaluate(center), reach = boundWeight * radius;
+            if (w + reach <= 0)
+            {
+                return boundA;
+            }
+            if (w - reach >= 1)
+            {
+                return boundB;
+            }
+            double valueA = a.Evaluate(center), valueB = b.Evaluate(center);
+            double difference = Math.Abs(valueA - valueB) + (boundA + boundB) * radius;
+            return Math.Max(boundA, boundB) + boundWeight * difference;
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return true;
+        }
+
+        public override bool IsRigorous()
+        {
+            return a.IsRigorous() && b.IsRigorous() && weight.IsRigorous();
+        }
+
+        private readonly SdfNode a, b, weight;
+        private readonly double lipschitz;
+    }
+
+    // A scalar field for a weight: the smooth step of a field between two values, 0 where the field is below low and 1 where it is above
+    // high (low and high may be given in either order, which reverses the ramp)
+    public sealed class SdfRamp : SdfNode
+    {
+        public SdfRamp(SdfNode child, double low, double high)
+        {
+            this.child = child;
+            this.low = low;
+            this.high = high;
+        }
+
+        public override double Evaluate(SdfVector p)
+        {
+            double width = high - low;
+            if (width == 0)
+            {
+                return child.Evaluate(p) < low ? 0 : 1;
+            }
+            double t = Math.Min(Math.Max((child.Evaluate(p) - low) / width, 0), 1);
+            return t * t * (3 - 2 * t);
+        }
+
+        // The smooth step has a slope of at most 3 / 2
+        public override double Lipschitz()
+        {
+            return high == low ? 0 : 1.5 * child.Lipschitz() / Math.Abs(high - low);
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            double childBound = child.Lipschitz(center, radius);
+            if (high == low)
+            {
+                return 0;
+            }
+            // Where the child stays on one side of both ends of the ramp in the ball the weight is constant
+            double value = child.Evaluate(center), reach = childBound * radius;
+            double lowEnd = Math.Min(low, high), highEnd = Math.Max(low, high);
+            if (value + reach < lowEnd || value - reach > highEnd)
+            {
+                return 0;
+            }
+            return 1.5 * childBound / Math.Abs(high - low);
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return true;
+        }
+
+        public override bool IsRigorous()
+        {
+            return child.IsRigorous();
+        }
+
+        private readonly SdfNode child;
+        private readonly double low, high;
+    }
+
+    // A scalar field for a weight: fractal noise remapped to [0, 1] (0.5 + 0.5 times the normalized sum of the octaves, clamped)
+    public sealed class SdfNoiseWeight : SdfNode
+    {
+        public SdfNoiseWeight(double frequency, int octaves, double roughness)
+        {
+            this.frequency = frequency;
+            this.octaves = Math.Max(1, octaves);
+            this.roughness = roughness;
+            double sum = 0, weight = 1, rate = 1, weightSum = 0;
+            for (int i = 0; i < this.octaves; ++i)
+            {
+                sum += weight * rate;
+                weightSum += weight;
+                weight *= roughness;
+                rate *= 2;
+            }
+            normalization = weightSum;
+            lipschitz = 0.5 * frequency * SdfNoiseDisplacement.NoiseGradientBound * sum / weightSum;
+        }
+
+        public override double Evaluate(SdfVector p)
+        {
+            double value = 0, weight = 1, scale = frequency;
+            for (int i = 0; i < octaves; ++i)
+            {
+                value += weight * pbrt.Noise(p.x * scale, p.y * scale, p.z * scale);
+                weight *= roughness;
+                scale *= 2;
+            }
+            return Math.Min(Math.Max(0.5 + 0.5 * value / normalization, 0), 1);
+        }
+
+        public override double Lipschitz()
+        {
+            return lipschitz;
+        }
+
+        private readonly double frequency, roughness, normalization, lipschitz;
+        private readonly int octaves;
     }
 
     // Offsets the surface outward (a negative amount shrinks it)
@@ -750,6 +976,16 @@ namespace pbrt
         public override double Lipschitz()
         {
             return child.Lipschitz();
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return child.Lipschitz(center, radius);
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return child.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -783,6 +1019,16 @@ namespace pbrt
         public override double Lipschitz()
         {
             return child.Lipschitz();
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            return child.Lipschitz(center, radius);
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return child.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -839,6 +1085,18 @@ namespace pbrt
         public override double Lipschitz()
         {
             return child.Lipschitz() * scale;
+        }
+
+        public override double Lipschitz(SdfVector center, double radius)
+        {
+            // The ball maps to a ball of scale times the radius, about the mapped center
+            SdfVector mapped = Linear(center) + translation;
+            return child.Lipschitz(mapped, scale * radius) * scale;
+        }
+
+        public override bool HasLocalBounds()
+        {
+            return child.HasLocalBounds();
         }
 
         public override bool IsRigorous()
@@ -1137,7 +1395,7 @@ namespace pbrt
     public sealed class SdfNoiseDisplacement : SdfNode
     {
         // The largest gradient of the noise, measured once over a large sample of points (with a margin)
-        private static readonly double NoiseGradientBound = MeasureNoiseGradient();
+        public static readonly double NoiseGradientBound = MeasureNoiseGradient();
 
         private static double MeasureNoiseGradient()
         {
@@ -1157,7 +1415,7 @@ namespace pbrt
 
         private static double Sample(double x, double y, double z)
         {
-            return pbrt.Noise((Float)x, (Float)y, (Float)z);
+            return pbrt.Noise(x, y, z);
         }
 
         public SdfNoiseDisplacement(SdfNode child, double amplitude, double frequency, int octaves, double roughness)

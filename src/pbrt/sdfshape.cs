@@ -59,6 +59,7 @@ namespace pbrt
             this.lower = new SdfVector(lower.x, lower.y, lower.z);
             this.upper = new SdfVector(upper.x, upper.y, upper.z);
             lipschitz = field.Lipschitz() * options.lipschitzFactor;
+            localBounds = field.HasLocalBounds();
             SdfVector extent = this.upper - this.lower;
             scale = extent.Length();
             epsilon = options.epsilon * scale;
@@ -119,7 +120,7 @@ namespace pbrt
                 SdfVector p = o + w * u;
                 double f = field.Evaluate(p);
                 double distance = Math.Abs(f);
-                double signedRadius = side * f / lipschitz;
+                double signedRadius = side * f / StepBound(p, distance);
                 double radius = Math.Abs(signedRadius);
                 if (omega > 1 && radius + previousRadius < stepLength)
                 {
@@ -160,6 +161,34 @@ namespace pbrt
                 }
             }
             return false;
+        }
+
+        // The Lipschitz bound to divide the distance by at p: the global one, or for a field with local bounds the bound over a ball
+        // that the step stays in (segment tracing). A step of radius r is safe when the bound over the ball of radius r is at most
+        // distance / r. The bound over the ball of radius distance is one such bound (the step distance / bound is inside that ball);
+        // a second try with the bound over the smaller ball is used when the larger step it allows passes its own test.
+        private double StepBound(SdfVector p, double distance)
+        {
+            if (!localBounds || distance == 0)
+            {
+                return lipschitz;
+            }
+            double bound = Math.Min(field.Lipschitz(p, distance) * options.lipschitzFactor, lipschitz);
+            if (bound < 1)
+            {
+                // A step of distance / bound would leave the ball that the bound was found for
+                return lipschitz;
+            }
+            double smaller = Math.Min(field.Lipschitz(p, distance / bound) * options.lipschitzFactor, bound);
+            if (smaller < bound && smaller >= 1)
+            {
+                double larger = Math.Min(field.Lipschitz(p, distance / smaller) * options.lipschitzFactor, bound);
+                if (larger <= smaller * (1 + 1e-12))
+                {
+                    return smaller;
+                }
+            }
+            return bound;
         }
 
         // Two Newton steps along the ray from a point that is already within the tolerance of the surface
@@ -585,6 +614,7 @@ namespace pbrt
         private readonly SdfShapeOptions options;
         private readonly SdfVector lower, upper;
         private readonly double lipschitz, scale, epsilon, gradientStep;
+        private readonly bool localBounds;
         private readonly double[] objectFromRenderMatrix, renderFromObjectMatrix;
         private SdfSurfaceSampler sampler;
         private readonly object samplerLock = new object();

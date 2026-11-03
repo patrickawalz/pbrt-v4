@@ -120,7 +120,7 @@ namespace pbrt
                                              0.5 * ((double)box.pMin.z + box.pMax.z));
             SdfVector half = new SdfVector(0.5 * ((double)box.pMax.x - box.pMin.x), 0.5 * ((double)box.pMax.y - box.pMin.y),
                                            0.5 * ((double)box.pMax.z - box.pMin.z));
-            double reach = lipschitz * half.Length();
+            double reach = field.Lipschitz(center, half.Length()) * half.Length();
             double centerDistance = field.Evaluate(center);
             double nearest = centerDistance - reach, farthest = centerDistance + reach;
             double high, low;

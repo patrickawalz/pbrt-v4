@@ -83,6 +83,51 @@ namespace pbrt
             return Lerp(wz, y0, y1);
         }
 
+        // Perlin noise in double precision (the sdf fields are double precision, and the single precision noise has steps of 1e-7 that a
+        // sphere tracer working to 1e-8 cannot get below)
+        public static double Noise(double x, double y, double z)
+        {
+            x %= 1 << 30;
+            y %= 1 << 30;
+            z %= 1 << 30;
+            int ix = (int)Math.Floor(x), iy = (int)Math.Floor(y), iz = (int)Math.Floor(z);
+            double dx = x - ix, dy = y - iy, dz = z - iz;
+            ix &= NoisePermSize - 1;
+            iy &= NoisePermSize - 1;
+            iz &= NoisePermSize - 1;
+            double w000 = Grad(ix, iy, iz, dx, dy, dz);
+            double w100 = Grad(ix + 1, iy, iz, dx - 1, dy, dz);
+            double w010 = Grad(ix, iy + 1, iz, dx, dy - 1, dz);
+            double w110 = Grad(ix + 1, iy + 1, iz, dx - 1, dy - 1, dz);
+            double w001 = Grad(ix, iy, iz + 1, dx, dy, dz - 1);
+            double w101 = Grad(ix + 1, iy, iz + 1, dx - 1, dy, dz - 1);
+            double w011 = Grad(ix, iy + 1, iz + 1, dx, dy - 1, dz - 1);
+            double w111 = Grad(ix + 1, iy + 1, iz + 1, dx - 1, dy - 1, dz - 1);
+            double wx = NoiseWeight(dx), wy = NoiseWeight(dy), wz = NoiseWeight(dz);
+            double x00 = (1 - wx) * w000 + wx * w100;
+            double x10 = (1 - wx) * w010 + wx * w110;
+            double x01 = (1 - wx) * w001 + wx * w101;
+            double x11 = (1 - wx) * w011 + wx * w111;
+            double y0 = (1 - wy) * x00 + wy * x10;
+            double y1 = (1 - wy) * x01 + wy * x11;
+            return (1 - wz) * y0 + wz * y1;
+        }
+
+        private static double Grad(int x, int y, int z, double dx, double dy, double dz)
+        {
+            int h = NoisePerm[NoisePerm[NoisePerm[x] + y] + z];
+            h &= 15;
+            double u = h < 8 || h == 12 || h == 13 ? dx : dy;
+            double v = h < 4 || h == 12 || h == 13 ? dy : dz;
+            return (((h & 1) != 0) ? -u : u) + (((h & 2) != 0) ? -v : v);
+        }
+
+        private static double NoiseWeight(double t)
+        {
+            double t3 = t * t * t;
+            return 6 * t3 * t * t - 15 * t3 * t + 10 * t3;
+        }
+
         public static Float Noise(Point3f p)
         {
             return Noise(p.x, p.y, p.z);

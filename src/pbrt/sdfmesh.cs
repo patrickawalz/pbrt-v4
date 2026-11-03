@@ -13,7 +13,7 @@ namespace pbrt
 
     // How the inside of a mesh is told from the outside: by the pseudonormal of the closest feature (exact for a closed mesh, wrong near
     // holes), by the generalized winding number (Jacobson et al. 2013; a hole only blurs the sign), or by the pseudonormal for a closed
-    // mesh and the winding number for any other
+    // mesh and the hybrid of the two for any other
     public enum SdfMeshSign
     {
         Pseudonormal,
@@ -60,8 +60,52 @@ namespace pbrt
                     break;
                 }
             }
-            useWinding = sign == SdfMeshSign.Winding || (sign == SdfMeshSign.Automatic && !closed);
+            signMode = sign == SdfMeshSign.Winding ? 1 : 0;
             BuildHierarchy();
+            if (sign == SdfMeshSign.Automatic)
+            {
+                // The pseudonormal is wrong where the shells of a closed mesh overlap or intersect themselves, and the winding number is
+                // wrong (near 0.5) around the openings of a mesh that is not closed. The hybrid takes the winding number where it is
+                // decisive and the pseudonormal where it is not. A closed mesh keeps the pseudonormal unless the two signs ever disagree
+                // at the points of a grid.
+                signMode = !closed || SignsDisagree() ? 2 : 0;
+            }
+        }
+
+        // Whether the pseudonormal and the winding number give a different sign at the points of a grid over the box of the mesh
+        // (points within a thousandth of the box of the surface are left out, where either can flip)
+        private bool SignsDisagree()
+        {
+            VertexBounds(out SdfVector lowerBound, out SdfVector upperBound);
+            SdfVector size = upperBound - lowerBound;
+            double tolerance = 1e-3 * size.Length();
+            const int count = 14;
+            int disagreements = 0;
+            for (int z = 0; z < count; ++z)
+            {
+                for (int y = 0; y < count; ++y)
+                {
+                    for (int x = 0; x < count; ++x)
+                    {
+                        // The grid covers the box with a jitter that is the same on every run
+                        double jx = 0.5 + 0.37 * Math.Sin(12.9898 * x + 78.233 * y + 37.719 * z);
+                        double jy = 0.5 + 0.37 * Math.Sin(39.346 * x + 11.135 * y + 83.155 * z);
+                        double jz = 0.5 + 0.37 * Math.Sin(73.156 * x + 52.235 * y + 9.151 * z);
+                        SdfVector p = new SdfVector(lowerBound.x + size.x * (x + jx) / count, lowerBound.y + size.y * (y + jy) / count,
+                                                    lowerBound.z + size.z * (z + jz) / count);
+                        double byPseudonormal = Signed(p, 0);
+                        if (Math.Abs(byPseudonormal) < tolerance)
+                        {
+                            continue;
+                        }
+                        if ((byPseudonormal < 0) != (WindingNumber(p) > 0.5))
+                        {
+                            ++disagreements;
+                        }
+                    }
+                }
+            }
+            return disagreements > 0;
         }
 
         // Whether every edge of the mesh belongs to two triangles
@@ -70,9 +114,10 @@ namespace pbrt
             return closed;
         }
 
+        // Whether the winding number takes part in the sign (alone, or with the pseudonormal)
         public bool UsesWinding()
         {
-            return useWinding;
+            return signMode != 0;
         }
 
         private static double Angle(SdfVector a, SdfVector b)
@@ -386,6 +431,11 @@ namespace pbrt
 
         public override double Evaluate(SdfVector p)
         {
+            return Signed(p, signMode);
+        }
+
+        private double Signed(SdfVector p, int mode)
+        {
             double best = double.MaxValue;
             int bestTriangle = -1, bestFeature = 0;
             SdfVector bestPoint = new SdfVector(0, 0, 0);
@@ -435,9 +485,22 @@ namespace pbrt
             {
                 return double.MaxValue;
             }
-            if (useWinding)
+            if (mode == 1)
             {
                 return WindingNumber(p) > 0.5 ? -Math.Sqrt(best) : Math.Sqrt(best);
+            }
+            if (mode == 2)
+            {
+                // A winding number that is clearly 0 or clearly 1 (or more) decides; one near 0.5 is the blur of an opening
+                double winding = WindingNumber(p);
+                if (winding > 0.8)
+                {
+                    return -Math.Sqrt(best);
+                }
+                if (winding < 0.2)
+                {
+                    return Math.Sqrt(best);
+                }
             }
             SdfVector pseudonormal = faceNormals[bestTriangle];
             int i0 = indices[3 * bestTriangle], i1 = indices[3 * bestTriangle + 1], i2 = indices[3 * bestTriangle + 2];
@@ -473,7 +536,9 @@ namespace pbrt
         private readonly int[] indices;
         private readonly SdfVector[] faceNormals, vertexNormals;
         private readonly Dictionary<long, SdfVector> edgeNormals;
-        private readonly bool closed, useWinding;
+        private readonly bool closed;
+        // 0 the pseudonormal, 1 the winding number, 2 the winding number where it is decisive and the pseudonormal elsewhere
+        private int signMode;
         private List<HierarchyNode> nodes;
         private int[] order;
     }
