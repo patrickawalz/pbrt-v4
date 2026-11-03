@@ -2819,6 +2819,10 @@ namespace pbrt
                 shapes.push_back(Disk.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
                 ++nDisks;
             }
+            else if (name == "sdf")
+            {
+                shapes.push_back(SdfShape.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
+            }
             else if (name == "bilinearmesh")
             {
                 BilinearPatchMesh mesh = BilinearPatch.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
