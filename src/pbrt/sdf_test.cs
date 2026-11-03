@@ -853,5 +853,87 @@ namespace pbrt
             Console.WriteLine("OVERLAP {0} points: winding wrong {1}, pseudonormal wrong {2}", tested, windingWrong, pseudonormalWrong);
             EXPECT_EQ(windingWrong, 0);
         }
+
+        // The mean and the relative standard deviation of the estimate of the integral over the surface of |cos at the light| / d^2
+        // (the form factor of an emitter without the receiver's cosine) for a receiver, with the given sampling
+        private static void EstimateFormFactor(SdfShape shape, Point3f receiver, int count, ulong seed, out double mean, out double relativeDeviation)
+        {
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(receiver), new Normal3f(0, 0, 1), new Normal3f(0, 0, 1), 0);
+            RNG rng = new RNG(seed);
+            double sum = 0, sumSquares = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                pstd.optional<ShapeSample> s = shape.Sample(ctx, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                double value = 0;
+                if (s)
+                {
+                    Vector3f wi = Normalize(s.value().intr.p() - receiver);
+                    // |cos at the light| / d^2 divided by the density per area = |cos| / d^2 / (pdf * |cos| / d^2) = 1 / pdf per solid angle
+                    value = AbsDot(s.value().intr.n, -wi) / DistanceSquared(receiver, s.value().intr.p()) /
+                            (s.value().pdf * AbsDot(s.value().intr.n, -wi) / DistanceSquared(receiver, s.value().intr.p()));
+                }
+                sum += value;
+                sumSquares += value * value;
+            }
+            mean = sum / count;
+            relativeDeviation = Math.Sqrt(Math.Max(sumSquares / count - mean * mean, 0)) / mean;
+        }
+
+        [TEST("Sdf", "ImportanceSamplingIsUnbiasedAndCheaperOnAThinLight")]
+        public static void Sdf_ImportanceSamplingIsUnbiasedAndCheaperOnAThinLight()
+        {
+            // A long thin rod seen from a point near its middle: most of the area is far from the point
+            SdfShapeOptions uniformOptions = new SdfShapeOptions();
+            uniformOptions.importanceSampling = false;
+            SdfShapeOptions importanceOptions = new SdfShapeOptions();
+            importanceOptions.importanceSampling = true;
+            string rod = "capsule(-1.4, 0, 0, 1.4, 0, 0, .08)";
+            SdfShape uniform = MakeShape(rod, new Transform(), 2, false, uniformOptions);
+            SdfShape importance = MakeShape(rod, new Transform(), 2, false, importanceOptions);
+            Point3f receiver = new Point3f(0.2f, 0.45f, 0.1f);
+            EstimateFormFactor(uniform, receiver, 100000, 3, out double meanUniform, out double deviationUniform);
+            EstimateFormFactor(importance, receiver, 100000, 5, out double meanImportance, out double deviationImportance);
+            Console.WriteLine("ROD area estimate uniform {0:F4} (rel sd {1:F3}) importance {2:F4} (rel sd {3:F3}); area {4:F4}",
+                              meanUniform, deviationUniform, meanImportance, deviationImportance, (double)uniform.Area());
+            // The mean of 1 / pdf over the solid angle is the solid angle weighted measure; both estimate the same integral, which for
+            // the quantity above (1 / pdf per solid angle) is the projected area seen from the point: compare the two estimates
+            EXPECT_NEAR(meanImportance / meanUniform, 1, 0.02);
+            EXPECT_LT(deviationImportance, deviationUniform);
+        }
+
+        [TEST("Sdf", "ImportanceDensityMatchesTheSampleDensity")]
+        public static void Sdf_ImportanceDensityMatchesTheSampleDensity()
+        {
+            SdfShape shape = MakeShape("smoothunion(sphere(.6), translate(box(.3,.3,.3,.05), .7, 0, 0), .2)", new Transform(), 2);
+            Point3f receiver = new Point3f(0.4f, -0.9f, 1.6f);
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(receiver), new Normal3f(0, 0, 1), new Normal3f(0, 0, 1), 0);
+            RNG rng = new RNG(79);
+            int compared = 0, close = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                pstd.optional<ShapeSample> s = shape.Sample(ctx, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                if (!s)
+                {
+                    continue;
+                }
+                Vector3f wi = Normalize(s.value().intr.p() - receiver);
+                // Only the first surface seen along the direction has a PDF (the far side of the shape is hidden by the near side)
+                pstd.optional<ShapeIntersection> first = shape.Intersect(ctx.SpawnRay(wi));
+                if (!first || Distance(first.value().intr.p(), s.value().intr.p()) > 1e-4)
+                {
+                    continue;
+                }
+                ++compared;
+                double ratio = shape.PDF(ctx, wi) / s.value().pdf;
+                if (Math.Abs(ratio - 1) < 0.1)
+                {
+                    ++close;
+                }
+            }
+            Console.WriteLine("DENSITY {0} visible samples, {1} within 10% of the PDF", compared, close);
+            EXPECT_GT(compared, 500);
+            // The triangle that a point is found in can differ from the one that sampled it, along the borders of the triangles
+            EXPECT_GT(close, compared * 97 / 100);
+        }
     }
 }

@@ -38,6 +38,9 @@ namespace pbrt
         public SdfUvMapping uvMapping = SdfUvMapping.Spherical;
         public int tessellation = 64;
         public int areaSubdivisions = 3;
+        // Whether an area light picks its sample points in proportion to the importance of the triangles for the receiving point
+        // (otherwise uniformly by area)
+        public bool importanceSampling = true;
     }
 
     // SdfShape Definition
@@ -417,10 +420,9 @@ namespace pbrt
             return (Float)Sampler().Area();
         }
 
-        public override pstd.optional<ShapeSample> Sample(Point2f u)
+        // The interaction at a point of the surface (object space)
+        private Interaction SurfacePoint(SdfVector pObject)
         {
-            SdfSurfaceSampler surface = Sampler();
-            SdfVector pObject = surface.Sample(u[0], u[1]);
             SdfVector n = NormalAt(pObject);
             Normal3f nObject = new Normal3f((Float)n.x, (Float)n.y, (Float)n.z);
             Normal3f normal = pbrt.Normalize(renderFromObject.Apply(nObject));
@@ -434,7 +436,14 @@ namespace pbrt
                               new Vector3f((Float)residual, (Float)residual, (Float)residual);
             Point3fi pi = renderFromObject.Apply(
                 new Point3fi(new Point3f((Float)pObject.x, (Float)pObject.y, (Float)pObject.z), pError));
-            return new ShapeSample(new Interaction(pi, normal, uv), 1 / (Float)surface.Area());
+            return new Interaction(pi, normal, uv);
+        }
+
+        public override pstd.optional<ShapeSample> Sample(Point2f u)
+        {
+            SdfSurfaceSampler surface = Sampler();
+            SdfVector pObject = surface.Sample(u[0], u[1]);
+            return new ShapeSample(SurfacePoint(pObject), 1 / (Float)surface.Area());
         }
 
         public override Float PDF(Interaction intr)
@@ -444,8 +453,23 @@ namespace pbrt
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            // Sample by area and convert the density to solid angle
-            pstd.optional<ShapeSample> ss = Sample(u);
+            // Sample by area (uniformly, or by the importance of the triangles for the receiving point) and convert the density to
+            // solid angle
+            pstd.optional<ShapeSample> ss;
+            if (options.importanceSampling)
+            {
+                SdfSurfaceSampler surface = Sampler();
+                SdfVector pObject = surface.SampleFrom(new SdfVector(ctx.p().x, ctx.p().y, ctx.p().z), u[0], u[1], out double areaDensity);
+                if (areaDensity <= 0)
+                {
+                    return default;
+                }
+                ss = new ShapeSample(SurfacePoint(pObject), (Float)areaDensity);
+            }
+            else
+            {
+                ss = Sample(u);
+            }
             if (!ss)
             {
                 return default;
@@ -474,7 +498,14 @@ namespace pbrt
             {
                 return 0;
             }
-            Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
+            Float areaDensity = 1 / Area();
+            if (options.importanceSampling)
+            {
+                Point3f receiver = ctx.p(), hit = isect.value().intr.p();
+                areaDensity = (Float)Sampler().DensityFrom(new SdfVector(receiver.x, receiver.y, receiver.z),
+                                                           new SdfVector(hit.x, hit.y, hit.z));
+            }
+            Float pdf = areaDensity / (pbrt.AbsDot(isect.value().intr.n, -wi) /
                                         pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
             if (pbrt.IsInf(pdf))
             {
@@ -511,6 +542,7 @@ namespace pbrt
             options.lipschitzFactor = parameters.GetOneFloat("lipschitz", 1);
             options.tessellation = parameters.GetOneInt("tessellation", options.tessellation);
             options.areaSubdivisions = parameters.GetOneInt("areasubdivisions", options.areaSubdivisions);
+            options.importanceSampling = parameters.GetOneBool("importance", options.importanceSampling);
             string mapping = parameters.GetOneString("uvmapping", "spherical");
             if (mapping == "spherical")
             {

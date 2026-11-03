@@ -338,7 +338,7 @@ namespace pbrt
         }
 
         // The closest point of a triangle to p and the feature it lies on: 0 the face, 1..3 the vertices, 4..6 the edges ab, bc, ca
-        private static SdfVector ClosestOnTriangle(SdfVector p, SdfVector a, SdfVector b, SdfVector c, out int feature)
+        public static SdfVector ClosestOnTriangle(SdfVector p, SdfVector a, SdfVector b, SdfVector c, out int feature)
         {
             SdfVector ab = b - a, ac = c - a, ap = p - a;
             double d1 = SdfVector.Dot(ab, ap), d2 = SdfVector.Dot(ac, ap);

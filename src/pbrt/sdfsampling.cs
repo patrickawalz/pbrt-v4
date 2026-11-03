@@ -29,6 +29,7 @@ namespace pbrt
             this.subdivisions = Math.Max(1, subdivisions);
             Tessellate(Math.Max(4, resolution));
             MeasureAreas();
+            BuildLightTree();
         }
 
         public double Area()
@@ -444,7 +445,61 @@ namespace pbrt
             return Project(p);
         }
 
+        // The tree of the triangles in render space with their outward normals, for the importance sampling of the receiving point
+        private void BuildLightTree()
+        {
+            int count = triangleAreas.Length;
+            double[] renderVertices = new double[9 * count];
+            double[] renderNormals = new double[3 * count];
+            double[] m = renderFromObject;
+            double determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) +
+                                 m[2] * (m[4] * m[9] - m[5] * m[8]);
+            double handedness = determinant < 0 ? -1 : 1;
+            pbrt.ParallelFor(0, count, (int t) =>
+            {
+                SdfVector a = Vertex(t, 0), b = Vertex(t, 1), c = Vertex(t, 2);
+                // The side of the triangle that the gradient points to is the outside
+                SdfVector gradient = field.Gradient(Project((a + b + c) / 3.0), gradientStep);
+                double orientation = SdfVector.Dot(SdfVector.Cross(b - a, c - a), gradient) >= 0 ? 1 : -1;
+                SdfVector ra = ToRender(a), rb = ToRender(b), rc = ToRender(c);
+                SdfVector normal = SdfVector.Cross(rb - ra, rc - ra).Normalized() * (orientation * handedness);
+                renderVertices[9 * t] = ra.x;
+                renderVertices[9 * t + 1] = ra.y;
+                renderVertices[9 * t + 2] = ra.z;
+                renderVertices[9 * t + 3] = rb.x;
+                renderVertices[9 * t + 4] = rb.y;
+                renderVertices[9 * t + 5] = rb.z;
+                renderVertices[9 * t + 6] = rc.x;
+                renderVertices[9 * t + 7] = rc.y;
+                renderVertices[9 * t + 8] = rc.z;
+                renderNormals[3 * t] = normal.x;
+                renderNormals[3 * t + 1] = normal.y;
+                renderNormals[3 * t + 2] = normal.z;
+            });
+            lightTree = new SdfLightTree(renderVertices, triangleAreas, renderNormals);
+        }
+
+        // A point of the surface (object space) chosen for the receiving point (render space) in proportion to the importance of the
+        // triangles; areaDensity is the density per unit of area (render space) of the point
+        public SdfVector SampleFrom(SdfVector receiver, double u0, double u1, out double areaDensity)
+        {
+            int t = lightTree.Sample(receiver, u0, out double probability, out double remainder);
+            double root = Math.Sqrt(remainder);
+            double b0 = 1 - root, b1 = u1 * root;
+            SdfVector p = Vertex(t, 0) * b0 + Vertex(t, 1) * b1 + Vertex(t, 2) * (1 - b0 - b1);
+            areaDensity = triangleAreas[t] > 0 ? probability / triangleAreas[t] : 0;
+            return Project(p);
+        }
+
+        // The density per unit of area of SampleFrom at a point of the surface (render space): that of the triangle closest to it
+        public double DensityFrom(SdfVector receiver, SdfVector renderPoint)
+        {
+            int t = lightTree.Closest(renderPoint);
+            return triangleAreas[t] > 0 ? lightTree.Probability(receiver, t) / triangleAreas[t] : 0;
+        }
+
         private readonly SdfNode field;
+        private SdfLightTree lightTree;
         private readonly double lipschitz, gradientStep;
         private readonly SdfVector lower, upper;
         private readonly double[] renderFromObject;

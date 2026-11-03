@@ -311,6 +311,19 @@ delegate call costs more than a single primitive. Release build, 8 million evalu
 A whole scene gains only as much as its fields are compiled: the showcase scene (gyroid, Mandelbulb and Menger sponge fall back) renders
 in the same time either way.
 
+### Importance sampling of SDF emitters
+
+An SDF that is an area light is cut into triangles (marching tetrahedra, see above), and the triangles form a binary tree (sdflighttree.cs)
+whose nodes keep their bounds, area and the cone of their normals. `Sample(ctx, u)` walks down from the root and takes each child with a
+probability proportional to area x the largest cosine toward the receiving point (the normal cone widened by the angle that the bounds
+subtend, folded so that either side counts) / squared distance (Conty Estevez and Kulla 2018, without the receiver's cosine). The
+density of a point found by a BSDF-sampled ray (`PDF(ctx, wi)`) is that of the triangle closest to the hit, so the multiple importance
+sampling weights agree with the sampling. `"bool importance" false` goes back to uniform sampling by area.
+
+On a 2.8 long, 0.07 thick rod seen from 0.45 away, the relative standard deviation of the estimate drops from 1.31 to 0.61 and the means
+agree (1.3355 vs 1.3401). In a full image (rod above a diffuse sphere, 16 spp) the error against a 1024 spp reference drops only from
+0.433 to 0.408 (RMSE), because most of the noise there is not the light sampling.
+
 ## Per-volume integrators (`volumeintegrator.cs`)
 
 As in Fong et al., every medium carries its own integrator, built from two shareable modules. The path estimators
