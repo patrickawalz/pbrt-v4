@@ -54,6 +54,24 @@ namespace pbrt
                 EXPECT_NEAR((nd - 1) / (nF - nC), abbe[g], 0.15, names[g] + " V_d " + (nd - 1) / (nF - nC));
             }
 
+            // The catalogue n_F, n_d and n_C of dispchk.cpp of the C++ fork, at its wavelengths, to its 6e-5
+            double[][] catalogue =
+            {
+                new double[] { 1.52238, 1.51680, 1.51432 },
+                new double[] { 1.80652, 1.78472, 1.77596 },
+                new double[] { 1.46318, 1.45846, 1.45637 }
+            };
+            double[] lines = { 0.4861, 0.58756, 0.65627 };
+            for (int g = 0; g < 3; ++g)
+            {
+                double[] coefficients = RealisticCamera.CatalogueGlass(names[g]);
+                for (int k = 0; k < 3; ++k)
+                {
+                    double n = RealisticCamera.SellmeierIndex(coefficients, lines[k]);
+                    EXPECT_NEAR(n, catalogue[g][k], 6e-5, names[g] + " line " + k + " n " + n);
+                }
+            }
+
             EXPECT_TRUE(RealisticCamera.CatalogueGlass("unobtainium") == null);
         }
 
