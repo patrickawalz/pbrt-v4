@@ -30,9 +30,13 @@ namespace OpenSubdiv.Far
     ///  Since structs are copied, the elements are always accessed in place via the
     ///  ref-returning indexer of a PrimvarBuffer<T>.
     ///
-    public interface IPrimvar<T, REAL>
+    public interface IPrimvarElement
     {
         void Clear();
+    }
+
+    public interface IPrimvar<T, REAL> : IPrimvarElement
+    {
         void AddWithWeight(T src, REAL weight);
     }
 
