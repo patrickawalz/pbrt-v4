@@ -648,7 +648,7 @@ namespace pbrt
             {
                 ns = -ns;
             }
-            si.SetShadingGeometry(ns, pu, pv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), true);
+            PatchShading.Apply(si, ns, pu);
             return si;
         }
 

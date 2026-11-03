@@ -603,7 +603,7 @@ namespace pbrt
                 {
                     ns = -ns;
                 }
-                si.SetShadingGeometry(ns, pur, pvr, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), true);
+                PatchShading.Apply(si, ns, pur);
             }
             return si;
         }

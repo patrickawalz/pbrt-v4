@@ -755,5 +755,255 @@ namespace pbrt
             CHECK_LT(spurious, 3);
             CHECK_LT(missing, 3);
         }
+
+        [TEST("Curved", "PnShadowRaysNearAnApexAgreeWithTheTessellation")]
+        public static void PnShadowRaysNearAnApexAgreeWithTheTessellation()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            List<SdfVector[]> tessellation = new List<SdfVector[]>();
+            int n = 48;
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                CurvedPatches.AddPnTriangle(shapes, mesh.settings, p, nn, null, f);
+                PnTriangle surface = new PnTriangle(p, nn);
+                for (int j = 0; j < n; ++j)
+                {
+                    for (int i = 0; i < n - j; ++i)
+                    {
+                        tessellation.Add(new SdfVector[] { surface.Position((double)i / n, (double)j / n), surface.Position((double)(i + 1) / n, (double)j / n),
+                                                           surface.Position((double)i / n, (double)(j + 1) / n) });
+                        if (i + j < n - 1)
+                        {
+                            tessellation.Add(new SdfVector[] { surface.Position((double)(i + 1) / n, (double)j / n),
+                                                               surface.Position((double)(i + 1) / n, (double)(j + 1) / n),
+                                                               surface.Position((double)i / n, (double)(j + 1) / n) });
+                        }
+                    }
+                }
+            }
+            SdfVector toLight = new SdfVector(3, 5, -2).Normalized();
+            Random random = new Random(8);
+            int tested = 0, spurious = 0, missing = 0, primaryMismatch = 0;
+            for (int k = 0; k < 600; ++k)
+            {
+                SdfVector origin = new SdfVector(2.6, -0.9, -3.2);
+                SdfVector target = new SdfVector(0, 0.9, 0) + new SdfVector(random.NextDouble() - 0.5, random.NextDouble() * 0.4 - 0.2, random.NextDouble() - 0.5) * 0.5;
+                SdfVector dir = (target - origin).Normalized();
+                Ray ray = new Ray(new Point3f((Float)origin.x, (Float)origin.y, (Float)origin.z), new Vector3f((Float)dir.x, (Float)dir.y, (Float)dir.z));
+                Float tHit = Infinity;
+                SdfVector normal = new SdfVector(0, 0, 1);
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    pstd.optional<ShapeIntersection> hit = shapes[s].Intersect(ray);
+                    if (hit && hit.value().tHit < tHit)
+                    {
+                        tHit = hit.value().tHit;
+                        Normal3f nn = hit.value().intr.n;
+                        normal = new SdfVector(nn.x, nn.y, nn.z).Normalized();
+                    }
+                }
+                double referenceHit = double.MaxValue;
+                foreach (SdfVector[] tri in tessellation)
+                {
+                    SubdivisionSurfaceTests.MoellerHit(origin, dir, tri, out double tr);
+                    if (tr > 0 && tr < referenceHit)
+                    {
+                        referenceHit = tr;
+                    }
+                }
+                if ((tHit == Infinity) != (referenceHit == double.MaxValue))
+                {
+                    ++primaryMismatch;
+                    Console.WriteLine("primary mismatch: shape " + tHit + " reference " + referenceHit + " target " + target.x + " " + target.y + " " + target.z);
+                }
+                if (tHit == Infinity)
+                {
+                    continue;
+                }
+                SdfVector point = origin + dir * tHit;
+                if (SdfVector.Dot(normal, dir) > 0)
+                {
+                    normal = -normal;
+                }
+                SdfVector start = point + normal * 2e-7;
+                double expected = double.MaxValue;
+                foreach (SdfVector[] tri in tessellation)
+                {
+                    SubdivisionSurfaceTests.MoellerHit(start, toLight, tri, out double t);
+                    if (t > 0 && t < expected)
+                    {
+                        expected = t;
+                    }
+                }
+                Ray shadow = new Ray(new Point3f((Float)start.x, (Float)start.y, (Float)start.z), new Vector3f((Float)toLight.x, (Float)toLight.y, (Float)toLight.z));
+                bool blocked = false;
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    if (shapes[s].IntersectP(shadow))
+                    {
+                        blocked = true;
+                        break;
+                    }
+                }
+                ++tested;
+                if (blocked && expected == double.MaxValue)
+                {
+                    ++spurious;
+                    for (int s2 = 0; s2 < (int)shapes.size(); ++s2)
+                    {
+                        pstd.optional<ShapeIntersection> h2 = shapes[s2].Intersect(shadow);
+                        if (h2)
+                        {
+                            SdfVector hitPoint = start + toLight * h2.value().tHit;
+                            double residual = double.MaxValue;
+                            for (int f2 = 0; f2 < 8; ++f2)
+                            {
+                                SdfVector[] p2 = new SdfVector[3];
+                                SdfVector[] n2 = new SdfVector[3];
+                                for (int q = 0; q < 3; ++q)
+                                {
+                                    p2[q] = mesh.positions[mesh.indices[3 * f2 + q]];
+                                    n2[q] = mesh.normals[mesh.indices[3 * f2 + q]];
+                                }
+                                residual = Math.Min(residual, SurfaceDistance(new PnTriangle(p2, n2), hitPoint));
+                            }
+                            Console.WriteLine("residual of the reported hit point from the surface: " + residual);
+                            Console.WriteLine("spurious: face " + s2 / 3 + " quad " + s2 % 3 + " t " + h2.value().tHit + " start " + start.x + " " + start.y + " " + start.z + " dot(n,L) " + SdfVector.Dot(normal, toLight));
+                        }
+                    }
+                }
+                if (!blocked && expected < double.MaxValue)
+                {
+                    ++missing;
+                }
+            }
+            Console.WriteLine("pn apex primary mismatches " + primaryMismatch + ", shadow rays: " + tested + " spurious " + spurious + " missing " + missing);
+            CHECK_GT(tested, 100);
+            CHECK_LT(spurious, 3);
+            CHECK_LT(missing, 3);
+        }
+
+        [TEST("Curved", "PnShadingNormalsAgreeWithTheSurface")]
+        public static void PnShadingNormalsAgreeWithTheSurface()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            int total = 0, flipped = 0;
+            double minimum = 1;
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+                CurvedPatches.AddPnTriangle(shapes, mesh.settings, p, nn, null, f);
+                for (int q = 0; q < 3; ++q)
+                {
+                    PatchSurface surface = ((BezierClipPatchShape)shapes[q]).Surface;
+                    for (int i = 1; i < 10; ++i)
+                    {
+                        for (int j = 1; j < 10; ++j)
+                        {
+                            surface.Evaluate(i / 10.0, j / 10.0, out SdfVector position, out SdfVector du, out SdfVector dv, out Point2f uv, out SdfVector shading);
+                            SdfVector geometric = SdfVector.Cross(du, dv).Normalized();
+                            double d = SdfVector.Dot(geometric, shading);
+                            ++total;
+                            minimum = Math.Min(minimum, d);
+                            if (d < 0)
+                            {
+                                ++flipped;
+                            }
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("pn shading normals: points " + total + " opposite to the surface normal " + flipped + " smallest dot " + minimum);
+            CHECK_EQ(flipped, 0);
+        }
+
+        [TEST("Curved", "PnProbeCapRays")]
+        public static void PnProbeCapRays()
+        {
+            CurvedMesh mesh = Octahedron(0.75);
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            for (int f = 0; f < 8; ++f)
+            {
+                SdfVector[] p = new SdfVector[3];
+                SdfVector[] nn = new SdfVector[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = mesh.positions[mesh.indices[3 * f + k]];
+                    nn[k] = mesh.normals[mesh.indices[3 * f + k]];
+                }
+                CurvedPatches.AddPnTriangle(shapes, mesh.settings, p, nn, null, f);
+            }
+            SdfVector eye = new SdfVector(2.6, -0.9, -3.2);
+            SdfVector forward = (new SdfVector(0, 0, 0) - eye).Normalized();
+            SdfVector right = SdfVector.Cross(new SdfVector(0, 1, 0), forward).Normalized();
+            SdfVector up = SdfVector.Cross(forward, right);
+            double scale = Math.Tan(18 * Math.PI / 180);
+            Random random = new Random(1);
+            for (int py = 38; py <= 56; py += 6)
+            {
+                double sy = (120 - py) / 120.0 * scale;
+                SdfVector dir = (forward + up * sy).Normalized();
+                Ray ray = new Ray(new Point3f((Float)eye.x, (Float)eye.y, (Float)eye.z), new Vector3f((Float)dir.x, (Float)dir.y, (Float)dir.z));
+                pstd.optional<ShapeIntersection> best = default;
+                for (int s = 0; s < (int)shapes.size(); ++s)
+                {
+                    pstd.optional<ShapeIntersection> hit = shapes[s].Intersect(ray);
+                    if (hit && (!best || hit.value().tHit < best.value().tHit))
+                    {
+                        best = hit;
+                    }
+                }
+                if (!best)
+                {
+                    Console.WriteLine("py " + py + " miss");
+                    continue;
+                }
+                SurfaceInteraction si = best.value().intr;
+                Normal3f ns = si.shading.n;
+                int blocked = 0, below = 0, count = 200;
+                for (int k = 0; k < count; ++k)
+                {
+                    // a cosine distributed direction about the shading normal
+                    double u1 = random.NextDouble(), u2 = random.NextDouble();
+                    double r = Math.Sqrt(u1), phi = 2 * Math.PI * u2;
+                    Vector3f a, c;
+                    unsafe
+                    {
+                        pbrt.CoordinateSystem(new Vector3f(ns.x, ns.y, ns.z), &a, &c);
+                    }
+                    Vector3f wi = (Float)(r * Math.Cos(phi)) * a + (Float)(r * Math.Sin(phi)) * c + (Float)Math.Sqrt(1 - u1) * new Vector3f(ns.x, ns.y, ns.z);
+                    if (pbrt.Dot(wi, (Vector3f)si.n) < 0)
+                    {
+                        ++below;
+                    }
+                    RayDifferential shadow = si.SpawnRay(wi);
+                    for (int s = 0; s < (int)shapes.size(); ++s)
+                    {
+                        if (shapes[s].IntersectP(new Ray(shadow.o, shadow.d)))
+                        {
+                            ++blocked;
+                            break;
+                        }
+                    }
+                }
+                Console.WriteLine("py " + py + " ns " + ns.x.ToString("F2") + " " + ns.y.ToString("F2") + " " + ns.z.ToString("F2") + " n " + si.n.x.ToString("F2") + " " + si.n.y.ToString("F2") + " " + si.n.z.ToString("F2") +
+                                  " wo.ns " + pbrt.Dot(si.wo, (Vector3f)ns).ToString("F2") + " blocked " + blocked + "/" + count + " below geometric " + below);
+            }
+        }
     }
 }

@@ -24,6 +24,29 @@ namespace pbrt
         }
     }
 
+    // The shading geometry of a patch: the tangent is made orthogonal to the shading normal as for the triangles of pbrt (the shading frame of a BSDF
+    // must be orthonormal)
+    public static unsafe class PatchShading
+    {
+        public static void Apply(SurfaceInteraction si, Normal3f ns, Vector3f dpdu)
+        {
+            Vector3f ss = dpdu;
+            Vector3f ts = pbrt.Cross(ns, ss);
+            if (pbrt.LengthSquared(ts) > 0)
+            {
+                ss = pbrt.Cross(ts, ns);
+            }
+            else
+            {
+                Vector3f a, c;
+                pbrt.CoordinateSystem(ns, &a, &c);
+                ss = a;
+                ts = c;
+            }
+            si.SetShadingGeometry(ns, ss, ts, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), true);
+        }
+    }
+
     // The parameters that the patches of a surface share
     public sealed class BezierSurfaceSettings
     {
@@ -210,12 +233,31 @@ namespace pbrt
                                                            ray.time, flipNormal, surface.FaceIndex());
             if (shading.LengthSquared() > 0)
             {
+                // Where the interpolated normal and the surface normal differ much (a PN patch with normals far from those of its surface), a view
+                // that sees the surface from the front of its normal but from the back of the interpolated one would shade it black: use the surface
+                // normal there, as the rule of Ogaki and Tokuyoshi does for Phong tessellation
+                SdfVector surfaceNormal = SdfVector.Cross(dpdu, dpdv);
+                if (surfaceNormal.LengthSquared() > 0)
+                {
+                    surfaceNormal = surfaceNormal.Normalized();
+                    SdfVector unitShading = shading.Normalized();
+                    if (SdfVector.Dot(surfaceNormal, unitShading) < 0)
+                    {
+                        surfaceNormal = -surfaceNormal;
+                    }
+                    Vector3f woObject = settings.objectFromRender.Apply(-ray.d);
+                    SdfVector view = new SdfVector(woObject.x, woObject.y, woObject.z);
+                    if (SdfVector.Dot(view, surfaceNormal) * SdfVector.Dot(view, unitShading) < 0)
+                    {
+                        shading = surfaceNormal;
+                    }
+                }
                 Normal3f ns = pbrt.Normalize(renderFromObject.Apply(new Normal3f((Float)shading.x, (Float)shading.y, (Float)shading.z)));
                 if (settings.reverseOrientation)
                 {
                     ns = -ns;
                 }
-                si.SetShadingGeometry(ns, pu, pv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), true);
+                PatchShading.Apply(si, ns, pu);
             }
             return si;
         }
