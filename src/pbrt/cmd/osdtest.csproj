@@ -16,6 +16,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../ext/opensubdiv/tests/osdtest.cs" />
-    <ProjectReference Include="../pbrt_lib.csproj" />
+    <ProjectReference Include="opensubdiv_lib.csproj" />
   </ItemGroup>
 </Project>

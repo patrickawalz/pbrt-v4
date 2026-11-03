@@ -1378,7 +1378,7 @@ namespace OpenSubdiv.Far.Internal
             }
             else
             {
-                System.Diagnostics.Debug.Assert(0);
+                System.Diagnostics.Debug.Assert(false);
             }
             return nPoints;
         }
@@ -2789,7 +2789,7 @@ namespace OpenSubdiv.Far.Internal
             }
             else
             {
-                System.Diagnostics.Debug.Assert(0);
+                System.Diagnostics.Debug.Assert(false);
             }
             return nPoints;
         }

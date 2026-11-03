@@ -199,6 +199,8 @@ int main(int argc, char ** argv) {
             Real s = sv[i], t = sv[j];
             Far::PatchTable::PatchHandle const * h = patchmap.FindPatch(face, s, t);
             if (!h) { printf("nopatch %d %.2f %.2f\n", face, s, t); continue; }
+            int htype = (int)pt->GetPatchArrayDescriptor(h->arrayIndex).GetType();
+            if (htype == 6 || htype == 7) { printf("noeval %d %.2f %.2f patch %d\n", face, s, t, h->patchIndex); continue; }  // legacy Gregory has no basis evaluation
             pt->EvaluateBasis(*h, s, t, pW, dsW, dtW);
             Far::ConstIndexArray cvs = pt->GetPatchVertices(*h);
             Real P[3] = {0,0,0}, D1[3] = {0,0,0}, D2[3] = {0,0,0};
