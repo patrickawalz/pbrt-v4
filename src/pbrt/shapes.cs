@@ -2823,6 +2823,10 @@ namespace pbrt
             {
                 shapes.push_back(SdfShape.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
             }
+            else if (name == "catmarksubdiv")
+            {
+                shapes = SubdivisionSurface.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
+            }
             else if (name == "displacedmesh")
             {
                 shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
