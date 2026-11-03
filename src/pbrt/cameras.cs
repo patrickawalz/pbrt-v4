@@ -988,6 +988,9 @@ namespace pbrt
             public Float thickness;
             public Float eta;
             public Float apertureRadius;
+            // (not in pbrt-v4) The conic constant and the coefficients A4, A6, ..., A16 of the aspheric terms of the surface, in
+            // millimetres like the lens file; null for a sphere
+            public double[] aspheric;
 
             public override string ToString()
             {
@@ -995,6 +998,44 @@ namespace pbrt
                                             "eta: %f apertureRadius: %f ]",
                                             curvatureRadius, thickness, eta, apertureRadius);
             }
+        }
+
+        // (not in pbrt-v4) The number of values per interface of the aspheric coefficients parameter: the conic constant k and
+        // A4, A6, A8, A10, A12, A14, A16 of the sag
+        //   z(r) = c r^2 / (1 + sqrt(1 - (1 + k) c^2 r^2)) + A4 r^4 + A6 r^6 + ... + A16 r^16
+        // where c is the curvature of the interface (1 / the radius of the lens file) and r and z are in millimetres. All zero
+        // is a sphere.
+        const int AsphericValuesPerInterface = 8;
+
+        // (not in pbrt-v4) The sag z(r) of an interface and its slope dz/dr (the radius r and the sag in metres, the slope has no
+        // unit), NaN where the conic term is not defined
+        static double ElementSag(LensElementInterface element, double r, out double slope)
+        {
+            double rMm = r * 1000;
+            double curvature = 1 / (element.curvatureRadius * 1000.0);
+            double conic = element.aspheric != null ? element.aspheric[0] : 0;
+            double radicand = 1 - (1 + conic) * curvature * curvature * rMm * rMm;
+            if (radicand <= 0)
+            {
+                slope = double.NaN;
+                return double.NaN;
+            }
+
+            double root = Math.Sqrt(radicand);
+            double sagMm = curvature * rMm * rMm / (1 + root);
+            slope = curvature * rMm / root;
+            if (element.aspheric != null)
+            {
+                for (int term = 0; term < 7; ++term)
+                {
+                    int power = 4 + 2 * term;
+                    double coefficient = element.aspheric[1 + term];
+                    sagMm += coefficient * Math.Pow(rMm, power);
+                    slope += power * coefficient * Math.Pow(rMm, power - 1);
+                }
+            }
+
+            return sagMm / 1000;
         }
 
         public override pstd.optional<CameraRayDifferential> GenerateRayDifferential(CameraSample sample,
@@ -1076,33 +1117,83 @@ namespace pbrt
             return weight != 0;
         }
 
+        // The front element is sampled uniformly by area within its aperture. The area within a radius r is
+        //   A(r) = integral of 2 pi r' sqrt(1 + sag'(r')^2) dr',
+        // tabulated against r^2, where the integrand is smooth, and inverted by interpolation.
+        const int FrontAreaTableSize = 2048;
+        double[] frontAreaTable;
+        Float frontArea;
+
+        void ComputeFrontAreaTable()
+        {
+            LensElementInterface front = elementInterfaces[0];
+            double radiusSquared = (double)front.apertureRadius * front.apertureRadius;
+            frontAreaTable = new double[FrontAreaTableSize + 1];
+            double previousIntegrand = 0;
+            for (int i = 0; i <= FrontAreaTableSize; ++i)
+            {
+                // dA / d(r^2) = pi sqrt(1 + sag'^2)
+                double r = Math.Sqrt(radiusSquared * i / FrontAreaTableSize);
+                ElementSag(front, r, out double slope);
+                double integrand = Math.PI * Math.Sqrt(1 + slope * slope);
+                if (i > 0)
+                {
+                    frontAreaTable[i] = frontAreaTable[i - 1] +
+                                        0.5 * (previousIntegrand + integrand) * radiusSquared / FrontAreaTableSize;
+                }
+
+                previousIntegrand = integrand;
+            }
+
+            frontArea = (Float)frontAreaTable[FrontAreaTableSize];
+        }
+
         Float FrontElementRadius()
         {
             return elementInterfaces[0].apertureRadius;
         }
 
-        // The sphere of the front element in lens space: its centre is on the axis at -LensFrontZ + radius
-        Float FrontElementCentreZ()
-        {
-            return -LensFrontZ() + elementInterfaces[0].curvatureRadius;
-        }
-
         // The area of the part of the front element within its aperture
         Float FrontElementArea()
         {
-            Float radius = std.abs(elementInterfaces[0].curvatureRadius);
-            Float cosAlpha = std.sqrt(std.max(0.0f, 1 - pbrt.Sqr(FrontElementRadius() / radius)));
-            return 2 * Pi * pbrt.Sqr(radius) * (1 - cosAlpha);
+            return frontArea;
+        }
+
+        // A point of the front element, uniformly by area, in camera space
+        Point3f SampleFrontElement(Point2f u)
+        {
+            double target = u.x * frontAreaTable[FrontAreaTableSize];
+            int low = 0;
+            int high = FrontAreaTableSize;
+            while (high - low > 1)
+            {
+                int middle = (low + high) / 2;
+                if (frontAreaTable[middle] <= target)
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+
+            double fraction = (target - frontAreaTable[low]) / (frontAreaTable[low + 1] - frontAreaTable[low]);
+            double radiusSquared = (double)FrontElementRadius() * FrontElementRadius();
+            double r = Math.Sqrt(radiusSquared * (low + fraction) / FrontAreaTableSize);
+            double phi = 2 * Math.PI * u.y;
+            double sag = ElementSag(elementInterfaces[0], r, out _);
+            // The vertex is at -LensFrontZ in lens space; camera space has the z axis the other way round
+            return new Point3f((Float)(r * Math.Cos(phi)), (Float)(r * Math.Sin(phi)), (Float)(LensFrontZ() - sag));
         }
 
         // The normal of the front element, towards the scene, at a point of it (in camera space)
         Normal3f FrontElementNormal(Point3f pCamera)
         {
-            Float radius = elementInterfaces[0].curvatureRadius;
-            Vector3f fromCentre = new Vector3f(pCamera.x, pCamera.y, -pCamera.z - FrontElementCentreZ());
-            Vector3f nLens = fromCentre * (radius > 0 ? 1 / radius : -1 / radius);
-            // Towards the scene: the scene is at lower z in lens space
-            return (Normal3f)pbrt.Normalize(new Vector3f(nLens.x, nLens.y, -nLens.z));
+            Float r = std.sqrt(pbrt.Sqr(pCamera.x) + pbrt.Sqr(pCamera.y));
+            ElementSag(elementInterfaces[0], r, out double slope);
+            Float radial = r > 0 ? (Float)(slope / r) : 0;
+            return (Normal3f)pbrt.Normalize(new Vector3f(radial * pCamera.x, radial * pCamera.y, 1));
         }
 
         public override SampledSpectrum We(Ray ray, ref SampledWavelengths lambda, Point2f* pRaster2 = null)
@@ -1156,13 +1247,7 @@ namespace pbrt
         public override pstd.optional<CameraWiSample> SampleWi(Interaction reference, Point2f u, ref SampledWavelengths lambda)
         {
             // Uniformly sample the front element within its aperture
-            Float radius = elementInterfaces[0].curvatureRadius;
-            Float cosAlphaMax = std.sqrt(std.max(0.0f, 1 - pbrt.Sqr(FrontElementRadius() / radius)));
-            Float cosAlpha = 1 - u.x * (1 - cosAlphaMax);
-            Float sinAlpha = std.sqrt(std.max(0.0f, 1 - cosAlpha * cosAlpha));
-            Float phi = 2 * Pi * u.y;
-            Float zLens = FrontElementCentreZ() - radius * cosAlpha;
-            Point3f pCamera = new Point3f(std.abs(radius) * sinAlpha * std.cos(phi), std.abs(radius) * sinAlpha * std.sin(phi), -zLens);
+            Point3f pCamera = SampleFrontElement(u);
             Point3f pLensRender = RenderFromCamera(pCamera, reference.time);
             Normal3f n = (Normal3f)pbrt.Normalize(RenderFromCamera((Vector3f)FrontElementNormal(pCamera), reference.time));
             Interaction lensIntr = new Interaction(pLensRender, n, reference.time, medium);
@@ -1220,9 +1305,84 @@ namespace pbrt
             return true;
         }
 
+        // (not in pbrt-v4) The intersection of a ray with an aspheric interface whose vertex is at elementZ, by Newton's method on
+        //   F(t) = z(t) - elementZ - sag(r(t))
+        // in double precision, started at the intersection with the sphere of the vertex curvature
+        static bool IntersectAsphericalElement(LensElementInterface element, Float elementZ, Ray ray, Float* t, Normal3f* n)
+        {
+            double tCurrent;
+            Float tSphere;
+            Normal3f nSphere = default;
+            if (IntersectSphericalElement(element.curvatureRadius, elementZ + element.curvatureRadius, ray, &tSphere, &nSphere))
+            {
+                tCurrent = tSphere;
+            }
+            else
+            {
+                tCurrent = (elementZ - ray.o.z) / ray.d.z;
+            }
+
+            bool converged = false;
+            double px = 0;
+            double py = 0;
+            double slope = 0;
+            double r = 0;
+            for (int iteration = 0; iteration < 32 && !converged; ++iteration)
+            {
+                px = ray.o.x + tCurrent * ray.d.x;
+                py = ray.o.y + tCurrent * ray.d.y;
+                double pz = ray.o.z + tCurrent * ray.d.z;
+                r = Math.Sqrt(px * px + py * py);
+                double sag = ElementSag(element, r, out slope);
+                if (double.IsNaN(sag))
+                {
+                    return false;
+                }
+
+                double f = pz - elementZ - sag;
+                double fPrime = ray.d.z - (r > 0 ? slope * (px * ray.d.x + py * ray.d.y) / r : 0);
+                if (fPrime == 0)
+                {
+                    return false;
+                }
+
+                double step = f / fPrime;
+                tCurrent -= step;
+                converged = Math.Abs(step) < 1e-12;
+            }
+
+            if (!converged || tCurrent < 0)
+            {
+                return false;
+            }
+
+            *t = (Float)tCurrent;
+            // The gradient of F: the normal is perpendicular to the surface, facing the ray
+            px = ray.o.x + tCurrent * ray.d.x;
+            py = ray.o.y + tCurrent * ray.d.y;
+            r = Math.Sqrt(px * px + py * py);
+            ElementSag(element, r, out slope);
+            double radial = r > 0 ? slope / r : 0;
+            *n = new Normal3f((Float)(-radial * px), (Float)(-radial * py), 1);
+            *n = pbrt.FaceForward(pbrt.Normalize(*n), -ray.d);
+            return true;
+        }
+
+        // (not in pbrt-v4) The intersection of a ray with the interface of a lens element, spherical or aspheric
+        static bool IntersectElement(LensElementInterface element, Float elementZ, Ray ray, Float* t, Normal3f* n)
+        {
+            if (element.aspheric == null)
+            {
+                return IntersectSphericalElement(element.curvatureRadius, elementZ + element.curvatureRadius, ray, t, n);
+            }
+
+            return IntersectAsphericalElement(element, elementZ, ray, t, n);
+        }
+
         // RealisticCamera Method Definitions
         public RealisticCamera(CameraBaseParameters baseParameters, List<Float> lensParameters, Float focusDistance,
-                               Float setApertureDiameter, Image apertureImage, Allocator alloc)
+                               Float setApertureDiameter, Image apertureImage, Allocator alloc,
+                               List<Float> asphericParameters = null)
             : base(baseParameters)
         {
             elementInterfaces = new pstd.vector<LensElementInterface>();
@@ -1255,15 +1415,33 @@ namespace pbrt
                     else
                         apertureDiameter = setApertureDiameter;
                 }
+                // (not in pbrt-v4) The aspheric terms of the interface: all zero is a sphere
+                double[] aspheric = null;
+                if (asphericParameters != null)
+                {
+                    int first = i / 4 * AsphericValuesPerInterface;
+                    bool any = false;
+                    double[] values = new double[AsphericValuesPerInterface];
+                    for (int k = 0; k < AsphericValuesPerInterface; ++k)
+                    {
+                        values[k] = asphericParameters[first + k];
+                        any |= values[k] != 0;
+                    }
+
+                    aspheric = any ? values : null;
+                }
+
                 // Add element interface to end of _elementInterfaces_
                 elementInterfaces.push_back(new LensElementInterface
                 {
                     curvatureRadius = curvatureRadius,
                     thickness = thickness,
                     eta = eta,
-                    apertureRadius = apertureDiameter / 2
+                    apertureRadius = apertureDiameter / 2,
+                    aspheric = aspheric
                 });
             }
+            ComputeFrontAreaTable();
 
             // Compute lens--film distance for given focus distance
             elementInterfaces.back().thickness = FocusThickLens(focusDistance);
@@ -1308,9 +1486,7 @@ namespace pbrt
                 else
                 {
                     // Intersect ray with element to compute _t_ and _n_
-                    Float radius = element.curvatureRadius;
-                    Float zCenter = elementZ + element.curvatureRadius;
-                    if (!IntersectSphericalElement(radius, zCenter, rLens, &t, &n))
+                    if (!IntersectElement(element, elementZ, rLens, &t, &n))
                         return 0;
                 }
                 pbrt.DCHECK_GE(t, 0);
@@ -1577,9 +1753,7 @@ namespace pbrt
                 }
                 else
                 {
-                    Float radius = element.curvatureRadius;
-                    Float zCenter = elementZ + element.curvatureRadius;
-                    if (!IntersectSphericalElement(radius, zCenter, rLens, &t, &n))
+                    if (!IntersectElement(element, elementZ, rLens, &t, &n))
                         return 0;
                 }
 
@@ -1735,9 +1909,7 @@ namespace pbrt
                     t = -(ray.o.z - elementZ) / ray.d.z;
                 else
                 {
-                    Float radius = element.curvatureRadius;
-                    Float zCenter = elementZ + element.curvatureRadius;
-                    if (!IntersectSphericalElement(radius, zCenter, ray, &t, &n))
+                    if (!IntersectElement(element, elementZ, ray, &t, &n))
                         goto done;
                 }
                 pbrt.CHECK_GE(t, 0);
@@ -1804,9 +1976,7 @@ namespace pbrt
                     t = -(ray.o.z - elementZ) / ray.d.z;
                 else
                 {
-                    Float radius = element.curvatureRadius;
-                    Float zCenter = elementZ + element.curvatureRadius;
-                    if (!IntersectSphericalElement(radius, zCenter, ray, &t, &n))
+                    if (!IntersectElement(element, elementZ, ray, &t, &n))
                         return;
                 }
                 pbrt.CHECK_GE(t, 0.0f);
@@ -1966,6 +2136,21 @@ namespace pbrt
                 return null;
             }
 
+            // (not in pbrt-v4) The aspheric terms of the interfaces, in the order of the lens file
+            List<Float> asphericParameters = parameters.GetFloatArray("asphericcoefficients");
+            if (asphericParameters.Count == 0)
+            {
+                asphericParameters = null;
+            }
+            else if (asphericParameters.Count != lensParameters.Count / 4 * AsphericValuesPerInterface)
+            {
+                pbrt.Error(loc, pbrt.StringPrintf("\"asphericcoefficients\" needs %d values (the conic constant and A4 to A16) " +
+                                                        "for each of the %d interfaces of the lens, read %d.",
+                                                        AsphericValuesPerInterface, (int)(lensParameters.Count / 4),
+                                                        (int)asphericParameters.Count));
+                return null;
+            }
+
             int builtinRes = 256;
             Func<Point2f[], Image> rasterize = (Point2f[] vert) =>
             {
@@ -2097,7 +2282,7 @@ namespace pbrt
             }
 
             return new RealisticCamera(cameraBaseParameters, lensParameters, focusDistance, apertureDiameter,
-                                       apertureImage, alloc);
+                                       apertureImage, alloc, asphericParameters);
         }
 
         // RealisticCamera Private Members

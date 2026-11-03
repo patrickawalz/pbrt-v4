@@ -11,7 +11,7 @@ namespace pbrt
     {
         // The double Gauss lens of pbrt's dgauss.50mm.dat: radius, thickness, index of refraction and aperture diameter in
         // millimetres of each interface from the scene to the film (radius 0 is the aperture stop)
-        static readonly Float[] doubleGauss =
+        internal static readonly Float[] doubleGauss =
         {
             29.475f, 3.76f, 1.67f, 25.2f,
             84.83f, 0.12f, 1.0f, 25.2f,
@@ -26,7 +26,8 @@ namespace pbrt
             -39.73f, 0.0f, 1.0f, 20.0f
         };
 
-        static RealisticCamera MakeCamera(Point2i resolution, string filename = "realisticcamerapolarised_test.exr")
+        internal static RealisticCamera MakeCamera(Point2i resolution, string filename = "realisticcamerapolarised_test.exr",
+                                                   List<Float> asphericParameters = null)
         {
             Transform id = new Transform();
             AnimatedTransform identityA = new AnimatedTransform(id, 0, id, 1);
@@ -37,7 +38,7 @@ namespace pbrt
             CameraBaseParameters cbp = new CameraBaseParameters(new CameraTransform(identityA), rgbFilm, null,
                                                                 new ParameterDictionary(), new FileLoc());
             List<Float> lensParameters = new List<Float>(doubleGauss);
-            return new RealisticCamera(cbp, lensParameters, 5.0f, 17.1f, new Image((Allocator)null), null);
+            return new RealisticCamera(cbp, lensParameters, 5.0f, 17.1f, new Image((Allocator)null), null, asphericParameters);
         }
 
         // The refraction of a ray at a spherical interface of a lens in lens space, written without the camera's code: the
