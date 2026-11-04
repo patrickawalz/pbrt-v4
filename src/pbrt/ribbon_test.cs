@@ -280,5 +280,67 @@ namespace pbrt
             CHECK_LT(worstGap, 1e-6);
             CHECK_LT(worstAngle, 1e-6);
         }
+
+        // A blade of grass: a planar curve with the normals of its plane. Ribbon2 and ribbon3 are then the same band.
+        private static void BladeEdges(out double hausdorff, out double widthRatio)
+        {
+            SdfVector[] points = new SdfVector[5];
+            SdfVector[] normals = new SdfVector[5];
+            double[] widths = new double[5];
+            for (int k = 0; k < 5; ++k)
+            {
+                double t = k / 4.0;
+                points[k] = new SdfVector(0.35 * t * t * 0.9, 0.9 * t, 0);
+                normals[k] = new SdfVector(0, 0, 1);
+                widths[k] = 0.035 * (1 - 0.9 * t);
+            }
+            List<RibbonSegment> a = RibbonBuilder.Build(points, normals, widths);
+            List<IRibbonSegment> b = Ribbon2Builder.Build(points, normals, widths);
+            List<SdfVector> edgesA = new List<SdfVector>(), edgesB = new List<SdfVector>();
+            widthRatio = 0;
+            foreach (RibbonSegment segment in a)
+            {
+                for (int i = 0; i <= 40; ++i)
+                {
+                    edgesA.Add(segment.Position(i / 40.0, -1));
+                    edgesA.Add(segment.Position(i / 40.0, 1));
+                }
+            }
+            foreach (IRibbonSegment segment in b)
+            {
+                for (int i = 0; i <= 40; ++i)
+                {
+                    edgesB.Add(segment.Position(i / 40.0, -1));
+                    edgesB.Add(segment.Position(i / 40.0, 1));
+                }
+            }
+            hausdorff = 0;
+            foreach (SdfVector p in edgesB)
+            {
+                double nearest = double.MaxValue;
+                foreach (SdfVector q in edgesA)
+                {
+                    nearest = Math.Min(nearest, (p - q).Length());
+                }
+                hausdorff = Math.Max(hausdorff, nearest);
+            }
+            foreach (SdfVector p in edgesA)
+            {
+                double nearest = double.MaxValue;
+                foreach (SdfVector q in edgesB)
+                {
+                    nearest = Math.Min(nearest, (p - q).Length());
+                }
+                hausdorff = Math.Max(hausdorff, nearest);
+            }
+        }
+
+        [TEST("Ribbon", "Ribbon2AndRibbon3AgreeOnAPlanarBlade")]
+        public static void Ribbon2AndRibbon3AgreeOnAPlanarBlade()
+        {
+            BladeEdges(out double hausdorff, out double widthRatio);
+            Console.WriteLine("blade: Hausdorff distance of the edges " + hausdorff + " (the half width is 0.035)");
+            CHECK_LT(hausdorff, 5e-3);
+        }
     }
 }

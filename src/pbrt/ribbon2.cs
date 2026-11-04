@@ -199,7 +199,7 @@ namespace pbrt
                 }
                 else
                 {
-                    NextPatch(segment, previous, b0, b1, b2);
+                    NextPatch(segment, previous, b0, b1, b2, normals != null ? JointNormal(normals, i + 1, points.Length) : default, normals != null ? JointNormal(normals, i, points.Length) : default, normals != null);
                 }
                 result.Add(segment);
                 previous = segment;
@@ -239,13 +239,38 @@ namespace pbrt
         }
 
         // Section 3.2: N00 = P11, N01 = P11 + y (P11 - P10), N10 = 2 B1 - N01; y minimizes the variation of psi
-        private static void NextPatch(Ribbon2Segment segment, Ribbon2Segment previous, SdfVector b0, SdfVector b1, SdfVector b2)
+        // The normal at the end of the segment that starts at point i: the end is the midpoint of the points i + 1 and i + 2 (or the last point)
+        private static SdfVector JointNormal(SdfVector[] normals, int i, int count)
+        {
+            SdfVector n = i + 1 < count - 1 ? normals[i] + normals[i + 1] : normals[count - 1];
+            return n.LengthSquared() > 0 ? n.Normalized() : normals[i];
+        }
+
+        private static void NextPatch(Ribbon2Segment segment, Ribbon2Segment previous, SdfVector b0, SdfVector b1, SdfVector b2, SdfVector endNormal, SdfVector startNormal, bool hasNormal)
         {
             SdfVector line = previous.q11 - previous.q10;
+            if (hasNormal)
+            {
+                // With normals the line at the start of the patch is the bitangent of the start (the same line as the end of the previous patch when it was reached, a
+                // slightly turned one otherwise: the strip is continuous, with a small crease): only then can the strip twist out of the plane of its curve
+                SdfVector start = SdfVector.Cross(b1 - b0, startNormal);
+                if (start.LengthSquared() > 0)
+                {
+                    start = start.Normalized() * line.Length();
+                    line = SdfVector.Dot(start, line) < 0 ? -1 * start : start;
+                }
+            }
             segment.q00 = previous.q11;
             segment.q11 = b2;
             double diagonal = (b2 - segment.q00).Length();
             double bestCost = double.MaxValue, bestY = 1;
+            // With normals the line at the end of the patch is turned toward the bitangent of the end (the only freedom of the patch is y): the strip follows the twist
+            SdfVector wanted = default;
+            if (hasNormal)
+            {
+                wanted = SdfVector.Cross(b2 - b1, endNormal);
+                wanted = wanted.LengthSquared() > 0 ? wanted.Normalized() : default;
+            }
             for (int sign = -1; sign <= 1; sign += 2)
             {
                 for (int k = -6; k <= 10; ++k)
@@ -262,6 +287,12 @@ namespace pbrt
                     segment.q01 = q01;
                     segment.q10 = q10;
                     double cost = Cost(segment);
+                    if (wanted.LengthSquared() > 0)
+                    {
+                        SdfVector end = (segment.q11 - segment.q10);
+                        double length = end.Length();
+                        cost += length > 0 ? 1e6 * (1 - Math.Abs(SdfVector.Dot(end, wanted)) / length) : 1e6;
+                    }
                     if (cost < bestCost)
                     {
                         bestCost = cost;
@@ -293,6 +324,11 @@ namespace pbrt
                 {
                     return double.MaxValue;
                 }
+                if (segment.Omega(u) > 0.5)
+                {
+                    // the band would reach far outside of the patch: the strip is not thin there
+                    return double.MaxValue;
+                }
                 sum += psi;
                 sumSquares += psi * psi;
             }
@@ -301,7 +337,7 @@ namespace pbrt
             double cost = mean > 0 ? Math.Max(0, variance) / (mean * mean) : double.MaxValue;
             if (smallestSine < minimumSine)
             {
-                cost += 1e6 * (minimumSine - smallestSine) + 1e3;
+                cost += 1e9 * (minimumSine - smallestSine) + 1e8;
             }
             return cost;
         }
