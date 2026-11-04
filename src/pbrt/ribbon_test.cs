@@ -168,5 +168,117 @@ namespace pbrt
             CHECK_LT(worstPosition, 1e-9);
             CHECK_LT(worstAngle, 1e-3);
         }
+
+        private static void AgainstTessellation2(List<IRibbonSegment> segments, int rayCount, out int total, out int missed, out int extra, out double worstT)
+        {
+            int nu = 200, nv = 24;
+            List<SdfVector[]> triangles = new List<SdfVector[]>();
+            foreach (IRibbonSegment segment in segments)
+            {
+                SdfVector[,] grid = new SdfVector[nu + 1, nv + 1];
+                for (int i = 0; i <= nu; ++i)
+                {
+                    for (int j = 0; j <= nv; ++j)
+                    {
+                        grid[i, j] = segment.Position((double)i / nu, 2.0 * j / nv - 1);
+                    }
+                }
+                for (int i = 0; i < nu; ++i)
+                {
+                    for (int j = 0; j < nv; ++j)
+                    {
+                        triangles.Add(new SdfVector[] { grid[i, j], grid[i + 1, j], grid[i, j + 1] });
+                        triangles.Add(new SdfVector[] { grid[i + 1, j], grid[i + 1, j + 1], grid[i, j + 1] });
+                    }
+                }
+            }
+            Random random = new Random(7);
+            total = 0;
+            missed = 0;
+            extra = 0;
+            worstT = 0;
+            for (int k = 0; k < rayCount; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                SdfVector target = new SdfVector(random.NextDouble() * 2.4 - 1.2, random.NextDouble() * 2.4 - 1.2, random.NextDouble() * 4);
+                SdfVector origin = target - dir * 8;
+                double expected = double.MaxValue;
+                foreach (SdfVector[] triangle in triangles)
+                {
+                    if (SubdivisionSurfaceTests.MoellerHit(origin, dir, triangle, out double t) && t < expected)
+                    {
+                        expected = t;
+                    }
+                }
+                double actual = double.MaxValue;
+                foreach (IRibbonSegment segment in segments)
+                {
+                    if (segment.Intersect(origin, dir, 0, 1e30, 0, out double t, out double u, out double v) && t < actual)
+                    {
+                        actual = t;
+                    }
+                }
+                if (expected < double.MaxValue)
+                {
+                    ++total;
+                    if (actual == double.MaxValue)
+                    {
+                        ++missed;
+                    }
+                    else
+                    {
+                        worstT = Math.Max(worstT, Math.Abs(actual - expected));
+                    }
+                }
+                else if (actual < double.MaxValue)
+                {
+                    ++extra;
+                }
+            }
+        }
+
+        [TEST("Ribbon", "Ribbon2MatchesTheTessellation")]
+        public static void Ribbon2MatchesTheTessellation()
+        {
+            SdfVector[] points = Spiral(9, 1.0, 0.35);
+            List<IRibbonSegment> segments = Ribbon2Builder.Build(points, null, Widths(points.Length, 0.18));
+            CHECK_EQ(segments.Count, 7);
+            AgainstTessellation2(segments, 3000, out int total, out int missed, out int extra, out double worstT);
+            Console.WriteLine("ribbon2: hits " + total + " missed " + missed + " extra " + extra + " worst t " + worstT);
+            CHECK_GT(total, 100);
+            CHECK_LT(missed, 4);
+            CHECK_LT(extra, 4);
+            CHECK_LT(worstT, 5e-3);
+        }
+
+        [TEST("Ribbon", "Ribbon2SegmentsAreConnected")]
+        public static void Ribbon2SegmentsAreConnected()
+        {
+            SdfVector[] points = Spiral(9, 1.0, 0.35);
+            List<IRibbonSegment> segments = Ribbon2Builder.Build(points, null, Widths(points.Length, 0.18));
+            double worstGap = 0, worstAngle = 0;
+            for (int i = 0; i + 1 < segments.Count; ++i)
+            {
+                for (int k = 0; k <= 4; ++k)
+                {
+                    double s = -1 + 0.5 * k;
+                    SdfVector end = segments[i].Position(1, s);
+                    // The next patch can run the other way along the same line (a negative binding factor)
+                    SdfVector startSame = segments[i + 1].Position(0, s), startFlipped = segments[i + 1].Position(0, -s);
+                    worstGap = Math.Max(worstGap, Math.Min((end - startSame).Length(), (end - startFlipped).Length()));
+                    segments[i].Derivatives(1, s, out SdfVector a0, out SdfVector b0);
+                    segments[i + 1].Derivatives(0, s, out SdfVector a1, out SdfVector b1);
+                    SdfVector n0 = SdfVector.Cross(a0, b0).Normalized(), n1 = SdfVector.Cross(a1, b1).Normalized();
+                    if (k == 2)
+                    {
+                        // On the center line the normals are equal by construction
+                        worstAngle = Math.Max(worstAngle, Math.Acos(Math.Min(1, Math.Abs(SdfVector.Dot(n0, n1)))));
+                    }
+                }
+            }
+            Console.WriteLine("ribbon2 joints: worst gap " + worstGap + " worst angle on the center line " + worstAngle);
+            CHECK_LT(worstGap, 1e-6);
+            CHECK_LT(worstAngle, 1e-6);
+        }
     }
 }

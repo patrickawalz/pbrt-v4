@@ -9,7 +9,7 @@ namespace pbrt
 {
     public sealed unsafe class RibbonShape : Shape
     {
-        public RibbonShape(BezierSurfaceSettings settings, RibbonSegment segment)
+        public RibbonShape(BezierSurfaceSettings settings, IRibbonSegment segment)
         {
             this.settings = settings;
             this.segment = segment;
@@ -92,10 +92,10 @@ namespace pbrt
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ RibbonShape segment: %d of %d ]", segment.index, segment.count);
+            return pbrt.StringPrintf("[ RibbonShape segment: %d of %d ]", segment.Index, segment.Count);
         }
 
-        public RibbonSegment Segment
+        public IRibbonSegment Segment
         {
             get { return segment; }
         }
@@ -143,9 +143,9 @@ namespace pbrt
             Transform renderFromObject = settings.renderFromObject;
             p = renderFromObject.Apply(new Point3f((Float)position.x, (Float)position.y, (Float)position.z));
             // The texture coordinates run along the whole ribbon and across its width
-            dpdu = renderFromObject.Apply(new Vector3f((Float)(du.x * segment.count), (Float)(du.y * segment.count), (Float)(du.z * segment.count)));
+            dpdu = renderFromObject.Apply(new Vector3f((Float)(du.x * segment.Count), (Float)(du.y * segment.Count), (Float)(du.z * segment.Count)));
             dpdv = renderFromObject.Apply(new Vector3f((Float)(dv.x * 2), (Float)(dv.y * 2), (Float)(dv.z * 2)));
-            uv = new Point2f((Float)((segment.index + u) / segment.count), (Float)(0.5 * (v + 1)));
+            uv = new Point2f((Float)((segment.Index + u) / segment.Count), (Float)(0.5 * (v + 1)));
         }
 
         private SurfaceInteraction InteractionAt(double u, double v, Ray ray)
@@ -154,7 +154,7 @@ namespace pbrt
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
             return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,
-                                          segment.index);
+                                          segment.Index);
         }
 
         // The sample of the point at (u, v), with the normal of the surface (the area density is set by the caller)
@@ -171,7 +171,7 @@ namespace pbrt
         }
 
         private readonly BezierSurfaceSettings settings;
-        private readonly RibbonSegment segment;
+        private readonly IRibbonSegment segment;
         private readonly Bounds3f bounds;
         private PatchAreaSampler sampler;
     }
@@ -179,7 +179,7 @@ namespace pbrt
     public static class Ribbons
     {
         // "point3 P" (the control points of the quadratic B-spline, at least three), "normal N" (the normal of the surface at each point; the normal of the plane of
-        // the curve when absent), "float width" (the half width at each point, or one value for all), "epsilon" (a fraction of the diagonal of the points that
+        // the curve when absent), "float width" (the half width at each point, or one value for all), "string type" ("ribbon3", the default, or "ribbon2": bilinear patches, about 40% faster, but only the first patch follows the normals), "epsilon" (a fraction of the diagonal of the points that
         // keeps rays that leave the surface from hitting it again)
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
@@ -232,7 +232,26 @@ namespace pbrt
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-5f) * diagonal;
 
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
-            foreach (RibbonSegment segment in RibbonBuilder.Build(points, normals, widths))
+            string type = parameters.GetOneString("type", "ribbon3");
+            if (type != "ribbon2" && type != "ribbon3")
+            {
+                pbrt.ErrorExit(loc, "ribbon: \"type\" must be \"ribbon2\" or \"ribbon3\".");
+            }
+            IEnumerable<IRibbonSegment> built;
+            if (type == "ribbon2")
+            {
+                built = Ribbon2Builder.Build(points, normals, widths);
+            }
+            else
+            {
+                List<IRibbonSegment> list = new List<IRibbonSegment>();
+                foreach (RibbonSegment segment in RibbonBuilder.Build(points, normals, widths))
+                {
+                    list.Add(segment);
+                }
+                built = list;
+            }
+            foreach (IRibbonSegment segment in built)
             {
                 shapes.push_back(new RibbonShape(settings, segment));
             }

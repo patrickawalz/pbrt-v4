@@ -11,8 +11,19 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
-    // One segment of a ribbon in object space
-    public sealed unsafe class RibbonSegment
+    // What a shape needs of a segment of a ribbon: the parameters u along the ribbon and v in [-1, 1] across its width
+    public interface IRibbonSegment
+    {
+        int Index { get; }
+        int Count { get; }
+        SdfVector Position(double u, double v);
+        void Derivatives(double u, double v, out SdfVector dpdu, out SdfVector dpdv);
+        void Bounds(out SdfVector low, out SdfVector high);
+        bool Intersect(SdfVector origin, SdfVector direction, double tmin, double tmax, double epsilon, out double t, out double hitU, out double hitV);
+    }
+
+    // One segment of a ribbon in object space (ribbon3: a quadratic directrix and a linear generator, a cubic equation)
+    public sealed unsafe class RibbonSegment : IRibbonSegment
     {
         // The centerline (a quadratic Bezier curve)
         public SdfVector b0, b1, b2;
@@ -24,6 +35,16 @@ namespace pbrt
         public double width0, width1, width2;
         // The range of the parameter along the whole ribbon of the segment (for the texture coordinates), and the number of segments
         public int index, count;
+
+        public int Index
+        {
+            get { return index; }
+        }
+
+        public int Count
+        {
+            get { return count; }
+        }
 
         public SdfVector Center(double u)
         {
