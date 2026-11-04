@@ -4,4 +4,3 @@ obj/
 *.user
 .vs/
 src/pbrt/local.props
-src/pbrt/rgbspec/prebuilt/
