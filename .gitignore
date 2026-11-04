@@ -3,3 +3,5 @@ obj/
 *.exr
 *.user
 .vs/
+src/pbrt/local.props
+src/pbrt/rgbspec/prebuilt/

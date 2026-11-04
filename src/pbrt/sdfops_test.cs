@@ -59,14 +59,6 @@ namespace pbrt
                 EXPECT_TRUE(Math.Abs(pair.Evaluate(p) - pair.Evaluate(q)) <= 0.01 * pair.Lipschitz() + 1e-12);
             }
 
-            // Normalized: close to a true distance near the surface (the gradient of the field is about one there)
-            SdfNode normal = Parse("metaballsn(0.5, 0, 0, 0, 1, 1)");
-            double h = 1e-5, edge = s;
-            double slope = (At(normal, edge + h, 0, 0) - At(normal, edge - h, 0, 0)) / (2 * h);
-            EXPECT_NEAR(slope, 1, 1e-4);
-            EXPECT_TRUE(At(normal, 0.9 * s, 0, 0) < 0 && At(normal, 1.1 * s, 0, 0) > 0);
-            EXPECT_TRUE(!normal.IsRigorous());
-
             SdfNode julia = Parse("julia(-0.2, 0.6, 0.2, 0, 12)");
             EXPECT_TRUE(At(julia, 3, 0, 0) > 0);
             bool inside = false;

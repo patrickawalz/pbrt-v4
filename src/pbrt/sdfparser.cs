@@ -11,7 +11,7 @@
 //   translate(a, x, y, z)  rotate(a, rx, ry, rz)  rotateaxis(a, ax, ay, az, degrees)  scale(a, s | sx, sy, sz)
 //   twist(a, k)  bend(a, k)  repeat(a, px, py, pz [, count])  mirror(a, "x"|"y"|"z")  elongate(a, hx, hy, hz)
 //   displace(a, amplitude, frequency [, octaves, roughness])
-//   inset  ink  clip  julia  metaballs  metaballsn (normalized)  texdisplace  label  transfer  morph  translate_t  rotate_t  displace_t  mandelbulbt
+//   inset  ink  clip  julia  metaballs   texdisplace  label  transfer  morph  translate_t  rotate_t  displace_t  mandelbulbt
 //   (see sdfops.cs)
 //
 // and the operators a | b (union), a & b (intersection) and a - b (subtraction), with & binding tighter than - and | .
@@ -532,7 +532,6 @@ namespace pbrt
                                         Number(a, 3, name, this), (int)Number(a, 4, 12, name), Number(a, 5, 4, name),
                                         Number(a, 6, 0, name), Number(a, 7, 0.5, name));
                 case "metaballs":
-                case "metaballsn":
                     if (a.Count < 6 || (a.Count - 1) % 5 != 0)
                     {
                         Fail("metaballs takes a threshold and then groups of x, y, z, radius, strength");
@@ -542,7 +541,7 @@ namespace pbrt
                     {
                         balls[i - 1] = Number(a, i, name, this);
                     }
-                    return new SdfMetaballs(Number(a, 0, name, this), balls, name == "metaballsn");
+                    return new SdfMetaballs(Number(a, 0, name, this), balls);
                 case "texdisplace":
                     Count(a, name, 3, 7);
                     return new SdfTextureDisplace(Node(a, 0, name),

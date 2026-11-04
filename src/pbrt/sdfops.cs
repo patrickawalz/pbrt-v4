@@ -361,11 +361,8 @@ namespace pbrt
     // difference of the threshold and the sum, divided by the largest possible gradient, which makes it a safe (if short) distance bound.
     public sealed class SdfMetaballs : SdfNode
     {
-        // normalized: divide by the gradient of the sum at the point (a first order distance estimate, close to a true distance near the
-        // surface, so that a morph with another field is even) instead of by the global bound; the field is then not rigorous
-        public SdfMetaballs(double threshold, double[] balls, bool normalized = false)
+        public SdfMetaballs(double threshold, double[] balls)
         {
-            this.normalized = normalized;
             this.threshold = threshold;
             this.balls = (double[])balls.Clone();
             count = balls.Length / 5;
@@ -376,17 +373,11 @@ namespace pbrt
             }
             // The kernel has slope 6 s (1 - s^2)^2 / r, at most 1.7165 / r
             gradientBound = Math.Max(sum, 1e-12);
-            double largest = 0;
-            for (int i = 0; i < count; ++i)
-            {
-                largest = Math.Max(largest, balls[5 * i + 3]);
-            }
-            minimumGradient = Math.Max(threshold / Math.Max(largest, 1e-12), 1e-12);
         }
 
         public override double Evaluate(SdfVector p)
         {
-            double sum = 0, gx = 0, gy = 0, gz = 0;
+            double sum = 0;
             for (int i = 0; i < count; ++i)
             {
                 double dx = p.x - balls[5 * i], dy = p.y - balls[5 * i + 1], dz = p.z - balls[5 * i + 2];
@@ -395,30 +386,13 @@ namespace pbrt
                 if (s2 < 1)
                 {
                     double k = 1 - s2;
-                    double strength = balls[5 * i + 4];
-                    sum += strength * k * k * k;
-                    double slope = -6 * strength * k * k / (r * r);
-                    gx += slope * dx;
-                    gy += slope * dy;
-                    gz += slope * dz;
+                    sum += balls[5 * i + 4] * k * k * k;
                 }
             }
-            if (!normalized)
-            {
-                return (threshold - sum) / gradientBound;
-            }
-            // Far from the balls the gradient vanishes: the floor keeps the value finite (about the distance to the nearest ball's edge)
-            double length = Math.Sqrt(gx * gx + gy * gy + gz * gz);
-            return (threshold - sum) / Math.Max(length, minimumGradient);
+            return (threshold - sum) / gradientBound;
         }
 
-        public override bool IsRigorous()
-        {
-            return !normalized;
-        }
-
-        private readonly double threshold, gradientBound, minimumGradient;
-        private readonly bool normalized;
+        private readonly double threshold, gradientBound;
         private readonly double[] balls;
         private readonly int count;
     }

@@ -23,8 +23,13 @@
   </ItemGroup>
   <!-- The RGB-to-spectrum tables (generated at build time by rgb2spec_opt, as the pbrt-v4 CMake build does) are an assembly of their own
        (rgbspec/pbrt_rgbspec.csproj): about 150 MB of source that the compiler cannot hold together with this library on a small machine. -->
+  <!-- A machine can keep a prebuilt pbrt_rgbspec.dll and skip generating and compiling the tables: local.props (not in git) sets
+       PrebuiltRgbSpec to the path of that assembly. Without it (a clone of the repository, the CI build) the tables are generated from
+       source by rgb2spec_opt and compiled as above. -->
+  <Import Project="$(MSBuildThisFileDirectory)local.props" Condition="Exists('$(MSBuildThisFileDirectory)local.props')" />
   <ItemGroup>
     <ProjectReference Include="../opensubdiv_lib/opensubdiv_lib.csproj" />
-    <ProjectReference Include="rgbspec/pbrt_rgbspec.csproj" />
+    <ProjectReference Include="rgbspec/pbrt_rgbspec.csproj" Condition="'$(PrebuiltRgbSpec)' == ''" />
+    <Reference Include="pbrt_rgbspec" HintPath="$(PrebuiltRgbSpec)" Private="true" Condition="'$(PrebuiltRgbSpec)' != '' And Exists('$(PrebuiltRgbSpec)')" />
   </ItemGroup>
 </Project>
