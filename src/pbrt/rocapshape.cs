@@ -338,6 +338,22 @@ namespace pbrt
         {
             Transform renderFromObject = settings.renderFromObject;
             SdfVector tangent = segment.Velocity(u);
+            // The hit is the entry into a sphere near the envelope of the spheres, so its normal is tilted a little from the normal of the envelope (the angle to the tangent is
+            // -r'/|q'|): the normal of the tube is corrected to that, which the hair material needs (its frame is perpendicular to the strand)
+            if (tangent.LengthSquared() > 0)
+            {
+                SdfVector axisUnit = tangent.Normalized();
+                double slope = -segment.RadiusDerivative(u) / tangent.Length();
+                double alongNormal = SdfVector.Dot(normalObject, axisUnit);
+                if (Math.Abs(alongNormal - slope) < 0.05 && Math.Abs(slope) < 0.999)
+                {
+                    SdfVector perpendicular = normalObject - axisUnit * alongNormal;
+                    if (perpendicular.LengthSquared() > 1e-24)
+                    {
+                        normalObject = axisUnit * slope + perpendicular.Normalized() * Math.Sqrt(1 - slope * slope);
+                    }
+                }
+            }
             // The tangent of the surface in the direction of the strand
             SdfVector along = tangent - normalObject * SdfVector.Dot(tangent, normalObject);
             if (along.LengthSquared() < 1e-24 * Math.Max(1e-300, tangent.LengthSquared()) || along.LengthSquared() == 0)
@@ -358,7 +374,13 @@ namespace pbrt
             Point3f p = renderFromObject.Apply(new Point3f((Float)position.x, (Float)position.y, (Float)position.z));
             Vector3f dpdu = renderFromObject.Apply(new Vector3f((Float)(along.x * segment.count), (Float)(along.y * segment.count), (Float)(along.z * segment.count)));
             Vector3f dpdv = renderFromObject.Apply(new Vector3f((Float)around.x, (Float)around.y, (Float)around.z));
-            Point2f uv = new Point2f((Float)((segment.index + u) / segment.count), (Float)(0.5 + angle / (2 * Math.PI)));
+            // v for the hair material, as for the curves of pbrt: the offset of the hit across the strand in [-1, 1] as seen along the ray (the component of the normal along
+            // d x tangent), as (h + 1) / 2
+            Vector3f rayDirection = settings.objectFromRender.Apply(ray.d);
+            SdfVector viewed = new SdfVector(rayDirection.x, rayDirection.y, rayDirection.z);
+            SdfVector across = SdfVector.Cross(viewed, axis);
+            double h = across.LengthSquared() > 0 ? Math.Max(-1, Math.Min(1, SdfVector.Dot(normalObject, across.Normalized()))) : 0;
+            Point2f uv = new Point2f((Float)((segment.index + u) / segment.count), (Float)(0.5 * (1 + h)));
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
             return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,

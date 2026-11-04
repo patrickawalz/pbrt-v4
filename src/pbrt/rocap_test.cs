@@ -376,5 +376,51 @@ namespace pbrt
             RGB plain = both.Color(0, 0);
             CHECK_LT(Math.Abs(plain.g - 1), 1e-6);
         }
+
+        // A ray that leaves the surface to the outside must not hit the same strand again right at its origin (the dark specks of a hair render)
+        [TEST("Rocap", "RaysLeavingTheSurfaceDoNotHitItAgain")]
+        public static void RaysLeavingTheSurfaceDoNotHitItAgain()
+        {
+            RocapSegment segment = Hook(0.02, 0.018, 0.015, 0.012);
+            Random random = new Random(17);
+            segment.Bounds(out SdfVector low, out SdfVector high);
+            SdfVector center = 0.5 * (low + high);
+            double size = (high - low).Length();
+            int hits = 0, again = 0, near = 0;
+            for (int k = 0; k < 60000; ++k)
+            {
+                SdfVector dir = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                SdfVector target = center + new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5) * size * 0.7;
+                SdfVector origin = target - dir * (3 * size);
+                if (!segment.Intersect(origin, dir, 0, 1e30, out double t, out double u, out SdfVector normal))
+                {
+                    continue;
+                }
+                ++hits;
+                SdfVector point = origin + dir * t;
+                // leave to the outside, from a point offset along the normal by the error bound of a float position
+                SdfVector leave = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5).Normalized();
+                if (SdfVector.Dot(leave, normal) < 0)
+                {
+                    leave = -1 * leave;
+                }
+                SdfVector start = point + normal * 1e-6;
+                if (segment.Intersect(start, leave, 1e-6 * size, 1e30, out double t2, out double u2, out SdfVector n2))
+                {
+                    // a legitimate hit of another part of the strand is farther than a few radii or comes from a bend; a hit at the origin is a fault
+                    if (t2 < 0.01 * segment.Radius(u))
+                    {
+                        ++again;
+                    }
+                    if (t2 < 0.5 * segment.Radius(u))
+                    {
+                        ++near;
+                    }
+                }
+            }
+            Console.WriteLine("rocap re-hits: hits " + hits + " again at the origin " + again + " within half a radius " + near);
+            CHECK_GT(hits, 500);
+            CHECK_LT(again, 1);
+        }
     }
 }
