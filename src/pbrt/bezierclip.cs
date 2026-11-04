@@ -390,6 +390,7 @@ namespace pbrt
             aligned.TransformAffine(m);
 
             UVT uvt = default;
+            uvt.tolerance = eps;
             bool result = false;
             if (TestBezierPatch(ref uvt, in aligned, tmin, tmax, eps))
             {
@@ -405,14 +406,14 @@ namespace pbrt
                 return result;
             }
 
-            // Test against the four children too, where the ray failed near the border of the patch (a crack between a transition patch and its neighbor)
+            // Test against the four children too (Split4 orders them (low u, low v), (high u, low v), (low u, high v), (high u, high v)), where the ray failed near the border of the patch (a crack between a transition patch and its neighbor)
             double* offsets = stackalloc double[8];
             offsets[0] = 0.0;
             offsets[1] = 0.0;
-            offsets[2] = 0.0;
-            offsets[3] = 0.5;
-            offsets[4] = 0.5;
-            offsets[5] = 0.0;
+            offsets[2] = 0.5;
+            offsets[3] = 0.0;
+            offsets[4] = 0.0;
+            offsets[5] = 0.5;
             offsets[6] = 0.5;
             offsets[7] = 0.5;
             BezierPatch4* children = stackalloc BezierPatch4[4];
@@ -448,6 +449,7 @@ namespace pbrt
             public double t;
             public int level;
             public int failFlag;
+            public double tolerance;
         }
 
         // The matrix that moves the ray to the origin with +z along the ray (the source's matrix4t(org, dir))
@@ -924,6 +926,12 @@ namespace pbrt
                     {
                         u = Lerp(i * du, (i + 1) * du, u);
                         v = Lerp(j * dv, (j + 1) * dv, v);
+                        // The bilinear leaf accepts hits beyond its border (the margin) and clamps them: the clamped point of the patch must still be on the ray
+                        SdfVector clamped = patch.Evaluate(u, v);
+                        if (clamped.x * clamped.x + clamped.y * clamped.y > info.tolerance * info.tolerance)
+                        {
+                            continue;
+                        }
                         uu = u;
                         vv = v;
                         zmax = t;

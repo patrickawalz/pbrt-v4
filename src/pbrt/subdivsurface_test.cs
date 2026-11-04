@@ -225,5 +225,58 @@ namespace pbrt
             CHECK_LT(extra, 4);
             CHECK_LT(worstT, 5e-3);
         }
+
+        // Rays grazing the silhouette near a corner: the point of every hit must be on the ray and face the viewer (a conservative child hit once had swapped uv offsets)
+        [TEST("Subdiv", "SilhouetteHitsLieOnTheRay")]
+        public static void SilhouetteHitsLieOnTheRay()
+        {
+            SubdivisionPatches patches = SubdivisionSurface.BuildPatches(Cube(0));
+            pstd.vector<Shape> shapes = SubdivisionSurface.CreateShapes(Settings(), patches);
+            SdfVector eye = new SdfVector(2.6, 2.2, -3.2);
+            SdfVector focus = new SdfVector(0.896, 0.441, 0.0478);
+            SdfVector forward = (focus - eye).Normalized();
+            SdfVector right = SdfVector.Cross(new SdfVector(0, 1, 0), forward).Normalized();
+            SdfVector up = SdfVector.Cross(forward, right);
+            double scale = Math.Tan(1.5 * Math.PI / 180);
+            int bad = 0, total = 0;
+            for (int py = 0; py < 60; ++py)
+            {
+                for (int px = 0; px < 60; ++px)
+                {
+                    double sx = (px - 30) / 30.0 * scale, sy = (30 - py) / 30.0 * scale;
+                    SdfVector dir = (forward + right * sx + up * sy).Normalized();
+                    Ray ray = new Ray(new Point3f((Float)eye.x, (Float)eye.y, (Float)eye.z), new Vector3f((Float)dir.x, (Float)dir.y, (Float)dir.z));
+                    pstd.optional<ShapeIntersection> best = default;
+                    for (int k = 0; k < (int)shapes.size(); ++k)
+                    {
+                        pstd.optional<ShapeIntersection> hit = shapes[k].Intersect(ray);
+                        if (hit && (!best || hit.value().tHit < best.value().tHit))
+                        {
+                            best = hit;
+                        }
+                    }
+                    if (!best)
+                    {
+                        continue;
+                    }
+                    ++total;
+                    Normal3f n = best.value().intr.n;
+                    double length = Math.Sqrt((double)n.x * n.x + (double)n.y * n.y + (double)n.z * n.z);
+                    Vector3f wo = best.value().intr.wo;
+                    double facing = n.x * wo.x + n.y * wo.y + n.z * wo.z;
+                    if (double.IsNaN(length) || length < 0.5 || facing <= 0)
+                    {
+                        ++bad;
+                        if (bad < 12)
+                        {
+                            Console.WriteLine("bad hit px " + px + " py " + py + " t " + best.value().tHit + " n " + n.x + " " + n.y + " " + n.z + " facing " + facing + " uv " + best.value().intr.uv.x + " " + best.value().intr.uv.y + " face " + best.value().intr.faceIndex + " |hit - ray point| " + Math.Sqrt(Math.Pow(best.value().intr.p().x - (eye.x + dir.x * best.value().tHit), 2) + Math.Pow(best.value().intr.p().y - (eye.y + dir.y * best.value().tHit), 2) + Math.Pow(best.value().intr.p().z - (eye.z + dir.z * best.value().tHit), 2)) + " p " + best.value().intr.p().x + " " + best.value().intr.p().y + " " + best.value().intr.p().z);
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("silhouette: hits " + total + " bad " + bad);
+            CHECK_GT(total, 1000);
+            CHECK_EQ(bad, 0);
+        }
     }
 }

@@ -50,6 +50,7 @@ namespace pbrt
             handle.vertIndex = array.vertIndex + patchInArray * array.desc.GetNumControlVertices();
             param = table.GetPatchParam(arrayIndex, patchInArray);
             OpenSubdiv.Vtr.ConstArray<int> vertices = table.GetPatchVertices(arrayIndex, patchInArray);
+            gregory = table.GetPatchArrayDescriptor(arrayIndex).GetType() == PatchDescriptor.Type.GREGORY_BASIS;
             controlVertices = new int[vertices.size()];
             for (int i = 0; i < controlVertices.Length; ++i)
             {
@@ -82,6 +83,21 @@ namespace pbrt
             p = new SdfVector(px, py, pz);
             dpdu = new SdfVector(ux, uy, uz);
             dpdv = new SdfVector(vx, vy, vz);
+            if (gregory)
+            {
+                // The derivative weights of the Gregory basis of OpenSubdiv do not differentiate the rational blend of the inner points (the
+                // true derivatives are disabled there), which is wrong near the extraordinary vertex: differentiate the positions instead
+                double h = 1e-4;
+                double ua = Math.Max(0, u - h), ub = Math.Min(1, u + h), va = Math.Max(0, v - h), vb = Math.Min(1, v + h);
+                double sa = ua, ta = v, sb = ub, tb = v;
+                param.Unnormalize(ref sa, ref ta);
+                param.Unnormalize(ref sb, ref tb);
+                double sc = u, tc = va, sd = u, td = vb;
+                param.Unnormalize(ref sc, ref tc);
+                param.Unnormalize(ref sd, ref td);
+                dpdu = (PositionAt(ub, v) - PositionAt(ua, v)) / (sb - sa);
+                dpdv = (PositionAt(u, vb) - PositionAt(u, va)) / (td - tc);
+            }
             uv = new Point2f((Float)s, (Float)t);
             shadingNormal = new SdfVector(0, 0, 0);
         }
@@ -89,6 +105,24 @@ namespace pbrt
         public override int FaceIndex()
         {
             return param.GetFaceId();
+        }
+
+        private SdfVector PositionAt(double u, double v)
+        {
+            double s = u, t = v;
+            param.Unnormalize(ref s, ref t);
+            Weights w = Workspace();
+            patches.table.EvaluateBasis(handle, s, t, w.p, w.ds, w.dt);
+            double px = 0, py = 0, pz = 0;
+            double[] points = patches.points;
+            for (int c = 0; c < controlVertices.Length; ++c)
+            {
+                int k = 3 * controlVertices[c];
+                px += w.p[c] * points[k];
+                py += w.p[c] * points[k + 1];
+                pz += w.p[c] * points[k + 2];
+            }
+            return new SdfVector(px, py, pz);
         }
 
         private sealed class Weights
@@ -114,6 +148,7 @@ namespace pbrt
         private readonly PatchTable.PatchHandle handle;
         private readonly PatchParam param;
         private readonly int[] controlVertices;
+        private readonly bool gregory;
     }
 
     // A point of the primvar refinement

@@ -566,3 +566,10 @@ Known limitations:
 - The Gregory proxy is not a strict bound; the shape clips against the averaged patch.
 - Phong conic: the pair of lines of the degenerate conic is obtained with the adjugate (not the M11 > M22 branch of the paper), and two Newton steps polish
   the hits; the bounding box is the box of the six control points of the quadratic Bezier triangle.
+
+### Curved patches: robustness notes
+
+- `maxlevel` is chosen from the patch size and `epsilon` unless given (`autoMaxLevel`), so large patches no longer stop clipping early.
+- Hits are searched from `2 * epsilon`, so a ray leaving a surface does not find its own leaf again.
+- Where the interpolated (PN) normal and the surface normal disagree about which side faces the viewer, the surface normal is shaded, as in the Ogaki–Tokuyoshi rule for Phong tessellation.
+- Bézier clipping: a leaf hit is accepted only if the clamped point of the patch is within `epsilon` of the ray, and the conservative child test maps the child's (u, v) back with the order of `Split4` (low/low, high/low, low/high, high/high). The old offsets swapped u and v there, which produced black slivers along patch borders near the silhouette of `catmarksubdiv` surfaces (regression test `Subdiv.SilhouetteHitsLieOnTheRay`).
