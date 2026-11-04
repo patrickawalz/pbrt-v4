@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The generated RGB-to-spectrum tables (rgbspectrum_*.cs, about 150 MB of source) in an assembly of their own: compiled together with
+       pbrt_lib they need more memory than the compiler can have on a small machine. The tool does not depend on pbrt_lib. -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>pbrt_rgbspec</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>pbrt</RootNamespace>
+    <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../cmd/rgb2spec_opt.csproj" ReferenceOutputAssembly="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;UseAppHost" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <RgbSpecDir>$(MSBuildThisFileDirectory)obj/rgbspec/</RgbSpecDir>
+    <RgbSpecTool>$(MSBuildThisFileDirectory)../cmd/bin/$(Configuration)/net10.0/rgb2spec_opt.dll</RgbSpecTool>
+  </PropertyGroup>
+
+  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile"
+          Inputs="$(MSBuildThisFileDirectory)../cmd/rgb2spec_opt.cs;$(RgbSpecTool)"
+          Outputs="$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
+    <MakeDir Directories="$(RgbSpecDir)" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_srgb.cs&quot; sRGB" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_dci_p3.cs&quot; DCI_P3" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_rec2020.cs&quot; REC2020" />
+    <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_aces.cs&quot; ACES2065_1" />
+  </Target>
+
+  <Target Name="AddRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="GenerateRgbSpectrumTables">
+    <ItemGroup>
+      <Compile Include="$(RgbSpecDir)rgbspectrum_*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
