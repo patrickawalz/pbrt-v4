@@ -32,10 +32,12 @@ namespace pbrt
         public bool tangentSpace = true;
         public bool smoothNormals = true;
         public int maxDepth = 16;
+        // Replaces the displacement along the border that patches share by the average of theirs, fading out over one cell of the grid
+        public bool weldSeams = true;
 
         // The displacement of the parameters "displacement" ("none", "scalar", "vector", "shell"), "displacementmap" (an image) or "functionx",
         // "functiony", "functionz" (expressions of (u, v); "function" for the height of the scalar mode), "displacementscale", "displacementbias",
-        // "resolution", "vectorspace" ("tangent", "object"), "smoothnormals", "displacementdepth"; null without displacement
+        // "resolution", "vectorspace" ("tangent", "object"), "smoothnormals", "displacementdepth", "weldseams"; null without displacement
         public static PatchDisplacement Create(ParameterDictionary parameters, FileLoc loc)
         {
             string name = parameters.GetOneString("displacement", "none");
@@ -66,6 +68,7 @@ namespace pbrt
             result.tangentSpace = space == "tangent";
             result.smoothNormals = parameters.GetOneBool("smoothnormals", true);
             result.maxDepth = parameters.GetOneInt("displacementdepth", 16);
+            result.weldSeams = parameters.GetOneBool("weldseams", true);
             bool scalarField = result.mode == PatchDisplacementMode.Scalar;
             string mapName = parameters.GetOneString("displacementmap", "");
             if (mapName.Length != 0)
@@ -139,6 +142,10 @@ namespace pbrt
                     pbrt.ErrorExit("displacement: the shape cannot be displaced.");
                 }
                 result.push_back(new DisplacedPatchShape(settings, patch.Patch, patch.Surface, this));
+            }
+            if (weldSeams)
+            {
+                DisplacedPatchShape.Weld(result);
             }
             return result;
         }
@@ -320,8 +327,138 @@ namespace pbrt
             }
         }
 
-        // The displaced point at the parameters (u, v) of the patch
+        // The displaced point at the parameters (u, v) of the patch, with the correction of the seams
         private SdfVector Displaced(double u, double v)
+        {
+            SdfVector point = RawDisplaced(u, v);
+            return edgeCorrection == null ? point : point + SeamCorrection(u, v);
+        }
+
+        // The correction of the offset along the four borders (the welded offset minus the own one at the border), fading out over one cell
+        private SdfVector SeamCorrection(double u, double v)
+        {
+            double cells = edgeCorrection[0].Length - 1;
+            SdfVector sum = new SdfVector(0, 0, 0);
+            double weights = 0;
+            for (int e = 0; e < 4; ++e)
+            {
+                double along = e == 0 ? u : e == 1 ? v : e == 2 ? u : v;
+                double across = e == 0 ? v : e == 1 ? 1 - u : e == 2 ? 1 - v : u;
+                double weight = 1 - across * cells;
+                if (weight <= 0)
+                {
+                    continue;
+                }
+                double position = Math.Max(0, Math.Min(cells, along * cells));
+                int index = Math.Min((int)position, (int)cells - 1);
+                double fraction = position - index;
+                sum = sum + weight * ((1 - fraction) * edgeCorrection[e][index] + fraction * edgeCorrection[e][index + 1]);
+                weights += weight;
+            }
+            return weights > 1 ? sum / weights : sum;
+        }
+
+        // Welds the borders that the displaced patches of a surface share: the offset at a point of a border becomes the average of the offsets of the patches
+        // that meet there (matched by the position of the base surface; a border between patches of different levels has no matching points and is left alone)
+        public static void Weld(pstd.vector<Shape> shapes)
+        {
+            List<DisplacedPatchShape> patches = new List<DisplacedPatchShape>();
+            for (int i = 0; i < (int)shapes.size(); ++i)
+            {
+                DisplacedPatchShape patch = shapes[i] as DisplacedPatchShape;
+                if (patch != null)
+                {
+                    patches.Add(patch);
+                }
+            }
+            Dictionary<string, List<int[]>> byPosition = new Dictionary<string, List<int[]>>();
+            List<SdfVector[][]> offsets = new List<SdfVector[][]>();
+            for (int a = 0; a < patches.Count; ++a)
+            {
+                DisplacedPatchShape patch = patches[a];
+                int cells = Math.Max(1, Math.Max(patch.field.cellsX, patch.field.cellsY));
+                SdfVector[][] own = new SdfVector[4][];
+                for (int e = 0; e < 4; ++e)
+                {
+                    own[e] = new SdfVector[cells + 1];
+                    for (int k = 0; k <= cells; ++k)
+                    {
+                        double t = (double)k / cells;
+                        double u = e == 0 ? t : e == 1 ? 1 : e == 2 ? t : 0, v = e == 0 ? 0 : e == 1 ? t : e == 2 ? 1 : t;
+                        patch.surface.Evaluate(u, v, out SdfVector p, out SdfVector dpdu, out SdfVector dpdv, out Point2f uv, out SdfVector shading);
+                        own[e][k] = patch.RawDisplaced(u, v) - p;
+                        string key = Math.Round(p.x * 1e5) + "," + Math.Round(p.y * 1e5) + "," + Math.Round(p.z * 1e5);
+                        if (!byPosition.TryGetValue(key, out List<int[]> list))
+                        {
+                            list = new List<int[]>();
+                            byPosition[key] = list;
+                        }
+                        list.Add(new int[] { a, e, k });
+                    }
+                }
+                offsets.Add(own);
+            }
+            SdfVector[][][] correction = new SdfVector[patches.Count][][];
+            double[] pad = new double[patches.Count];
+            for (int a = 0; a < patches.Count; ++a)
+            {
+                correction[a] = new SdfVector[4][];
+                for (int e = 0; e < 4; ++e)
+                {
+                    correction[a][e] = new SdfVector[offsets[a][e].Length];
+                }
+            }
+            foreach (List<int[]> list in byPosition.Values)
+            {
+                // One offset per patch, whichever border or corner of it the point is on
+                Dictionary<int, SdfVector> perPatch = new Dictionary<int, SdfVector>();
+                foreach (int[] entry in list)
+                {
+                    if (!perPatch.ContainsKey(entry[0]))
+                    {
+                        perPatch[entry[0]] = offsets[entry[0]][entry[1]][entry[2]];
+                    }
+                }
+                if (perPatch.Count < 2)
+                {
+                    continue;
+                }
+                SdfVector average = new SdfVector(0, 0, 0);
+                foreach (SdfVector offset in perPatch.Values)
+                {
+                    average = average + offset;
+                }
+                average = average / perPatch.Count;
+                foreach (int[] entry in list)
+                {
+                    SdfVector delta = average - offsets[entry[0]][entry[1]][entry[2]];
+                    correction[entry[0]][entry[1]][entry[2]] = delta;
+                    pad[entry[0]] = Math.Max(pad[entry[0]], delta.Length());
+                }
+            }
+            for (int a = 0; a < patches.Count; ++a)
+            {
+                patches[a].edgeCorrection = correction[a];
+                patches[a].weldPad = pad[a];
+                patches[a].GrowBounds(pad[a]);
+            }
+        }
+
+        // The bounds of the shape grown by the distance that the welding moves the surface
+        private void GrowBounds(double distance)
+        {
+            if (!(distance > 0))
+            {
+                return;
+            }
+            Vector3f px = settings.renderFromObject.Apply(new Vector3f(1, 0, 0)), py = settings.renderFromObject.Apply(new Vector3f(0, 1, 0)), pz = settings.renderFromObject.Apply(new Vector3f(0, 0, 1));
+            double scale = Math.Max(pbrt.Length(px), Math.Max(pbrt.Length(py), pbrt.Length(pz)));
+            Vector3f grow = new Vector3f((Float)(distance * scale * 1.01), (Float)(distance * scale * 1.01), (Float)(distance * scale * 1.01));
+            bounds = new Bounds3f(bounds.pMin - grow, bounds.pMax + grow);
+        }
+
+        // The displaced point at the parameters (u, v) of the patch, as the field gives it
+        private SdfVector RawDisplaced(double u, double v)
         {
             surface.Evaluate(u, v, out SdfVector p, out SdfVector dpdu, out SdfVector dpdv, out Point2f uv, out SdfVector shading);
             // At a degenerate point (a corner at an extraordinary vertex) the frame is that of a point nearby
@@ -400,6 +537,11 @@ namespace pbrt
         // low and high grown by the displacement bounded by [displacementLow, displacementHigh]
         private void Grow(ref SdfVector low, ref SdfVector high, SdfVector displacementLow, SdfVector displacementHigh)
         {
+            if (weldPad > 0)
+            {
+                low = low - new SdfVector(weldPad, weldPad, weldPad);
+                high = high + new SdfVector(weldPad, weldPad, weldPad);
+            }
             if (displacement.tangentSpace)
             {
                 double x = Math.Max(Math.Abs(displacementLow.x), Math.Abs(displacementHigh.x));
@@ -675,6 +817,8 @@ namespace pbrt
         }
 
         private PatchAreaSampler sampler;
+        private SdfVector[][] edgeCorrection;
+        private double weldPad;
         private readonly BezierSurfaceSettings settings;
         private readonly PatchSurface surface;
         private readonly BezierPatch4 patch;
@@ -683,6 +827,6 @@ namespace pbrt
         private readonly PatchTextureMap texture;
         private readonly double tileU, tileV;
         private readonly SdfVector rootLow, rootHigh;
-        private readonly Bounds3f bounds;
+        private Bounds3f bounds;
     }
 }

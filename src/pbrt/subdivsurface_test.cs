@@ -317,6 +317,82 @@ namespace pbrt
             CHECK_LT(mismatched, compared / 200);
         }
 
+        // The largest gap between the displaced points that two patches give for the same point of their shared edge
+        private static double SeamGap(string x, string y, string z, bool tangentSpace, out int pairs)
+        {
+            PatchDisplacement displacement = new PatchDisplacement();
+            displacement.mode = PatchDisplacementMode.Vector;
+            displacement.tangentSpace = tangentSpace;
+            displacement.smoothNormals = true;
+            displacement.field = new ShellVectorProcedural(ShellExpression.Parse(x), ShellExpression.Parse(y), ShellExpression.Parse(z), 6, 1);
+            SubdivisionPatches patches = SubdivisionSurface.BuildPatches(Cube(0));
+            pstd.vector<Shape> shapes = displacement.Apply(SubdivisionSurface.CreateShapes(Settings(), patches), Settings());
+            System.Reflection.MethodInfo displaced = typeof(DisplacedPatchShape).GetMethod("Displaced", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            System.Reflection.FieldInfo surfaceField = typeof(DisplacedPatchShape).GetField("surface", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            int count = (int)shapes.size();
+            double worst = 0;
+            pairs = 0;
+            // The samples of the borders of every patch, keyed by their position on the base surface
+            Dictionary<string, List<double[]>> byPosition = new Dictionary<string, List<double[]>>();
+            for (int a = 0; a < count; ++a)
+            {
+                PatchSurface surface = (PatchSurface)surfaceField.GetValue(shapes[a]);
+                for (int e = 0; e < 4; ++e)
+                {
+                    for (int k = 0; k <= 64; ++k)
+                    {
+                        double t = k / 64.0;
+                        double u = e == 0 ? t : e == 1 ? 1 : e == 2 ? t : 0, v = e == 0 ? 0 : e == 1 ? t : e == 2 ? 1 : t;
+                        surface.Evaluate(u, v, out SdfVector p, out SdfVector du, out SdfVector dv, out Point2f uv, out SdfVector ns);
+                        string key = Math.Round(p.x * 1e6) + "," + Math.Round(p.y * 1e6) + "," + Math.Round(p.z * 1e6);
+                        if (!byPosition.TryGetValue(key, out List<double[]> list))
+                        {
+                            list = new List<double[]>();
+                            byPosition[key] = list;
+                        }
+                        list.Add(new double[] { a, u, v });
+                    }
+                }
+            }
+            foreach (List<double[]> list in byPosition.Values)
+            {
+                for (int i = 0; i < list.Count; ++i)
+                {
+                    for (int j = i + 1; j < list.Count; ++j)
+                    {
+                        if ((int)list[i][0] == (int)list[j][0])
+                        {
+                            continue;
+                        }
+                        SdfVector qa = (SdfVector)displaced.Invoke(shapes[(int)list[i][0]], new object[] { list[i][1], list[i][2] });
+                        SdfVector qb = (SdfVector)displaced.Invoke(shapes[(int)list[j][0]], new object[] { list[j][1], list[j][2] });
+                        worst = Math.Max(worst, (qa - qb).Length());
+                        ++pairs;
+                    }
+                }
+            }
+            return worst;
+        }
+
+        [TEST("Subdiv", "DisplacedSeamGaps")]
+        public static void DisplacedSeamGaps()
+        {
+            double constantObject = SeamGap("0.05", "0.03", "0.04", false, out int p1);
+            double borderZeroObject = SeamGap("0.04*sin(2*pi*u)*sin(2*pi*v)", "0.04*sin(2*pi*u)*sin(2*pi*v)", "0.07*sin(4*pi*u)*sin(4*pi*v)", false, out int p2);
+            double borderZeroTangent = SeamGap("0.04*sin(2*pi*u)*sin(2*pi*v)", "0.04*sin(2*pi*u)*sin(2*pi*v)", "0.07*sin(4*pi*u)*sin(4*pi*v)", true, out int p3);
+            double cosineObject = SeamGap("0.06*cos(2*pi*u)+0.03", "0.06*cos(2*pi*v)", "0.05*cos(2*pi*u)*cos(2*pi*v)+0.03", false, out int p4);
+            double cosineTangent = SeamGap("0.06*cos(2*pi*u)+0.03", "0.06*cos(2*pi*v)", "0.05*cos(2*pi*u)*cos(2*pi*v)+0.03", true, out int p5);
+            Console.WriteLine("seam gaps: constant object " + constantObject + " (" + p1 + " points), border-zero object " + borderZeroObject + " (" + p2 + "), border-zero tangent " + borderZeroTangent + " (" + p3 +
+                              "), cosine object " + cosineObject + " (" + p4 + "), cosine tangent " + cosineTangent + " (" + p5 + ")");
+            CHECK_GT(p1, 100);
+            // The seams are welded, so the field need not be continuous across them
+            CHECK_LT(constantObject, 1e-6);
+            CHECK_LT(borderZeroObject, 1e-6);
+            CHECK_LT(borderZeroTangent, 1e-6);
+            CHECK_LT(cosineObject, 1e-6);
+            CHECK_LT(cosineTangent, 1e-6);
+        }
+
         // Rays grazing the silhouette near a corner: the point of every hit must be on the ray and face the viewer (a conservative child hit once had swapped uv offsets)
         [TEST("Subdiv", "SilhouetteHitsLieOnTheRay")]
         public static void SilhouetteHitsLieOnTheRay()
