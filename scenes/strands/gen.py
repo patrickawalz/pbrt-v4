@@ -66,4 +66,4 @@ def ribbons(TYPE='ribbon3', name='ribbons'):
     s += 'Shape "ribbon" "point3 P" [%s] "normal N" [%s] "float width" 0.16 "string type" "%s"\n' % ("  ".join(f(p) for p in pts), "  ".join(f(p) for p in nrm), TYPE)
     s += 'AttributeEnd\n'
     open(name + ".pbrt","w").write(s)
-rocap(); ribbons('ribbon3','ribbons'); ribbons('ribbon2','ribbons2')
+rocap(); ribbons('ribbon3','ribbons')

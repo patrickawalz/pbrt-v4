@@ -179,7 +179,7 @@ namespace pbrt
     public static class Ribbons
     {
         // "point3 P" (the control points of the quadratic B-spline, at least three), "normal N" (the normal of the surface at each point; the normal of the plane of
-        // the curve when absent), "float width" (the half width at each point, or one value for all), "string type" ("ribbon3", the default, or "ribbon2": bilinear patches, about 40% faster, but only the first patch follows the normals), "epsilon" (a fraction of the diagonal of the points that
+        // the curve when absent), "float width" (the half width at each point, or one value for all), "epsilon" (a fraction of the diagonal of the points that
         // keeps rays that leave the surface from hitting it again)
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
@@ -232,26 +232,7 @@ namespace pbrt
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-5f) * diagonal;
 
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
-            string type = parameters.GetOneString("type", "ribbon3");
-            if (type != "ribbon2" && type != "ribbon3")
-            {
-                pbrt.ErrorExit(loc, "ribbon: \"type\" must be \"ribbon2\" or \"ribbon3\".");
-            }
-            IEnumerable<IRibbonSegment> built;
-            if (type == "ribbon2")
-            {
-                built = Ribbon2Builder.Build(points, normals, widths);
-            }
-            else
-            {
-                List<IRibbonSegment> list = new List<IRibbonSegment>();
-                foreach (RibbonSegment segment in RibbonBuilder.Build(points, normals, widths))
-                {
-                    list.Add(segment);
-                }
-                built = list;
-            }
-            foreach (IRibbonSegment segment in built)
+            foreach (RibbonSegment segment in RibbonBuilder.Build(points, normals, widths))
             {
                 shapes.push_back(new RibbonShape(settings, segment));
             }
