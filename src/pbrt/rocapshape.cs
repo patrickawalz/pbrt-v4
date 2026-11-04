@@ -38,16 +38,16 @@ namespace pbrt
 
         public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
         {
-            if (!Trace(ray, tMax, out double t, out double u, out SdfVector normal, out double length))
+            if (!Trace(ray, tMax, out double t, out double u, out SdfVector normal, out SdfVector hitPoint, out double length))
             {
                 return default;
             }
-            return new ShapeIntersection(InteractionAt(u, normal, ray), (Float)(t / length));
+            return new ShapeIntersection(InteractionAt(u, normal, hitPoint, ray), (Float)(t / length));
         }
 
         public override bool IntersectP(Ray ray, Float tMax = Infinity)
         {
-            return Trace(ray, tMax, out double t, out double u, out SdfVector normal, out double length);
+            return Trace(ray, tMax, out double t, out double u, out SdfVector normal, out SdfVector hitPoint, out double length);
         }
 
         // The area of the surface of revolution of the strand (the caps of the spheres at the ends are not counted)
@@ -97,8 +97,9 @@ namespace pbrt
             get { return segment; }
         }
 
-        private bool Trace(Ray ray, Float tMax, out double t, out double u, out SdfVector normal, out double length)
+        private bool Trace(Ray ray, Float tMax, out double t, out double u, out SdfVector normal, out SdfVector hitPoint, out double length)
         {
+            hitPoint = default;
             t = 0;
             u = 0;
             normal = default;
@@ -112,13 +113,17 @@ namespace pbrt
             SdfVector origin = new SdfVector(o.x, o.y, o.z);
             SdfVector direction = new SdfVector(d.x / length, d.y / length, d.z / length);
             double tMaxObject = float.IsPositiveInfinity(tMax) ? 1e30 : tMax * length;
-            return segment.Intersect(origin, direction, settings.epsilon, tMaxObject, out t, out u, out normal);
+            if (!segment.Intersect(origin, direction, settings.epsilon, tMaxObject, out t, out u, out normal))
+            {
+                return false;
+            }
+            hitPoint = origin + direction * t;
+            return true;
         }
 
-        private SurfaceInteraction InteractionAt(double u, SdfVector normalObject, Ray ray)
+        private SurfaceInteraction InteractionAt(double u, SdfVector normalObject, SdfVector position, Ray ray)
         {
             Transform renderFromObject = settings.renderFromObject;
-            SdfVector position = segment.Position(u) + normalObject * Math.Max(0, segment.Radius(u));
             SdfVector tangent = segment.Velocity(u);
             // The tangent of the surface in the direction of the strand
             SdfVector along = tangent - normalObject * SdfVector.Dot(tangent, normalObject);
@@ -155,7 +160,7 @@ namespace pbrt
     public static class Rocaps
     {
         // "point3 P" (the control points of the chain of cubic Bezier curves: 3n + 1 points), "float radius" (one value, or one for each point),
-        // "float width0" and "float width1" (diameters at the two ends when "radius" is absent, 0.02 and 0.02 of the diagonal), "epsilon" (a fraction of the
+        // "float width0" and "float width1" (diameters at the two ends when "radius" is absent, 0.02 and 0.02 of the diagonal), "bool flatcaps" (disks at the ends instead of spheres), "epsilon" (a fraction of the
         // diagonal of the points that keeps rays that leave the surface from hitting it again)
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
@@ -206,13 +211,14 @@ namespace pbrt
             settings.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-6f) * diagonal;
 
+            bool flatCaps = parameters.GetOneBool("flatcaps", false);
             int count = (points.Length - 1) / 3;
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             for (int s = 0; s < count; ++s)
             {
                 SdfVector[] p = new SdfVector[] { points[3 * s], points[3 * s + 1], points[3 * s + 2], points[3 * s + 3] };
                 double[] r = new double[] { radii[3 * s], radii[3 * s + 1], radii[3 * s + 2], radii[3 * s + 3] };
-                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count)));
+                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }));
             }
             return shapes;
         }

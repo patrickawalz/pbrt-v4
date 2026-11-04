@@ -36,6 +36,9 @@ namespace pbrt
             maxAcceleration = Math.Max(a0.Length(), a1.Length());
         }
 
+        // Flat caps: the strand ends in disks perpendicular to the curve instead of spheres (the solid is cut by the planes of the ends)
+        public bool FlatCaps;
+
         public readonly int index, count;
 
         public SdfVector[] ControlPoints
@@ -117,6 +120,17 @@ namespace pbrt
             u = 0;
             normal = new SdfVector(0, 0, 1);
             bool found = false;
+            double slabLow = double.MinValue, slabHigh = double.MaxValue;
+            SdfVector slabNormal = default;
+            int slabPlane = -1;
+            if (FlatCaps)
+            {
+                Slab(o, d, out slabLow, out slabHigh, out slabPlane, out slabNormal, out bool empty);
+                if (empty || slabLow > slabHigh)
+                {
+                    return false;
+                }
+            }
 
             // The ray at the origin: the control points relative to it (more accurate for rays that start far away, Section 4)
             SdfVector q0 = point[0] - o, q1 = point[1] - o, q2 = point[2] - o, q3 = point[3] - o;
@@ -162,7 +176,7 @@ namespace pbrt
                     double hitU = us + fraction * (ue - us);
                     double refinedT = capsuleT;
                     SdfVector refinedNormal = default;
-                    bool ok = Scan(o, d, us, ue, ref hitU, ref refinedT, out refinedNormal);
+                    bool ok = Scan(o, d, us, ue, tMin, slabLow, slabHigh, slabNormal, ref hitU, ref refinedT, out refinedNormal);
                     if (!ok)
                     {
                         // the swept spheres of the interval are missed: the capsule was larger than the surface
@@ -188,6 +202,48 @@ namespace pbrt
                 us = ue;
             }
             return found;
+        }
+
+        // The interval of the ray inside the slab between the planes of the ends (flat caps), and the plane (0: start, 1: end) that bounds it from below
+        private void Slab(SdfVector o, SdfVector d, out double low, out double high, out int lowPlane, out SdfVector lowNormal, out bool empty)
+        {
+            low = double.MinValue;
+            high = double.MaxValue;
+            lowPlane = -1;
+            lowNormal = default;
+            empty = false;
+            for (int end = 0; end <= 1; ++end)
+            {
+                SdfVector axis = Velocity(end);
+                if (!(axis.LengthSquared() > 0))
+                {
+                    continue;
+                }
+                axis = axis.Normalized();
+                // inside the slab: (p - q0) . axis >= 0 at the start, (p - q1) . axis <= 0 at the end; outward = -axis at the start and +axis at the end
+                SdfVector outward = end == 0 ? -axis : axis;
+                double slope = SdfVector.Dot(d, outward);
+                double offset = SdfVector.Dot(Position(end) - o, outward);
+                // inside: t * slope <= offset
+                if (slope > 0)
+                {
+                    high = Math.Min(high, offset / slope);
+                }
+                else if (slope < 0)
+                {
+                    double entry = offset / slope;
+                    if (entry > low)
+                    {
+                        low = entry;
+                        lowPlane = end;
+                        lowNormal = outward;
+                    }
+                }
+                else if (offset < 0)
+                {
+                    empty = true;
+                }
+            }
         }
 
         // The size of the capsules in the parameter (the function capsule_step of the paper, without the footprint of the pixel)
@@ -310,29 +366,36 @@ namespace pbrt
             return true;
         }
 
-        // The first hit of the ray with the sphere (q(u), r(u)) and the mapping error e(u) = v . q'(u) - r(u) r'(u) of Section 4.4 (v: from the curve to the hit)
-        private bool SphereError(SdfVector o, SdfVector d, double u, out double t, out double error, out SdfVector v)
+        // The clamped entry of the ray into the sphere (q(u), r(u)): the entry, moved to the start of the slab (flat caps) when the ray is already inside the sphere there,
+        // or double.MaxValue when the ray leaves the sphere before the slab or misses it
+        private double ClampedEntry(SdfVector o, SdfVector d, double u, double tMin, double slabLow, double slabHigh, out bool onPlane, out SdfVector v)
         {
+            onPlane = false;
+            v = default;
             SdfVector c = Position(u) - o;
             double r = Radius(u);
             double b = SdfVector.Dot(c, d);
             double h = b * b - SdfVector.Dot(c, c) + r * r;
             if (h < 0)
             {
-                t = 0;
-                error = 0;
-                v = default;
-                return false;
+                return double.MaxValue;
             }
-            t = b - Math.Sqrt(h);
-            v = d * t - c;
-            error = SdfVector.Dot(v, Velocity(u)) - r * RadiusDerivative(u);
-            return true;
+            double root = Math.Sqrt(h);
+            double entry = b - root, exit = b + root;
+            double start = Math.Max(entry, slabLow), finish = Math.Min(exit, slabHigh);
+            if (!(start <= finish) || !(start > tMin))
+            {
+                return double.MaxValue;
+            }
+            onPlane = start > entry;
+            v = d * start - c;
+            return start;
         }
 
-        // Improves the parameter of the hit of a capsule with the secant method on e(u)
-        // The nearest entry into the spheres of the parameters in [lo, hi]: a scan, then the golden section search around the best sample
-        private bool Scan(SdfVector o, SdfVector d, double lo, double hi, ref double u, ref double t, out SdfVector normal)
+        // The nearest entry into the spheres of the parameters in [lo, hi] (cut by the slab of flat caps): a scan, then the golden section search around the best
+        // sample. The entry of the sphere that is the nearest is on the swept surface (or on the plane of an end).
+        private bool Scan(SdfVector o, SdfVector d, double lo, double hi, double tMin, double slabLow, double slabHigh, SdfVector slabNormal, ref double u, ref double t,
+                          out SdfVector normal)
         {
             normal = default;
             const int samples = 12;
@@ -340,7 +403,8 @@ namespace pbrt
             for (int i = 0; i <= samples; ++i)
             {
                 double w = lo + (hi - lo) * i / samples;
-                if (SphereError(o, d, w, out double ts, out double es, out SdfVector vs) && ts < bestT)
+                double ts = ClampedEntry(o, d, w, tMin, slabLow, slabHigh, out bool planeSample, out SdfVector vs);
+                if (ts < bestT)
                 {
                     bestT = ts;
                     bestU = w;
@@ -355,8 +419,8 @@ namespace pbrt
             for (int i = 0; i < 34; ++i)
             {
                 double c1 = b - phi * (b - a), c2 = a + phi * (b - a);
-                double f1 = SphereError(o, d, c1, out double tt1, out double ee1, out SdfVector vv1) ? tt1 : double.MaxValue;
-                double f2 = SphereError(o, d, c2, out double tt2, out double ee2, out SdfVector vv2) ? tt2 : double.MaxValue;
+                double f1 = ClampedEntry(o, d, c1, tMin, slabLow, slabHigh, out bool p1, out SdfVector v1);
+                double f2 = ClampedEntry(o, d, c2, tMin, slabLow, slabHigh, out bool p2, out SdfVector v2);
                 if (f1 < f2)
                 {
                     b = c2;
@@ -367,20 +431,16 @@ namespace pbrt
                 }
             }
             double best = 0.5 * (a + b);
-            if (!SphereError(o, d, best, out double tb, out double eb, out SdfVector vb) || tb > bestT)
+            double tb = ClampedEntry(o, d, best, tMin, slabLow, slabHigh, out bool onPlane, out SdfVector vb);
+            if (!(tb <= bestT))
             {
                 best = bestU;
-                SphereError(o, d, best, out tb, out eb, out vb);
+                tb = ClampedEntry(o, d, best, tMin, slabLow, slabHigh, out onPlane, out vb);
             }
             u = best;
             t = tb;
-            normal = Unit(vb, Radius(best));
+            normal = onPlane ? slabNormal : Unit(vb, Radius(best));
             return true;
-        }
-
-        private double ScaleOf(double u)
-        {
-            return Velocity(u).Length() * Math.Max(Radius(u), 1e-300);
         }
 
         private static SdfVector Unit(SdfVector v, double r)
