@@ -325,16 +325,19 @@ namespace pbrt
             int cellY1 = Math.Max(0, Math.Min(field.cellsY - 1, (int)Math.Ceiling(maxY - 1e-9) - 1));
             cellX1 = Math.Max(cellX1, cellX0);
             cellY1 = Math.Max(cellY1, cellY0);
-            int level = displacement.mode == PatchDisplacementMode.Shell ? 0 : field.levels - 1;
-            if (displacement.mode == PatchDisplacementMode.Shell)
+            // The smallest level of the pyramid whose nodes cover the footprint with at most two nodes along each axis
+            int level = 0;
+            while (level < field.levels - 1 && ((cellX1 >> level) - (cellX0 >> level) > 1 || (cellY1 >> level) - (cellY0 >> level) > 1))
             {
-                while (level < field.levels - 1 && ((cellX1 >> level) - (cellX0 >> level) > 1 || (cellY1 >> level) - (cellY0 >> level) > 1))
-                {
-                    ++level;
-                }
+                ++level;
             }
-            double[] box = new double[6];
-            double[] sum = { double.MaxValue, double.MaxValue, double.MaxValue, -double.MaxValue, -double.MaxValue, -double.MaxValue };
+            double[] box = boundBox ??= new double[6];
+            double[] sum = boundSum ??= new double[6];
+            for (int c = 0; c < 3; ++c)
+            {
+                sum[c] = double.MaxValue;
+                sum[3 + c] = -double.MaxValue;
+            }
             for (int j = cellY0 >> level; j <= cellY1 >> level; ++j)
             {
                 for (int i = cellX0 >> level; i <= cellX1 >> level; ++i)
@@ -370,6 +373,11 @@ namespace pbrt
             }
         }
 
+        [ThreadStatic]
+        private static double[] boundBox;
+        [ThreadStatic]
+        private static double[] boundSum;
+
         private bool Trace(Ray ray, Float tMax, bool anyHit, out Hit hit, out double length)
         {
             hit = default;
@@ -393,15 +401,7 @@ namespace pbrt
             SdfVector low, high;
             node.GetMinMax(out low, out high, 0);
             SdfVector boundLow, boundHigh;
-            if (displacement.mode == PatchDisplacementMode.Shell)
-            {
-                GridFootprintBound(u0, u1, v0, v1, out boundLow, out boundHigh);
-            }
-            else
-            {
-                boundLow = rootLow;
-                boundHigh = rootHigh;
-            }
+            GridFootprintBound(u0, u1, v0, v1, out boundLow, out boundHigh);
             Grow(ref low, ref high, boundLow, boundHigh);
             if (!SlabTest(origin, direction, low, high, hit.t, out double entry))
             {
@@ -425,31 +425,41 @@ namespace pbrt
             }
 
             double um = 0.5 * (u0 + u1), vm = 0.5 * (v0 + v1);
-            node.Split4(out BezierPatch4 c0, out BezierPatch4 c1, out BezierPatch4 c2, out BezierPatch4 c3, 0.5, 0.5);
+            BezierPatch4* children = stackalloc BezierPatch4[4];
+            node.Split4(out children[0], out children[1], out children[2], out children[3], 0.5, 0.5);
+            double* us = stackalloc double[4];
+            double* ue = stackalloc double[4];
+            double* vs = stackalloc double[4];
+            double* ve = stackalloc double[4];
+            us[0] = u0; ue[0] = um; vs[0] = v0; ve[0] = vm;
+            us[1] = um; ue[1] = u1; vs[1] = v0; ve[1] = vm;
+            us[2] = u0; ue[2] = um; vs[2] = vm; ve[2] = v1;
+            us[3] = um; ue[3] = u1; vs[3] = vm; ve[3] = v1;
             // The children in the order of the entry of the ray into their boxes
-            BezierPatch4[] children = { c0, c1, c2, c3 };
-            double[] us = { u0, um, u0, um };
-            double[] ue = { um, u1, um, u1 };
-            double[] vs = { v0, v0, vm, vm };
-            double[] ve = { vm, vm, v1, v1 };
-            double[] order = new double[4];
-            int[] index = { 0, 1, 2, 3 };
+            double* order = stackalloc double[4];
+            int* index = stackalloc int[4];
             for (int k = 0; k < 4; ++k)
             {
                 children[k].GetMinMax(out SdfVector cl, out SdfVector ch, 0);
                 Grow(ref cl, ref ch, boundLow, boundHigh);
                 order[k] = SlabTest(origin, direction, cl, ch, hit.t, out double e) ? e : double.MaxValue;
+                int position = k;
+                while (position > 0 && order[index[position - 1]] > order[k])
+                {
+                    index[position] = index[position - 1];
+                    --position;
+                }
+                index[position] = k;
             }
-            Array.Sort(order, index);
             bool found = false;
             for (int k = 0; k < 4; ++k)
             {
-                if (order[k] == double.MaxValue || order[k] > hit.t)
+                int child = index[k];
+                if (order[child] == double.MaxValue || order[child] > hit.t)
                 {
                     break;
                 }
-                int child = index[k];
-                if (Visit(children[child], us[child], ue[child], vs[child], ve[child], depth + 1, origin, direction, anyHit, ref hit))
+                if (Visit(in children[child], us[child], ue[child], vs[child], ve[child], depth + 1, origin, direction, anyHit, ref hit))
                 {
                     found = true;
                     if (anyHit)
