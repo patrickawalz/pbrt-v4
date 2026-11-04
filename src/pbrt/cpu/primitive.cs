@@ -28,8 +28,9 @@ namespace pbrt
     {
         // GeometricPrimitive Public Methods
         public GeometricPrimitive(Shape shape, Material material, Light areaLight,
-                                  MediumInterface mediumInterface, FloatTexture alpha = null)
+                                  MediumInterface mediumInterface, FloatTexture alpha = null, int objectId = 0)
         {
+            this.objectId = objectId;
             this.shape = shape;
             this.material = material;
             this.areaLight = areaLight;
@@ -73,6 +74,7 @@ namespace pbrt
 
             // Initialize _SurfaceInteraction_ after _Shape_ intersection
             si.value().intr.SetIntersectionProperties(material, areaLight, mediumInterface);
+            si.value().intr.objectId = objectId;
 
             return si;
         }
@@ -91,14 +93,16 @@ namespace pbrt
         Light areaLight;
         MediumInterface mediumInterface;
         FloatTexture alpha;
+        int objectId;
     }
 
     // SimplePrimitive Definition
     public sealed unsafe class SimplePrimitive : Primitive
     {
         // SimplePrimitive Public Methods
-        public SimplePrimitive(Shape shape, Material material)
+        public SimplePrimitive(Shape shape, Material material, int objectId = 0)
         {
+            this.objectId = objectId;
             this.shape = shape;
             this.material = material;
         }
@@ -120,11 +124,13 @@ namespace pbrt
                 return default;
 
             si.value().intr.SetIntersectionProperties(material, null, null);
+            si.value().intr.objectId = objectId;
 
             return si;
         }
 
         // SimplePrimitive Private Members
+        int objectId;
         Shape shape;
         Material material;
     }
@@ -138,6 +144,9 @@ namespace pbrt
         {
             this.primitive = primitive;
             this.renderFromPrimitive = renderFromPrimitive;
+            // Each instance varies on its own: its position (the translation of the transform) is mixed into the number of the object of the hit
+            Point3f origin = renderFromPrimitive.Apply(new Point3f(0, 0, 0));
+            instanceId = ObjectIds.Mix(ObjectIds.Mix(BitConverter.SingleToInt32Bits(origin.x), BitConverter.SingleToInt32Bits(origin.y)), BitConverter.SingleToInt32Bits(origin.z));
         }
 
         public override Bounds3f Bounds() { return renderFromPrimitive.Apply(primitive.Bounds()); }
@@ -153,6 +162,7 @@ namespace pbrt
 
             // Return transformed instance's intersection information
             si.Ref().intr = renderFromPrimitive.Apply(si.value().intr);
+            si.Ref().intr.objectId = ObjectIds.Mix(si.value().intr.objectId, instanceId);
             CHECK_GE(Dot(si.value().intr.n, si.value().intr.shading.n), (Float)0);
             return si;
         }
@@ -166,6 +176,7 @@ namespace pbrt
         // TransformedPrimitive Private Members
         Primitive primitive;
         Transform renderFromPrimitive;
+        int instanceId;
     }
 
     // AnimatedPrimitive Definition

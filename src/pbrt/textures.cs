@@ -157,6 +157,7 @@ namespace pbrt
             dpdx = default; dpdy = default; n = default;
             dudx = 0; dudy = 0; dvdx = 0; dvdy = 0;
             faceIndex = 0;
+            objectId = 0;
         }
         public TextureEvalContext(SurfaceInteraction si)
         {
@@ -170,10 +171,12 @@ namespace pbrt
             dvdx = si.dvdx;
             dvdy = si.dvdy;
             faceIndex = si.faceIndex;
+            objectId = si.objectId;
         }
         public TextureEvalContext(Point3f p, Vector3f dpdx, Vector3f dpdy, Normal3f n, Point2f uv, Float dudx, Float dudy,
-                                  Float dvdx, Float dvdy, int faceIndex)
+                                  Float dvdx, Float dvdy, int faceIndex, int objectId = 0)
         {
+            this.objectId = objectId;
             this.p = p;
             this.dpdx = dpdx;
             this.dpdy = dpdy;
@@ -198,6 +201,7 @@ namespace pbrt
         public Point2f uv;
         public Float dudx, dudy, dvdx, dvdy;
         public int faceIndex;
+        public int objectId;
     }
 
     // TexCoord2D Definition
@@ -1172,6 +1176,17 @@ namespace pbrt
             return pbrt.RGBSpectrumBound(spectrumType, mipmap.GetRGBColorSpace(), m);
         }
 
+        public override bool SupportsRGB { get { return mipmap.GetRGBColorSpace() != null; } }
+
+        public override bool TryEvaluateRGB(TextureEvalContext ctx, out RGB rgb)
+        {
+            TexCoord2D c = mapping.Map(ctx);
+            c.st.y = 1 - c.st.y;
+            rgb = scale * mipmap.Filter<RGB>(c.st, new Vector2f(c.dsdx, c.dtdx), new Vector2f(c.dsdy, c.dtdy));
+            rgb = pbrt.ClampZero(invert ? (new RGB(1, 1, 1) - rgb) : rgb);
+            return mipmap.GetRGBColorSpace() != null;
+        }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             // Apply texture mapping and flip $t$ coordinate for image texture lookup
@@ -1987,6 +2002,8 @@ namespace pbrt
                 tex = MarbleTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "densitygrid")
                 tex = SpectrumGridTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "variation")
+                tex = SpectrumVariationTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "strandcolor")
                 tex = SpectrumStrandColorTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ramp")

@@ -997,9 +997,9 @@ namespace pbrt
                                 area = areaList[(int)j];
 
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
-                                prims.Add(new SimplePrimitive(shapeObjs[j], mtl));
+                                prims.Add(new SimplePrimitive(shapeObjs[j], mtl, ObjectIds.Hash(sh.loc)));
                             else
-                                prims.Add(new GeometricPrimitive(shapeObjs[j], mtl, area, mi, alphaTex));
+                                prims.Add(new GeometricPrimitive(shapeObjs[j], mtl, area, mi, alphaTex, ObjectIds.Hash(sh.loc)));
                         }
                         sh.parameters.FreeParameters();
                     }

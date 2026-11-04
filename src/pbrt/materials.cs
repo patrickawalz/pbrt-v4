@@ -93,7 +93,7 @@ namespace pbrt
         {
             TextureEvalContext t = new TextureEvalContext(si);
             p = t.p; dpdx = t.dpdx; dpdy = t.dpdy; n = t.n; uv = t.uv;
-            dudx = t.dudx; dudy = t.dudy; dvdx = t.dvdx; dvdy = t.dvdy; faceIndex = t.faceIndex;
+            dudx = t.dudx; dudy = t.dudy; dvdx = t.dvdx; dvdy = t.dvdy; faceIndex = t.faceIndex; objectId = t.objectId;
             wo = si.wo;
             ns = si.shading.n;
             dpdus = si.shading.dpdu;
@@ -103,7 +103,7 @@ namespace pbrt
 
         public static implicit operator TextureEvalContext(MaterialEvalContext c)
         {
-            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex);
+            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex, c.objectId);
         }
 
         public override string ToString()
@@ -119,6 +119,7 @@ namespace pbrt
         public Point2f uv;
         public Float dudx, dudy, dvdx, dvdy;
         public int faceIndex;
+        public int objectId;
         // MaterialEvalContext members
         public Vector3f wo;
         public Normal3f ns;
@@ -141,6 +142,7 @@ namespace pbrt
             dpdx = si.dpdx;
             dpdy = si.dpdy;
             faceIndex = si.faceIndex;
+            objectId = si.objectId;
             shading = new ShadingGeometry();
             shading.n = si.shading.n;
             shading.dpdu = si.shading.dpdu;
@@ -151,7 +153,7 @@ namespace pbrt
 
         public static implicit operator TextureEvalContext(NormalBumpEvalContext c)
         {
-            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex);
+            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex, c.objectId);
         }
 
         public override string ToString()
@@ -177,6 +179,7 @@ namespace pbrt
         public Float dudx, dudy, dvdx, dvdy;
         public Vector3f dpdx, dpdy;
         public int faceIndex;
+        public int objectId;
     }
 
     // DielectricMaterial Definition

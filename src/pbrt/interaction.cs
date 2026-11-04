@@ -479,6 +479,8 @@ namespace pbrt
         public Normal3f dndu, dndv;
         public Shading shading;
         public int faceIndex = 0;
+        // A number that identifies the object of the hit (the shape of the scene file, mixed with the instance): the seed of the variation of a texture by object
+        public int objectId = 0;
         public Material material;
         public Light areaLight;
         public Vector3f dpdx, dpdy;

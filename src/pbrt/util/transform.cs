@@ -448,6 +448,7 @@ namespace pbrt
             ret.areaLight = si.areaLight;
             ret.shading.n = FaceForward(ret.shading.n, ret.n);
             ret.faceIndex = si.faceIndex;
+            ret.objectId = si.objectId;
             return ret;
         }
 
@@ -547,6 +548,7 @@ namespace pbrt
             ret.areaLight = si.areaLight;
             ret.shading.n = FaceForward(ret.shading.n, ret.n);
             ret.faceIndex = si.faceIndex;
+            ret.objectId = si.objectId;
             return ret;
         }
 

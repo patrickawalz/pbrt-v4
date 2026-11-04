@@ -125,6 +125,14 @@ namespace pbrt
             return result;
         }
 
+        public override bool SupportsRGB { get { return true; } }
+
+        public override bool TryEvaluateRGB(TextureEvalContext ctx, out RGB rgb)
+        {
+            rgb = pbrt.ClampZero(Color(ctx.uv[0], ctx.faceIndex));
+            return true;
+        }
+
         // The colors are blended inside their hull, so the largest component bounds the texture
         public override Float MaxValue()
         {
