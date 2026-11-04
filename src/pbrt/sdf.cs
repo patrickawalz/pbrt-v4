@@ -131,6 +131,13 @@ namespace pbrt
             return true;
         }
 
+        // Adds to w the share of each labelled operand (see SdfLabel) in the material at p; weight is the share of this node. A node
+        // without labels below it gives all of its weight to label 0.
+        public virtual void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            w.Add(0, weight);
+        }
+
         // The gradient by a tetrahedral central difference; h is the offset of the four samples
         public SdfVector Gradient(SdfVector p, double h)
         {
@@ -583,6 +590,11 @@ namespace pbrt
             return context.Min(context.Compile(a, x, y, z), context.Compile(b, x, y, z));
         }
 
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            if (a.Evaluate(p) <= b.Evaluate(p)) a.Weights(p, w, weight); else b.Weights(p, w, weight);
+        }
+
         private readonly SdfNode a, b;
     }
 
@@ -622,6 +634,11 @@ namespace pbrt
         public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
         {
             return context.Max(context.Compile(a, x, y, z), context.Compile(b, x, y, z));
+        }
+
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            if (a.Evaluate(p) >= b.Evaluate(p)) a.Weights(p, w, weight); else b.Weights(p, w, weight);
         }
 
         private readonly SdfNode a, b;
@@ -666,6 +683,12 @@ namespace pbrt
             Expression da = context.Compile(a, x, y, z);
             Expression db = context.Compile(b, x, y, z);
             return context.Max(da, context.Negate(db));
+        }
+
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            // The cut surface belongs to the subtracted shape
+            if (a.Evaluate(p) >= -b.Evaluate(p)) a.Weights(p, w, weight); else b.Weights(p, w, weight);
         }
 
         private readonly SdfNode a, b;
@@ -743,6 +766,17 @@ namespace pbrt
                 return context.SmoothMax(da, db, width, kind);
             }
             return context.SmoothMax(da, context.Negate(db), width, kind);
+        }
+
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            double da = a.Evaluate(p), db = b.Evaluate(p);
+            if (operation == 2) db = -db;
+            // Across the blend width the weight moves smoothly from one operand to the other
+            double t = width <= 0 ? (operation == 1 ? (da >= db ? 1 : 0) : (da <= db ? 1 : 0))
+                                  : SdfWeights.SmoothStep(operation == 1 ? 0.5 + 0.5 * (da - db) / width : 0.5 + 0.5 * (db - da) / width);
+            if (t > 0) a.Weights(p, w, weight * t);
+            if (t < 1) b.Weights(p, w, weight * (1 - t));
         }
 
         private readonly SdfNode a, b;
@@ -998,6 +1032,11 @@ namespace pbrt
             return context.Subtract(context.Compile(child, x, y, z), context.Constant(amount));
         }
 
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            child.Weights(p, w, weight);
+        }
+
         private readonly SdfNode child;
         private readonly double amount;
     }
@@ -1039,6 +1078,11 @@ namespace pbrt
         public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
         {
             return context.Subtract(context.Abs(context.Compile(child, x, y, z)), context.Constant(0.5 * thickness));
+        }
+
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            child.Weights(p, w, weight);
         }
 
         private readonly SdfNode child;
@@ -1121,6 +1165,11 @@ namespace pbrt
             return context.Compile(child, nx, ny, nz);
         }
 
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            child.Weights(Linear(p) + translation, w, weight);
+        }
+
         private readonly SdfNode child;
         private readonly double[] m;
         private readonly SdfVector translation;
@@ -1162,6 +1211,11 @@ namespace pbrt
             Expression ny = context.Define(context.Divide(y, context.Constant(sy)));
             Expression nz = context.Define(context.Divide(z, context.Constant(sz)));
             return context.Multiply(context.Compile(child, nx, ny, nz), context.Constant(smallest));
+        }
+
+        public override void Weights(SdfVector p, SdfWeights w, double weight)
+        {
+            child.Weights(new SdfVector(p.x / sx, p.y / sy, p.z / sz), w, weight);
         }
 
         private readonly SdfNode child;

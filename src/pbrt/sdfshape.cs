@@ -25,7 +25,9 @@ namespace pbrt
         Spherical,
         Cylindrical,
         Planar,
-        Box
+        Box,
+        PlanarYZ,
+        PlanarXZ
     }
 
     // SdfShapeOptions Definition
@@ -274,6 +276,7 @@ namespace pbrt
 
         public override bool IntersectP(Ray ray, Float tMax = Infinity)
         {
+            SdfTime.Current = ray.time;
             if (!PrepareRay(ray, tMax, out SdfVector o, out SdfVector w, out double dirLength, out double u0, out double u1))
             {
                 return false;
@@ -287,6 +290,7 @@ namespace pbrt
 
         public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
         {
+            SdfTime.Current = ray.time;
             if (!PrepareRay(ray, tMax, out SdfVector o, out SdfVector w, out double dirLength, out double u0, out double u1))
             {
                 return default;
@@ -353,6 +357,20 @@ namespace pbrt
                 uv = new Point2f((Float)p.x, (Float)p.y);
                 gradU = new SdfVector(1, 0, 0);
                 gradV = new SdfVector(0, 1, 0);
+                return;
+            }
+            if (mode == SdfUvMapping.PlanarYZ)
+            {
+                uv = new Point2f((Float)p.y, (Float)p.z);
+                gradU = new SdfVector(0, 1, 0);
+                gradV = new SdfVector(0, 0, 1);
+                return;
+            }
+            if (mode == SdfUvMapping.PlanarXZ)
+            {
+                uv = new Point2f((Float)p.x, (Float)p.z);
+                gradU = new SdfVector(1, 0, 0);
+                gradV = new SdfVector(0, 0, 1);
                 return;
             }
             if (mode == SdfUvMapping.Cylindrical)
@@ -601,9 +619,18 @@ namespace pbrt
             {
                 options.uvMapping = SdfUvMapping.Planar;
             }
-            else if (mapping == "box")
+            else if (mapping == "box" || mapping == "triplanar")
             {
+                // The face is chosen by the dominant axis of the normal (a blend of three lookups is the "triplanar" texture)
                 options.uvMapping = SdfUvMapping.Box;
+            }
+            else if (mapping == "planaryz" || mapping == "yz")
+            {
+                options.uvMapping = SdfUvMapping.PlanarYZ;
+            }
+            else if (mapping == "planarxz" || mapping == "xz")
+            {
+                options.uvMapping = SdfUvMapping.PlanarXZ;
             }
             else
             {

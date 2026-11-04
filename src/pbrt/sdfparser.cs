@@ -11,6 +11,8 @@
 //   translate(a, x, y, z)  rotate(a, rx, ry, rz)  rotateaxis(a, ax, ay, az, degrees)  scale(a, s | sx, sy, sz)
 //   twist(a, k)  bend(a, k)  repeat(a, px, py, pz [, count])  mirror(a, "x"|"y"|"z")  elongate(a, hx, hy, hz)
 //   displace(a, amplitude, frequency [, octaves, roughness])
+//   inset  ink  clip  julia  metaballs  texdisplace  label  transfer  morph  translate_t  rotate_t  displace_t  mandelbulbt
+//   (see sdfops.cs)
 //
 // and the operators a | b (union), a & b (intersection) and a - b (subtraction), with & binding tighter than - and | .
 // The constant pi is known; angles are in degrees.
@@ -515,6 +517,60 @@ namespace pbrt
                     Count(a, name, 3, 5);
                     return new SdfNoiseDisplacement(Node(a, 0, name), Number(a, 1, name, this), Number(a, 2, name, this),
                                                     (int)Number(a, 3, 1, name), Number(a, 4, 0.5, name));
+                case "inset":
+                    Count(a, name, 3, 4);
+                    return new SdfInset(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this), Number(a, 3, 0.05, name));
+                case "ink":
+                    Count(a, name, 3, 3);
+                    return new SdfInk(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this));
+                case "clip":
+                    Count(a, name, 2, 3);
+                    return new SdfClip(Node(a, 0, name), Node(a, 1, name), Number(a, 2, 0.01, name));
+                case "julia":
+                    Count(a, name, 4, 8);
+                    return new SdfJulia(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this),
+                                        Number(a, 3, name, this), (int)Number(a, 4, 12, name), Number(a, 5, 4, name),
+                                        Number(a, 6, 0, name), Number(a, 7, 0.5, name));
+                case "metaballs":
+                    if (a.Count < 6 || (a.Count - 1) % 5 != 0)
+                    {
+                        Fail("metaballs takes a threshold and then groups of x, y, z, radius, strength");
+                    }
+                    double[] balls = new double[a.Count - 1];
+                    for (int i = 1; i < a.Count; ++i)
+                    {
+                        balls[i - 1] = Number(a, i, name, this);
+                    }
+                    return new SdfMetaballs(Number(a, 0, name, this), balls);
+                case "texdisplace":
+                    Count(a, name, 3, 7);
+                    return new SdfTextureDisplace(Node(a, 0, name),
+                                                  new SdfHeight(Text(a, 1, name), a.Count > 5 ? Text(a, 5, name) : "xyz", Number(a, 6, 1, name)),
+                                                  Number(a, 2, name, this), Number(a, 3, 0, name), Number(a, 4, 1, name), context.domainRadius);
+                case "label":
+                    Count(a, name, 2, 2);
+                    return new SdfLabel(Node(a, 0, name), (int)Number(a, 1, name, this));
+                case "transfer":
+                    Count(a, name, 2, 2);
+                    return new SdfTransfer(Node(a, 0, name), Node(a, 1, name));
+                case "morph":
+                    Count(a, name, 2, 2);
+                    return new SdfMorph(Node(a, 0, name), Node(a, 1, name));
+                case "translate_t":
+                    Count(a, name, 4, 4);
+                    return new SdfTimeTranslate(Node(a, 0, name),
+                                                new SdfVector(Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this)));
+                case "rotate_t":
+                    Count(a, name, 4, 4);
+                    return new SdfTimeRotate(Node(a, 0, name), Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this));
+                case "displace_t":
+                    Count(a, name, 4, 6);
+                    return new SdfTimeDisplacement(Node(a, 0, name), Number(a, 1, name, this), Number(a, 2, name, this),
+                                                   Number(a, 3, name, this), (int)Number(a, 4, 1, name), Number(a, 5, 0.5, name));
+                case "mandelbulbt":
+                    Count(a, name, 2, 5);
+                    return new SdfTimeMandelbulb(Number(a, 0, name, this), Number(a, 1, name, this), (int)Number(a, 2, 12, name),
+                                                 Number(a, 3, 4, name), Number(a, 4, 0.6, name));
                 default:
                     Fail("unknown function \"" + name + "\"");
                     return null;
