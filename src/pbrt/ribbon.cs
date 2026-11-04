@@ -310,51 +310,46 @@ namespace pbrt
             return result.LengthSquared() > 0 ? result.Normalized() : new SdfVector(1, 0, 0);
         }
 
-        // Section 4.1: the terms beta, gamma (and the length alpha of the last bitangent) of the segment next that make the surface normals of both segments
-        // collinear along the joint: the coefficients of v and v^2 of equation (10) must vanish
+        // Section 4.1: the terms beta, gamma (and the length alpha of the last bitangent) of the segment next that make the surface normals of both segments the
+        // same along the joint. The normal at (u, v) is parallel to X + v w Y with X = B' x b and Y = g' x g / |g|^2; the tangent B' is the same on both sides of
+        // a joint of the quadratic B-spline and so is g (up to its length), so the normals agree for every v when Y is the same on both sides: with
+        // g(u0) = alpha_p b before and b after, the component of g' that is perpendicular to b of the next segment is that of the previous one divided by alpha_p.
+        // That is two equations for alpha, beta and gamma; alpha is chosen to minimize beta^2 + gamma^2.
         private static void Connect(RibbonSegment previous, RibbonSegment next)
         {
             SdfVector b = next.bitangent0;
             SdfVector c1 = 2 * (previous.b1 - previous.b0), c2 = previous.b0 - 2 * previous.b1 + previous.b2;
-            // The derivatives with respect to u at the end of the previous segment: the curve and the generator
-            SdfVector previousTangent = c1 + 2 * c2;
+            double previousAlpha = previous.bitangent1.Length();
+            // g'(1) of the previous segment
             SdfVector previousGenerator = previous.bitangent1 - previous.bitangent0 - (previous.beta * c2 + previous.gamma * (c1 + c2));
-            SdfVector a = SdfVector.Cross(previousGenerator, b);
-            SdfVector c = SdfVector.Cross(previousTangent, b);
             SdfVector nc1 = 2 * (next.b1 - next.b0), nc2 = next.b0 - 2 * next.b1 + next.b2;
-            // g'(0) of the next segment is alpha b1 - b0 + beta C2 + gamma C1 with b1 the unit bitangent (the length alpha is what is found)
             SdfVector unitEnd = next.bitangent1.Normalized();
-            double a1 = SdfVector.Dot(a, nc2), a2 = SdfVector.Dot(a, nc1);
-            double c1x = SdfVector.Dot(c, nc2), c2x = SdfVector.Dot(c, nc1);
-            double determinant = a1 * c2x - a2 * c1x;
-            if (Math.Abs(determinant) < 1e-12 * Math.Max(1e-300, Math.Abs(a1 * c2x) + Math.Abs(a2 * c1x)))
+            // A basis of the plane perpendicular to b
+            SdfVector e1 = OrthogonalTo(b);
+            SdfVector e2 = SdfVector.Cross(b, e1).Normalized();
+            double m11 = SdfVector.Dot(e1, nc2), m12 = SdfVector.Dot(e1, nc1);
+            double m21 = SdfVector.Dot(e2, nc2), m22 = SdfVector.Dot(e2, nc1);
+            double determinant = m11 * m22 - m12 * m21;
+            if (!(previousAlpha > 0) || Math.Abs(determinant) < 1e-12 * Math.Max(1e-300, Math.Abs(m11 * m22) + Math.Abs(m12 * m21)))
             {
                 next.bitangent1 = unitEnd;
                 return;
             }
-            // The right hand sides for the generator terms alpha b1 - b0
-            // equation for v^2: a . (alpha b1 - b0 + beta C2 + gamma C1) = 0
-            // equation for v:   a . C1next + c . (alpha b1 - b0 + beta C2 + gamma C1) = 0
-            double ab1 = SdfVector.Dot(a, unitEnd), ab0 = SdfVector.Dot(a, b);
-            double cb1 = SdfVector.Dot(c, unitEnd), cb0 = SdfVector.Dot(c, b);
-            double ac1 = SdfVector.Dot(a, nc1);
-            // beta (a1) + gamma (a2) = -(alpha ab1 - ab0)
-            // beta (c1x) + gamma (c2x) = -ac1 - (alpha cb1 - cb0)
-            double rhs0Constant = ab0, rhs0Alpha = -ab1;
-            double rhs1Constant = -ac1 + cb0, rhs1Alpha = -cb1;
-            double beta0 = (rhs0Constant * c2x - a2 * rhs1Constant) / determinant;
-            double gamma0 = (a1 * rhs1Constant - rhs0Constant * c1x) / determinant;
-            double beta1 = (rhs0Alpha * c2x - a2 * rhs1Alpha) / determinant;
-            double gamma1 = (a1 * rhs1Alpha - rhs0Alpha * c1x) / determinant;
-            // beta = beta0 + alpha beta1 and gamma = gamma0 + alpha gamma1: the alpha that minimizes beta^2 + gamma^2
-            double denominator = beta1 * beta1 + gamma1 * gamma1;
-            double alpha = denominator > 0 ? -(beta0 * beta1 + gamma0 * gamma1) / denominator : 1;
+            SdfVector target = previousGenerator / previousAlpha;
+            double r1 = SdfVector.Dot(e1, target), r2 = SdfVector.Dot(e2, target);
+            double s1 = SdfVector.Dot(e1, unitEnd), s2 = SdfVector.Dot(e2, unitEnd);
+            // [beta, gamma] = M^-1 (r - alpha s) = p + alpha q
+            double p0 = (m22 * r1 - m12 * r2) / determinant, p1 = (-m21 * r1 + m11 * r2) / determinant;
+            double q0 = -(m22 * s1 - m12 * s2) / determinant, q1 = -(-m21 * s1 + m11 * s2) / determinant;
+            double denominator = q0 * q0 + q1 * q1;
+            double alpha = denominator > 0 ? -(p0 * q0 + p1 * q1) / denominator : 1;
             if (!(alpha > 1e-3) || double.IsNaN(alpha) || double.IsInfinity(alpha))
             {
+                // the bitangent must keep its direction: take the smallest positive length that is allowed
                 alpha = 1;
             }
-            next.beta = beta0 + alpha * beta1;
-            next.gamma = gamma0 + alpha * gamma1;
+            next.beta = p0 + alpha * q0;
+            next.gamma = p1 + alpha * q1;
             next.bitangent1 = unitEnd * alpha;
             if (double.IsNaN(next.beta) || double.IsNaN(next.gamma) || double.IsInfinity(next.beta) || double.IsInfinity(next.gamma))
             {
