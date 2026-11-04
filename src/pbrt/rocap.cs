@@ -153,7 +153,8 @@ namespace pbrt
                 }
                 us = Math.Max(us, un - 1e-9);
                 double ue = Math.Min(1, us + step);
-                double ra = Math.Max(0, Radius(us)), rb = Math.Max(0, Radius(ue));
+                double sagitta = maxAcceleration * (ue - us) * (ue - us) / 8;
+                double ra = Math.Max(0, Radius(us)) + sagitta, rb = Math.Max(0, Radius(ue)) + sagitta;
                 SdfVector a = Position(us) - o, b = Position(ue) - o;
                 if (Capsule(a, b, ra, rb, d, tMin, t, out double capsuleT, out double fraction))
                 {
@@ -161,14 +162,16 @@ namespace pbrt
                     double hitU = us + fraction * (ue - us);
                     double refinedT = capsuleT;
                     SdfVector refinedNormal = default;
-                    bool ok = Delinearize(o, d, ref hitU, ref refinedT, out refinedNormal);
+                    bool ok = Scan(o, d, us, ue, ref hitU, ref refinedT, out refinedNormal);
                     if (!ok)
                     {
-                        // keep the hit of the capsule
-                        SdfVector onCurve = Position(hitU) - o;
-                        refinedNormal = (d * capsuleT - onCurve);
-                        double length = refinedNormal.Length();
-                        refinedNormal = length > 0 ? refinedNormal / length : refinedNormal;
+                        // the swept spheres of the interval are missed: the capsule was larger than the surface
+                        if (ue >= 1)
+                        {
+                            break;
+                        }
+                        us = ue;
+                        continue;
                     }
                     if (refinedT > tMin && refinedT < t)
                     {
@@ -190,10 +193,10 @@ namespace pbrt
         // The size of the capsules in the parameter (the function capsule_step of the paper, without the footprint of the pixel)
         private double CapsuleStep()
         {
-            const double minimum = 1.0 / 50;
+            const double minimum = 1.0 / 2000;
             double r = Math.Max(averageRadius, 1e-300);
             // The capsule replaces the arc of the curve, whose sagitta is a fraction of the radius
-            double step = maxAcceleration > 0 ? Math.Sqrt(0.4 * r / maxAcceleration) : 1;
+            double step = maxAcceleration > 0 ? Math.Sqrt(0.2 * r / maxAcceleration) : 1;
             // At most about ten diameters long
             if (maxSpeed > 0)
             {
@@ -328,60 +331,54 @@ namespace pbrt
         }
 
         // Improves the parameter of the hit of a capsule with the secant method on e(u)
-        private bool Delinearize(SdfVector o, SdfVector d, ref double u, ref double t, out SdfVector normal)
+        // The nearest entry into the spheres of the parameters in [lo, hi]: a scan, then the golden section search around the best sample
+        private bool Scan(SdfVector o, SdfVector d, double lo, double hi, ref double u, ref double t, out SdfVector normal)
         {
             normal = default;
-            double u0 = u;
-            if (!SphereError(o, d, u0, out double t0, out double e0, out SdfVector v0))
+            const int samples = 12;
+            double bestT = double.MaxValue, bestU = 0;
+            for (int i = 0; i <= samples; ++i)
+            {
+                double w = lo + (hi - lo) * i / samples;
+                if (SphereError(o, d, w, out double ts, out double es, out SdfVector vs) && ts < bestT)
+                {
+                    bestT = ts;
+                    bestU = w;
+                }
+            }
+            if (bestT == double.MaxValue)
             {
                 return false;
             }
-            if (Math.Abs(e0) < 1e-14 * Math.Max(1, Math.Abs(r0Scale(u0))))
+            double a = Math.Max(lo, bestU - (hi - lo) / samples), b = Math.Min(hi, bestU + (hi - lo) / samples);
+            const double phi = 0.6180339887498949;
+            for (int i = 0; i < 34; ++i)
             {
-                u = u0;
-                t = t0;
-                normal = Unit(v0, Radius(u0));
-                return true;
-            }
-            double u1 = u0 + (u0 < 0.5 ? 1 : -1) * 1e-3;
-            if (!SphereError(o, d, u1, out double t1, out double e1, out SdfVector v1))
-            {
-                u = u0;
-                t = t0;
-                normal = Unit(v0, Radius(u0));
-                return true;
-            }
-            for (int i = 0; i < 12; ++i)
-            {
-                double denominator = e1 - e0;
-                if (denominator == 0)
+                double c1 = b - phi * (b - a), c2 = a + phi * (b - a);
+                double f1 = SphereError(o, d, c1, out double tt1, out double ee1, out SdfVector vv1) ? tt1 : double.MaxValue;
+                double f2 = SphereError(o, d, c2, out double tt2, out double ee2, out SdfVector vv2) ? tt2 : double.MaxValue;
+                if (f1 < f2)
                 {
-                    break;
+                    b = c2;
                 }
-                double next = u1 - e1 * (u1 - u0) / denominator;
-                next = Math.Max(0, Math.Min(1, next));
-                u0 = u1;
-                t0 = t1;
-                e0 = e1;
-                v0 = v1;
-                if (!SphereError(o, d, next, out t1, out e1, out v1))
+                else
                 {
-                    // the iteration left the shadow of the sphere: keep the best point
-                    break;
-                }
-                u1 = next;
-                if (Math.Abs(u1 - u0) < 1e-12)
-                {
-                    break;
+                    a = c1;
                 }
             }
-            u = u1;
-            t = t1;
-            normal = Unit(v1, Radius(u1));
+            double best = 0.5 * (a + b);
+            if (!SphereError(o, d, best, out double tb, out double eb, out SdfVector vb) || tb > bestT)
+            {
+                best = bestU;
+                SphereError(o, d, best, out tb, out eb, out vb);
+            }
+            u = best;
+            t = tb;
+            normal = Unit(vb, Radius(best));
             return true;
         }
 
-        private double r0Scale(double u)
+        private double ScaleOf(double u)
         {
             return Velocity(u).Length() * Math.Max(Radius(u), 1e-300);
         }
