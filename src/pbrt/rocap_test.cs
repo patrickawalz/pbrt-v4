@@ -228,5 +228,106 @@ namespace pbrt
             CHECK_LT(extra, 5);
             CHECK_LT(worst, 5e-4);
         }
+
+        private static RocapShape LightShape(double r0, double r1, double r2, double r3, bool flat)
+        {
+            BezierSurfaceSettings settings = new BezierSurfaceSettings();
+            settings.renderFromObject = new Transform();
+            settings.objectFromRender = new Transform();
+            settings.epsilon = 1e-6;
+            RocapSegment segment = Hook(r0, r1, r2, r3);
+            segment.FlatCaps = flat;
+            return new RocapShape(settings, segment);
+        }
+
+        [TEST("Rocap", "SolidAnglePdfMatchesTheSampler")]
+        public static void SolidAnglePdfMatchesTheSampler()
+        {
+            RocapShape shape = LightShape(0.25, 0.2, 0.15, 0.2, false);
+            Point3f reference = new Point3f(4.0f, 3.0f, -5.0f);
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(reference, new Vector3f(0, 0, 0)), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
+            Random random = new Random(5);
+            int compared = 0, mismatched = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                pstd.optional<ShapeSample> ss = shape.Sample(ctx, new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                if (!ss)
+                {
+                    continue;
+                }
+                Vector3f wi = pbrt.Normalize(ss.value().intr.p() - reference);
+                Ray ray = ctx.SpawnRay(wi);
+                pstd.optional<ShapeIntersection> hit = shape.Intersect(ray);
+                // The pdf is that of the first hit: skip the samples hidden by another part of the strand, and the grazing ones
+                if (!hit || pbrt.Distance(hit.value().intr.p(), ss.value().intr.p()) > 1e-3 || pbrt.AbsDot(ss.value().intr.n, wi) < 0.2)
+                {
+                    continue;
+                }
+                ++compared;
+                Float pdf = shape.PDF(ctx, wi);
+                if (Math.Abs(pdf - ss.value().pdf) > 0.05 * ss.value().pdf)
+                {
+                    ++mismatched;
+                    if (mismatched < 6)
+                    {
+                        Console.WriteLine("mismatch pdf " + pdf + " sample pdf " + ss.value().pdf);
+                    }
+                }
+            }
+            Console.WriteLine("rocap solid angle pdf: compared " + compared + " mismatched " + mismatched);
+            CHECK_GT(compared, 500);
+            // A few percent of the samples differ by about 5% (the hit normal of the refined hit sets the angle around the strand)
+            CHECK_LT(mismatched, compared / 50);
+        }
+
+        // The solid angle of the visible tube from a point, by the directions of the sphere (the hits with a pdf) and by the samples of the shape (the visible ones, 1 / pdf)
+        [TEST("Rocap", "SamplesGiveTheSolidAngle")]
+        public static void SamplesGiveTheSolidAngle()
+        {
+            RocapShape shape = LightShape(0.25, 0.2, 0.15, 0.2, false);
+            Point3f reference = new Point3f(4.0f, 3.0f, -5.0f);
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(reference, new Vector3f(0, 0, 0)), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
+            Random random = new Random(9);
+            const int count = 400000;
+            // by the directions: a cone toward the strand, the solid angle of the cone times the fraction that hits the tube
+            Vector3f toCenter = pbrt.Normalize(new Vector3f(-reference.x, -reference.y, -reference.z));
+            double cosineCone = Math.Cos(0.5);
+            double coneSolidAngle = 2 * Math.PI * (1 - cosineCone);
+            Vector3f helper = Math.Abs(toCenter.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
+            Vector3f side = pbrt.Normalize(pbrt.Cross(toCenter, helper));
+            Vector3f up = pbrt.Cross(toCenter, side);
+            int tubeHits = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                double cosTheta = 1 - random.NextDouble() * (1 - cosineCone);
+                double sinTheta = Math.Sqrt(Math.Max(0, 1 - cosTheta * cosTheta));
+                double phi = 2 * Math.PI * random.NextDouble();
+                Vector3f wi = toCenter * (Float)cosTheta + side * (Float)(sinTheta * Math.Cos(phi)) + up * (Float)(sinTheta * Math.Sin(phi));
+                if (shape.PDF(ctx, wi) > 0)
+                {
+                    ++tubeHits;
+                }
+            }
+            double byDirections = coneSolidAngle * tubeHits / count;
+            double bySamples = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                pstd.optional<ShapeSample> ss = shape.Sample(ctx, new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                if (!ss)
+                {
+                    continue;
+                }
+                Vector3f wi = pbrt.Normalize(ss.value().intr.p() - reference);
+                pstd.optional<ShapeIntersection> hit = shape.Intersect(ctx.SpawnRay(wi));
+                if (hit && pbrt.Distance(hit.value().intr.p(), ss.value().intr.p()) < 1e-3)
+                {
+                    bySamples += 1.0 / ss.value().pdf;
+                }
+            }
+            bySamples /= count;
+            Console.WriteLine("rocap solid angle: by directions " + byDirections + " by samples " + bySamples + " area " + shape.Area());
+            CHECK_GT(byDirections, 1e-3);
+            CHECK_LT(Math.Abs(bySamples - byDirections) / byDirections, 0.03);
+        }
     }
 }
