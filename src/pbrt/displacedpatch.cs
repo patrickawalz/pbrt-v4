@@ -203,33 +203,76 @@ namespace pbrt
             return Trace(ray, tMax, true, out Hit hit, out double length);
         }
 
+        // The sampler of the area of the displaced surface (built when first needed): the cells of the table are those of the footprint of a grid of 32 x 32
+        private PatchAreaSampler Sampler()
+        {
+            PatchAreaSampler result = sampler;
+            if (result == null)
+            {
+                result = new PatchAreaSampler((double u, double v) =>
+                {
+                    SdfVector p = Displaced(u, v);
+                    Point3f q = settings.renderFromObject.Apply(new Point3f((Float)p.x, (Float)p.y, (Float)p.z));
+                    return new SdfVector(q.x, q.y, q.z);
+                }, 32);
+                sampler = result;
+            }
+            return result;
+        }
+
         public override Float Area()
         {
-            return new BezierClipPatchShape(settings, patch, surface, false).Area();
+            return (Float)Sampler().Area;
+        }
+
+        // The point of the displaced surface at the parameters (u, v), with its normal
+        private Interaction InteractionAt(double u, double v)
+        {
+            PatchAreaSampler areaSampler = Sampler();
+            SdfVector p = Displaced(u, v);
+            areaSampler.Differences(u, v, out SdfVector dpdu, out SdfVector dpdv);
+            texture.Convert(u, v, dpdu, dpdv, out Point2f uv, out SdfVector pu, out SdfVector pv);
+            Point3f pr = settings.renderFromObject.Apply(new Point3f((Float)p.x, (Float)p.y, (Float)p.z));
+            Normal3f n = pbrt.Normalize(new Normal3f((Float)(pu.y * pv.z - pu.z * pv.y), (Float)(pu.z * pv.x - pu.x * pv.z), (Float)(pu.x * pv.y - pu.y * pv.x)));
+            if (settings.reverseOrientation ^ settings.transformSwapsHandedness)
+            {
+                n = -n;
+            }
+            Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(pr.x, pr.y, pr.z));
+            return new Interaction(new Point3fi(pr, pError), n, uv);
         }
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            pbrt.ErrorExit("Displaced patches: area lights are not supported yet.");
-            return default;
+            PatchAreaSampler areaSampler = Sampler();
+            areaSampler.Sample(u, out double pu, out double pv, out double density);
+            double jacobian = areaSampler.Jacobian(pu, pv);
+            if (!(jacobian > 0))
+            {
+                return default;
+            }
+            return new ShapeSample(InteractionAt(pu, pv), (Float)(density / jacobian));
         }
 
         public override Float PDF(Interaction intr)
         {
-            pbrt.ErrorExit("Displaced patches: area lights are not supported yet.");
-            return 0;
+            return 1 / Area();
         }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            pbrt.ErrorExit("Displaced patches: area lights are not supported yet.");
-            return default;
+            return PatchSampling.ToSolidAngle(Sample(u), ctx);
         }
 
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
         {
-            pbrt.ErrorExit("Displaced patches: area lights are not supported yet.");
-            return 0;
+            Ray ray = ctx.SpawnRay(wi);
+            if (!Trace(ray, Infinity, false, out Hit hit, out double length))
+            {
+                return 0;
+            }
+            Interaction at = InteractionAt(hit.u, hit.v);
+            return PatchSampling.AreaToSolidAngle(Sampler().AreaDensity(hit.u, hit.v), at.n, at.p(), ctx, wi);
         }
 
         public override string ToString()
@@ -631,6 +674,7 @@ namespace pbrt
             return new SdfVector(d.x / length, d.y / length, d.z / length);
         }
 
+        private PatchAreaSampler sampler;
         private readonly BezierSurfaceSettings settings;
         private readonly PatchSurface surface;
         private readonly BezierPatch4 patch;

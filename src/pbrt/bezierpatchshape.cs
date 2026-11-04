@@ -62,6 +62,8 @@ namespace pbrt
         // The maximum level of the clipping from the size of the patch and epsilon, instead of clip.maxLevel (when it is larger): a leaf of the size
         // of a patch of the default level is much larger than epsilon for a large patch, and a ray that grazes the surface finds the leaf and not the surface
         public bool autoMaxLevel = true;
+        // The cells along each axis of the table that draws the points of the surface for area lights
+        public int sampleResolution = 16;
     }
 
     public sealed unsafe class BezierClipPatchShape : Shape
@@ -123,52 +125,84 @@ namespace pbrt
 
         public override Float Area()
         {
-            // The area of a 8 x 8 grid of the surface
-            int n = 8;
-            SdfVector[] grid = new SdfVector[(n + 1) * (n + 1)];
-            for (int j = 0; j <= n; ++j)
+            return (Float)Sampler().Area;
+        }
+
+        // The sampler of the area of the patch (built when first needed)
+        private PatchAreaSampler Sampler()
+        {
+            PatchAreaSampler result = sampler;
+            if (result == null)
             {
-                for (int i = 0; i <= n; ++i)
+                result = new PatchAreaSampler((double u, double v) =>
                 {
-                    surface.Evaluate((double)i / n, (double)j / n, out SdfVector p, out SdfVector dpdu, out SdfVector dpdv, out Point2f uv, out SdfVector ns);
+                    surface.Evaluate(u, v, out SdfVector p, out SdfVector dpdu, out SdfVector dpdv, out Point2f uv, out SdfVector shading);
                     Point3f q = settings.renderFromObject.Apply(new Point3f((Float)p.x, (Float)p.y, (Float)p.z));
-                    grid[j * (n + 1) + i] = new SdfVector(q.x, q.y, q.z);
-                }
+                    return new SdfVector(q.x, q.y, q.z);
+                }, settings.sampleResolution);
+                sampler = result;
             }
-            double area = 0;
-            for (int j = 0; j < n; ++j)
+            return result;
+        }
+
+        // The point of the surface at the parameters (u, v), with its normal as the intersection gives it
+        private Interaction InteractionAt(double u, double v)
+        {
+            surface.Evaluate(u, v, out SdfVector p, out SdfVector dpdu, out SdfVector dpdv, out Point2f uv, out SdfVector shading);
+            Transform renderFromObject = settings.renderFromObject;
+            Point3f pr = renderFromObject.Apply(new Point3f((Float)p.x, (Float)p.y, (Float)p.z));
+            Vector3f pu = renderFromObject.Apply(new Vector3f((Float)dpdu.x, (Float)dpdu.y, (Float)dpdu.z));
+            Vector3f pv = renderFromObject.Apply(new Vector3f((Float)dpdv.x, (Float)dpdv.y, (Float)dpdv.z));
+            Normal3f n = pbrt.Normalize((Normal3f)pbrt.Cross(pu, pv));
+            if (settings.reverseOrientation ^ settings.transformSwapsHandedness)
             {
-                for (int i = 0; i < n; ++i)
-                {
-                    SdfVector a = grid[j * (n + 1) + i], b = grid[j * (n + 1) + i + 1], c = grid[(j + 1) * (n + 1) + i], d = grid[(j + 1) * (n + 1) + i + 1];
-                    area += 0.5 * SdfVector.Cross(b - a, c - a).Length() + 0.5 * SdfVector.Cross(b - d, c - d).Length();
-                }
+                n = -n;
             }
-            return (Float)area;
+            if (shading.LengthSquared() > 0)
+            {
+                Normal3f ns = pbrt.Normalize(renderFromObject.Apply(new Normal3f((Float)shading.x, (Float)shading.y, (Float)shading.z)));
+                if (settings.reverseOrientation)
+                {
+                    ns = -ns;
+                }
+                n = pbrt.FaceForward(n, ns);
+            }
+            Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(pr.x, pr.y, pr.z));
+            return new Interaction(new Point3fi(pr, pError), n, uv);
         }
 
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            pbrt.ErrorExit("Bezier clipped patches: area lights are not supported yet.");
-            return default;
+            PatchAreaSampler areaSampler = Sampler();
+            areaSampler.Sample(u, out double pu, out double pv, out double density);
+            double jacobian = areaSampler.Jacobian(pu, pv);
+            if (!(jacobian > 0))
+            {
+                return default;
+            }
+            return new ShapeSample(InteractionAt(pu, pv), (Float)(density / jacobian));
         }
 
         public override Float PDF(Interaction intr)
         {
-            pbrt.ErrorExit("Bezier clipped patches: area lights are not supported yet.");
-            return 0;
+            return 1 / Area();
         }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            pbrt.ErrorExit("Bezier clipped patches: area lights are not supported yet.");
-            return default;
+            return PatchSampling.ToSolidAngle(Sample(u), ctx);
         }
 
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
         {
-            pbrt.ErrorExit("Bezier clipped patches: area lights are not supported yet.");
-            return 0;
+            Ray ray = ctx.SpawnRay(wi);
+            if (!Trace(ray, Infinity, out BezierClipHit hit, out double length))
+            {
+                return 0;
+            }
+            Interaction at = InteractionAt(hit.u, hit.v);
+            double areaPdf = Sampler().AreaDensity(hit.u, hit.v);
+            return PatchSampling.AreaToSolidAngle(areaPdf, at.n, at.p(), ctx, wi);
         }
 
         public override string ToString()
@@ -268,5 +302,6 @@ namespace pbrt
         private readonly BezierPatchIntersection intersection;
         private readonly Bounds3f bounds;
         private readonly SdfVector center;
+        private PatchAreaSampler sampler;
     }
 }

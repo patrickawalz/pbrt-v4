@@ -226,6 +226,97 @@ namespace pbrt
             CHECK_LT(worstT, 5e-3);
         }
 
+        [TEST("Subdiv", "AreaSamplingIsUnbiasedAndMatchesTheTessellation")]
+        public static void AreaSamplingIsUnbiasedAndMatchesTheTessellation()
+        {
+            SubdivisionPatches patches = SubdivisionSurface.BuildPatches(Cube(0));
+            pstd.vector<Shape> shapes = SubdivisionSurface.CreateShapes(Settings(), patches);
+            double reference = 0;
+            foreach (SdfVector[] tri in Tessellate(patches, 24))
+            {
+                reference += 0.5 * SdfVector.Cross(tri[1] - tri[0], tri[2] - tri[0]).Length();
+            }
+            double areaSum = 0, worstMean = 0;
+            Random random = new Random(3);
+            int onSurface = 0, samples = 0;
+            for (int k = 0; k < (int)shapes.size(); ++k)
+            {
+                Shape shape = shapes[k];
+                double area = shape.Area();
+                areaSum += area;
+                // E[1 / pdf] over the samples is the area of the shape
+                double mean = 0;
+                int count = 4000;
+                for (int i = 0; i < count; ++i)
+                {
+                    pstd.optional<ShapeSample> ss = shape.Sample(new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                    if (ss)
+                    {
+                        mean += 1.0 / ss.value().pdf;
+                        ++samples;
+                        // The normal faces away from the center of the cube
+                        Point3f p = ss.value().intr.p();
+                        Normal3f n = ss.value().intr.n;
+                        if (p.x * n.x + p.y * n.y + p.z * n.z > 0)
+                        {
+                            ++onSurface;
+                        }
+                    }
+                }
+                mean /= count;
+                worstMean = Math.Max(worstMean, Math.Abs(mean - area) / area);
+            }
+            Console.WriteLine("area sum " + areaSum + " tessellated " + reference + " worst |E[1/pdf] - area| / area " + worstMean + " outward normals " + onSurface + " / " + samples);
+            CHECK_LT(Math.Abs(areaSum - reference) / reference, 0.01);
+            CHECK_LT(worstMean, 0.05);
+            CHECK_EQ(onSurface, samples);
+        }
+
+        [TEST("Subdiv", "SolidAnglePdfMatchesTheSampler")]
+        public static void SolidAnglePdfMatchesTheSampler()
+        {
+            SubdivisionPatches patches = SubdivisionSurface.BuildPatches(Cube(0));
+            pstd.vector<Shape> shapes = SubdivisionSurface.CreateShapes(Settings(), patches);
+            Point3f reference = new Point3f(3.0f, 2.0f, -2.5f);
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(reference, new Vector3f(0, 0, 0)), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
+            Random random = new Random(11);
+            int compared = 0, mismatched = 0;
+            for (int k = 0; k < (int)shapes.size(); ++k)
+            {
+                for (int i = 0; i < 60; ++i)
+                {
+                    pstd.optional<ShapeSample> ss = shapes[k].Sample(ctx, new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                    if (!ss)
+                    {
+                        continue;
+                    }
+                    Vector3f wi = pbrt.Normalize(ss.value().intr.p() - reference);
+                    Ray ray = ctx.SpawnRay(wi);
+                    // The pdf is that of the first hit of the patch: skip the samples on the far side of the patch
+                    pstd.optional<ShapeIntersection> hit = shapes[k].Intersect(ray);
+                    // and the grazing ones, where the pdf of the solid angle changes much with the point
+                    if (!hit || pbrt.Distance(hit.value().intr.p(), ss.value().intr.p()) > 1e-3 || pbrt.AbsDot(ss.value().intr.n, wi) < 0.05)
+                    {
+                        continue;
+                    }
+                    ++compared;
+                    Float pdf = shapes[k].PDF(ctx, wi);
+                    if (Math.Abs(pdf - ss.value().pdf) > 0.1 * ss.value().pdf)
+                    {
+                        ++mismatched;
+                        if (mismatched < 6)
+                        {
+                            Console.WriteLine("mismatch shape " + k + " pdf " + pdf + " sample pdf " + ss.value().pdf + " distance " + pbrt.Distance(hit.value().intr.p(), ss.value().intr.p()));
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("solid angle pdf: compared " + compared + " mismatched " + mismatched);
+            CHECK_GT(compared, 100);
+            // The Gregory patches are traced as a proxy that deviates by 2.5e-4 from the surface, and the Jacobian changes quickly at their corners
+            CHECK_LT(mismatched, compared / 200);
+        }
+
         // Rays grazing the silhouette near a corner: the point of every hit must be on the ray and face the viewer (a conservative child hit once had swapped uv offsets)
         [TEST("Subdiv", "SilhouetteHitsLieOnTheRay")]
         public static void SilhouetteHitsLieOnTheRay()

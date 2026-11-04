@@ -525,6 +525,73 @@ namespace pbrt
             return (surface.Position(bs, bt) + height * surface.Normal(bs, bt) - point).Length();
         }
 
+        [TEST("Curved", "DisplacedPatchAreaSamplingIsUnbiased")]
+        public static void DisplacedPatchAreaSamplingIsUnbiased()
+        {
+            PatchDisplacement displacement = new PatchDisplacement();
+            displacement.mode = PatchDisplacementMode.Scalar;
+            displacement.tangentSpace = true;
+            displacement.smoothNormals = true;
+            int depth = 6;
+            displacement.field = new ShellVectorProcedural(ShellExpression.Parse("0"), ShellExpression.Parse("0"), ShellExpression.Parse("0.12*sin(9*u)*cos(7*v)+0.05"), depth, 1);
+            BezierSurfaceSettings settings = Settings();
+            pstd.vector<Shape> baseShapes = new pstd.vector<Shape>();
+            SdfVector[] corner = { new SdfVector(0, 0, 0), new SdfVector(1, 0, 0), new SdfVector(0, 1, 0), new SdfVector(1, 1, 0) };
+            SdfVector[] normal = { new SdfVector(0, 0, 1), new SdfVector(0, 0, 1), new SdfVector(0, 0, 1), new SdfVector(0, 0, 1) };
+            CurvedPatches.AddPhongQuad(baseShapes, settings, corner, normal, 0.75, null, 0);
+            pstd.vector<Shape> shapes = displacement.Apply(baseShapes, settings);
+
+            // The area of the surface through the grid points
+            int n = 1 << depth;
+            SdfVector[,] grid = new SdfVector[n + 1, n + 1];
+            for (int j = 0; j <= n; ++j)
+            {
+                for (int i = 0; i <= n; ++i)
+                {
+                    displacement.field.Sample(i, j, out double vx, out double vy, out double vz);
+                    grid[i, j] = new SdfVector((double)i / n + vx, (double)j / n + vy, vz);
+                }
+            }
+            double reference = 0;
+            for (int j = 0; j < n; ++j)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    reference += 0.5 * SdfVector.Cross(grid[i + 1, j] - grid[i, j], grid[i, j + 1] - grid[i, j]).Length();
+                    reference += 0.5 * SdfVector.Cross(grid[i + 1, j] - grid[i + 1, j + 1], grid[i, j + 1] - grid[i + 1, j + 1]).Length();
+                }
+            }
+            double area = 0, mean = 0;
+            Random random = new Random(4);
+            int count = 20000, upward = 0, drawn = 0;
+            double worstWeight = 0;
+            for (int k = 0; k < (int)shapes.size(); ++k)
+            {
+                double shapeArea = shapes[k].Area();
+                area += shapeArea;
+                double sum = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    pstd.optional<ShapeSample> ss = shapes[k].Sample(new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                    if (ss)
+                    {
+                        sum += 1.0 / ss.value().pdf;
+                        worstWeight = Math.Max(worstWeight, 1.0 / ss.value().pdf);
+                        ++drawn;
+                        if (ss.value().intr.n.z > 0)
+                        {
+                            ++upward;
+                        }
+                    }
+                }
+                mean += sum / count;
+            }
+            Console.WriteLine("displaced area " + area + " grid surface " + reference + " E[1/pdf] " + mean + " upward normals " + upward + " / " + drawn + " largest 1/pdf " + worstWeight);
+            CHECK_LT(Math.Abs(area - reference) / reference, 0.02);
+            CHECK_LT(Math.Abs(mean - area) / area, 0.03);
+            CHECK_EQ(upward, drawn);
+        }
+
         [TEST("Curved", "DisplacedCurvedPatchIsAnOffsetSurface")]
         public static void DisplacedCurvedPatchIsAnOffsetSurface()
         {
