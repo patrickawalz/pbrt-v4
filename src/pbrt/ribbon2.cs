@@ -195,7 +195,7 @@ namespace pbrt
                 segment.width2 = i == count - 1 ? widths[points.Length - 1] : (widths[i + 1] + widths[i + 2]) * 0.5;
                 if (previous == null)
                 {
-                    FirstPatch(segment, b0, b1, b2, normals != null ? normals[0] : default, normals != null);
+                    FirstPatch(segment, b0, b1, b2, normals != null ? normals[0] : default, normals != null ? JointNormal(normals, i + 1, points.Length) : default, normals != null);
                 }
                 else
                 {
@@ -208,7 +208,7 @@ namespace pbrt
         }
 
         // Section 3.1: Q01 - Q10 orthogonal to the plane of the curve (or along the bitangent when a normal is given), as long as the ratio of the diagonals allows
-        private static void FirstPatch(Ribbon2Segment segment, SdfVector b0, SdfVector b1, SdfVector b2, SdfVector normal, bool hasNormal)
+        private static void FirstPatch(Ribbon2Segment segment, SdfVector b0, SdfVector b1, SdfVector b2, SdfVector normal, SdfVector endNormal, bool hasNormal)
         {
             SdfVector direction;
             if (hasNormal)
@@ -234,11 +234,67 @@ namespace pbrt
             double s = 0.5 * Math.Max(diagonal, 1e-12) * MaxStretch * 0.5;
             segment.q00 = b0;
             segment.q11 = b2;
+            if (hasNormal)
+            {
+                SdfVector wantedEnd = SdfVector.Cross(b2 - b1, endNormal);
+                if (wantedEnd.LengthSquared() > 0)
+                {
+                    wantedEnd = wantedEnd.Normalized();
+                    for (int flip = 0; flip < 2; ++flip)
+                    {
+                        SdfVector d0 = flip == 0 ? direction : -1 * direction;
+                        if (ExactPatch(segment, b1, d0, SdfVector.Dot(wantedEnd, d0) < 0 ? -1 * wantedEnd : wantedEnd))
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
             segment.q01 = b1 + direction * s;
             segment.q10 = b1 - direction * s;
         }
 
         // Section 3.2: N00 = P11, N01 = P11 + y (P11 - P10), N10 = 2 B1 - N01; y minimizes the variation of psi
+
+        // A patch whose lines at both ends are exactly the given directions (d0 at u = 0, d1 at u = 1): Q01 = Q00 + a d0, Q10 = Q11 - b d1 with the diagonal's middle control
+        // point (Q01 + Q10) / 2 as close to the control point b1 as the two directions allow (least squares: only the part of the offset out of their plane remains).
+        // The edges of neighboring patches then meet exactly. False when the directions are (nearly) the same or the patch is not a thin ribbon.
+        private static bool ExactPatch(Ribbon2Segment segment, SdfVector b1, SdfVector d0, SdfVector d1)
+        {
+            SdfVector offset = 2 * b1 - segment.q00 - segment.q11;
+            double dd = SdfVector.Dot(d0, d1);
+            double det = 1 - dd * dd;
+            if (!(det > 1e-10))
+            {
+                return false;
+            }
+            double sa = SdfVector.Dot(offset, d0), sb = -SdfVector.Dot(offset, d1);
+            double a = (sa + dd * sb) / det, b = (sb + dd * sa) / det;
+            if (!(a > 0 && b > 0))
+            {
+                // the generator would point against d0 at the start or at the end (the strip would turn over: its sides swap at the joint)
+                return false;
+            }
+            segment.q01 = segment.q00 + d0 * a;
+            segment.q10 = segment.q11 - d1 * b;
+            double across = (segment.q01 - segment.q10).Length();
+            double diagonal = (segment.q11 - segment.q00).Length();
+            double ratio = across > diagonal ? across / Math.Max(diagonal, 1e-300) : diagonal / Math.Max(across, 1e-300);
+            // not folded: the generator keeps away from the tangent of the diagonal (the width itself is exact for any size of the patch)
+            for (int k = 0; k <= 32; ++k)
+            {
+                double u = k / 32.0;
+                SdfVector tangent = segment.Tangent(u);
+                SdfVector generator = segment.Generator(u);
+                double product = tangent.Length() * generator.Length();
+                if (!(product > 0) || SdfVector.Cross(generator, tangent).Length() / product < 0.25)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         // The normal at the end of the segment that starts at point i: the end is the midpoint of the points i + 1 and i + 2 (or the last point)
         private static SdfVector JointNormal(SdfVector[] normals, int i, int count)
         {
@@ -271,33 +327,68 @@ namespace pbrt
                 wanted = SdfVector.Cross(b2 - b1, endNormal);
                 wanted = wanted.LengthSquared() > 0 ? wanted.Normalized() : default;
             }
-            for (int sign = -1; sign <= 1; sign += 2)
+            if (wanted.LengthSquared() > 0)
+            {
+                SdfVector d0 = (previous.q11 - previous.q10).Normalized();
+                SdfVector d1 = SdfVector.Dot(wanted, d0) < 0 ? -1 * wanted : wanted;
+                if (ExactPatch(segment, b1, d0, d1))
+                {
+                    return;
+                }
+            }
+            Func<double, double> evaluate = (double y) =>
+            {
+                SdfVector q01 = previous.q11 + line * y;
+                SdfVector q10 = 2 * b1 - q01;
+                double across = (q01 - q10).Length();
+                double ratio = across > diagonal ? across / Math.Max(diagonal, 1e-300) : diagonal / Math.Max(across, 1e-300);
+                if (!(ratio <= MaxStretch))
+                {
+                    return double.MaxValue;
+                }
+                segment.q01 = q01;
+                segment.q10 = q10;
+                double cost = Cost(segment);
+                if (cost < double.MaxValue && wanted.LengthSquared() > 0)
+                {
+                    SdfVector end = segment.q11 - segment.q10;
+                    double length = end.Length();
+                    cost += length > 0 ? 1e6 * (1 - Math.Abs(SdfVector.Dot(end, wanted)) / length) : 1e6;
+                }
+                return cost;
+            };
+            // y > 0: the generator keeps its direction through the joint (a negative y would swap the sides of the strip)
+            for (int sign = 1; sign <= 1; sign += 2)
             {
                 for (int k = -6; k <= 10; ++k)
                 {
                     double y = sign * Math.Pow(10, 0.5 * k - 1);
-                    SdfVector q01 = previous.q11 + line * y;
-                    SdfVector q10 = 2 * b1 - q01;
-                    double across = (q01 - q10).Length();
-                    double ratio = across > diagonal ? across / Math.Max(diagonal, 1e-300) : diagonal / Math.Max(across, 1e-300);
-                    if (!(ratio <= MaxStretch))
-                    {
-                        continue;
-                    }
-                    segment.q01 = q01;
-                    segment.q10 = q10;
-                    double cost = Cost(segment);
-                    if (wanted.LengthSquared() > 0)
-                    {
-                        SdfVector end = (segment.q11 - segment.q10);
-                        double length = end.Length();
-                        cost += length > 0 ? 1e6 * (1 - Math.Abs(SdfVector.Dot(end, wanted)) / length) : 1e6;
-                    }
+                    double cost = evaluate(y);
                     if (cost < bestCost)
                     {
                         bestCost = cost;
                         bestY = y;
                     }
+                }
+            }
+            // The grid is coarse: the end line must meet the bitangent closely, or the edges jump at the joint. Narrowing scans around the best factor.
+            if (bestCost < double.MaxValue)
+            {
+                double span = 3.2;
+                for (int pass = 0; pass < 8; ++pass)
+                {
+                    double center = bestY;
+                    for (int k = -20; k <= 20; ++k)
+                    {
+                        double y = center * Math.Pow(span, k / 20.0);
+                        double cost = evaluate(y);
+                        if (cost < bestCost)
+                        {
+                            bestCost = cost;
+                            bestY = y;
+                        }
+                    }
+                    span = 1 + (span - 1) * 0.2;
                 }
             }
             segment.q01 = previous.q11 + line * bestY;

@@ -342,5 +342,36 @@ namespace pbrt
             Console.WriteLine("blade: Hausdorff distance of the edges " + hausdorff + " (the half width is 0.035)");
             CHECK_LT(hausdorff, 5e-3);
         }
+
+        [TEST("Ribbon", "Ribbon2JointsOfATwistingStrip")]
+        public static void Ribbon2JointsOfATwistingStrip()
+        {
+            const int n = 36;
+            SdfVector[] points = new SdfVector[n + 1];
+            SdfVector[] normals = new SdfVector[n + 1];
+            double[] widths = new double[n + 1];
+            for (int k = 0; k <= n; ++k)
+            {
+                double th = 2 * Math.PI * k / n * 0.92;
+                SdfVector c = new SdfVector(Math.Cos(th), 0, Math.Sin(th));
+                points[k] = c * 0.9;
+                double tw = th / 2;
+                normals[k] = new SdfVector(0, Math.Cos(tw), 0) + c * Math.Sin(tw);
+                widths[k] = 0.16;
+            }
+            List<IRibbonSegment> b = Ribbon2Builder.Build(points, normals, widths);
+            double worst = 0;
+            for (int i = 1; i < b.Count; ++i)
+            {
+                double d = 0;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    d = Math.Max(d, (b[i - 1].Position(1, side) - b[i].Position(0, side)).Length());
+                }
+                Console.WriteLine("joint " + i + ": edge jump " + d + " (width 0.16)");
+                worst = Math.Max(worst, d);
+            }
+            CHECK_LT(worst, 0.16 * 0.5);
+        }
     }
 }
