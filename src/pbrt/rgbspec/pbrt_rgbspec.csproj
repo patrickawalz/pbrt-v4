@@ -28,7 +28,7 @@
     <RgbSpecTool>$(MSBuildThisFileDirectory)../cmd/bin/$(Configuration)/net10.0/rgb2spec_opt.dll</RgbSpecTool>
   </PropertyGroup>
 
-  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile"
+  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="AssignTargetPaths;BeforeCompile;CoreCompile"
           Inputs="$(MSBuildThisFileDirectory)../cmd/rgb2spec_opt.cs;$(RgbSpecTool)"
           Outputs="$(RgbSpecDir)rgbspectrum_srgb.bin;$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
     <MakeDir Directories="$(RgbSpecDir)" />
@@ -38,10 +38,11 @@
     <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_aces.cs&quot; ACES2065_1" />
   </Target>
 
-  <Target Name="AddRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="GenerateRgbSpectrumTables">
+  <Target Name="AddRgbSpectrumTables" BeforeTargets="AssignTargetPaths;BeforeCompile;CoreCompile" DependsOnTargets="GenerateRgbSpectrumTables">
     <ItemGroup>
       <Compile Include="$(RgbSpecDir)rgbspectrum_*.cs" />
-      <EmbeddedResource Include="$(RgbSpecDir)rgbspectrum_*.bin" LogicalName="%(Filename).bin" />
+      <RgbSpecBinary Include="$(RgbSpecDir)rgbspectrum_*.bin" />
+      <EmbeddedResource Include="@(RgbSpecBinary)" LogicalName="%(RgbSpecBinary.Filename).bin" />
     </ItemGroup>
   </Target>
 </Project>

@@ -19,5 +19,6 @@
     <Compile Include="pbrt_test.cs" />
     <Compile Include="../**/*_test.cs" />
     <ProjectReference Include="../pbrt_lib.csproj" />
+    <ProjectReference Include="../../opensubdiv_lib/opensubdiv_lib.csproj" />
   </ItemGroup>
 </Project>
