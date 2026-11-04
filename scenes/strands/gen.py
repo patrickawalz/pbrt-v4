@@ -23,7 +23,7 @@ def rocap():
     # a constant-width tube chain (two cubic segments) with round caps
     P2 = [(0.3,0.15,0),(0.6,0.15,0.9),(1.5,0.15,0.9),(1.8,0.15,0),(2.1,0.15,-0.9),(2.6,0.15,-0.9),(2.9,0.5,0)]
     s += 'Material "diffuse" "rgb reflectance" [0.2 0.4 0.7]\n'
-    s += 'Shape "rocap" "point3 P" [%s] "float radius" 0.12\n' % "  ".join(f(p) for p in P2)
+    s += 'Shape "rocap" "point3 P" [%s] "float radius" 0.12 "bool flatcaps" true\n' % "  ".join(f(p) for p in P2)
     # thin curly strands
     random.seed(3)
     s += 'Material "diffuse" "rgb reflectance" [0.8 0.7 0.3]\n'
@@ -36,8 +36,8 @@ def rocap():
         s += 'Shape "rocap" "point3 P" [%s] "float radius" [0.03 0.025 0.015 0.004]\n' % "  ".join(f(p) for p in pts)
     open("hair_rocap.pbrt","w").write(s)
 # ribbons: grass blades and a twisted strip
-def ribbons():
-    s = HEAD % ("0 4.2 -6.0", 400, 300, "ribbons")
+def ribbons(TYPE='ribbon3', name='ribbons'):
+    s = HEAD % ("0 4.2 -6.0", 400, 300, name)
     random.seed(5)
     s += 'Material "diffuse" "rgb reflectance" [0.25 0.55 0.15]\n'
     for i in range(120):
@@ -51,7 +51,7 @@ def ribbons():
             pts.append((x+dx*bend*t*t*h, h*t, z+dz*bend*t*t*h))
             nrm.append((-dz, 0, dx))   # normal perpendicular to the lean direction: blade faces sideways
             wd.append(0.035*(1-0.9*t))
-        s += 'Shape "ribbon" "point3 P" [%s] "normal N" [%s] "float width" [%s]\n' % ("  ".join(f(p) for p in pts), "  ".join(f(p) for p in nrm), " ".join("%.5f"%w for w in wd))
+        s += 'Shape "ribbon" "point3 P" [%s] "normal N" [%s] "float width" [%s] "string type" "%s"\n' % ("  ".join(f(p) for p in pts), "  ".join(f(p) for p in nrm), " ".join("%.5f"%w for w in wd), TYPE)
     # twisted strip (one half twist around a circle)
     s += 'AttributeBegin\nTranslate 0 1.5 1.2\nMaterial "diffuse" "rgb reflectance" [0.85 0.3 0.25]\n'
     pts=[]; nrm=[]; n=36
@@ -63,7 +63,7 @@ def ribbons():
         radial = c; up=(0,1,0)
         nm = (math.cos(tw)*up[0]+math.sin(tw)*radial[0], math.cos(tw)*up[1]+math.sin(tw)*radial[1], math.cos(tw)*up[2]+math.sin(tw)*radial[2])
         nrm.append(nm)
-    s += 'Shape "ribbon" "point3 P" [%s] "normal N" [%s] "float width" 0.16\n' % ("  ".join(f(p) for p in pts), "  ".join(f(p) for p in nrm))
+    s += 'Shape "ribbon" "point3 P" [%s] "normal N" [%s] "float width" 0.16 "string type" "%s"\n' % ("  ".join(f(p) for p in pts), "  ".join(f(p) for p in nrm), TYPE)
     s += 'AttributeEnd\n'
-    open("ribbons.pbrt","w").write(s)
-rocap(); ribbons()
+    open(name + ".pbrt","w").write(s)
+rocap(); ribbons('ribbon3','ribbons'); ribbons('ribbon2','ribbons2')

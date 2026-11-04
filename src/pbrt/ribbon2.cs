@@ -273,14 +273,22 @@ namespace pbrt
             segment.q10 = 2 * b1 - segment.q01;
         }
 
-        // The relative variance of psi on [0, 1] (equation (8), normalized by the mean so that stretching alone does not lower it)
+        // The cost of a patch: the relative variance of psi on [0, 1] (equation (8), normalized by the mean so that stretching alone does not lower it); a patch whose
+        // generator comes close to the tangent of the diagonal is not a ribbon (the width goes to infinity: the folds of Figure 12) and costs more than any other
         private static double Cost(Ribbon2Segment segment)
         {
             const int samples = 32;
-            double sum = 0, sumSquares = 0;
+            const double minimumSine = 0.25;
+            double sum = 0, sumSquares = 0, smallestSine = 1;
             for (int i = 0; i <= samples; ++i)
             {
-                double psi = segment.Psi((double)i / samples);
+                double u = (double)i / samples;
+                SdfVector tangent = segment.Tangent(u);
+                SdfVector generator = segment.Generator(u);
+                double product = tangent.Length() * generator.Length();
+                double sine = product > 0 ? SdfVector.Cross(generator, tangent).Length() / product : 0;
+                smallestSine = Math.Min(smallestSine, sine);
+                double psi = segment.Psi(u);
                 if (!(psi < 1e300))
                 {
                     return double.MaxValue;
@@ -290,7 +298,12 @@ namespace pbrt
             }
             double mean = sum / (samples + 1);
             double variance = sumSquares / (samples + 1) - mean * mean;
-            return mean > 0 ? Math.Max(0, variance) / (mean * mean) : double.MaxValue;
+            double cost = mean > 0 ? Math.Max(0, variance) / (mean * mean) : double.MaxValue;
+            if (smallestSine < minimumSine)
+            {
+                cost += 1e6 * (minimumSine - smallestSine) + 1e3;
+            }
+            return cost;
         }
     }
 }
