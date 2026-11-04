@@ -339,23 +339,42 @@ namespace pbrt
             {
                 bezier[i] = new RGB(i / 6f, 1 - i / 6f, 0.5f);
             }
-            SpectrumStrandColorTexture b = new SpectrumStrandColorTexture(bezier, true, SpectrumType.Albedo, RGBColorSpace.sRGB);
-            CHECK_LT(Math.Abs(b.Color(0).r - 0), 1e-6);
-            CHECK_LT(Math.Abs(b.Color(1).r - 1), 1e-6);
-            CHECK_LT(Math.Abs(b.Color(0.5f).r - 0.5), 1e-5);
-            CHECK_LT(Math.Abs(b.Color(0.25f).r - 0.25), 1e-5);
+            SpectrumStrandColorTexture b = new SpectrumStrandColorTexture(bezier, true, false, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            CHECK_LT(Math.Abs(b.Color(0, 0).r - 0), 1e-6);
+            CHECK_LT(Math.Abs(b.Color(1, 0).r - 1), 1e-6);
+            CHECK_LT(Math.Abs(b.Color(0.5f, 0).r - 0.5), 1e-5);
+            CHECK_LT(Math.Abs(b.Color(0.25f, 0).r - 0.25), 1e-5);
             // bspline2: five points, three segments; the ends clamped, the joints at the midpoints of the points, continuous
             RGB[] spline = { new RGB(1, 0, 0), new RGB(0, 1, 0), new RGB(0, 0, 1), new RGB(1, 1, 0), new RGB(0, 1, 1) };
-            SpectrumStrandColorTexture q = new SpectrumStrandColorTexture(spline, false, SpectrumType.Albedo, RGBColorSpace.sRGB);
-            CHECK_LT(Math.Abs(q.Color(0).r - 1), 1e-6);
-            CHECK_LT(Math.Abs(q.Color(1).b - 1), 1e-6);
+            SpectrumStrandColorTexture q = new SpectrumStrandColorTexture(spline, false, false, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            CHECK_LT(Math.Abs(q.Color(0, 0).r - 1), 1e-6);
+            CHECK_LT(Math.Abs(q.Color(1, 0).b - 1), 1e-6);
             // the joint between the first and second segment (x = 1/3): the midpoint of the second and third color
-            RGB joint = q.Color(1f / 3);
+            RGB joint = q.Color(1f / 3, 0);
             CHECK_LT(Math.Abs(joint.g - 0.5), 1e-5);
             CHECK_LT(Math.Abs(joint.b - 0.5), 1e-5);
-            RGB before = q.Color(1f / 3 - 1e-4f), after = q.Color(1f / 3 + 1e-4f);
+            RGB before = q.Color(1f / 3 - 1e-4f, 0), after = q.Color(1f / 3 + 1e-4f, 0);
             CHECK_LT(Math.Abs(before.g - after.g), 1e-3);
             CHECK_LT(Math.Abs(before.b - after.b), 1e-3);
+        }
+
+        [TEST("Rocap", "LocalAndGlobalStrandColorsMultiply")]
+        public static void LocalAndGlobalStrandColorsMultiply()
+        {
+            RGB[] own = { new RGB(1, 0.5f, 0.25f) };
+            int number = StrandColors.Register(own, false);
+            RGB[] gradient = { new RGB(1, 1, 1), new RGB(0.5f, 0.5f, 0.5f), new RGB(0, 0, 0) };
+            SpectrumStrandColorTexture both = new SpectrumStrandColorTexture(gradient, false, true, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            SpectrumStrandColorTexture onlyLocal = new SpectrumStrandColorTexture(null, false, true, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            RGB product = both.Color(0, number);
+            CHECK_LT(Math.Abs(product.g - 0.5), 1e-6);
+            CHECK_LT(Math.Abs(product.b - 0.25), 1e-6);
+            RGB ownOnly = onlyLocal.Color(0.7f, number);
+            CHECK_LT(Math.Abs(ownOnly.r - 1), 1e-6);
+            CHECK_LT(Math.Abs(ownOnly.b - 0.25), 1e-6);
+            // a strand without colors leaves the global ones alone
+            RGB plain = both.Color(0, 0);
+            CHECK_LT(Math.Abs(plain.g - 1), 1e-6);
         }
     }
 }

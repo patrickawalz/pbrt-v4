@@ -9,8 +9,9 @@ namespace pbrt
 {
     public sealed unsafe class RibbonShape : Shape
     {
-        public RibbonShape(BezierSurfaceSettings settings, IRibbonSegment segment)
+        public RibbonShape(BezierSurfaceSettings settings, IRibbonSegment segment, int strandColors = 0)
         {
+            this.strandColors = strandColors;
             this.settings = settings;
             this.segment = segment;
             segment.Bounds(out SdfVector low, out SdfVector high);
@@ -154,7 +155,7 @@ namespace pbrt
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
             return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,
-                                          segment.Index);
+                                          strandColors);
         }
 
         // The sample of the point at (u, v), with the normal of the surface (the area density is set by the caller)
@@ -172,6 +173,8 @@ namespace pbrt
 
         private readonly BezierSurfaceSettings settings;
         private readonly IRibbonSegment segment;
+        // The number of the registered colors of the strand (StrandColors), the face index of the hits; 0 without
+        private readonly int strandColors;
         private readonly Bounds3f bounds;
         private PatchAreaSampler sampler;
     }
@@ -179,7 +182,7 @@ namespace pbrt
     public static class Ribbons
     {
         // "point3 P" (the control points of the quadratic B-spline, at least three), "normal N" (the normal of the surface at each point; the normal of the plane of
-        // the curve when absent), "float width" (the half width at each point, or one value for all), "epsilon" (a fraction of the diagonal of the points that
+        // the curve when absent), "float width" (the half width at each point, or one value for all), "rgb Cs" (the color of the strand, one for all or one for each point, read by a "strandcolor" texture with "local" true), "epsilon" (a fraction of the diagonal of the points that
         // keeps rays that leave the surface from hitting it again)
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
@@ -232,9 +235,15 @@ namespace pbrt
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-5f) * diagonal;
 
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            List<RGB> colorList = parameters.GetRGBArray("Cs");
+            if (colorList.Count > 1 && colorList.Count != points.Length)
+            {
+                pbrt.ErrorExit(loc, "ribbon: \"Cs\" needs one color or one for each point.");
+            }
+            int strandColors = colorList.Count > 0 ? StrandColors.Register(colorList.ToArray(), false) : 0;
             foreach (RibbonSegment segment in RibbonBuilder.Build(points, normals, widths))
             {
-                shapes.push_back(new RibbonShape(settings, segment));
+                shapes.push_back(new RibbonShape(settings, segment, strandColors));
             }
             return shapes;
         }

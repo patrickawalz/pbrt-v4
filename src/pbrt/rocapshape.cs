@@ -9,8 +9,9 @@ namespace pbrt
 {
     public sealed unsafe class RocapShape : Shape
     {
-        public RocapShape(BezierSurfaceSettings settings, RocapSegment segment)
+        public RocapShape(BezierSurfaceSettings settings, RocapSegment segment, int strandColors = 0)
         {
+            this.strandColors = strandColors;
             this.settings = settings;
             this.segment = segment;
             SdfVector chord = segment.Position(1) - segment.Position(0);
@@ -361,11 +362,13 @@ namespace pbrt
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
             return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,
-                                          segment.index);
+                                          strandColors);
         }
 
         private readonly BezierSurfaceSettings settings;
         private readonly RocapSegment segment;
+        // The number of the registered colors of the strand (StrandColors), the face index of the hits; 0 without
+        private readonly int strandColors;
         private readonly Bounds3f bounds;
         private SamplingTable table;
         private SdfVector reference;
@@ -374,7 +377,7 @@ namespace pbrt
     public static class Rocaps
     {
         // "point3 P" (the control points of the chain of cubic Bezier curves: 3n + 1 points), "float radius" (one value, or one for each point),
-        // "float width0" and "float width1" (diameters at the two ends when "radius" is absent, 0.02 and 0.02 of the diagonal), "bool flatcaps" (disks at the ends instead of spheres), "epsilon" (a fraction of the
+        // "float width0" and "float width1" (diameters at the two ends when "radius" is absent, 0.02 and 0.02 of the diagonal), "rgb Cs" (the color of the strand, one for all or one for each point, read by a "strandcolor" texture with "local" true), "bool flatcaps" (disks at the ends instead of spheres), "epsilon" (a fraction of the
         // diagonal of the points that keeps rays that leave the surface from hitting it again)
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
@@ -425,6 +428,12 @@ namespace pbrt
             settings.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             settings.epsilon = parameters.GetOneFloat("epsilon", 1e-6f) * diagonal;
 
+            List<RGB> colorList = parameters.GetRGBArray("Cs");
+            if (colorList.Count > 1 && colorList.Count != points.Length)
+            {
+                pbrt.ErrorExit(loc, "rocap: \"Cs\" needs one color or one for each point of \"P\".");
+            }
+            int strandColors = colorList.Count > 0 ? StrandColors.Register(colorList.ToArray(), true) : 0;
             bool flatCaps = parameters.GetOneBool("flatcaps", false);
             int count = (points.Length - 1) / 3;
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
@@ -432,7 +441,7 @@ namespace pbrt
             {
                 SdfVector[] p = new SdfVector[] { points[3 * s], points[3 * s + 1], points[3 * s + 2], points[3 * s + 3] };
                 double[] r = new double[] { radii[3 * s], radii[3 * s + 1], radii[3 * s + 2], radii[3 * s + 3] };
-                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }));
+                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }, strandColors));
             }
             return shapes;
         }
