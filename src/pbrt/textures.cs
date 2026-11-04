@@ -1987,6 +1987,8 @@ namespace pbrt
                 tex = MarbleTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "densitygrid")
                 tex = SpectrumGridTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "strandcolor")
+                tex = SpectrumStrandColorTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ramp")
                 tex = SpectrumRampTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "blackbody")

@@ -329,5 +329,33 @@ namespace pbrt
             CHECK_GT(byDirections, 1e-3);
             CHECK_LT(Math.Abs(bySamples - byDirections) / byDirections, 0.03);
         }
+
+        [TEST("Rocap", "StrandColorFollowsTheBasis")]
+        public static void StrandColorFollowsTheBasis()
+        {
+            // bezier3: the first and last colors at the ends, a linear ramp of colors stays linear along the strand
+            RGB[] bezier = new RGB[7];
+            for (int i = 0; i < 7; ++i)
+            {
+                bezier[i] = new RGB(i / 6f, 1 - i / 6f, 0.5f);
+            }
+            SpectrumStrandColorTexture b = new SpectrumStrandColorTexture(bezier, true, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            CHECK_LT(Math.Abs(b.Color(0).r - 0), 1e-6);
+            CHECK_LT(Math.Abs(b.Color(1).r - 1), 1e-6);
+            CHECK_LT(Math.Abs(b.Color(0.5f).r - 0.5), 1e-5);
+            CHECK_LT(Math.Abs(b.Color(0.25f).r - 0.25), 1e-5);
+            // bspline2: five points, three segments; the ends clamped, the joints at the midpoints of the points, continuous
+            RGB[] spline = { new RGB(1, 0, 0), new RGB(0, 1, 0), new RGB(0, 0, 1), new RGB(1, 1, 0), new RGB(0, 1, 1) };
+            SpectrumStrandColorTexture q = new SpectrumStrandColorTexture(spline, false, SpectrumType.Albedo, RGBColorSpace.sRGB);
+            CHECK_LT(Math.Abs(q.Color(0).r - 1), 1e-6);
+            CHECK_LT(Math.Abs(q.Color(1).b - 1), 1e-6);
+            // the joint between the first and second segment (x = 1/3): the midpoint of the second and third color
+            RGB joint = q.Color(1f / 3);
+            CHECK_LT(Math.Abs(joint.g - 0.5), 1e-5);
+            CHECK_LT(Math.Abs(joint.b - 0.5), 1e-5);
+            RGB before = q.Color(1f / 3 - 1e-4f), after = q.Color(1f / 3 + 1e-4f);
+            CHECK_LT(Math.Abs(before.g - after.g), 1e-3);
+            CHECK_LT(Math.Abs(before.b - after.b), 1e-3);
+        }
     }
 }
