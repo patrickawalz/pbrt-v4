@@ -10,12 +10,17 @@
     <LangVersion>latest</LangVersion>
     <Optimize>true</Optimize>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <RootNamespace>pbrt</RootNamespace>
     <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../cmd/rgb2spec_opt.csproj" ReferenceOutputAssembly="false"
                       GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;UseAppHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="rgbspectrumresources.cs" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -25,7 +30,7 @@
 
   <Target Name="GenerateRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile"
           Inputs="$(MSBuildThisFileDirectory)../cmd/rgb2spec_opt.cs;$(RgbSpecTool)"
-          Outputs="$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
+          Outputs="$(RgbSpecDir)rgbspectrum_srgb.bin;$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
     <MakeDir Directories="$(RgbSpecDir)" />
     <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_srgb.cs&quot; sRGB" />
     <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_dci_p3.cs&quot; DCI_P3" />
@@ -36,6 +41,7 @@
   <Target Name="AddRgbSpectrumTables" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="GenerateRgbSpectrumTables">
     <ItemGroup>
       <Compile Include="$(RgbSpecDir)rgbspectrum_*.cs" />
+      <EmbeddedResource Include="$(RgbSpecDir)rgbspectrum_*.bin" LogicalName="%(Filename).bin" />
     </ItemGroup>
   </Target>
 </Project>
