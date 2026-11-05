@@ -2694,6 +2694,10 @@ namespace pbrt
             {
                 shapes = SubdivisionSurface.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
             }
+            else if (name == "subdivisionmesh")
+            {
+                shapes = SubdivisionMeshes.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "curvedpatches")
             {
                 shapes = CurvedPatches.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);

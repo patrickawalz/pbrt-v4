@@ -265,6 +265,37 @@ namespace pbrt
                     int k = 3 * vertices[j];
                     P[j] = new SdfVector(points[k], points[k + 1], points[k + 2]);
                 }
+                // A patch at the boundary of the mesh has phantom points on the sides of its boundary edges: OpenSubdiv's evaluation reflects the row or
+                // column next to the boundary (adjustBSplineBoundaryWeights, whose weights act on the points in the order of the bits 8, 4, 2, 1)
+                int boundary = table.GetPatchParam(arrayIndex, patchInArray).GetBoundary();
+                if ((boundary & 8) != 0)
+                {
+                    for (int r = 0; r < 16; r += 4)
+                    {
+                        P[r] = 2 * P[r + 1] - P[r + 2];
+                    }
+                }
+                if ((boundary & 4) != 0)
+                {
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        P[c + 12] = 2 * P[c + 8] - P[c + 4];
+                    }
+                }
+                if ((boundary & 2) != 0)
+                {
+                    for (int r = 0; r < 16; r += 4)
+                    {
+                        P[r + 3] = 2 * P[r + 2] - P[r + 1];
+                    }
+                }
+                if ((boundary & 1) != 0)
+                {
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        P[c] = 2 * P[c + 4] - P[c + 8];
+                    }
+                }
                 SdfVector[] BP = BSplineToBezier(P);
                 for (int k = 0; k < 16; ++k)
                 {
