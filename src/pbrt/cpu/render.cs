@@ -28,6 +28,11 @@ namespace pbrt
                 if (m.Value is TextureMedium textureMedium)
                     textureMedium.ResolveTextures(textures, new FileLoc());
 
+            // (not in pbrt-v4) OSL media analyze their shaders and build their majorants now that the scene (the render space) is known
+            foreach (KeyValuePair<string, Medium> m in media)
+                if (m.Value is OSLMedium oslMedium)
+                    oslMedium.Prepare();
+
             // Lights
             Dictionary<int, List<Light>> shapeIndexToAreaLights = new Dictionary<int, List<Light>>();
             List<Light> lights = parsedScene.CreateLights(textures, shapeIndexToAreaLights);

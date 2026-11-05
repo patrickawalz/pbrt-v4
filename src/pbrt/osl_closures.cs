@@ -48,6 +48,10 @@ namespace pbrt
         public const int MxMediumVdf = 26;
         public const int MxLayer = 27;
         public const int Subsurface = 28;
+        // Volume closures that are not in OSL's stdosl.h (declared in scenes/osl_volume/pbrt_volume.h): the weight is a coefficient of the medium
+        public const int HenyeyGreenstein = 29;
+        public const int Isotropic = 30;
+        public const int Absorption = 31;
     }
 
     /// Reads the fields of the argument block of a closure
@@ -313,6 +317,11 @@ namespace pbrt
             Reg(ss, "layer", OSLClosureId.MxLayer, Cl(MxLayerTop), Cl(MxLayerBase), Finish(MxLayerSize, 8));
             Reg(ss, "anisotropic_vdf", OSLClosureId.MxAnisotropicVdf, C(0), C(12), F(24), Sk(32, "label"), Finish(40, 8));
             Reg(ss, "medium_vdf", OSLClosureId.MxMediumVdf, C(0), F(12), C(16), F(28), F(32), I(36), Sk(40, "label"), Finish(48, 8));
+
+            // The volume closures of the "osl" medium that stdosl.h does not declare (weight = scattering or absorption coefficient)
+            Reg(ss, "henyey_greenstein", OSLClosureId.HenyeyGreenstein, F(0), Finish(4, 4));
+            Reg(ss, "isotropic", OSLClosureId.Isotropic, Finish(0, 1));
+            Reg(ss, "absorption", OSLClosureId.Absorption, Finish(0, 1));
         }
     }
 }

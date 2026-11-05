@@ -145,7 +145,7 @@ namespace pbrt
 
         public override bool TryClosedForm(Ray ray, Medium medium, Float tMax, SampledWavelengths lambda, out SampledSpectrum T)
         {
-            if (!(medium is HomogeneousMedium))
+            if (!(medium is HomogeneousMedium) && !(medium is OSLMedium oslMedium && oslMedium.IsHomogeneous() && !oslMedium.HasBounds()))
             {
                 T = new SampledSpectrum(1f);
                 return false;

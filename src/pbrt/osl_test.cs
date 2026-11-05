@@ -166,9 +166,9 @@ namespace pbrt
         }
 
         /// Renders a scene file with the command line of pbrt; returns the image (linear RGB). The scene is written next to the shaders of the tests.
-        public static OslRender Render(string name, string sceneText, int spp, int seed, string extraArgs = "")
+        public static OslRender Render(string name, string sceneText, int spp, int seed, string extraArgs = "", string sceneDir = null)
         {
-            string dir = OslTestShaders.Directory();
+            string dir = sceneDir ?? OslTestShaders.Directory();
             string scenePath = Path.Combine(dir, name + "_" + spp + "_" + seed + ".pbrt");
             string exrPath = Path.Combine(dir, name + "_" + spp + "_" + seed + ".exr");
             File.WriteAllText(scenePath, sceneText);
@@ -375,9 +375,10 @@ namespace pbrt
         }
 
         /// Writes /tmp/osl_renders/<name>_<spp>spp_seed<seed>.png: the image scaled up 2x with the labels (the mode, the spp and the seed) burned in
-        public static string SaveLabelled(OslRender r, string name, string mode, int spp, int seed, string extraLine = "", float scale = 1f)
+        public static string SaveLabelled(OslRender r, string name, string mode, int spp, int seed, string extraLine = "", float scale = 1f, string dir = null)
         {
-            Directory.CreateDirectory(Dir);
+            string outDir = dir ?? Dir;
+            Directory.CreateDirectory(outDir);
             const int up = 2;
             int w = r.width * up, h = r.height * up;
             byte[] px = new byte[3 * w * h];
@@ -408,7 +409,7 @@ namespace pbrt
             {
                 DrawText(px, w, h, 4, 13, extraLine, 1);
             }
-            string path = Path.Combine(Dir, name + "_" + spp + "spp_seed" + seed + ".png");
+            string path = Path.Combine(outDir, name + "_" + spp + "spp_seed" + seed + ".png");
             WritePng(path, px, w, h);
             return path;
         }

@@ -1,0 +1,26 @@
+// An emissive medium: a flame-like column. The emission is a black-body-like ramp from red at the edge to yellow-white in the core;
+// the medium emits sigma_a * Le, so the absorption that goes with the glow is given too.
+#include "pbrt_volume.h"
+
+volume flame(float density = 10.0,
+             float emission_scale = 40.0,
+             float frequency = 4.0,
+             float rise = 1.5,
+             float albedo = 0.1,
+             float g = 0.0)
+{
+    point Pm = transform("shader", P);
+    // a column along y whose radius shrinks with height, pushed sideways by noise that rises with the flame
+    float h = clamp(Pm[1], 0.0, 1.0);
+    point q = point(Pm[0] * frequency, Pm[1] * frequency - rise, Pm[2] * frequency);
+    float wob = 0.12 * (noise(q) - 0.5) * 2.0;
+    float wob2 = 0.12 * (noise(q + vector(11.3, 5.1, 7.7)) - 0.5) * 2.0;
+    float dx = Pm[0] - 0.5 + wob * h, dz = Pm[2] - 0.5 + wob2 * h;
+    float radius = 0.28 * (1.0 - 0.85 * h) * (0.9 + 0.2 * noise(q * 2.0));
+    float rr = sqrt(dx * dx + dz * dz) / radius;
+    float core = (1.0 - smoothstep(0.0, 1.0, rr)) * (1.0 - smoothstep(0.75, 1.0, h)) * smoothstep(0.0, 0.05, h);
+    float temp = core * (1.0 - 0.5 * h);
+    color Le = mix(color(1.0, 0.18, 0.02), color(1.0, 0.85, 0.5), smoothstep(0.35, 0.9, temp));
+    float sigma_t = density * core;
+    Ci = absorption() * (sigma_t * (1.0 - albedo)) + henyey_greenstein(g) * (sigma_t * albedo) + emission() * (Le * emission_scale * temp);
+}

@@ -102,6 +102,23 @@ namespace pbrt
             return false;
         }
 
+        // (not in pbrt-v4) The measured coefficients of a preset as RGB values (for the shader parameters of an "osl" medium)
+        public static bool GetMediumScatteringRGB(string name, out RGB sigma_s, out RGB sigma_a)
+        {
+            foreach (MeasuredSS mss in SubsurfaceParameterTable)
+            {
+                if (name == mss.name)
+                {
+                    sigma_s = mss.sigma_prime_s;
+                    sigma_a = mss.sigma_a;
+                    return true;
+                }
+            }
+            sigma_s = default;
+            sigma_a = default;
+            return false;
+        }
+
         // SampleT_maj<ConcreteMedium>
         public static SampledSpectrum SampleT_maj<ConcreteMedium, MajorantIterator>(
             Ray ray, Medium rayMedium, Float tMax, Float u, ref RNG rng, SampledWavelengths lambda,
@@ -194,6 +211,8 @@ namespace pbrt
                 return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
                 return SampleT_maj<NanoVDBMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is OSLMedium)
+                return SampleT_maj<OSLMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is ScaledMedium)
                 return SampleT_maj<ScaledMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CompositeMedium)
@@ -1426,6 +1445,10 @@ namespace pbrt
             else if (name == "texture")
             {
                 m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "osl")
+            {
+                m = OSLMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else
                 ErrorExit(loc, $"{name}: medium unknown.");

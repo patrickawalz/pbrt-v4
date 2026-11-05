@@ -93,13 +93,23 @@ namespace pbrt
         private static readonly string[] reserved = new string[] { "shader", "layers", "connect", "groupspec", "searchpath", "output", "displacement",
                                                                     "__shaderspace", "layername", "type" };
 
-        private static bool IsReserved(string name)
+        private static bool IsReserved(string name, string[] extraReserved)
         {
             foreach (string r in reserved)
             {
                 if (r == name)
                 {
                     return true;
+                }
+            }
+            if (extraReserved != null)
+            {
+                foreach (string r in extraReserved)
+                {
+                    if (r == name)
+                    {
+                        return true;
+                    }
                 }
             }
             return false;
@@ -218,7 +228,8 @@ namespace pbrt
         }
 
         /// The description of a group from the parameters of a Material or a Texture
-        public static OSLGroupSpec FromParameters(TextureParameterDictionary tparams, FileLoc loc, bool isTexture, string defaultOutput, Allocator alloc)
+        public static OSLGroupSpec FromParameters(TextureParameterDictionary tparams, FileLoc loc, bool isTexture, string defaultOutput, Allocator alloc,
+                                                  string[] extraReserved = null)
         {
             ParameterDictionary dict = tparams;
             List<ParsedParameter> plist = dict.GetParameterVector();
@@ -297,7 +308,7 @@ namespace pbrt
             NamedTextures named = tparams.Textures();
             foreach (ParsedParameter p in plist)
             {
-                if (IsReserved(p.name))
+                if (IsReserved(p.name, extraReserved))
                 {
                     p.lookedUp = true;
                     continue;
@@ -451,9 +462,10 @@ namespace pbrt
             {
                 g.bindings[new ustring(b.parameter).hash()] = b;
             }
+            string usage = kind == "medium" ? "volume" : "surface";
             if (spec.groupSpec != null)
             {
-                g.group = ss.ShaderGroupBegin(g.name, "surface", spec.groupSpec);
+                g.group = ss.ShaderGroupBegin(g.name, usage, spec.groupSpec);
             }
             else
             {
@@ -464,7 +476,7 @@ namespace pbrt
                     {
                         ss.Parameter(g.group, p.name, p.type, p.value, p.interpolated ? ParamHints.interpolated : ParamHints.none);
                     }
-                    ss.Shader(g.group, "surface", l.shader, l.layer);
+                    ss.Shader(g.group, usage, l.shader, l.layer);
                 }
                 foreach (OSLConnectionSpec c in spec.connections)
                 {

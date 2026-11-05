@@ -1,0 +1,7 @@
+// A homogeneous fog: the coefficients do not depend on the position, so the medium behaves as pbrt's "homogeneous" medium.
+#include "pbrt_volume.h"
+
+volume fog(color sigma_a = color(0.05), color sigma_s = color(0.4), float g = 0.0)
+{
+    Ci = absorption() * sigma_a + henyey_greenstein(g) * sigma_s;
+}
