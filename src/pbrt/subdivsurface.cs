@@ -205,7 +205,7 @@ namespace pbrt
 
             PatchTableFactory.Options options = new PatchTableFactory.Options((uint)input.isolationLevel);
             options.SetPatchPrecision<double>();
-            options.useInfSharpPatch = false;
+            options.useInfSharpPatch = true;   // the patches at infinitely sharp corners and creases are exact (the spike of a corner reaches its vertex)
             options.useSingleCreasePatch = false;
             options.generateVaryingTables = false;
             options.generateVaryingLocalPoints = false;

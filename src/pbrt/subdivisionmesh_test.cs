@@ -121,9 +121,24 @@ namespace pbrt
             corneredDirect.Add(Param("integer", "cornerindices", null, new int[] { 6 }, null));
             corneredDirect.Add(Param("float", "cornerweights", new double[] { 10 }, null, null));
             EXPECT_NEAR(1.0, Area(cornered) / Area(Make("catmarksubdiv", corneredDirect)), 1e-6, "corner against catmarksubdiv");
-            // (that the limit surface of the corner reaches the vertex exactly is not verified: the patches around a sharp corner are end caps of the
-            // isolation level)
             EXPECT_GT(Math.Abs(Area(cornered) - smoothArea), 1e-3, "the corner changes the surface");
+            // rays toward the corner vertex (1, 1, 1) at shrinking offsets hit the spike nearer and nearer to the vertex: the limit surface reaches it
+            Vector3f toCorner = pbrt.Normalize(new Vector3f(-1, -1, -1));
+            Vector3f side1 = pbrt.Normalize(new Vector3f(1, -1, 0)), side2 = pbrt.Cross(toCorner, side1);
+            foreach (double delta in new double[] { 1e-2, 1e-3, 1e-4, 1e-5 })
+            {
+                for (int k = 0; k < 8; ++k)
+                {
+                    double angle = k * Math.PI / 4;
+                    Vector3f lateral = side1 * (Float)(delta * Math.Cos(angle)) + side2 * (Float)(delta * Math.Sin(angle));
+                    Point3f origin = new Point3f(1, 1, 1) + toCorner * -5.0f + lateral;
+                    double t = FirstHit(cornered, origin, toCorner);
+                    ASSERT_TRUE(t < 1e5, "a ray at offset " + delta + " misses the corner spike");
+                    Point3f hit = origin + toCorner * (Float)t;
+                    double distance = Math.Sqrt(Math.Pow(hit.x - 1.0, 2) + Math.Pow(hit.y - 1.0, 2) + Math.Pow(hit.z - 1.0, 2));
+                    EXPECT_LT(distance, 12 * delta + 1e-4, "hit distance to the corner vertex, offset " + delta);
+                }
+            }
 
             // a hole: removing the face 0 (z = -1) lets a ray from below see the inside of the opposite face
             pstd.vector<Shape> holed = Make("subdivisionmesh", Cube(Param("string", "tags", null, null, new string[] { "hole" }),
