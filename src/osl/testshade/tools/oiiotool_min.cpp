@@ -54,6 +54,11 @@ int main(int argc, char** argv)
         ImageSpec config;
         if (!wrap.empty())
             config.attribute("wrapmodes", wrap + "," + wrap);
+        // as the real maketx does: the Software attribute is what makes the texture system trust the oiio:ConstantColor / oiio:AverageColor tags
+        std::string cmdline = prog;
+        for (int i = 1; i < argc; ++i)
+            cmdline += std::string(" ") + argv[i];
+        config.attribute("Software", std::string("OpenImageIO ") + OIIO_VERSION_STRING + " : " + cmdline);
         bool ok = ImageBufAlgo::make_texture(ImageBufAlgo::MakeTxTexture, in, out, config, &std::cout);
         if (!ok) { std::fprintf(stderr, "maketx: failed\n"); return 1; }
         return 0;
@@ -127,6 +132,10 @@ int main(int argc, char** argv)
             } else {
                 ImageSpec config;
                 if (fmt != TypeDesc::UNKNOWN) config.format = fmt;
+                std::string cmdline = "oiiotool";
+                for (int j = 1; j < argc; ++j)
+                    cmdline += std::string(" ") + argv[j];
+                config.attribute("Software", std::string("OpenImageIO ") + OIIO_VERSION_STRING + " : " + cmdline);
                 ok = ImageBufAlgo::make_texture(opt == "otex" ? ImageBufAlgo::MakeTxTexture : ImageBufAlgo::MakeTxEnvLatl, cur, file, config, &std::cout);
             }
             if (!ok) { std::fprintf(stderr, "oiiotool: could not write %s: %s\n", file.c_str(), cur.geterror().c_str()); return 1; }

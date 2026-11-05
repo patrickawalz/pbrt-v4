@@ -648,7 +648,15 @@ namespace OIIO
                 {
                     if (h.resolved_filename.Length > 0 && !File.Exists(h.resolved_filename) && error == "Could not open file")
                     {
-                        error = "Could not open file: " + h.resolved_filename + ": No such file or directory";
+                        if (!is_known_image_extension(h.resolved_filename))
+                        {
+                            // ImageInput::create(): no reader for the extension and no such file
+                            error = "Image \"" + h.resolved_filename + "\" does not exist. Also, it is not the name of an image format that OpenImageIO recognizes.";
+                        }
+                        else
+                        {
+                            error = "Could not open file: " + h.resolved_filename + ": No such file or directory";
+                        }
                     }
                     else if (h.resolved_filename.Length == 0 && error == "Could not open file")
                     {
@@ -659,6 +667,29 @@ namespace OIIO
                 }
                 finish_open(h, data);
             }
+        }
+
+        // The file name extensions of the OIIO 3.1 image format plugins (the "extension_list" attribute)
+        private static readonly string[] known_image_extensions = new string[]
+        {
+            "exr", "sxr", "mxr", "tif", "tiff", "tx", "env", "sm", "vsm", "jpg", "jpe", "jpeg", "jif", "jfif", "jfi", "bmp", "dib", "cin", "dds", "dpx", "fits",
+            "hdr", "rgbe", "ico", "iff", "z", "null", "nul", "png", "ppm", "pgm", "pbm", "pnm", "pfm", "psd", "pdd", "psb", "rla", "sgi", "rgb", "rgba", "bw",
+            "int", "inta", "pic", "tga", "tpic", "term", "zfile"
+        };
+
+        private static bool is_known_image_extension(string filename)
+        {
+            string ext = Path.GetExtension(filename);
+            if (ext.Length > 0)
+            {
+                ext = ext.Substring(1);
+            }
+            else
+            {
+                // without an extension ImageInput::create() takes the whole name as the format name
+                ext = filename;
+            }
+            return Array.IndexOf(known_image_extensions, ext.ToLowerInvariant()) >= 0;
         }
 
         /// Read the file (a point where a derived class can substitute its own source of images)

@@ -242,7 +242,8 @@ namespace OSL
                 }
                 else if (errormessage != null)
                 {
-                    *errormessage = Strings.unknown.hash();
+                    // gettextureinfo failed but did not provide an error, so none should be emitted
+                    *errormessage = 0UL;
                 }
             }
         }
@@ -342,7 +343,8 @@ namespace OSL
                 }
                 else if (errormessage != null)
                 {
-                    *errormessage = Strings.unknown.hash();
+                    // gettextureinfo failed but did not provide an error, so none should be emitted
+                    *errormessage = 0UL;
                 }
             }
             return status;

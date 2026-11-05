@@ -50,7 +50,15 @@ run_one() {
   n=$1
   w=/tmp/tsuite/$n
   rm -rf $w; mkdir -p $w
-  (cd $w && timeout ${TS_TIMEOUT:-300} python3 $SUITE/runtest.py $w $BUILD > $w/runtest.log 2>&1)
+  # A directory with a BATCHED_REGRESSION marker is only run by the OSL CMake in a batched build, as "optimized batched run against the scalar run"
+  # (OSL_REGRESSION_TEST=BATCHED makes runtest.py produce a baseline first). Batched execution is not ported (testshade ignores TESTSHADE_BATCHED), so
+  # that comparison is scalar against scalar: these directories show the shaders run to completion, they do not validate a batched code path.
+  extra=""
+  if [ -f $SUITE/$n/BATCHED_REGRESSION ]; then
+    if [ -f $SUITE/$n/NOOPTIMIZE ]; then extra="TESTSHADE_OPT=0"; else extra="TESTSHADE_OPT=2"; fi
+    extra="$extra OSL_REGRESSION_TEST=BATCHED"
+  fi
+  (cd $w && env $extra timeout ${TS_TIMEOUT:-300} python3 $SUITE/runtest.py $w $BUILD > $w/runtest.log 2>&1)
   rc=$?
   if [ $rc -eq 0 ]; then echo "PASS $n"; else echo "FAIL $n ($rc)"; fi
 }

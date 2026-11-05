@@ -529,6 +529,17 @@ namespace OIIO
             {
                 spec.attributes["Software"] = software;
             }
+            // the other ASCII tags the OIIO TIFF reader exposes as metadata
+            string[] ascii_names = new string[] { "DocumentName", "DateTime", "Artist", "HostComputer", "Make", "Model", "Copyright" };
+            int[] ascii_tags = new int[] { 269, 306, 315, 316, 271, 272, 33432 };
+            for (int t = 0; t < ascii_tags.Length; ++t)
+            {
+                string value = get_string(ifd, ascii_tags[t]);
+                if (value != null && value.Length > 0)
+                {
+                    spec.attributes[ascii_names[t]] = value;
+                }
+            }
             if (textureformat != null)
             {
                 spec.attributes["textureformat"] = textureformat;
