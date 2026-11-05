@@ -183,9 +183,19 @@ namespace pbrt
             return new ShapeSample(InteractionAt(pu, pv), (Float)(density / jacobian));
         }
 
+        // The area density of the sampling at a point of the surface: the parameters of the point are found by projection, since the density of
+        // Sample(u) is not uniform in the area (it follows the cells of the sampler and the Jacobian)
         public override Float PDF(Interaction intr)
         {
-            return 1 / Area();
+            PatchAreaSampler areaSampler = Sampler();
+            Point3f p = intr.p();
+            double distance = areaSampler.Locate(new SdfVector(p.x, p.y, p.z), out double u, out double v);
+            Bounds3f box = Bounds();
+            if (distance > 1e-3 * pbrt.Length(box.pMax - box.pMin))
+            {
+                return 0;
+            }
+            return (Float)areaSampler.AreaDensity(u, v);
         }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)

@@ -120,6 +120,55 @@ namespace pbrt
             return jacobian > 0 ? Density(u, v) / jacobian : 0;
         }
 
+        // The parameters (u, v) of the point of the surface that is nearest to the target: the best of a grid of 17 x 17 points, then Gauss-Newton steps.
+        // Returns the distance to the surface point found.
+        public double Locate(SdfVector target, out double u, out double v)
+        {
+            const int n = 16;
+            double best = double.MaxValue;
+            u = 0.5;
+            v = 0.5;
+            for (int j = 0; j <= n; ++j)
+            {
+                for (int i = 0; i <= n; ++i)
+                {
+                    double d = (position((double)i / n, (double)j / n) - target).Length();
+                    if (d < best)
+                    {
+                        best = d;
+                        u = (double)i / n;
+                        v = (double)j / n;
+                    }
+                }
+            }
+            for (int iteration = 0; iteration < 40; ++iteration)
+            {
+                SdfVector r = position(u, v) - target;
+                Differences(u, v, out SdfVector pu, out SdfVector pv);
+                double a = SdfVector.Dot(pu, pu), b = SdfVector.Dot(pu, pv), c = SdfVector.Dot(pv, pv);
+                double e = -SdfVector.Dot(pu, r), f = -SdfVector.Dot(pv, r);
+                double det = a * c - b * b;
+                if (!(det > 1e-30 * a * c))
+                {
+                    break;
+                }
+                double du = (c * e - b * f) / det, dv = (a * f - b * e) / det;
+                double step = Math.Max(Math.Abs(du), Math.Abs(dv));
+                if (step > 0.25)
+                {
+                    du *= 0.25 / step;
+                    dv *= 0.25 / step;
+                }
+                u = Math.Min(1, Math.Max(0, u + du));
+                v = Math.Min(1, Math.Max(0, v + dv));
+                if (step < 1e-12)
+                {
+                    break;
+                }
+            }
+            return (position(u, v) - target).Length();
+        }
+
         private readonly PatchPositionFunction position;
         private readonly int resolution;
         private readonly double[] cumulative;
