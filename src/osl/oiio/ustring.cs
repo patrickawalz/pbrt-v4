@@ -39,7 +39,7 @@ namespace OIIO
             {
                 Entry n = new Entry();
                 n.text = k;
-                n.hash = Fnv64(k);
+                n.hash = OIIO.Strutil_hash.strhash64(k);
                 byHash[n.hash] = n;
                 return n;
             });
