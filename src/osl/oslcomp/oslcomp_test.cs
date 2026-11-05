@@ -82,6 +82,17 @@ namespace OSL
                 EXPECT_TRUE(oso.Contains("%mystruct{q} %mystructfield{1}"));
                 EXPECT_TRUE(oso.Contains("\tfunctioncall"));
             }
+
+            [TEST("OslComp", "LineMacroIsClosingParenLine")]
+            public static void OslComp_LineMacroIsClosingParenLine()
+            {
+                // The buffer carries the injected stdosl include line, so clang's __LINE__ (the line of the closing parenthesis) is one more than the file line
+                string source = "#define F(x, y) (x + y + __LINE__)\nshader t6(output int r = 0)\n{\n  r = F(1,\n        2);\n}\n";
+                string oso;
+                BufferedErrorHandler errors;
+                EXPECT_TRUE(Compile(source, out oso, out errors));
+                EXPECT_TRUE(oso.Contains("int\t$const1\t9\t"));  // 1 + 2 + 6
+            }
         }
     }
 }

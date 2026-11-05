@@ -486,12 +486,16 @@ namespace OSL
                     // An ordinary text line. A function-like macro invocation may run on over several lines.
                     string logical = line.text;
                     int endLine = line.endLine;
+                    int lastStart = line.startLine;
                     while (UnbalancedMacroCall(logical) && li + 1 < lines.Count && !lines[li + 1].text.TrimStart(' ', '\t').StartsWith("#", StringComparison.Ordinal))
                     {
                         ++li;
                         logical += " " + lines[li].text;
                         endLine = lines[li].endLine;
+                        lastStart = lines[li].startLine;
                     }
+                    // clang's __LINE__ is the line of the closing parenthesis of the outermost macro invocation
+                    curline = lastStart;
                     if (logical.Trim().Length == 0)
                     {
                         continue;

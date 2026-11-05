@@ -1331,7 +1331,7 @@ namespace OSL
         }
 
         // Imath::Vec3<float>::length(), including its handling of lengths whose square would underflow (lengthTiny)
-        private static float Vec3Length(Vec3 v)
+        internal static float Vec3Length(Vec3 v)
         {
             float length2 = v.x * v.x + v.y * v.y + v.z * v.z;
             if (length2 < 2.0f * fmath.float_min)
