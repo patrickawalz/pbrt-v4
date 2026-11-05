@@ -687,6 +687,12 @@ namespace pbrt
             return x * x;
         }
 
+        // (not in pbrt-v4) The surface for the diced displacement
+        public IDicedSurface CreateDicedSurface()
+        {
+            return new NurbsDicedSurface(surface, trim);
+        }
+
         public override Bounds3f Bounds()
         {
             return bounds;

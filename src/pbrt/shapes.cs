@@ -303,6 +303,14 @@ namespace pbrt
 
         public override DirectionCone NormalBounds() { return DirectionCone.EntireSphere(); }
 
+        protected override void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n)
+        {
+            double phi = u * phiMax, theta = thetaZMin + v * ((double)thetaZMax - thetaZMin);
+            double st = Math.Sin(theta);
+            n = new SdfVector(st * Math.Cos(phi), st * Math.Sin(phi), Math.Cos(theta));
+            p = radius * n;
+        }
+
         public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
         {
             Float phi;
@@ -584,6 +592,13 @@ namespace pbrt
 
         protected override Float ComputeObjectArea() { return phiMax * 0.5f * (Sqr(radius) - Sqr(innerRadius)); }
 
+        protected override void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n)
+        {
+            double phi = u * phiMax, r = radius - v * ((double)radius - innerRadius);
+            p = new SdfVector(r * Math.Cos(phi), r * Math.Sin(phi), height);
+            n = new SdfVector(0, 0, 1);
+        }
+
         public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
         {
             // Transform _Ray_ origin and direction to object space
@@ -850,6 +865,13 @@ namespace pbrt
             this.zMin = std.min(zMin, zMax);
             this.zMax = std.max(zMin, zMax);
             this.phiMax = QuadricUtil.SweepRadians(phiMax);
+        }
+
+        protected override void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n)
+        {
+            double phi = u * phiMax, c = Math.Cos(phi), s = Math.Sin(phi);
+            p = new SdfVector(radius * c, radius * s, zMin + v * ((double)zMax - zMin));
+            n = new SdfVector(c, s, 0);
         }
 
         protected override Bounds3f ObjectBounds()
@@ -2617,6 +2639,25 @@ namespace pbrt
             return new ShapeSample(new Interaction(p, n, ctx.time, st), pdf);
         }
 
+        // (not in pbrt-v4) The corners (p00, p10, p01, p11, in render space), the texture coordinates at the corners (null without) and the face index,
+        // for the diced displacement
+        public void GetCorners(out Point3f[] p, out Point2f[] uv, out int faceIndex)
+        {
+            BilinearPatchMesh mesh = GetMesh();
+            int vi = 4 * blpIndex;
+            p = new Point3f[4];
+            uv = mesh.uv != null ? new Point2f[4] : null;
+            for (int i = 0; i < 4; ++i)
+            {
+                p[i] = mesh.p[mesh.vertexIndices[vi + i]];
+                if (uv != null)
+                {
+                    uv[i] = mesh.uv[mesh.vertexIndices[vi + i]];
+                }
+            }
+            faceIndex = mesh.faceIndices != null ? mesh.faceIndices[blpIndex] : 0;
+        }
+
         // BilinearPatch Private Methods
         BilinearPatchMesh GetMesh() { return allMeshes[meshIndex]; }
 
@@ -2652,6 +2693,23 @@ namespace pbrt
                                                 bool reverseOrientation, ParameterDictionary parameters,
                                                 IDictionary<string, FloatTexture> floatTextures, FileLoc loc,
                                                 Allocator alloc)
+        {
+            // (not in pbrt-v4) A shape with a "texture displacement" is diced (dicing.cs); every other shape is created exactly as before
+            if (DicedShapes.TryCreate(name, renderFromObject, objectFromRender, reverseOrientation, parameters, floatTextures, loc, alloc,
+                                      out pstd.vector<Shape> diced))
+            {
+                if (diced.empty())
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create shape.", name));
+                return diced;
+            }
+            return CreateExact(name, renderFromObject, objectFromRender, reverseOrientation, parameters, floatTextures, loc, alloc);
+        }
+
+        // The shape without dicing
+        public static pstd.vector<Shape> CreateExact(string name, Transform renderFromObject, Transform objectFromRender,
+                                                     bool reverseOrientation, ParameterDictionary parameters,
+                                                     IDictionary<string, FloatTexture> floatTextures, FileLoc loc,
+                                                     Allocator alloc)
         {
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             if (name == "sphere")

@@ -417,6 +417,15 @@ namespace pbrt
 
         public abstract pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax);
 
+        // (not in pbrt-v4) The point and the unit normal (along cross(dpdu, dpdv)) at the parameters (u, v) in [0, 1]^2, in object space, for the
+        // diced displacement (dicing.cs)
+        protected abstract void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n);
+
+        public IDicedSurface CreateDicedSurface()
+        {
+            return new AnalyticDicedSurface(EvaluateDiced);
+        }
+
         public abstract SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time);
 
         protected virtual Vector3f ObjectPError(Point3f pObj)
@@ -582,6 +591,17 @@ namespace pbrt
             this.zMin = std.min(zStart, zEnd);
             this.zMax = std.max(zStart, zEnd);
             this.phiMax = phiMax;
+        }
+
+        protected override void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n)
+        {
+            Float z = (Float)(zStart + v * ((double)zEnd - zStart));
+            Vector3f q, dq, ddq;
+            Profile(z, out q, out dq, out ddq);
+            double phi = u * phiMax, c = Math.Cos(phi), s = Math.Sin(phi);
+            p = new SdfVector(c * q.x - s * q.y, s * q.x + c * q.y, z);
+            Vector3f normal = NormalFromRotation(q, dq, (Float)c, (Float)s);
+            n = new SdfVector(normal.x, normal.y, normal.z).Normalized();
         }
 
         // The generator point q(z) and its first and second derivatives with respect to z
@@ -1142,6 +1162,15 @@ namespace pbrt
             this.fullMinor = hi - lo >= 360;
             this.phiSweep = fullMinor ? 2 * Pi : Radians(hi - lo);
             this.thetaMax = QuadricUtil.SweepRadians(thetaMaxDegrees);
+        }
+
+        protected override void EvaluateDiced(double u, double v, out SdfVector p, out SdfVector n)
+        {
+            double theta = u * thetaMax, phi = phiMin + v * phiSweep;
+            double ct = Math.Cos(theta), st = Math.Sin(theta), cp = Math.Cos(phi), sp = Math.Sin(phi);
+            double rho = majorRadius + minorRadius * cp;
+            p = new SdfVector(rho * ct, rho * st, minorRadius * sp);
+            n = new SdfVector(cp * ct, cp * st, sp);
         }
 
         protected override Float ComputeObjectArea()
