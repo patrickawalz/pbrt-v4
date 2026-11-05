@@ -2722,6 +2722,10 @@ namespace pbrt
             {
                 shapes = Points.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "blobby")
+            {
+                shapes = Blobbies.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "procedural")
             {
                 shapes = Procedurals.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
