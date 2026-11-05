@@ -144,8 +144,8 @@ namespace OSL.pvt
             switch (s)
             {
                 case "closest": return TextureOpt.InterpClosest;
-                case "bilinear": return TextureOpt.InterpBilinear;
-                case "bicubic": return TextureOpt.InterpBicubic;
+                case "linear": return TextureOpt.InterpBilinear;
+                case "cubic": return TextureOpt.InterpBicubic;
                 case "smartcubic": return TextureOpt.InterpSmartBicubic;
                 default: return -1;
             }
@@ -617,7 +617,7 @@ namespace OSL.pvt
             }
             int* out_indices = (int*)out_indices_;
             float* out_distances = (float*)out_distances_;
-            int count = RsFallback.rs_pointcloud_search(oec, filename_, *(Vec3*)center, radius, max_points, sort != 0, out_indices, out_distances,
+            int count = RsFallback.rs_pointcloud_search(oec, filename_, (Vec3*)center, radius, max_points, sort != 0, out_indices, out_distances,
                                                         derivs_offset);
             ulong* names = (ulong*)names_;
             TypeDesc* types = (TypeDesc*)types_;

@@ -77,7 +77,8 @@ namespace OSL.pvt
                 fixed (int* pindices = indices)
                 fixed (float* pdistances = distances)
                 {
-                    count = rop.renderer().pointcloud_search(rop.shaderglobals(), filename.hash(), Center.get_vec3(), Radius.get_float(), maxpoints,
+                    Vec3 center_value = Center.get_vec3();
+                    count = rop.renderer().pointcloud_search(rop.shaderglobals(), filename.hash(), &center_value, Radius.get_float(), maxpoints,
                                                              false, pindices, pdistances, 0);
                 }
                 rop.shadingsys().pointcloud_stats(1, 0, count);

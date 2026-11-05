@@ -367,21 +367,22 @@ namespace OSL
             return get_texture_info_impl(filename, texture_handle, texture_thread_info, sg, subimage, dataname, datatype, data, errormessage);
         }
 
-        public virtual int pointcloud_search(ShaderGlobals* sg, ulong filename, Vec3 center, float radius, int max_points, bool sort,
+        /// center points at three consecutive Vec3: the center and its x and y derivatives
+        public virtual int pointcloud_search(ShaderGlobals* sg, ulong filename, Vec3* center, float radius, int max_points, bool sort,
                                              int* out_indices, float* out_distances, int derivs_offset)
         {
-            return 0;
+            return PointCloudStore.search(sg, filename, center, radius, max_points, sort, out_indices, out_distances, derivs_offset);
         }
 
         public virtual int pointcloud_get(ShaderGlobals* sg, ulong filename, int* indices, int count, ulong attr_name, TypeDesc attr_type,
                                           void* out_data)
         {
-            return 0;
+            return PointCloudStore.get(sg, filename, indices, count, attr_name, attr_type, out_data);
         }
 
         public virtual bool pointcloud_write(ShaderGlobals* sg, ulong filename, Vec3 pos, int nattribs, ulong* names, TypeDesc* types, void** data)
         {
-            return false;
+            return PointCloudStore.write(sg, filename, pos, nattribs, names, types, data);
         }
 
         public virtual bool trace(ref TraceOpt options, ShaderGlobals* sg, Vec3 P, Vec3 dPdx, Vec3 dPdy, Vec3 R, Vec3 dRdx, Vec3 dRdy)
@@ -593,7 +594,7 @@ namespace OSL
                                              errormessage);
         }
 
-        public static int rs_pointcloud_search(void* exec_ctx, ulong filename, Vec3 center, float radius, int max_points, bool sort, int* out_indices,
+        public static int rs_pointcloud_search(void* exec_ctx, ulong filename, Vec3* center, float radius, int max_points, bool sort, int* out_indices,
                                                float* out_distances, int derivs_offset)
         {
             ShaderGlobals* sg = get_sg(exec_ctx);
