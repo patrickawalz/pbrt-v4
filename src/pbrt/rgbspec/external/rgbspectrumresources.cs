@@ -1,6 +1,6 @@
 // (not in pbrt-v4) rgbspectrumresources.cs
 //
-// Loads the RGB-to-spectrum tables from the files embedded in the assembly, or from files next to it (see rgb2spec_opt, pbrt_lib.csproj).
+// Loads the RGB-to-spectrum tables from the .bin files beside the assembly; used by rgbspec/external (see rgb2spec_opt, pbrt_lib.csproj).
 
 using System;
 using System.IO;
@@ -13,15 +13,13 @@ namespace pbrt
         // count floats of the resource, starting at the float offset
         public static float[] Load(string name, long offset, long count)
         {
-            Assembly assembly = typeof(RgbSpectrumResources).Assembly;
-            // Embedded in the assembly (the default), or a file next to it (a build with RgbSpecExternal, see pbrt_lib.csproj)
-            Stream embedded = assembly.GetManifestResourceStream(name);
-            string path = Path.Combine(Path.GetDirectoryName(assembly.Location), name);
-            if (embedded == null && !File.Exists(path))
+            // The file is beside the assembly (see rgb2spec_opt with "bin", and pbrt_lib.csproj)
+            string path = Path.Combine(Path.GetDirectoryName(typeof(RgbSpectrumResources).Assembly.Location), name);
+            if (!File.Exists(path))
             {
-                throw new InvalidOperationException("The RGB-to-spectrum table " + name + " is neither in the assembly nor next to it (" + path + ").");
+                throw new InvalidOperationException("The RGB-to-spectrum table file " + path + " is missing.");
             }
-            using (Stream stream = embedded ?? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (Stream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 stream.Seek(offset * sizeof(float), SeekOrigin.Begin);
                 float[] result = new float[count];
