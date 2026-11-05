@@ -284,38 +284,26 @@ namespace pbrt
         public Float phi;
     }
 
-    // Shared helpers for the shape implementations below
-    // Sphere Definition
-    public sealed unsafe class Sphere : Shape
+    // Sphere Definition: RenderMan's Sphere radius zmin zmax thetamax (phimax in pbrt); (u, v) = (phi / phimax, from zmin to zmax)
+    public sealed unsafe class Sphere : QuadricBase
     {
         // Sphere Public Methods
         public Sphere(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, Float radius,
                       Float zMin, Float zMax, Float phiMax)
+            : base(renderFromObject, objectFromRender, reverseOrientation)
         {
-            this.renderFromObject = renderFromObject;
-            this.objectFromRender = objectFromRender;
-            this.reverseOrientation = reverseOrientation;
-            this.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             this.radius = radius;
-            this.zMin = pbrt.Clamp(std.min(zMin, zMax), -radius, radius);
-            this.zMax = pbrt.Clamp(std.max(zMin, zMax), -radius, radius);
-            this.thetaZMin = std.acos(pbrt.Clamp(std.min(zMin, zMax) / radius, -1, 1));
-            this.thetaZMax = std.acos(pbrt.Clamp(std.max(zMin, zMax) / radius, -1, 1));
-            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
+            this.zMin = Clamp(std.min(zMin, zMax), -radius, radius);
+            this.zMax = Clamp(std.max(zMin, zMax), -radius, radius);
+            this.thetaZMin = std.acos(Clamp(std.min(zMin, zMax) / radius, -1, 1));
+            this.thetaZMax = std.acos(Clamp(std.max(zMin, zMax) / radius, -1, 1));
+            this.phiMax = QuadricUtil.SweepRadians(phiMax);
+            this.fullSphere = this.zMin <= -radius && this.zMax >= radius && this.phiMax >= 2 * Pi;
         }
 
         public override DirectionCone NormalBounds() { return DirectionCone.EntireSphere(); }
 
-        public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
-        {
-            pstd.optional<QuadricIntersection> isect = BasicIntersect(ray, tMax);
-            if (!isect)
-                return default;
-            SurfaceInteraction intr = InteractionFromIntersection(isect.value(), -ray.d, ray.time);
-            return new ShapeIntersection(intr, isect.value().tHit);
-        }
-
-        public pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
+        public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
         {
             Float phi;
             Point3f pHit;
@@ -326,20 +314,20 @@ namespace pbrt
             // Solve quadratic equation to compute sphere _t0_ and _t1_
             Interval t0, t1;
             // Compute sphere quadratic coefficients
-            Interval a = pbrt.Sqr(di.x) + pbrt.Sqr(di.y) + pbrt.Sqr(di.z);
+            Interval a = Sqr(di.x) + Sqr(di.y) + Sqr(di.z);
             Interval b = 2 * (di.x * oi.x + di.y * oi.y + di.z * oi.z);
-            Interval c = pbrt.Sqr(oi.x) + pbrt.Sqr(oi.y) + pbrt.Sqr(oi.z) - pbrt.Sqr(new Interval(radius));
+            Interval c = Sqr(oi.x) + Sqr(oi.y) + Sqr(oi.z) - Sqr(new Interval(radius));
 
             // Compute sphere quadratic discriminant _discrim_
             Interval f = b / (2 * a);
             Vector3fi v = new Vector3fi(oi.x - f * di.x, oi.y - f * di.y, oi.z - f * di.z);
-            Interval length = pbrt.Length(v);
+            Interval length = Length(v);
             Interval discrim = 4 * a * (new Interval(radius) + length) * (new Interval(radius) - length);
             if (discrim.LowerBound() < 0)
                 return default;
 
             // Compute quadratic $t$ values
-            Interval rootDiscrim = pbrt.Sqrt(discrim);
+            Interval rootDiscrim = Sqrt(discrim);
             Interval q;
             if ((Float)b < 0)
                 q = -.5f * (b - rootDiscrim);
@@ -364,10 +352,29 @@ namespace pbrt
                     return default;
             }
 
-            // Compute sphere hit position and $\phi$
-            pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
+            // Compute sphere hit position and $\phi$, and test them against the clipping parameters
+            if (!ClipHit(oi, di, tShapeHit, out pHit, out phi))
+            {
+                // The nearest root is clipped: the second root may be inside the partial sphere
+                if (tShapeHit == t1)
+                    return default;
+                if (t1.UpperBound() > tMax)
+                    return default;
+                tShapeHit = t1;
+                if (!ClipHit(oi, di, tShapeHit, out pHit, out phi))
+                    return default;
+            }
+
+            // Return _QuadricIntersection_ for sphere intersection
+            return new QuadricIntersection((Float)tShapeHit, pHit, phi);
+        }
+
+        // The refined hit point at the ray parameter t and its phi; false if it is clipped
+        bool ClipHit(Point3fi oi, Vector3fi di, Interval t, out Point3f pHit, out Float phi)
+        {
+            pHit = (Point3f)oi + (Float)t * (Vector3f)di;
             // Refine sphere intersection point
-            pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
+            pHit *= radius / Distance(pHit, new Point3f(0, 0, 0));
 
             if (pHit.x == 0 && pHit.y == 0)
                 pHit.x = 1e-5f * radius;
@@ -376,135 +383,82 @@ namespace pbrt
                 phi += 2 * Pi;
 
             // Test sphere intersection against clipping parameters
-            if ((zMin > -radius && pHit.z < zMin) || (zMax < radius && pHit.z > zMax) || phi > phiMax)
-            {
-                if (tShapeHit == t1)
-                    return default;
-                if (t1.UpperBound() > tMax)
-                    return default;
-                tShapeHit = t1;
-                // Compute sphere hit position and $\phi$
-                pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
-                // Refine sphere intersection point
-                pHit *= radius / pbrt.Distance(pHit, new Point3f(0, 0, 0));
-
-                if (pHit.x == 0 && pHit.y == 0)
-                    pHit.x = 1e-5f * radius;
-                phi = std.atan2(pHit.y, pHit.x);
-                if (phi < 0)
-                    phi += 2 * Pi;
-
-                if ((zMin > -radius && pHit.z < zMin) || (zMax < radius && pHit.z > zMax) || phi > phiMax)
-                    return default;
-            }
-
-            // Return _QuadricIntersection_ for sphere intersection
-            return new QuadricIntersection((Float)tShapeHit, pHit, phi);
+            return !((zMin > -radius && pHit.z < zMin) || (zMax < radius && pHit.z > zMax) || phi > phiMax);
         }
 
-        public override bool IntersectP(Ray r, Float tMax = Infinity) { return BasicIntersect(r, tMax); }
-
-        public SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
+        public override SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
         {
             Point3f pHit = isect.pObj;
             Float phi = isect.phi;
             // Find parametric representation of sphere hit
             Float u = phi / phiMax;
             Float cosTheta = pHit.z / radius;
-            Float theta = pbrt.SafeACos(cosTheta);
+            Float theta = SafeACos(cosTheta);
             Float v = (theta - thetaZMin) / (thetaZMax - thetaZMin);
             // Compute sphere $\dpdu$ and $\dpdv$
-            Float zRadius = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
+            Float zRadius = std.sqrt(Sqr(pHit.x) + Sqr(pHit.y));
             Float cosPhi = pHit.x / zRadius, sinPhi = pHit.y / zRadius;
             Vector3f dpdu = new Vector3f(-phiMax * pHit.y, phiMax * pHit.x, 0);
-            Float sinTheta = pbrt.SafeSqrt(1 - pbrt.Sqr(cosTheta));
+            Float sinTheta = SafeSqrt(1 - Sqr(cosTheta));
             Vector3f dpdv = (thetaZMax - thetaZMin) *
                             new Vector3f(pHit.z * cosPhi, pHit.z * sinPhi, -radius * sinTheta);
 
             // Compute sphere $\dndu$ and $\dndv$
             Vector3f d2Pduu = -phiMax * phiMax * new Vector3f(pHit.x, pHit.y, 0);
             Vector3f d2Pduv = (thetaZMax - thetaZMin) * pHit.z * phiMax * new Vector3f(-sinPhi, cosPhi, 0.0f);
-            Vector3f d2Pdvv = -pbrt.Sqr(thetaZMax - thetaZMin) * new Vector3f(pHit.x, pHit.y, pHit.z);
-            // Compute coefficients for fundamental forms
-            Float E = pbrt.Dot(dpdu, dpdu), F = pbrt.Dot(dpdu, dpdv), G = pbrt.Dot(dpdv, dpdv);
-            Vector3f n = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
-            Float e = pbrt.Dot(n, d2Pduu), f = pbrt.Dot(n, d2Pduv), g = pbrt.Dot(n, d2Pdvv);
-
-            // Compute $\dndu$ and $\dndv$ from fundamental form coefficients
-            Float EGF2 = pbrt.DifferenceOfProducts(E, G, F, F);
-            Float invEGF2 = (EGF2 == 0) ? (Float)0 : 1 / EGF2;
-            Normal3f dndu = (Normal3f)((f * F - e * G) * invEGF2 * dpdu + (e * F - f * E) * invEGF2 * dpdv);
-            Normal3f dndv = (Normal3f)((g * F - f * G) * invEGF2 * dpdu + (f * F - g * E) * invEGF2 * dpdv);
+            Vector3f d2Pdvv = -Sqr(thetaZMax - thetaZMin) * new Vector3f(pHit.x, pHit.y, pHit.z);
+            Normal3f dndu, dndv;
+            QuadricUtil.NormalDerivatives(dpdu, dpdv, d2Pduu, d2Pduv, d2Pdvv, out dndu, out dndv);
 
             // Compute error bounds for sphere intersection
-            Vector3f pError = pbrt.gamma(5) * pbrt.Abs((Vector3f)pHit);
+            Vector3f pError = gamma(5) * Abs((Vector3f)pHit);
 
             // Return _SurfaceInteraction_ for quadric intersection
-            bool flipNormal = reverseOrientation ^ transformSwapsHandedness;
-            Vector3f woObject = objectFromRender.Apply(wo);
-            return renderFromObject.Apply(new SurfaceInteraction(new Point3fi(pHit, pError), new Point2f(u, v),
-                                                                 woObject, dpdu, dpdv, dndu, dndv, time, flipNormal));
+            return MakeInteraction(pHit, pError, new Point2f(u, v), wo, dpdu, dpdv, dndu, dndv, time);
         }
 
-        public override Float Area() { return phiMax * radius * (zMax - zMin); }
+        protected override Float ComputeObjectArea() { return phiMax * radius * (zMax - zMin); }
 
-        public override pstd.optional<ShapeSample> Sample(Point2f u)
+        // Sampled uniformly by area: z is uniform on the sphere (Archimedes) and phi is uniform, so the partial sphere is sampled
+        // without rejection
+        protected override void SampleObject(Point2f u, out Point3f pObj, out Vector3f nObj, out Point2f uv)
         {
-            Point3f pObj = new Point3f(0, 0, 0) + radius * pbrt.SampleUniformSphere(u);
-            // Reproject _pObj_ to sphere surface and compute _pObjError_
-            pObj *= radius / pbrt.Distance(pObj, new Point3f(0, 0, 0));
-            Vector3f pObjError = pbrt.gamma(5) * pbrt.Abs((Vector3f)pObj);
-            // Compute surface normal for sphere sample and return _ShapeSample_
-            Normal3f nObj = new Normal3f(pObj.x, pObj.y, pObj.z);
-            Normal3f n = pbrt.Normalize(renderFromObject.Apply(nObj));
-            if (reverseOrientation)
-                n *= -1;
-
-            // Compute $(u,v)$ coordinates for sphere sample
-            Float theta = pbrt.SafeACos(pObj.z / radius);
-            Float phi = std.atan2(pObj.y, pObj.x);
-            if (phi < 0)
-                phi += 2 * Pi;
-            Point2f uv = new Point2f(phi / phiMax, (theta - thetaZMin) / (thetaZMax - thetaZMin));
-
-            Point3fi pi = renderFromObject.Apply(new Point3fi(pObj, pObjError));
-            return new ShapeSample(new Interaction(pi, n, uv), 1 / Area());
+            Float z = Lerp(u[0], zMin, zMax);
+            Float phi = u[1] * phiMax;
+            Float rz = SafeSqrt(radius * radius - z * z);
+            pObj = new Point3f(rz * std.cos(phi), rz * std.sin(phi), z);
+            // Reproject _pObj_ to sphere surface
+            pObj *= radius / Distance(pObj, new Point3f(0, 0, 0));
+            nObj = new Vector3f(pObj.x, pObj.y, pObj.z);
+            Float theta = SafeACos(pObj.z / radius);
+            uv = new Point2f(u[1], (theta - thetaZMin) / (thetaZMax - thetaZMin));
         }
+
+        protected override Vector3f ObjectNormal(Point3f pObj) { return new Vector3f(pObj.x, pObj.y, pObj.z); }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
+            // A partial sphere, or one whose transform is not a similarity, is sampled by area
+            if (!fullSphere || !xform.isUniform)
+                return QuadricUtil.ToSolidAngle(ctx, Sample(u));
+
             // Sample uniformly on sphere if $\pt{}$ is inside it
+            Float rr = xform.scale * radius;
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
-            if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
-            {
-                // Sample shape by area and compute incident direction _wi_
-                pstd.optional<ShapeSample> ss = Sample(u);
-                pbrt.DCHECK(ss);
-                ss.Ref().intr.time = ctx.time;
-                Vector3f wi = ss.value().intr.p() - ctx.p();
-                if (pbrt.LengthSquared(wi) == 0)
-                    return default;
-                wi = pbrt.Normalize(wi);
-
-                // Convert area sampling PDF in _ss_ to solid angle measure
-                ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
-                if (pbrt.IsInf(ss.value().pdf))
-                    return default;
-
-                return ss;
-            }
+            if (DistanceSquared(pOrigin, pCenter) <= Sqr(rr))
+                return QuadricUtil.ToSolidAngle(ctx, Sample(u));
 
             // Sample sphere uniformly inside subtended cone
             // Compute quantities related to the $\theta_\roman{max}$ for cone
-            Float sinThetaMax = radius / pbrt.Distance(ctx.p(), pCenter);
-            Float sin2ThetaMax = pbrt.Sqr(sinThetaMax);
-            Float cosThetaMax = pbrt.SafeSqrt(1 - sin2ThetaMax);
+            Float sinThetaMax = rr / Distance(ctx.p(), pCenter);
+            Float sin2ThetaMax = Sqr(sinThetaMax);
+            Float cosThetaMax = SafeSqrt(1 - sin2ThetaMax);
             Float oneMinusCosThetaMax = 1 - cosThetaMax;
 
             // Compute $\theta$ and $\phi$ values for sample in cone
             Float cosTheta = (cosThetaMax - 1) * u[0] + 1;
-            Float sin2Theta = 1 - pbrt.Sqr(cosTheta);
+            Float sin2Theta = 1 - Sqr(cosTheta);
             if (sin2ThetaMax < 0.00068523f /* sin^2(1.5 deg) */)
             {
                 // Compute cone sample via Taylor series expansion for small angles
@@ -514,45 +468,48 @@ namespace pbrt
             }
 
             // Compute angle $\alpha$ from center of sphere to sampled point on surface
-            Float cosAlpha = sin2Theta / sinThetaMax +
-                             cosTheta * pbrt.SafeSqrt(1 - sin2Theta / pbrt.Sqr(sinThetaMax));
-            Float sinAlpha = pbrt.SafeSqrt(1 - pbrt.Sqr(cosAlpha));
+            Float cosAlpha = sin2Theta / sinThetaMax + cosTheta * SafeSqrt(1 - sin2Theta / Sqr(sinThetaMax));
+            Float sinAlpha = SafeSqrt(1 - Sqr(cosAlpha));
 
             // Compute surface normal and sampled point on sphere
             Float phi = u[1] * 2 * Pi;
-            Vector3f w = pbrt.SphericalDirection(sinAlpha, cosAlpha, phi);
-            Frame samplingFrame = Frame.FromZ(pbrt.Normalize(pCenter - ctx.p()));
+            Vector3f w = SphericalDirection(sinAlpha, cosAlpha, phi);
+            Frame samplingFrame = Frame.FromZ(Normalize(pCenter - ctx.p()));
             Normal3f n = (Normal3f)samplingFrame.FromLocal(-w);
-            Point3f p = pCenter + radius * new Point3f(n.x, n.y, n.z);
-            if (reverseOrientation)
+            Point3f p = pCenter + rr * new Point3f(n.x, n.y, n.z);
+            if (reverseOrientation ^ transformSwapsHandedness)
                 n *= -1;
 
             // Return _ShapeSample_ for sampled point on sphere
             // Compute _pError_ for sampled point on sphere
-            Vector3f pError = pbrt.gamma(5) * pbrt.Abs((Vector3f)p);
+            Vector3f pError = gamma(5) * Abs((Vector3f)p);
 
             // Compute $(u,v)$ coordinates for sampled point on sphere
             Point3f pObj = objectFromRender.Apply(p);
-            Float theta = pbrt.SafeACos(pObj.z / radius);
+            Float theta = SafeACos(pObj.z / radius);
             Float spherePhi = std.atan2(pObj.y, pObj.x);
             if (spherePhi < 0)
                 spherePhi += 2 * Pi;
             Point2f uv = new Point2f(spherePhi / phiMax, (theta - thetaZMin) / (thetaZMax - thetaZMin));
 
-            pbrt.DCHECK_NE(oneMinusCosThetaMax, 0);  // very small far away sphere
+            DCHECK_NE(oneMinusCosThetaMax, 0);  // very small far away sphere
             return new ShapeSample(new Interaction(new Point3fi(p, pError), n, ctx.time, uv),
                                    1 / (2 * Pi * oneMinusCosThetaMax));
         }
 
-        public override Bounds3f Bounds()
+        protected override Bounds3f ObjectBounds()
         {
-            return renderFromObject.Apply(
-                new Bounds3f(new Point3f(-radius, -radius, zMin), new Point3f(radius, radius, zMax)));
+            // The radius of the circle at height z is sqrt(radius^2 - z^2): its largest value is at the z closest to 0
+            Float rLow = SafeSqrt(radius * radius - zMin * zMin), rHigh = SafeSqrt(radius * radius - zMax * zMax);
+            Float rMax = (zMin <= 0 && zMax >= 0) ? radius : std.max(rLow, rHigh);
+            Float xMin, xMax, yMin, yMax;
+            QuadricUtil.SectorExtent(std.min(rLow, rHigh), rMax, phiMax, out xMin, out xMax, out yMin, out yMax);
+            return new Bounds3f(new Point3f(xMin, yMin, zMin), new Point3f(xMax, yMax, zMax));
         }
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ Sphere renderFromObject: %s " +
+            return StringPrintf("[ Sphere renderFromObject: %s " +
                                         "objectFromRender: %s reverseOrientation: %s " +
                                         "transformSwapsHandedness: %s radius: %f zMin: %f " +
                                         "zMax: %f thetaMin: %f " +
@@ -562,47 +519,43 @@ namespace pbrt
                                         thetaZMax, phiMax);
         }
 
-        public override Float PDF(Interaction intr) { return 1 / Area(); }
-
         public static Sphere Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
                                     ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             Float radius = parameters.GetOneFloat("radius", 1.0f);
             Float zmin = parameters.GetOneFloat("zmin", -radius);
             Float zmax = parameters.GetOneFloat("zmax", radius);
-            Float phimax = parameters.GetOneFloat("phimax", 360.0f);
+            // thetamax is RenderMan's name for phimax
+            Float thetamax = parameters.GetOneFloat("thetamax", 360.0f);
+            Float phimax = parameters.GetOneFloat("phimax", thetamax);
             return new Sphere(renderFromObject, objectFromRender, reverseOrientation, radius, zmin, zmax, phimax);
         }
 
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
         {
+            if (!fullSphere || !xform.isUniform)
+                return base.PDF(ctx, wi);
+
+            Float rr = xform.scale * radius;
             Point3f pCenter = renderFromObject.Apply(new Point3f(0, 0, 0));
             Point3f pOrigin = ctx.OffsetRayOrigin(pCenter);
-            if (pbrt.DistanceSquared(pOrigin, pCenter) <= pbrt.Sqr(radius))
-            {
-                // Intersect sample ray with shape geometry
-                Ray ray = ctx.SpawnRay(wi);
-                pstd.optional<ShapeIntersection> isect = Intersect(ray);
-                if (!isect)
-                    return 0;
-
-                // Compute PDF in solid angle measure from shape intersection point
-                Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
-                                            pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
-                if (pbrt.IsInf(pdf))
-                    pdf = 0;
-
-                return pdf;
-            }
-                // Return solid angle PDF for point inside sphere
+            if (DistanceSquared(pOrigin, pCenter) <= Sqr(rr))
+                return base.PDF(ctx, wi);
 
             // Compute general solid angle sphere PDF
-            Float sin2ThetaMax = radius * radius / pbrt.DistanceSquared(ctx.p(), pCenter);
-            Float cosThetaMax = pbrt.SafeSqrt(1 - sin2ThetaMax);
+            Float sin2ThetaMax = rr * rr / DistanceSquared(ctx.p(), pCenter);
+            Float cosThetaMax = SafeSqrt(1 - sin2ThetaMax);
             Float oneMinusCosThetaMax = 1 - cosThetaMax;
             // Compute more accurate _oneMinusCosThetaMax_ for small solid angle
             if (sin2ThetaMax < 0.00068523f /* sin^2(1.5 deg) */)
                 oneMinusCosThetaMax = sin2ThetaMax / 2;
+
+            // The density is zero for directions outside the subtended cone
+            Vector3f toCenter = Normalize(pCenter - ctx.p());
+            Vector3f wn = Normalize(wi);
+            Float sin2Between = LengthSquared(Cross(wn, toCenter));
+            if (Dot(wn, toCenter) <= 0 || sin2Between > sin2ThetaMax * 1.001f + 1e-9f)
+                return 0;
 
             return 1 / (2 * Pi * oneMinusCosThetaMax);
         }
@@ -611,62 +564,46 @@ namespace pbrt
         Float radius;
         Float zMin, zMax;
         Float thetaZMin, thetaZMax, phiMax;
-        Transform renderFromObject, objectFromRender;
-        bool reverseOrientation, transformSwapsHandedness;
+        bool fullSphere;
     }
 
-    // Disk Definition
-    public sealed unsafe class Disk : Shape
+    // Disk Definition: RenderMan's Disk height radius thetamax, extended with innerradius; v runs from the outer edge (0) to the inner
+    public sealed unsafe class Disk : QuadricBase
     {
         // Disk Public Methods
         public Disk(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, Float height,
                     Float radius, Float innerRadius, Float phiMax)
+            : base(renderFromObject, objectFromRender, reverseOrientation)
         {
-            this.renderFromObject = renderFromObject;
-            this.objectFromRender = objectFromRender;
-            this.reverseOrientation = reverseOrientation;
-            this.transformSwapsHandedness = renderFromObject.SwapsHandedness();
             this.height = height;
             this.radius = radius;
-            this.innerRadius = innerRadius;
-            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
+            this.innerRadius = Clamp(innerRadius, 0, radius);
+            this.phiMax = QuadricUtil.SweepRadians(phiMax);
         }
 
-        public override Float Area() { return phiMax * 0.5f * (pbrt.Sqr(radius) - pbrt.Sqr(innerRadius)); }
+        protected override Float ComputeObjectArea() { return phiMax * 0.5f * (Sqr(radius) - Sqr(innerRadius)); }
 
-        public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
-        {
-            pstd.optional<QuadricIntersection> isect = BasicIntersect(ray, tMax);
-            if (!isect)
-                return default;
-            SurfaceInteraction intr = InteractionFromIntersection(isect.value(), -ray.d, ray.time);
-            return new ShapeIntersection(intr, isect.value().tHit);
-        }
-
-        public pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
+        public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
         {
             // Transform _Ray_ origin and direction to object space
             Point3fi oi = objectFromRender.Apply(new Point3fi(r.o));
             Vector3fi di = objectFromRender.Apply(new Vector3fi(r.d));
 
-            // Compute plane intersection for disk
-            // Reject disk intersections for rays parallel to the disk's plane
-            if ((Float)di.z == 0)
+            // Compute plane intersection for disk: reject rays parallel to the disk's plane, and hits not conservatively in (0, tMax)
+            Interval tInterval = (height - oi.z) / di.z;
+            if (tInterval.LowerBound() <= 0 || tInterval.UpperBound() >= tMax)
                 return default;
-
-            Float tShapeHit = (height - (Float)oi.z) / (Float)di.z;
-            if (tShapeHit <= 0 || tShapeHit >= tMax)
-                return default;
+            Float tShapeHit = (Float)tInterval;
 
             // See if hit point is inside disk radii and $\phimax$
-            Point3f pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
-            Float dist2 = pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y);
-            if (dist2 > pbrt.Sqr(radius) || dist2 < pbrt.Sqr(innerRadius))
+            Point3f pHit = (Point3f)oi + tShapeHit * (Vector3f)di;
+            Float dist2 = Sqr(pHit.x) + Sqr(pHit.y);
+            if (dist2 > Sqr(radius) || dist2 < Sqr(innerRadius))
                 return default;
+            if (dist2 == 0)
+                pHit.x = 1e-5f * radius;
             // Test disk $\phi$ value against $\phimax$
-            Float phi = std.atan2(pHit.y, pHit.x);
-            if (phi < 0)
-                phi += 2 * Pi;
+            Float phi = QuadricUtil.PhiOf(pHit.x, pHit.y);
             if (phi > phiMax)
                 return default;
 
@@ -674,13 +611,13 @@ namespace pbrt
             return new QuadricIntersection(tShapeHit, pHit, phi);
         }
 
-        public SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
+        public override SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
         {
             Point3f pHit = isect.pObj;
             Float phi = isect.phi;
             // Find parametric representation of disk hit
             Float u = phi / phiMax;
-            Float rHit = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
+            Float rHit = std.sqrt(Sqr(pHit.x) + Sqr(pHit.y));
             Float v = (radius - rHit) / (radius - innerRadius);
             Vector3f dpdu = new Vector3f(-phiMax * pHit.y, phiMax * pHit.x, 0);
             Vector3f dpdv = new Vector3f(pHit.x, pHit.y, 0) * (innerRadius - radius) / rHit;
@@ -693,67 +630,56 @@ namespace pbrt
             Vector3f pError = new Vector3f(0, 0, 0);
 
             // Return _SurfaceInteraction_ for quadric intersection
-            bool flipNormal = reverseOrientation ^ transformSwapsHandedness;
-            Vector3f woObject = objectFromRender.Apply(wo);
-            return renderFromObject.Apply(new SurfaceInteraction(new Point3fi(pHit, pError), new Point2f(u, v),
-                                                                 woObject, dpdu, dpdv, dndu, dndv, time, flipNormal));
+            return MakeInteraction(pHit, pError, new Point2f(u, v), wo, dpdu, dpdv, dndu, dndv, time);
         }
 
-        public override bool IntersectP(Ray r, Float tMax = Infinity) { return BasicIntersect(r, tMax); }
+        protected override Vector3f ObjectPError(Point3f pObj) { return new Vector3f(0, 0, 0); }
 
-        public override pstd.optional<ShapeSample> Sample(Point2f u)
+        // A whole disk is sampled with the concentric map; an annulus or a sector uniformly in r^2 and phi
+        protected override void SampleObject(Point2f u, out Point3f pObj, out Vector3f nObj, out Point2f uv)
         {
-            Point2f pd = pbrt.SampleUniformDiskConcentric(u);
-            Point3f pObj = new Point3f(pd.x * radius, pd.y * radius, height);
-            Point3fi pi = renderFromObject.Apply(new Point3fi(pObj));
-            Normal3f n = pbrt.Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
-            if (reverseOrientation)
-                n *= -1;
+            Float x, y;
+            if (innerRadius == 0 && phiMax >= 2 * Pi)
+            {
+                Point2f pd = SampleUniformDiskConcentric(u);
+                x = pd.x * radius;
+                y = pd.y * radius;
+            }
+            else
+            {
+                Float r = std.sqrt(Lerp(u[0], Sqr(innerRadius), Sqr(radius)));
+                Float phiSample = u[1] * phiMax;
+                x = r * std.cos(phiSample);
+                y = r * std.sin(phiSample);
+            }
+            pObj = new Point3f(x, y, height);
+            nObj = new Vector3f(0, 0, 1);
             // Compute $(u,v)$ for sampled point on disk
-            Float phi = std.atan2(pd.y, pd.x);
-            if (phi < 0)
-                phi += 2 * Pi;
-            Float radiusSample = std.sqrt(pbrt.Sqr(pObj.x) + pbrt.Sqr(pObj.y));
-            Point2f uv = new Point2f(phi / phiMax, (radius - radiusSample) / (radius - innerRadius));
-            return new ShapeSample(new Interaction(pi, n, uv), 1 / Area());
+            Float phi = QuadricUtil.PhiOf(x, y);
+            Float radiusSample = std.sqrt(Sqr(x) + Sqr(y));
+            uv = new Point2f(phi / phiMax, (radius - radiusSample) / (radius - innerRadius));
         }
 
-        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
+        protected override Vector3f ObjectNormal(Point3f pObj) { return new Vector3f(0, 0, 1); }
+
+        protected override Bounds3f ObjectBounds()
         {
-            // Sample shape by area and compute incident direction _wi_
-            pstd.optional<ShapeSample> ss = Sample(u);
-            pbrt.DCHECK(ss);
-            ss.Ref().intr.time = ctx.time;
-            Vector3f wi = ss.value().intr.p() - ctx.p();
-            if (pbrt.LengthSquared(wi) == 0)
-                return default;
-            wi = pbrt.Normalize(wi);
-
-            // Convert area sampling PDF in _ss_ to solid angle measure
-            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
-            if (pbrt.IsInf(ss.value().pdf))
-                return default;
-
-            return ss;
-        }
-
-        public override Bounds3f Bounds()
-        {
-            return renderFromObject.Apply(
-                new Bounds3f(new Point3f(-radius, -radius, height), new Point3f(radius, radius, height)));
+            Float xMin, xMax, yMin, yMax;
+            QuadricUtil.SectorExtent(innerRadius, radius, phiMax, out xMin, out xMax, out yMin, out yMax);
+            return new Bounds3f(new Point3f(xMin, yMin, height), new Point3f(xMax, yMax, height));
         }
 
         public override DirectionCone NormalBounds()
         {
-            Normal3f n = renderFromObject.Apply(new Normal3f(0, 0, 1));
-            if (reverseOrientation)
+            Normal3f n = Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
+            if (reverseOrientation ^ transformSwapsHandedness)
                 n = -n;
             return new DirectionCone((Vector3f)n);
         }
 
         public override string ToString()
         {
-            return pbrt.StringPrintf(
+            return StringPrintf(
                 "[ Disk renderFromObject: %s objectFromRender: %s " +
                 "reverseOrientation: %s " +
                 "transformSwapsHandedness: %s height: %f radius: %f innerRadius: %f " +
@@ -762,59 +688,27 @@ namespace pbrt
                 transformSwapsHandedness, height, radius, innerRadius, phiMax);
         }
 
-        public override Float PDF(Interaction intr) { return 1 / Area(); }
-
         public static Disk Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
                                   ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             Float height = parameters.GetOneFloat("height", 0.0f);
             Float radius = parameters.GetOneFloat("radius", 1);
             Float innerRadius = parameters.GetOneFloat("innerradius", 0);
-            Float phimax = parameters.GetOneFloat("phimax", 360);
+            Float thetamax = parameters.GetOneFloat("thetamax", 360);
+            Float phimax = parameters.GetOneFloat("phimax", thetamax);
             return new Disk(renderFromObject, objectFromRender, reverseOrientation, height, radius, innerRadius, phimax);
         }
 
-        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
-        {
-            // Intersect sample ray with shape geometry
-            Ray ray = ctx.SpawnRay(wi);
-            pstd.optional<ShapeIntersection> isect = Intersect(ray);
-            if (!isect)
-                return 0;
-
-            // Compute PDF in solid angle measure from shape intersection point
-            Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
-                                        pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
-            if (pbrt.IsInf(pdf))
-                pdf = 0;
-
-            return pdf;
-        }
-
         // Disk Private Members
-        Transform renderFromObject, objectFromRender;
-        bool reverseOrientation, transformSwapsHandedness;
         Float height, radius, innerRadius, phiMax;
     }
 
-    // Cylinder Definition
-    public sealed unsafe class Cylinder : Shape
+    // Cylinder Definition: RenderMan's Cylinder radius zmin zmax thetamax; v runs from zmin to zmax
+    public sealed unsafe class Cylinder : QuadricBase
     {
+        protected override Float ComputeObjectArea() { return (zMax - zMin) * radius * phiMax; }
 
-        public override Float Area() { return (zMax - zMin) * radius * phiMax; }
-
-        public override DirectionCone NormalBounds() { return DirectionCone.EntireSphere(); }
-
-        public override pstd.optional<ShapeIntersection> Intersect(Ray ray, Float tMax = Infinity)
-        {
-            pstd.optional<QuadricIntersection> isect = BasicIntersect(ray, tMax);
-            if (!isect)
-                return default;
-            SurfaceInteraction intr = InteractionFromIntersection(isect.value(), -ray.d, ray.time);
-            return new ShapeIntersection(intr, isect.value().tHit);
-        }
-
-        public pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
+        public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
         {
             Float phi;
             Point3f pHit;
@@ -825,20 +719,24 @@ namespace pbrt
             // Solve quadratic equation to find cylinder _t0_ and _t1_ values
             Interval t0, t1;
             // Compute cylinder quadratic coefficients
-            Interval a = pbrt.Sqr(di.x) + pbrt.Sqr(di.y);
+            Interval a = Sqr(di.x) + Sqr(di.y);
             Interval b = 2 * (di.x * oi.x + di.y * oi.y);
-            Interval c = pbrt.Sqr(oi.x) + pbrt.Sqr(oi.y) - pbrt.Sqr(new Interval(radius));
+            Interval c = Sqr(oi.x) + Sqr(oi.y) - Sqr(new Interval(radius));
+
+            // A ray parallel to the axis never crosses the side of the cylinder
+            if (a.LowerBound() <= 0)
+                return default;
 
             // Compute cylinder quadratic discriminant _discrim_
             Interval f = b / (2 * a);
             Interval vx = oi.x - f * di.x, vy = oi.y - f * di.y;
-            Interval length = pbrt.Sqrt(pbrt.Sqr(vx) + pbrt.Sqr(vy));
+            Interval length = Sqrt(Sqr(vx) + Sqr(vy));
             Interval discrim = 4 * a * (new Interval(radius) + length) * (new Interval(radius) - length);
             if (discrim.LowerBound() < 0)
                 return default;
 
             // Compute quadratic $t$ values
-            Interval rootDiscrim = pbrt.Sqrt(discrim);
+            Interval rootDiscrim = Sqrt(discrim);
             Interval q;
             if ((Float)b < 0)
                 q = -.5f * (b - rootDiscrim);
@@ -863,10 +761,29 @@ namespace pbrt
                     return default;
             }
 
-            // Compute cylinder hit point and $\phi$
-            pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
+            // Compute cylinder hit point and $\phi$, and test them against the clipping parameters
+            if (!ClipHit(oi, di, tShapeHit, out pHit, out phi))
+            {
+                // The nearest root is clipped: the second root may be inside the partial cylinder
+                if (tShapeHit == t1)
+                    return default;
+                tShapeHit = t1;
+                if (t1.UpperBound() > tMax)
+                    return default;
+                if (!ClipHit(oi, di, tShapeHit, out pHit, out phi))
+                    return default;
+            }
+
+            // Return _QuadricIntersection_ for cylinder intersection
+            return new QuadricIntersection((Float)tShapeHit, pHit, phi);
+        }
+
+        // The refined hit point at the ray parameter t and its phi; false if it is clipped
+        bool ClipHit(Point3fi oi, Vector3fi di, Interval t, out Point3f pHit, out Float phi)
+        {
+            pHit = (Point3f)oi + (Float)t * (Vector3f)di;
             // Refine cylinder intersection point
-            Float hitRad = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
+            Float hitRad = std.sqrt(Sqr(pHit.x) + Sqr(pHit.y));
             pHit.x *= radius / hitRad;
             pHit.y *= radius / hitRad;
 
@@ -875,35 +792,10 @@ namespace pbrt
                 phi += 2 * Pi;
 
             // Test cylinder intersection against clipping parameters
-            if (pHit.z < zMin || pHit.z > zMax || phi > phiMax)
-            {
-                if (tShapeHit == t1)
-                    return default;
-                tShapeHit = t1;
-                if (t1.UpperBound() > tMax)
-                    return default;
-                // Compute cylinder hit point and $\phi$
-                pHit = (Point3f)oi + (Float)tShapeHit * (Vector3f)di;
-                // Refine cylinder intersection point
-                Float hitRad2 = std.sqrt(pbrt.Sqr(pHit.x) + pbrt.Sqr(pHit.y));
-                pHit.x *= radius / hitRad2;
-                pHit.y *= radius / hitRad2;
-
-                phi = std.atan2(pHit.y, pHit.x);
-                if (phi < 0)
-                    phi += 2 * Pi;
-
-                if (pHit.z < zMin || pHit.z > zMax || phi > phiMax)
-                    return default;
-            }
-
-            // Return _QuadricIntersection_ for cylinder intersection
-            return new QuadricIntersection((Float)tShapeHit, pHit, phi);
+            return !(pHit.z < zMin || pHit.z > zMax || phi > phiMax);
         }
 
-        public override bool IntersectP(Ray r, Float tMax = Infinity) { return BasicIntersect(r, tMax); }
-
-        public SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
+        public override SurfaceInteraction InteractionFromIntersection(QuadricIntersection isect, Vector3f wo, Float time)
         {
             Point3f pHit = isect.pObj;
             Float phi = isect.phi;
@@ -917,89 +809,65 @@ namespace pbrt
             // Compute cylinder $\dndu$ and $\dndv$
             Vector3f d2Pduu = -phiMax * phiMax * new Vector3f(pHit.x, pHit.y, 0);
             Vector3f d2Pduv = new Vector3f(0, 0, 0), d2Pdvv = new Vector3f(0, 0, 0);
-            // Compute coefficients for fundamental forms
-            Float E = pbrt.Dot(dpdu, dpdu), F = pbrt.Dot(dpdu, dpdv), G = pbrt.Dot(dpdv, dpdv);
-            Vector3f n = pbrt.Normalize(pbrt.Cross(dpdu, dpdv));
-            Float e = pbrt.Dot(n, d2Pduu), f = pbrt.Dot(n, d2Pduv), g = pbrt.Dot(n, d2Pdvv);
-
-            // Compute $\dndu$ and $\dndv$ from fundamental form coefficients
-            Float EGF2 = pbrt.DifferenceOfProducts(E, G, F, F);
-            Float invEGF2 = (EGF2 == 0) ? (Float)0 : 1 / EGF2;
-            Normal3f dndu = (Normal3f)((f * F - e * G) * invEGF2 * dpdu + (e * F - f * E) * invEGF2 * dpdv);
-            Normal3f dndv = (Normal3f)((g * F - f * G) * invEGF2 * dpdu + (f * F - g * E) * invEGF2 * dpdv);
+            Normal3f dndu, dndv;
+            QuadricUtil.NormalDerivatives(dpdu, dpdv, d2Pduu, d2Pduv, d2Pdvv, out dndu, out dndv);
 
             // Compute error bounds for cylinder intersection
-            Vector3f pError = pbrt.gamma(3) * pbrt.Abs(new Vector3f(pHit.x, pHit.y, 0));
+            Vector3f pError = gamma(3) * Abs(new Vector3f(pHit.x, pHit.y, 0));
 
             // Return _SurfaceInteraction_ for quadric intersection
-            bool flipNormal = reverseOrientation ^ transformSwapsHandedness;
-            Vector3f woObject = objectFromRender.Apply(wo);
-            return renderFromObject.Apply(new SurfaceInteraction(new Point3fi(pHit, pError), new Point2f(u, v),
-                                                                 woObject, dpdu, dpdv, dndu, dndv, time, flipNormal));
+            return MakeInteraction(pHit, pError, new Point2f(u, v), wo, dpdu, dpdv, dndu, dndv, time);
         }
 
-        public override pstd.optional<ShapeSample> Sample(Point2f u)
+        protected override Vector3f ObjectPError(Point3f pObj) { return gamma(3) * Abs(new Vector3f(pObj.x, pObj.y, 0)); }
+
+        protected override void SampleObject(Point2f u, out Point3f pObj, out Vector3f nObj, out Point2f uv)
         {
-            Float z = pbrt.Lerp(u[0], zMin, zMax);
+            Float z = Lerp(u[0], zMin, zMax);
             Float phi = u[1] * phiMax;
             // Compute cylinder sample position _pi_ and normal _n_ from $z$ and $\phi$
-            Point3f pObj = new Point3f(radius * std.cos(phi), radius * std.sin(phi), z);
-            // Reproject _pObj_ to cylinder surface and compute _pObjError_
-            Float hitRad = std.sqrt(pbrt.Sqr(pObj.x) + pbrt.Sqr(pObj.y));
+            pObj = new Point3f(radius * std.cos(phi), radius * std.sin(phi), z);
+            // Reproject _pObj_ to cylinder surface
+            Float hitRad = std.sqrt(Sqr(pObj.x) + Sqr(pObj.y));
             pObj.x *= radius / hitRad;
             pObj.y *= radius / hitRad;
-            Vector3f pObjError = pbrt.gamma(3) * pbrt.Abs(new Vector3f(pObj.x, pObj.y, 0));
-
-            Point3fi pi = renderFromObject.Apply(new Point3fi(pObj, pObjError));
-            Normal3f n = pbrt.Normalize(renderFromObject.Apply(new Normal3f(pObj.x, pObj.y, 0)));
-            if (reverseOrientation)
-                n *= -1;
+            nObj = new Vector3f(pObj.x, pObj.y, 0);
             // Compute $(u,v)$ for cylinder sample
-            Point2f uv = new Point2f(phi / phiMax, (pObj.z - zMin) / (zMax - zMin));
-            return new ShapeSample(new Interaction(pi, n, uv), 1 / Area());
+            uv = new Point2f(u[1], (pObj.z - zMin) / (zMax - zMin));
         }
 
-        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
-        {
-            // Sample shape by area and compute incident direction _wi_
-            pstd.optional<ShapeSample> ss = Sample(u);
-            pbrt.DCHECK(ss);
-            ss.Ref().intr.time = ctx.time;
-            Vector3f wi = ss.value().intr.p() - ctx.p();
-            if (pbrt.LengthSquared(wi) == 0)
-                return default;
-            wi = pbrt.Normalize(wi);
+        protected override Vector3f ObjectNormal(Point3f pObj) { return new Vector3f(pObj.x, pObj.y, 0); }
 
-            // Convert area sampling PDF in _ss_ to solid angle measure
-            ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
-            if (pbrt.IsInf(ss.value().pdf))
-                return default;
-
-            return ss;
-        }
         // Cylinder Public Methods
         public Cylinder(Transform renderFromObj, Transform objFromRender, bool reverseOrientation, Float radius,
                         Float zMin, Float zMax, Float phiMax)
+            : base(renderFromObj, objFromRender, reverseOrientation)
         {
-            this.renderFromObject = renderFromObj;
-            this.objectFromRender = objFromRender;
-            this.reverseOrientation = reverseOrientation;
-            this.transformSwapsHandedness = renderFromObj.SwapsHandedness();
             this.radius = radius;
             this.zMin = std.min(zMin, zMax);
             this.zMax = std.max(zMin, zMax);
-            this.phiMax = pbrt.Radians(pbrt.Clamp(phiMax, 0, 360));
+            this.phiMax = QuadricUtil.SweepRadians(phiMax);
         }
 
-        public override Bounds3f Bounds()
+        protected override Bounds3f ObjectBounds()
         {
-            return renderFromObject.Apply(
-                new Bounds3f(new Point3f(-radius, -radius, zMin), new Point3f(radius, radius, zMax)));
+            Float xMin, xMax, yMin, yMax;
+            QuadricUtil.SectorExtent(radius, radius, phiMax, out xMin, out xMax, out yMin, out yMax);
+            return new Bounds3f(new Point3f(xMin, yMin, zMin), new Point3f(xMax, yMax, zMax));
+        }
+
+        public override DirectionCone NormalBounds()
+        {
+            // The normals (cos phi, sin phi, 0) of a sector of at most half a turn lie within phiMax / 2 of its middle
+            if (phiMax > Pi)
+                return DirectionCone.EntireSphere();
+            Float half = phiMax / 2;
+            return TransformNormalCone(new Vector3f(std.cos(half), std.sin(half), 0), std.cos(half) - 1e-5f);
         }
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ Cylinder renderFromObject: %s objectFromRender: %s " +
+            return StringPrintf("[ Cylinder renderFromObject: %s objectFromRender: %s " +
                                         "reverseOrientation: %s " +
                                         "transformSwapsHandedness: %s radius: %f zMin: %f zMax: %f " +
                                         "phiMax: %f ]",
@@ -1007,38 +875,18 @@ namespace pbrt
                                         transformSwapsHandedness, radius, zMin, zMax, phiMax);
         }
 
-        public override Float PDF(Interaction intr) { return 1 / Area(); }
-
         public static Cylinder Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
                                       ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             Float radius = parameters.GetOneFloat("radius", 1);
             Float zmin = parameters.GetOneFloat("zmin", -1);
             Float zmax = parameters.GetOneFloat("zmax", 1);
-            Float phimax = parameters.GetOneFloat("phimax", 360);
+            Float thetamax = parameters.GetOneFloat("thetamax", 360);
+            Float phimax = parameters.GetOneFloat("phimax", thetamax);
             return new Cylinder(renderFromObject, objectFromRender, reverseOrientation, radius, zmin, zmax, phimax);
         }
 
-        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
-        {
-            // Intersect sample ray with shape geometry
-            Ray ray = ctx.SpawnRay(wi);
-            pstd.optional<ShapeIntersection> isect = Intersect(ray);
-            if (!isect)
-                return 0;
-
-            // Compute PDF in solid angle measure from shape intersection point
-            Float pdf = (1 / Area()) / (pbrt.AbsDot(isect.value().intr.n, -wi) /
-                                        pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()));
-            if (pbrt.IsInf(pdf))
-                pdf = 0;
-
-            return pdf;
-        }
-
         // Cylinder Private Members
-        Transform renderFromObject, objectFromRender;
-        bool reverseOrientation, transformSwapsHandedness;
         Float radius, zMin, zMax, phiMax;
     }
 
@@ -2818,6 +2666,22 @@ namespace pbrt
             {
                 shapes.push_back(Disk.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
                 ++nDisks;
+            }
+            else if (name == "cone")
+            {
+                shapes.push_back(Cone.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
+            }
+            else if (name == "paraboloid")
+            {
+                shapes.push_back(Paraboloid.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
+            }
+            else if (name == "hyperboloid")
+            {
+                shapes.push_back(Hyperboloid.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
+            }
+            else if (name == "torus")
+            {
+                shapes.push_back(Torus.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
             }
             else if (name == "sdf")
             {

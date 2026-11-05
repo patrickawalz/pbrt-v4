@@ -1028,7 +1028,7 @@ namespace pbrt
         {
             if (shape is BilinearPatch patch)
                 return patch.SamplesUniformArea();
-            return shape is Triangle || shape is Disk || shape is Sphere || shape is Cylinder;
+            return shape is Triangle || shape is QuadricBase;
         }
 
         // A point on the light, with the density per unit area; false if there is none
