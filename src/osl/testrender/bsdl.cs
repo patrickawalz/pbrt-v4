@@ -200,6 +200,40 @@ namespace OSL
         {
             return V3.normalized(v);
         }
+
+        public static float fresnel_dielectric(float cosi, float eta)
+        {
+            if (eta == 0.0f)
+            {
+                return 1.0f;
+            }
+            if (cosi < 0.0f)
+            {
+                eta = 1.0f / eta;
+            }
+            float c = MathF.Abs(cosi);
+            float g = eta * eta - 1 + c * c;
+            if (g > 0)
+            {
+                g = MathF.Sqrt(g);
+                float A = (g - c) / (g + c);
+                float B = (c * (g + c) - 1) / (c * (g - c) + 1);
+                return 0.5f * A * A * (1 + B * B);
+            }
+            return 1.0f;  // TIR (no refracted component)
+        }
+
+        public static float avg_fresnel_dielectric(float eta)
+        {
+            if (eta < 1)
+            {
+                return 0.997118f + eta * (0.1014f + eta * (-0.965241f - eta * 0.130607f));
+            }
+            else
+            {
+                return (eta - 1) / (4.08567f + 1.00071f * eta);
+            }
+        }
     }
 
     /// The RGB power of libbsdl (three hero wavelength channels, the hero wavelength 0)
@@ -670,6 +704,7 @@ namespace OSL
         public static readonly EnergyTable DielectricReflFront = new EnergyTable(16, 16, 32, false, BsdlLuts.DielectricReflFront);
         public static readonly EnergyTable DielectricBothFront = new EnergyTable(16, 16, 32, false, BsdlLuts.DielectricBothFront);
         public static readonly EnergyTable DielectricBothBack = new EnergyTable(16, 16, 32, false, BsdlLuts.DielectricBothBack);
+        public static readonly EnergyTable Thinlayer = new EnergyTable(16, 16, 32, false, BsdlLuts.Thinlayer);
     }
 
     /// Looks up the energy of a lobe in its table (TabulatedEnergyCurve)

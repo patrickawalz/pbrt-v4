@@ -28,6 +28,7 @@ namespace OSL
         public const int MX_ANISOTROPIC_VDF_ID = 25;
         public const int MX_MEDIUM_VDF_ID = 26;
         public const int MX_LAYER_ID = 27;
+        public const int SPI_THINLAYER = 28;
     }
 
     [StructLayout(LayoutKind.Sequential)]

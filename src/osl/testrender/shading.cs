@@ -918,6 +918,13 @@ namespace OSL
                     new ClosureParam(TypeDescs.TypeInt, off(typeof(OrenNayarDiffuseData), "energy_compensation"), "energy_compensation", sizeof(int)),
                     str(typeof(OrenNayarDiffuseData), "label", "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(OrenNayarDiffuseData), 8)
                 });
+            reg(shadingsys, "thinlayer", MxClosureIDs.SPI_THINLAYER,
+                new ClosureParam[]
+                {
+                    vec(typeof(ThinLayerData), "N"), vec(typeof(ThinLayerData), "T"), flt(typeof(ThinLayerData), "IOR"), flt(typeof(ThinLayerData), "roughness"),
+                    flt(typeof(ThinLayerData), "anisotropy"), flt(typeof(ThinLayerData), "thickness"), col(typeof(ThinLayerData), "refl_tint"),
+                    col(typeof(ThinLayerData), "refr_tint"), col(typeof(ThinLayerData), "sigma_t"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(ThinLayerData), 4)
+                });
             reg(shadingsys, "translucent_bsdf", MxClosureIDs.MX_TRANSLUCENT_ID,
                 new ClosureParam[]
                 {
@@ -1225,6 +1232,9 @@ namespace OSL
                                         }
                                     case MxClosureIDs.MX_SHEEN_ID:
                                         ok = result.bsdf.add_bsdf(cw, new MxSheen(*(SheenData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.SPI_THINLAYER:
+                                        ok = result.bsdf.add_bsdf(cw, new SpiThinLayer(*(ThinLayerData*)data, -sg->I, path_roughness));
                                         break;
                                     case MxClosureIDs.MX_LAYER_ID:
                                         {
