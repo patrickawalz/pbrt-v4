@@ -696,65 +696,193 @@ namespace pbrt
                         string label = reference.name + " " + TransformNames[which] + " point " + pointIndex;
                         ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(p), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
 
-                        // The solid angle by uniformly random directions, and the integral of PDF(ctx, wi) over them
-                        const int nDirections = 150000;
-                        int hits = 0;
-                        double pdfSum = 0;
-                        for (int i = 0; i < nDirections; ++i)
+                        SolidAngleStatistics stats = MeasureSolidAngle(shape, ctx, p, rng, 150000, 40000);
+                        if (System.Environment.GetEnvironmentVariable("QUADRIC_VERBOSE") != null)
                         {
-                            Vector3f w = RandomDirection(rng);
-                            if (shape.IntersectP(new Ray(p, w)))
-                            {
-                                ++hits;
-                            }
-                            pdfSum += shape.PDF(ctx, w);
+                            Console.WriteLine(label + ": " + stats);
                         }
-                        double solidAngle = 4 * Math.PI * hits / nDirections;
-                        double pdfIntegral = 4 * Math.PI * pdfSum / nDirections;
-
-                        // The solid angle by the samples that see the shape (the first hit on the way to them is the sample itself)
-                        const int nSamples = 40000;
-                        double sampledSolidAngle = 0;
-                        int visible = 0, inconsistent = 0, failed = 0;
-                        for (int i = 0; i < nSamples; ++i)
-                        {
-                            pstd.optional<ShapeSample> ss = shape.Sample(ctx, new Point2f((Float)rng.NextDouble(), (Float)rng.NextDouble()));
-                            if (!ss.has_value() || ss.value().pdf <= 0)
-                            {
-                                ++failed;
-                                continue;
-                            }
-                            Point3f q = ss.value().intr.p();
-                            Vector3f wi = q - p;
-                            Float distance = Length(wi);
-                            wi /= distance;
-                            pstd.optional<ShapeIntersection> first = shape.Intersect(new Ray(p, wi));
-                            if (!first.has_value() || std.abs(first.value().tHit - distance) > 2e-5f * distance)
-                            {
-                                continue;
-                            }
-                            ++visible;
-                            sampledSolidAngle += 1 / ss.value().pdf;
-                            Float pdf = shape.PDF(ctx, wi);
-                            if (std.abs(pdf - ss.value().pdf) > 2e-3f * ss.value().pdf)
-                            {
-                                ++inconsistent;
-                            }
-                        }
-                        sampledSolidAngle /= nSamples;
-                        if (solidAngle > 0.05 && System.Environment.GetEnvironmentVariable("QUADRIC_VERBOSE") != null)
-                        {
-                            Console.WriteLine(label + ": solid angle " + solidAngle + " sampled " + sampledSolidAngle + " pdf integral " + pdfIntegral + " visible " + visible / (double)nSamples);
-                        }
-                        if (solidAngle > 0.05 && solidAngle < 4.0)
-                        {
-                            EXPECT_NEAR(1.0, sampledSolidAngle / solidAngle, 0.06, label + " solid angle from samples vs directions: " + solidAngle);
-                            // The density of the nearest hits integrates to the share of the samples that are visible
-                            EXPECT_NEAR(visible / (double)(nSamples - failed), pdfIntegral, 0.05 + 0.15 * pdfIntegral, label + " integral of the pdf vs the visible share of the samples");
-                        }
-                        EXPECT_LE(inconsistent, 1 + visible / 100, label + " Sample pdf differs from PDF(ctx, wi) for visible samples");
+                        // Four standard errors: this test runs several hundred comparisons
+                        EXPECT_LT(std.abs(stats.ZWeighted()), 4.0, label + " distance weighted solid angle by samples vs by directions: " + stats);
+                        EXPECT_LT(std.abs(stats.ZPdfIntegral()), 4.0, label + " integral of the pdf vs the visible share of the samples: " + stats);
+                        EXPECT_EQ(0, stats.inconsistent, label + " Sample pdf differs from PDF(ctx, wi) for visible samples: " + stats);
+                        int failed = stats.failed, nSamples = stats.samples;
                         EXPECT_LT(failed, nSamples / 50, label + " failed samples");
                     }
+                }
+            }
+        }
+
+        // The estimates compared by the solid angle tests, each with its standard error
+        private sealed class SolidAngleStatistics
+        {
+            public int directions, samples, failed, inconsistent, checkedPdfs;
+            public double solidAngleByDirections, solidAngleByDirectionsError;
+            public double solidAngleBySamples, solidAngleBySamplesError;
+            public double pdfIntegral, pdfIntegralError;
+            public double visibleShare, visibleShareError;
+            // the same comparison for the integral of the squared distance to the first hit over the directions: its terms are bounded
+            // (the plain solid angle estimate by samples has terms of 1 / d^2, whose variance is infinite for a point near the surface,
+            // so its standard error is not a valid one there)
+            public double weightedByDirections, weightedByDirectionsError, weightedBySamples, weightedBySamplesError;
+
+            public double ZWeighted()
+            {
+                return (weightedByDirections - weightedBySamples) / Math.Sqrt(Sq(weightedByDirectionsError) + Sq(weightedBySamplesError) + 1e-300);
+            }
+
+            public double ZSolidAngle()
+            {
+                return (solidAngleByDirections - solidAngleBySamples) / Math.Sqrt(Sq(solidAngleByDirectionsError) + Sq(solidAngleBySamplesError) + 1e-300);
+            }
+
+            public double ZPdfIntegral()
+            {
+                return (pdfIntegral - visibleShare) / Math.Sqrt(Sq(pdfIntegralError) + Sq(visibleShareError) + 1e-300);
+            }
+
+            private static double Sq(double x)
+            {
+                return x * x;
+            }
+
+            public override string ToString()
+            {
+                return "solid angle by directions " + solidAngleByDirections + " +- " + solidAngleByDirectionsError + ", by samples " +
+                       solidAngleBySamples + " +- " + solidAngleBySamplesError + " (z " + ZSolidAngle().ToString("F2") + "), distance weighted " + weightedByDirections + " +- " + weightedByDirectionsError + " vs " +
+                       weightedBySamples + " +- " + weightedBySamplesError + " (z " + ZWeighted().ToString("F2") + "); pdf integral " +
+                       pdfIntegral + " +- " + pdfIntegralError + ", visible share " + visibleShare + " +- " + visibleShareError +
+                       " (z " + ZPdfIntegral().ToString("F2") + "); pdf mismatches " + inconsistent + " of " + checkedPdfs;
+            }
+        }
+
+        // Measures the solid angle of the shape from p four ways: uniformly random directions (hit fraction), the samples of the shape
+        // (the mean of 1 / pdf over those that nothing hides: a sample is visible if no hit precedes it), the integral of
+        // PDF(ctx, wi) over uniformly random directions (it is the probability that a sample is visible: the density of a direction is
+        // that of the nearest hit, the convention of pbrt-v4's sphere, so samples hidden behind another part of the shape carry mass the
+        // density of the directions does not see), and the share of visible samples
+        private static SolidAngleStatistics MeasureSolidAngle(Shape shape, ShapeSampleContext ctx, Point3f p, Random rng, int nDirections,
+                                                               int nSamples)
+        {
+            SolidAngleStatistics stats = new SolidAngleStatistics();
+            stats.directions = nDirections;
+            stats.samples = nSamples;
+            int hits = 0;
+            double pdfSum = 0, pdfSquares = 0, distSum = 0, distSquares = 0;
+            for (int i = 0; i < nDirections; ++i)
+            {
+                Vector3f w = RandomDirection(rng);
+                pstd.optional<ShapeIntersection> first = shape.Intersect(new Ray(p, w));
+                if (first.has_value())
+                {
+                    ++hits;
+                    double t2 = (double)first.value().tHit * first.value().tHit;
+                    distSum += t2;
+                    distSquares += t2 * t2;
+                }
+                double pdf = shape.PDF(ctx, w);
+                pdfSum += pdf;
+                pdfSquares += pdf * pdf;
+            }
+            double fraction = hits / (double)nDirections;
+            stats.solidAngleByDirections = 4 * Math.PI * fraction;
+            stats.solidAngleByDirectionsError = 4 * Math.PI * Math.Sqrt(fraction * (1 - fraction) / nDirections);
+            double distMean = distSum / nDirections;
+            stats.weightedByDirections = 4 * Math.PI * distMean;
+            stats.weightedByDirectionsError = 4 * Math.PI * Math.Sqrt(Math.Max(0, distSquares / nDirections - distMean * distMean) / nDirections);
+            double pdfMean = pdfSum / nDirections;
+            stats.pdfIntegral = 4 * Math.PI * pdfMean;
+            stats.pdfIntegralError = 4 * Math.PI * Math.Sqrt(Math.Max(0, pdfSquares / nDirections - pdfMean * pdfMean) / nDirections);
+
+            int visible = 0;
+            double inverseSum = 0, inverseSquares = 0, weightedSum = 0, weightedSquares = 0;
+            for (int i = 0; i < nSamples; ++i)
+            {
+                pstd.optional<ShapeSample> ss = shape.Sample(ctx, new Point2f((Float)rng.NextDouble(), (Float)rng.NextDouble()));
+                if (!ss.has_value() || ss.value().pdf <= 0)
+                {
+                    ++stats.failed;
+                    continue;
+                }
+                Vector3f wi = ss.value().intr.p() - p;
+                Float distance = Length(wi);
+                wi /= distance;
+                if (shape.IntersectP(new Ray(p, wi), distance * (1 - 1e-4f)))
+                {
+                    continue;
+                }
+                ++visible;
+                double inverse = 1.0 / ss.value().pdf;
+                inverseSum += inverse;
+                inverseSquares += inverse * inverse;
+                double weighted = (double)distance * distance * inverse;
+                weightedSum += weighted;
+                weightedSquares += weighted * weighted;
+                // the pdf of a sample that is the first hit is that of its direction (checked where the hit is the sample, well
+                // away from grazing, where the relative error of the cosine is float noise)
+                pstd.optional<ShapeIntersection> first = shape.Intersect(new Ray(p, wi));
+                if (first.has_value() && std.abs(first.value().tHit - distance) < 1e-5f * distance &&
+                    AbsDot(first.value().intr.n, -wi) > 0.05f)
+                {
+                    ++stats.checkedPdfs;
+                    if (std.abs(shape.PDF(ctx, wi) - ss.value().pdf) > 2e-3f * ss.value().pdf)
+                    {
+                        ++stats.inconsistent;
+                        if (stats.inconsistent <= 5 && Environment.GetEnvironmentVariable("QUADRIC_VERBOSE") != null)
+                        {
+                            Console.WriteLine("MISMATCH ratio " + (shape.PDF(ctx, wi) / ss.value().pdf) + " cos " + AbsDot(first.value().intr.n, -wi) +
+                                              " sampleCos " + AbsDot(ss.value().intr.n, -wi) + " dist " + distance + " uv " + first.value().intr.uv + " sampleUv " + ss.value().intr.uv);
+                        }
+                    }
+                }
+            }
+            double inverseMean = inverseSum / nSamples;
+            stats.solidAngleBySamples = inverseMean;
+            stats.solidAngleBySamplesError = Math.Sqrt(Math.Max(0, inverseSquares / nSamples - inverseMean * inverseMean) / nSamples);
+            double weightedMean = weightedSum / nSamples;
+            stats.weightedBySamples = weightedMean;
+            stats.weightedBySamplesError = Math.Sqrt(Math.Max(0, weightedSquares / nSamples - weightedMean * weightedMean) / nSamples);
+            stats.visibleShare = visible / (double)nSamples;
+            stats.visibleShareError = Math.Sqrt(stats.visibleShare * (1 - stats.visibleShare) / nSamples);
+            return stats;
+        }
+
+        // The configurations the solid angle test once flagged (a partial skew hyperboloid, a partial torus under a non-uniform scale
+        // and a mirror, a sphere under a non-uniform scale), measured with up to 10^7 directions: the two estimates of each pair must
+        // agree to within their standard errors at every N, and the standard errors must shrink as 1/sqrt(N)
+        [TEST("Quadric", "SolidAngleConvergence")]
+        public static void SolidAngleConvergence()
+        {
+            Transform[] transforms = Transforms();
+            List<Reference> references = References();
+            string[] names = { "partial skew hyperboloid", "partial torus", "partial torus", "sphere", "torus crossing zero" };
+            int[] which = { 0, 3, 4, 3, 1 };
+            int[] pointIndices = { 3, 1, 1, 2, 2 };
+            for (int c = 0; c < names.Length; ++c)
+            {
+                Reference reference = references.Find((Reference r) => r.name == names[c]);
+                Transform t = transforms[which[c]], ti = Inverse(t);
+                Shape shape = reference.make(t, ti, which[c] == 1);
+                Random rng = new Random(2024 + which[c]);
+                Point3f p = ReferencePoints(shape, rng)[pointIndices[c] - 1];
+                ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(p), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
+                double previousError = 0;
+                foreach (int n in new int[] { 100000, 1000000, 10000000 })
+                {
+                    SolidAngleStatistics stats = MeasureSolidAngle(shape, ctx, p, new Random(n + c), n, n / 10);
+                    string label = names[c] + " " + TransformNames[which[c]] + " point " + pointIndices[c] + " N " + n + ": " + stats;
+                    if (System.Environment.GetEnvironmentVariable("QUADRIC_VERBOSE") != null)
+                    {
+                        Console.WriteLine(label);
+                    }
+                    EXPECT_LT(std.abs(stats.ZWeighted()), 4.0, label);
+                    EXPECT_LT(std.abs(stats.ZPdfIntegral()), 4.0, label);
+                    EXPECT_EQ(0, stats.inconsistent, label);
+                    if (previousError > 0)
+                    {
+                        // ten times the samples: about 1/sqrt(10) of the error
+                        EXPECT_LT(stats.solidAngleByDirectionsError, 0.6 * previousError, label);
+                    }
+                    previousError = stats.solidAngleByDirectionsError;
                 }
             }
         }

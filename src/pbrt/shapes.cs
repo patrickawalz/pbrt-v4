@@ -370,6 +370,7 @@ namespace pbrt
         }
 
         // The refined hit point at the ray parameter t and its phi; false if it is clipped
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         bool ClipHit(Point3fi oi, Vector3fi di, Interval t, out Point3f pHit, out Float phi)
         {
             pHit = (Point3f)oi + (Float)t * (Vector3f)di;
@@ -589,11 +590,12 @@ namespace pbrt
             Point3fi oi = objectFromRender.Apply(new Point3fi(r.o));
             Vector3fi di = objectFromRender.Apply(new Vector3fi(r.d));
 
-            // Compute plane intersection for disk: reject rays parallel to the disk's plane, and hits not conservatively in (0, tMax)
-            Interval tInterval = (height - oi.z) / di.z;
-            if (tInterval.LowerBound() <= 0 || tInterval.UpperBound() >= tMax)
+            // Compute plane intersection for disk: reject rays parallel to the disk's plane (as in pbrt-v4; an interval t was measured slower with no accuracy gain)
+            if ((Float)di.z == 0)
                 return default;
-            Float tShapeHit = (Float)tInterval;
+            Float tShapeHit = (height - (Float)oi.z) / (Float)di.z;
+            if (tShapeHit <= 0 || tShapeHit >= tMax)
+                return default;
 
             // See if hit point is inside disk radii and $\phimax$
             Point3f pHit = (Point3f)oi + tShapeHit * (Vector3f)di;
@@ -779,6 +781,7 @@ namespace pbrt
         }
 
         // The refined hit point at the ray parameter t and its phi; false if it is clipped
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         bool ClipHit(Point3fi oi, Vector3fi di, Interval t, out Point3f pHit, out Float phi)
         {
             pHit = (Point3f)oi + (Float)t * (Vector3f)di;
