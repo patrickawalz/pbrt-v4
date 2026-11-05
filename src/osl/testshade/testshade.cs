@@ -1134,11 +1134,12 @@ namespace OSL.TestShade
                     }
                     else if (t.basetype == TypeDesc.INT)
                     {
-                        // We are outputting an integer variable, so we need to convert it to floating point.
+                        // We are outputting an integer variable, so we need to convert it to floating point. OIIO::convert_pixel_values from
+                        // int32 to float normalizes to the range of the integer type (1 becomes 1/2147483647), which is what the reference does.
                         float* pixel = stackalloc float[nchans];
                         for (int c = 0; c < nchans; ++c)
                         {
-                            pixel[c] = (float)((int*)data)[c];
+                            pixel[c] = (float)(((int*)data)[c] * (1.0 / 2147483647.0));
                         }
                         outputimg.setpixel(x, y, pixel);
                         if (print_outputs)

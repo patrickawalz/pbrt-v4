@@ -42,7 +42,9 @@ namespace OSL.TestShade
             string format = dataformatname;
             if (format.Length == 0)
             {
-                format = "float";
+                // The ImageBuf of an output has the base type of the output symbol (OIIO writes the buffer in its own format by default), which is
+                // int32 for an int output
+                format = buf.datatype.basetype == TypeDesc.INT ? "int32" : "float";
             }
             string lower = filename.ToLowerInvariant();
             try
@@ -72,7 +74,8 @@ namespace OSL.TestShade
             int h = buf.yres;
             int nch = buf.nchannels;
             int bits = format == "uint8" ? 8 : (format == "uint16" ? 16 : 32);
-            bool isfloat = bits == 32;
+            bool isint32 = format == "int32";
+            bool isfloat = bits == 32 && !isint32;
             int bytes = w * h * nch * (bits / 8);
             byte[] data = new byte[bytes];
             int n = w * h * nch;
@@ -86,6 +89,13 @@ namespace OSL.TestShade
                 else if (bits == 16)
                 {
                     BitConverter.GetBytes(to_uint16(v)).CopyTo(data, i * 2);
+                }
+                else if (isint32)
+                {
+                    // float to int32 as OIIO converts: the float is a fraction of the range of the integer type
+                    double scaled = Math.Round((double)v * 2147483647.0, MidpointRounding.AwayFromZero);
+                    int iv = scaled >= 2147483647.0 ? int.MaxValue : (scaled <= -2147483648.0 ? int.MinValue : (int)scaled);
+                    BitConverter.GetBytes(iv).CopyTo(data, i * 4);
                 }
                 else
                 {
@@ -109,7 +119,7 @@ namespace OSL.TestShade
                 int sfOffset = (int)ms.Position;
                 for (int c = 0; c < nch; ++c)
                 {
-                    bw.Write((ushort)(isfloat ? 3 : 1));
+                    bw.Write((ushort)(isfloat ? 3 : (isint32 ? 2 : 1)));
                 }
                 if ((ms.Position & 1) != 0)
                 {
@@ -125,7 +135,7 @@ namespace OSL.TestShade
 
                 int photometric = nch >= 3 ? 2 : 1;
                 int extra = nch == 2 ? 1 : (nch > 3 ? nch - 3 : 0);
-                int ntags = 10 + (extra > 0 ? 1 : 0) + (isfloat ? 1 : 0);
+                int ntags = 10 + (extra > 0 ? 1 : 0) + (isfloat || isint32 ? 1 : 0);
                 bw.Write((ushort)ntags);
                 write_entry(bw, 256, 4, 1, (uint)w);
                 write_entry(bw, 257, 4, 1, (uint)h);
@@ -141,9 +151,9 @@ namespace OSL.TestShade
                 {
                     write_entry(bw, 338, 3, extra, 2);
                 }
-                if (isfloat)
+                if (isfloat || isint32)
                 {
-                    write_entry(bw, 339, 3, nch, nch == 1 ? 3u : (uint)sfOffset);
+                    write_entry(bw, 339, 3, nch, nch == 1 ? (isint32 ? 2u : 3u) : (uint)sfOffset);
                 }
                 bw.Write((uint)0);
                 bw.Flush();

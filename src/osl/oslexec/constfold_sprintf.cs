@@ -1,14 +1,11 @@
-// OSL port: OIIO::Strutil::sprintf, the printf-style formatting (a typesafe tinyformat) that the format() folder of constfold.cpp uses to build the
-// constant string at optimization time.
-//
-// The conventions are those of tinyformat, which formats through a C++ ostream rather than through the C library:
-//   * the conversion character selects the stream flags (d i u: decimal, o: octal, x X: hex, e E: scientific, f F: fixed, g G: general, c: character,
-//     s: the value as the stream prints it), the argument type selects how the value is printed;
-//   * a float given to d i u o x X c is converted to int first, an int given to e f g is printed as an int (the stream ignores the float flags and the
-//     precision for integers), a float given to s is printed in the stream's default (%g) format;
-//   * a precision truncates a string given to %s;
-//   * the flags are '-', '+', ' ', '#' and '0'; width and precision may be '*' (taken from an int argument); length modifiers are skipped.
-// Arguments are int, float and string.
+// OSL port: OIIO::Strutil::sprintf, the printf-style formatting that the format() folder of constfold.cpp uses to build the constant string at
+// optimization time. In the OIIO that OSL builds against (3.x) it is fmt::sprintf, the printf emulation of the {fmt} library, so this follows C printf:
+//   * flags '-', '+', ' ', '#' and '0'; width and precision may be '*' (taken from an int argument); length modifiers (h l ll j z t L q) are skipped;
+//   * d i: signed decimal, u o x X: the int taken as unsigned, c: the character with that code, s: the string (a number given to %s prints as {fmt}
+//     prints it), e E f F g G: a float in the style of {fmt}/C (the same engine as Fmt.format_arg), "%%" is a percent sign;
+//   * a precision on an integer conversion is the minimum number of digits, on %s it truncates the string; the '0' flag is ignored when there is a
+//     precision for integers or when '-' is given.
+// Arguments are int, float, double and string. The output of the golden test sprintf_golden_test.cs is what the real fmt::sprintf produced.
 
 using System;
 using System.Globalization;
@@ -40,7 +37,6 @@ namespace OIIO
                     continue;
                 }
 
-                // flags
                 bool left = false, plus = false, space = false, alt = false, zero = false;
                 bool more = true;
                 while (more && i < fmt.Length)
@@ -73,7 +69,6 @@ namespace OIIO
                     }
                 }
 
-                // width
                 int width = 0;
                 if (i < fmt.Length && fmt[i] == '*')
                 {
@@ -98,7 +93,6 @@ namespace OIIO
                     }
                 }
 
-                // precision
                 int prec = -1;
                 if (i < fmt.Length && fmt[i] == '.')
                 {
@@ -127,172 +121,206 @@ namespace OIIO
                     }
                 }
 
-                // length modifiers are ignored
+                int short_count = 0;
                 while (i < fmt.Length && (fmt[i] == 'h' || fmt[i] == 'l' || fmt[i] == 'L' || fmt[i] == 'j' || fmt[i] == 'z' || fmt[i] == 't' || fmt[i] == 'q'))
                 {
+                    if (fmt[i] == 'h')
+                    {
+                        ++short_count;
+                    }
                     ++i;
                 }
 
                 if (i >= fmt.Length)
                 {
-                    break;  // a format specification that ends the string: nothing to convert
+                    break;
                 }
                 char conv = fmt[i];
                 ++i;
                 if (argnum >= args.Length)
                 {
-                    break;  // not enough arguments
+                    break;
                 }
                 object arg = args[argnum++];
+                if (short_count > 0 && arg is int && conv != 'c' && conv != 's')
+                {
+                    // 'h' and 'hh' narrow the int to a short or a char (signed for d and i, unsigned for the others)
+                    int iv = (int)arg;
+                    bool is_signed = conv == 'd' || conv == 'i';
+                    if (short_count == 1)
+                    {
+                        arg = is_signed ? (int)(short)iv : (int)(ushort)iv;
+                    }
+                    else
+                    {
+                        arg = is_signed ? (int)(sbyte)iv : (int)(byte)iv;
+                    }
+                }
                 o.Append(format_one(arg, conv, left, plus, space, alt, zero, width, prec));
             }
             return o.ToString();
         }
 
-        private static string format_one(object arg, char conv, bool left, bool plus, bool space, bool alt, bool zero, int width, int prec)
+        private static string pad_text(string prefix, string body, int width, bool left, bool zero_fill)
         {
-            string body;  // the text of the value without the sign
-            string sign = "";
-            bool numeric = true;
-            bool upper = char.IsUpper(conv) && conv != 'c';
-            if (arg is string)
-            {
-                numeric = false;
-                body = (string)arg;
-                if (conv == 's' && prec >= 0 && body.Length > prec)
-                {
-                    body = body.Substring(0, prec);
-                }
-            }
-            else
-            {
-                bool isint = arg is int;
-                // Integer conversions take a float as an int
-                if (!isint && (conv == 'd' || conv == 'i' || conv == 'u' || conv == 'o' || conv == 'x' || conv == 'X' || conv == 'c'))
-                {
-                    float fv = (float)arg;
-                    arg = (fv >= -2147483648.0f && fv < 2147483648.0f) ? (int)fv : int.MinValue;
-                    isint = true;
-                }
-                if (isint)
-                {
-                    int v = (int)arg;
-                    if (conv == 'c')
-                    {
-                        numeric = false;
-                        body = ((char)(byte)v).ToString();
-                    }
-                    else if (conv == 'x' || conv == 'X')
-                    {
-                        body = ((uint)v).ToString(conv == 'X' ? "X" : "x", CultureInfo.InvariantCulture);
-                        if (alt && v != 0)
-                        {
-                            body = (conv == 'X' ? "0X" : "0x") + body;
-                        }
-                        plus = false;
-                        space = false;
-                    }
-                    else if (conv == 'o')
-                    {
-                        body = Convert.ToString(v, 8);
-                        if (alt && v != 0)
-                        {
-                            body = "0" + body;
-                        }
-                        plus = false;
-                        space = false;
-                    }
-                    else
-                    {
-                        // d i u s and the float conversions of an int: the stream prints the signed decimal value
-                        if (v < 0)
-                        {
-                            sign = "-";
-                            body = ((long)(-(long)v)).ToString(CultureInfo.InvariantCulture);
-                        }
-                        else
-                        {
-                            body = v.ToString(CultureInfo.InvariantCulture);
-                        }
-                    }
-                }
-                else
-                {
-                    float fv = (float)arg;
-                    double v = fv;
-                    bool neg = fv < 0 || (fv == 0 && float.IsNegative(fv));
-                    double a = Math.Abs(v);
-                    if (float.IsNaN(fv))
-                    {
-                        body = upper ? "NAN" : "nan";
-                        neg = false;
-                        zero = false;
-                    }
-                    else if (float.IsInfinity(fv))
-                    {
-                        body = upper ? "INF" : "inf";
-                        zero = false;
-                    }
-                    else if (conv == 'e' || conv == 'E')
-                    {
-                        body = Fmt.format_e(a, prec >= 0 ? prec : 6, upper);
-                        if (alt && prec == 0)
-                        {
-                            body = body.Insert(body.IndexOfAny(new char[] { 'e', 'E' }), ".");
-                        }
-                    }
-                    else if (conv == 'f' || conv == 'F')
-                    {
-                        body = a.ToString("F" + (prec >= 0 ? prec : 6), CultureInfo.InvariantCulture);
-                        if (alt && prec == 0)
-                        {
-                            body += ".";
-                        }
-                    }
-                    else
-                    {
-                        // g G and s: the stream's default float format, which is %g with the precision (6 if none is given)
-                        body = Fmt.format_g(a, prec >= 0 ? prec : 6, upper, alt && (conv == 'g' || conv == 'G'));
-                    }
-                    if (neg)
-                    {
-                        sign = "-";
-                    }
-                }
-                if (sign.Length == 0 && numeric)
-                {
-                    if (plus)
-                    {
-                        sign = "+";
-                    }
-                    else if (space)
-                    {
-                        sign = " ";
-                    }
-                }
-            }
-
-            int len = sign.Length + body.Length;
+            int len = prefix.Length + body.Length;
             if (len >= width)
             {
-                return sign + body;
+                return prefix + body;
             }
             int pad = width - len;
             if (left)
             {
-                return sign + body + new string(' ', pad);
+                return prefix + body + new string(' ', pad);
             }
-            if (zero && numeric)
+            if (zero_fill)
             {
-                // internal padding: zeros after the sign (and after the 0x of a hex number)
-                int prefixlen = 0;
-                if (body.StartsWith("0x", StringComparison.Ordinal) || body.StartsWith("0X", StringComparison.Ordinal))
-                {
-                    prefixlen = 2;
-                }
-                return sign + body.Substring(0, prefixlen) + new string('0', pad) + body.Substring(prefixlen);
+                return prefix + new string('0', pad) + body;
             }
-            return new string(' ', pad) + sign + body;
+            return new string(' ', pad) + prefix + body;
+        }
+
+        private static string format_one(object arg, char conv, bool left, bool plus, bool space, bool alt, bool zero, int width, int prec)
+        {
+            if (arg is string)
+            {
+                string body = (string)arg;
+                if (conv == 's' && prec >= 0 && body.Length > prec)
+                {
+                    body = body.Substring(0, prec);
+                }
+                return pad_text("", body, width, left, false);
+            }
+            if (arg is int)
+            {
+                int v = (int)arg;
+                switch (conv)
+                {
+                    case 'c':
+                        return pad_text("", ((char)(byte)v).ToString(), width, left, false);
+                    case 'd':
+                    case 'i':
+                    case 'u':
+                    case 'o':
+                    case 'x':
+                    case 'X':
+                    {
+                        bool is_signed = conv == 'd' || conv == 'i';
+                        string sign = "";
+                        ulong mag;
+                        if (is_signed)
+                        {
+                            if (v < 0)
+                            {
+                                sign = "-";
+                                mag = (ulong)(-(long)v);
+                            }
+                            else
+                            {
+                                mag = (ulong)v;
+                                sign = plus ? "+" : (space ? " " : "");
+                            }
+                        }
+                        else
+                        {
+                            mag = (uint)v;
+                            sign = plus ? "+" : (space ? " " : "");
+                        }
+                        string digits;
+                        string prefix = "";
+                        if (conv == 'x' || conv == 'X')
+                        {
+                            digits = mag.ToString(conv == 'X' ? "X" : "x", CultureInfo.InvariantCulture);
+                            if (alt && mag != 0)
+                            {
+                                prefix = conv == 'X' ? "0X" : "0x";
+                            }
+                        }
+                        else if (conv == 'o')
+                        {
+                            digits = Convert.ToString((long)mag, 8);
+                        }
+                        else
+                        {
+                            digits = mag.ToString(CultureInfo.InvariantCulture);
+                        }
+                        if (prec >= 0)
+                        {
+                            while (digits.Length < prec)
+                            {
+                                digits = "0" + digits;
+                            }
+                        }
+                        if (conv == 'o' && alt && (digits.Length == 0 || digits[0] != '0'))
+                        {
+                            digits = "0" + digits;
+                        }
+                        return pad_text(sign + prefix, digits, width, left, zero && prec < 0);
+                    }
+                    default:
+                        // e f g with an int: the value as {fmt} prints a number
+                        return Fmt.format_arg(spec_for(left, plus, space, alt, zero, width, prec, ""), arg);
+                }
+            }
+            if (conv == 's' || conv == 'e' || conv == 'E' || conv == 'f' || conv == 'F' || conv == 'g' || conv == 'G')
+            {
+                bool nonfinite = false;
+                if (arg is float)
+                {
+                    nonfinite = float.IsNaN((float)arg) || float.IsInfinity((float)arg);
+                }
+                else if (arg is double)
+                {
+                    nonfinite = double.IsNaN((double)arg) || double.IsInfinity((double)arg);
+                }
+                string type = conv == 's' ? "" : conv.ToString();
+                if (nonfinite)
+                {
+                    // C printf pads inf and nan with spaces (right aligned unless '-')
+                    string spec = (left ? "<" : ">") + (plus ? "+" : (space ? " " : "")) + (width > 0 ? width.ToString(CultureInfo.InvariantCulture) : "") + type;
+                    return Fmt.format_arg(spec, arg);
+                }
+                return Fmt.format_arg(spec_for(left, plus, space, alt, zero, width, prec, type), arg);
+            }
+            // An integer conversion given a float: the float is taken as an int
+            float fv = arg is double ? (float)(double)arg : (float)arg;
+            int iv = (fv >= -2147483648.0f && fv < 2147483648.0f) ? (int)fv : int.MinValue;
+            return format_one(iv, conv, left, plus, space, alt, zero, width, prec);
+        }
+
+        private static string spec_for(bool left, bool plus, bool space, bool alt, bool zero, int width, int prec, string type)
+        {
+            StringBuilder s = new StringBuilder();
+            if (left)
+            {
+                s.Append('<');
+            }
+            if (plus)
+            {
+                s.Append('+');
+            }
+            else if (space)
+            {
+                s.Append(' ');
+            }
+            if (alt)
+            {
+                s.Append('#');
+            }
+            if (zero && !left)
+            {
+                s.Append('0');
+            }
+            if (width > 0)
+            {
+                s.Append(width.ToString(CultureInfo.InvariantCulture));
+            }
+            if (prec >= 0)
+            {
+                s.Append('.').Append(prec.ToString(CultureInfo.InvariantCulture));
+            }
+            s.Append(type);
+            return s.ToString();
         }
     }
 }

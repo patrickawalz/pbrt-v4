@@ -7,7 +7,7 @@
 //
 // Formats: TIFF (strips and tiles; none, LZW, Deflate and PackBits; 8/16 bit integer, 16/32 bit float; horizontal and floating point predictors; MIP levels
 // stored as IFDs of a "textureformat" file as written by maketx), Radiance HDR, PNG (non interlaced), PPM/PGM (P5, P6) and PFM, BMP (uncompressed 24 and 32 bit).
-// Other formats (EXR, JPEG, ...) go through ImageReaders.external_reader, which a host sets to its own decoder; without one such files are reported as
+// OpenEXR is read by exrinput.cs. Other formats (JPEG, ...) go through ImageReaders.external_reader, which a host sets to its own decoder; without one such files are reported as
 // invalid, as the C++ does for a file that no plugin can open.
 
 using System;
@@ -126,6 +126,10 @@ namespace OIIO
                 {
                     r = HdrReader.read(bytes, out error);
                 }
+                else if (ExrReader.is_exr(bytes))
+                {
+                    r = ExrReader.read(bytes, out error);
+                }
                 else if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G')
                 {
                     r = PngReader.read(bytes, out error);
@@ -149,6 +153,16 @@ namespace OIIO
                 else
                 {
                     error = "Could not open file: unsupported image format";
+                }
+                if (r == null && external_reader != null)
+                {
+                    // A format that is built in but that the built in decoder doesn't handle (interlaced PNG, other TIFF variants, ...) is left to the host
+                    ImageFileData ext = external_reader(filename);
+                    if (ext != null)
+                    {
+                        error = "";
+                        r = ext;
+                    }
                 }
                 return r;
             }

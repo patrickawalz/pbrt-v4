@@ -650,6 +650,10 @@ namespace OIIO
                     {
                         error = "Could not open file: " + h.resolved_filename + ": No such file or directory";
                     }
+                    else if (h.resolved_filename.Length == 0 && error == "Could not open file")
+                    {
+                        error = "ImageInput::create() called with no filename";
+                    }
                     mark_broken(h, error);
                     return;
                 }
