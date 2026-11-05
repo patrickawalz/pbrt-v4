@@ -797,5 +797,34 @@ namespace pbrt
                 previousChord = worstChord;
             }
         }
+        [TEST("Dicing", "TriangleMeshDisplacementModes")]
+        public static void TriangleMeshDisplacementModes()
+        {
+            Transform identity = new Transform();
+            Dictionary<string, FloatTexture> textures = new Dictionary<string, FloatTexture>();
+            textures["t"] = Constant(0.1);
+            ParsedParameter[] mesh = { Ints("indices", 0, 1, 2, 0, 2, 3), Floats("point3", "P", 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0), Floats("point2", "uv", 0, 0, 1, 0, 1, 1, 0, 1) };
+            // no displacement: the two triangles
+            EXPECT_EQ(2, (int)Shape.Create("trianglemesh", identity, identity, false, Dictionary(mesh), textures, null, new Allocator()).size());
+            // the default: tessellation, edges split to "edgelength", vertices displaced by scale * texture + offset
+            List<ParsedParameter> tessellated = new List<ParsedParameter>(mesh);
+            tessellated.Add(Text("texture", "displacement", "t"));
+            tessellated.Add(Floats("float", "edgelength", 0.2f));
+            tessellated.Add(Floats("float", "displacementscale", 2));
+            pstd.vector<Shape> shapes = Shape.Create("trianglemesh", identity, identity, false, Dictionary(tessellated.ToArray()), textures, null, new Allocator());
+            EXPECT_GT(shapes.size(), 2);
+            Bounds3f box = shapes[0].Bounds();
+            for (ulong i = 1; i < shapes.size(); ++i)
+            {
+                box = pbrt.Union(box, shapes[i].Bounds());
+            }
+            EXPECT_NEAR(box.pMax.z, 0.2, 1e-5);
+            // the shell mapped option is the displacedmesh
+            List<ParsedParameter> shell = new List<ParsedParameter>(mesh);
+            shell.Add(Text("texture", "displacement", "t"));
+            shell.Add(Text("string", "displacementmode", "shell"));
+            pstd.vector<Shape> shellShapes = Shape.Create("trianglemesh", identity, identity, false, Dictionary(shell.ToArray()), textures, null, new Allocator());
+            EXPECT_TRUE(shellShapes[0] is DisplacedTriangle);
+        }
     }
 }  // namespace pbrt

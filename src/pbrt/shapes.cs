@@ -2689,6 +2689,131 @@ namespace pbrt
             displacedTrisDelta = 0;
         });
 
+        // (not in pbrt-v4) "string displacementmode" of a triangle mesh with a "texture displacement": "tessellate" (the default, the edges are split to
+        // "edgelength" and the vertices displaced) or "shell" (Shape "displacedmesh": no tessellation)
+        static bool ShellModeRequested(string name, ParameterDictionary parameters, FileLoc loc)
+        {
+            string mode = parameters.GetOneString("displacementmode", "tessellate");
+            if (mode != "tessellate" && mode != "shell")
+                pbrt.ErrorExit(loc, name + ": \"displacementmode\" must be \"tessellate\" or \"shell\".");
+            return mode == "shell" && parameters.GetTexture("displacement").Length != 0;
+        }
+
+        // The mesh of the parameters of a trianglemesh, for the displacement
+        static TriQuadMesh TriangleMeshData(ParameterDictionary parameters, FileLoc loc)
+        {
+            TriQuadMesh result = new TriQuadMesh();
+            List<int> indices = parameters.GetIntArray("indices");
+            List<Point3f> points = parameters.GetPoint3fArray("P");
+            if (indices.Count == 0 && points.Count == 3)
+                indices = new List<int> { 0, 1, 2 };
+            if (indices.Count == 0 || points.Count == 0 || indices.Count % 3 != 0)
+                pbrt.ErrorExit(loc, "trianglemesh: \"indices\" (a multiple of 3) and \"P\" are required.");
+            List<Point2f> uvs = parameters.GetPoint2fArray("uv");
+            List<Normal3f> normals = parameters.GetNormal3fArray("N");
+            foreach (int i in indices)
+                if (i < 0 || i >= points.Count)
+                    pbrt.ErrorExit(loc, "trianglemesh: vertex index out of range.");
+            foreach (Point3f p in points)
+                result.p.push_back(p);
+            foreach (int i in indices)
+                result.triIndices.push_back(i);
+            if (uvs.Count == points.Count)
+                foreach (Point2f uv in uvs)
+                    result.uv.push_back(uv);
+            if (normals.Count == points.Count)
+                foreach (Normal3f n in normals)
+                    result.n.push_back(n);
+            return result;
+        }
+
+        // The displacement of a triangle and quad mesh by tessellation ("texture displacement", "vectormap"), and its shapes
+        static pstd.vector<Shape> TriQuadShapes(TriQuadMesh plyMesh, string filename, Transform renderFromObject, bool reverseOrientation,
+                                                ParameterDictionary parameters, IDictionary<string, FloatTexture> floatTextures, FileLoc loc,
+                                                Allocator alloc)
+        {
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            Float edgeLength = parameters.GetOneFloat("edgelength", 1.0f);
+            edgeLength *= pbrt.Options.displacementEdgeScale;
+
+            string vectorMapName = parameters.GetOneString("vectormap", "");
+            string displacementTexName = parameters.GetTexture("displacement");
+            if (vectorMapName.Length != 0)
+            {
+                if (displacementTexName.Length != 0)
+                    pbrt.ErrorExit(loc, "plymesh: \"displacement\" and \"vectormap\" cannot both be given.");
+                string vectorSpace = parameters.GetOneString("vectorspace", "tangent");
+                if (vectorSpace != "tangent" && vectorSpace != "object")
+                    pbrt.ErrorExit(loc, "plymesh: \"vectorspace\" must be \"tangent\" or \"object\".");
+                VectorMapImage vectorImage = new VectorMapImage(pbrt.ResolveFilename(vectorMapName),
+                                                                parameters.GetOneFloat("vectorscale", 1),
+                                                                parameters.GetOneFloat("vectorbias", 0));
+                pbrt.LOG_VERBOSE("Starting to vector displace mesh \"%s\" with \"%s\"", filename, vectorMapName);
+                int origVectorTriCount = (int)(plyMesh.triIndices.size() / 3);
+                Transform vectorRfo = renderFromObject;
+                plyMesh = plyMesh.Displace(
+                    (Point3f v0, Point3f v1) => pbrt.Distance(vectorRfo.Apply(v0), vectorRfo.Apply(v1)), edgeLength,
+                    (TriQuadMesh refined) => VectorTessellation.Apply(refined, vectorImage, vectorSpace == "tangent"), loc);
+                displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origVectorTriCount;
+            }
+            else if (displacementTexName.Length != 0)
+            {
+                if (!floatTextures.TryGetValue(displacementTexName, out FloatTexture displacement))
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: no such texture defined.", displacementTexName));
+
+                pbrt.LOG_VERBOSE("Starting to displace mesh \"%s\" with \"%s\"", filename, displacementTexName);
+
+                int origTriCount = (int)(plyMesh.triIndices.size() / 3);
+                Transform rfo = renderFromObject;
+                Float displacementScale = parameters.GetOneFloat("displacementscale", 1), displacementOffset = parameters.GetOneFloat("displacementoffset", 0);
+                plyMesh = plyMesh.Displace(
+                    (Point3f v0, Point3f v1) =>
+                    {
+                        v0 = rfo.Apply(v0);
+                        v1 = rfo.Apply(v1);
+                        return pbrt.Distance(v0, v1);
+                    },
+                    edgeLength,
+                    (Point3f[] p, Normal3f[] n, Point2f[] uv, int nVertices) =>
+                    {
+                        pbrt.ParallelFor(0, nVertices, (int i) =>
+                        {
+                            TextureEvalContext ctx = default;
+                            ctx.p = p[i];
+                            ctx.uv = uv[i];
+                            Float d = displacementScale * new UniversalTextureEvaluator().Apply(displacement, ctx) + displacementOffset;
+                            p[i] += (Vector3f)(d * n[i]);
+                        });
+                    },
+                    loc);
+
+                pbrt.LOG_VERBOSE("Finished displacing mesh \"%s\" with \"%s\" -> %d tris", filename,
+                                    displacementTexName, plyMesh.triIndices.size() / 3);
+                displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origTriCount;
+            }
+
+            if (!plyMesh.triIndices.empty())
+            {
+                TriangleMesh mesh = new TriangleMesh(renderFromObject, reverseOrientation, plyMesh.triIndices,
+                                                     plyMesh.p, new pstd.vector<Vector3f>(), plyMesh.n,
+                                                     plyMesh.uv, plyMesh.faceIndices, alloc);
+                shapes = Triangle.CreateTriangles(mesh, alloc);
+            }
+
+            if (!plyMesh.quadIndices.empty())
+            {
+                BilinearPatchMesh mesh = new BilinearPatchMesh(renderFromObject, reverseOrientation,
+                                                               plyMesh.quadIndices, plyMesh.p, plyMesh.n,
+                                                               plyMesh.uv, plyMesh.faceIndices,
+                                                               null /* image dist */, alloc);
+                pstd.vector<Shape> quadMesh = BilinearPatch.CreatePatches(mesh, alloc);
+                for (int i = 0; i < (int)quadMesh.size(); ++i)
+                    shapes.push_back(quadMesh[i]);
+            }
+
+            return shapes;
+        }
+
         public static pstd.vector<Shape> Create(string name, Transform renderFromObject, Transform objectFromRender,
                                                 bool reverseOrientation, ParameterDictionary parameters,
                                                 IDictionary<string, FloatTexture> floatTextures, FileLoc loc,
@@ -2819,90 +2944,35 @@ namespace pbrt
                 shapes = Curve.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
             else if (name == "trianglemesh")
             {
-                TriangleMesh mesh = Triangle.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
-                if (mesh != null)
-                    shapes = Triangle.CreateTriangles(mesh, alloc);
+                // (not in pbrt-v4) with a "texture displacement" the mesh is displaced as a plymesh is (see docs/displacement.md)
+                if (parameters.GetTexture("displacement").Length != 0)
+                {
+                    if (ShellModeRequested(name, parameters, loc))
+                    {
+                        shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
+                    }
+                    else
+                    {
+                        shapes = TriQuadShapes(TriangleMeshData(parameters, loc), "trianglemesh", renderFromObject, reverseOrientation, parameters, floatTextures, loc, alloc);
+                    }
+                }
+                else
+                {
+                    TriangleMesh mesh = Triangle.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
+                    if (mesh != null)
+                        shapes = Triangle.CreateTriangles(mesh, alloc);
+                }
             }
             else if (name == "plymesh")
             {
                 string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
-                TriQuadMesh plyMesh = TriQuadMesh.ReadPLY(filename);
-
-                Float edgeLength = parameters.GetOneFloat("edgelength", 1.0f);
-                edgeLength *= pbrt.Options.displacementEdgeScale;
-
-                string vectorMapName = parameters.GetOneString("vectormap", "");
-                string displacementTexName = parameters.GetTexture("displacement");
-                if (vectorMapName.Length != 0)
+                if (ShellModeRequested(name, parameters, loc))
                 {
-                    if (displacementTexName.Length != 0)
-                        pbrt.ErrorExit(loc, "plymesh: \"displacement\" and \"vectormap\" cannot both be given.");
-                    string vectorSpace = parameters.GetOneString("vectorspace", "tangent");
-                    if (vectorSpace != "tangent" && vectorSpace != "object")
-                        pbrt.ErrorExit(loc, "plymesh: \"vectorspace\" must be \"tangent\" or \"object\".");
-                    VectorMapImage vectorImage = new VectorMapImage(pbrt.ResolveFilename(vectorMapName),
-                                                                    parameters.GetOneFloat("vectorscale", 1),
-                                                                    parameters.GetOneFloat("vectorbias", 0));
-                    pbrt.LOG_VERBOSE("Starting to vector displace mesh \"%s\" with \"%s\"", filename, vectorMapName);
-                    int origVectorTriCount = (int)(plyMesh.triIndices.size() / 3);
-                    Transform vectorRfo = renderFromObject;
-                    plyMesh = plyMesh.Displace(
-                        (Point3f v0, Point3f v1) => pbrt.Distance(vectorRfo.Apply(v0), vectorRfo.Apply(v1)), edgeLength,
-                        (TriQuadMesh refined) => VectorTessellation.Apply(refined, vectorImage, vectorSpace == "tangent"), loc);
-                    displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origVectorTriCount;
+                    shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
                 }
-                else if (displacementTexName.Length != 0)
+                else
                 {
-                    if (!floatTextures.TryGetValue(displacementTexName, out FloatTexture displacement))
-                        pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: no such texture defined.", displacementTexName));
-
-                    pbrt.LOG_VERBOSE("Starting to displace mesh \"%s\" with \"%s\"", filename, displacementTexName);
-
-                    int origTriCount = (int)(plyMesh.triIndices.size() / 3);
-                    Transform rfo = renderFromObject;
-                    plyMesh = plyMesh.Displace(
-                        (Point3f v0, Point3f v1) =>
-                        {
-                            v0 = rfo.Apply(v0);
-                            v1 = rfo.Apply(v1);
-                            return pbrt.Distance(v0, v1);
-                        },
-                        edgeLength,
-                        (Point3f[] p, Normal3f[] n, Point2f[] uv, int nVertices) =>
-                        {
-                            pbrt.ParallelFor(0, nVertices, (int i) =>
-                            {
-                                TextureEvalContext ctx = default;
-                                ctx.p = p[i];
-                                ctx.uv = uv[i];
-                                Float d = new UniversalTextureEvaluator().Apply(displacement, ctx);
-                                p[i] += (Vector3f)(d * n[i]);
-                            });
-                        },
-                        loc);
-
-                    pbrt.LOG_VERBOSE("Finished displacing mesh \"%s\" with \"%s\" -> %d tris", filename,
-                                        displacementTexName, plyMesh.triIndices.size() / 3);
-                    displacedTrisDelta += (long)(plyMesh.triIndices.size() / 3) - origTriCount;
-                }
-
-                if (!plyMesh.triIndices.empty())
-                {
-                    TriangleMesh mesh = new TriangleMesh(renderFromObject, reverseOrientation, plyMesh.triIndices,
-                                                         plyMesh.p, new pstd.vector<Vector3f>(), plyMesh.n,
-                                                         plyMesh.uv, plyMesh.faceIndices, alloc);
-                    shapes = Triangle.CreateTriangles(mesh, alloc);
-                }
-
-                if (!plyMesh.quadIndices.empty())
-                {
-                    BilinearPatchMesh mesh = new BilinearPatchMesh(renderFromObject, reverseOrientation,
-                                                                   plyMesh.quadIndices, plyMesh.p, plyMesh.n,
-                                                                   plyMesh.uv, plyMesh.faceIndices,
-                                                                   null /* image dist */, alloc);
-                    pstd.vector<Shape> quadMesh = BilinearPatch.CreatePatches(mesh, alloc);
-                    for (int i = 0; i < (int)quadMesh.size(); ++i)
-                        shapes.push_back(quadMesh[i]);
+                    shapes = TriQuadShapes(TriQuadMesh.ReadPLY(filename), filename, renderFromObject, reverseOrientation, parameters, floatTextures, loc, alloc);
                 }
             }
             else if (name == "loopsubdiv")

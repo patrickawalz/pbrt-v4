@@ -456,7 +456,7 @@ namespace pbrt
             string filename = parameters.GetOneString("filename", "");
             MeshData(filename, parameters.GetIntArray("indices"), parameters.GetPoint3fArray("P"), parameters.GetNormal3fArray("N"),
                      parameters.GetPoint2fArray("uv"), loc, out int[] indices, out Point3f[] p, out Normal3f[] n, out Point2f[] uvArray);
-            double scale = parameters.GetOneFloat("scale", 1), offsetValue = parameters.GetOneFloat("offset", 0);
+            double scale = parameters.GetOneFloat("scale", parameters.GetOneFloat("displacementscale", 1)), offsetValue = parameters.GetOneFloat("offset", parameters.GetOneFloat("displacementoffset", 0));
             string function = parameters.GetOneString("function", "");
             string textureName = parameters.GetTexture("displacement");
             ShellHeights field;
