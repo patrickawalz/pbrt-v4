@@ -104,17 +104,25 @@ Volume closures (VDFs) are ignored.
 
 * A shape whose OSL material mentions an emission closure becomes a two sided `DiffuseAreaLight` whose radiance is the emission closure of the shader evaluated at the point (position, normal and uv are known there, the tangents are made up). It is sampled by the light sampler and used with MIS like any area light; its power and bounds come from the shader evaluated at 64 points of the shape. Emission that is not found this way (animated shapes) is added at camera/BSDF-sampled hits without MIS.
 * `subsurface` is a diffuse approximation; VDFs are ignored.
-* The ray types and the emission without area light are wired in `PathIntegrator`, `VolPathIntegrator` and SPPM; other integrators (BDPT, random walk) were not checked.
+* The path, volpath, simple path, random walk, BDPT, MLT, SPPM and light path integrators were run with OSL matte, conductor, glass and emitter scenes against the same scene with pbrt materials (see Tests). `simplevolpath` does not support surface scattering at all, with any material.
 * Animated shapes are not registered in the object registry (`object:name` is empty for them, `"object"` space is identity).
 * Point cloud functions return no points.
 * A texture bound to a parameter is evaluated once per shading point, not per closure.
 * Shader execution is per shading point with differentials from pbrt; `Dx`/`Dy` of values that are not functions of position/uv are zero.
 
+## Layered and mixed closures
+
+`layer(top, base)` is the MaterialX model: `f = f_top + (1 - E_top(wo)) * f_base`, no refraction into the layer, no interreflection (so it is not pbrt's `CoatedDiffuseBxDF`, which is darker: 0.30 against 0.52 for a 0.5 base at normal incidence). `E_top` is the Fresnel reflection of a dielectric top at the viewing angle. A sum of closures is a sum of lobes, as in OSL. Classic `microfacet` closures take `eta` as given: a shader must flip it with `backfacing()` as the glass shader of `testrender` does, otherwise the inside of an object is wrong.
+
 ## Tests and renders
 
-`dotnet src/pbrt/cmd/bin/Release/net10.0/pbrt_test.dll --gtest_filter='OslPbrt*'`
+`dotnet src/pbrt/cmd/bin/Release/net10.0/pbrt_test.dll --gtest_filter='OslPbrt*'` (`RenderAllIntegrators` takes about 20 minutes; `OSL_TEST_INTEGRATORS=path,bdpt` restricts it)
 
 * Parameter conversion, scene parsing, spectral modes.
 * `ShaderGlobals` against hand-computed values with a probe shader (render space translation/rotation, object/shader/named/camera spaces, attributes, ray types, back faces, handedness, `trace`).
 * BxDFs: chi-square sampling test (pbrt's `TestBSDF`) for each lobe type, f/pdf equal to `Sample_f`, energy <= 1, reciprocity, equality with pbrt's `DielectricBxDF`, white furnace for the diffuse lobes.
 * End-to-end renders through `pbrt.dll`: matte against `diffuse`, MaterialX conductor against `conductor`, MaterialX rough and smooth glass and the classic glass against `dielectric`, a mirror against a smooth conductor, procedural textures (checkerboard, marble) on a sphere and plane, the OSL checkerboard against pbrt's, a layered and a mixed closure, an emitting sphere against an area light, and the spectral modes. Images with the mode, spp and seed burned in are written to `/tmp/osl_renders/<name>_<spp>spp_seed<seed>.png`; each variant is a separate image with the same camera, lights and positions.
+
+* Emission: an OSL emitter and an `AreaLightSource` sphere are rendered with light sampling only, BSDF sampling only and MIS, and against a 1024 spp reference.
+* Layered/mixed: `f` of the closures against `f_top + (1 - E) f_base` and `0.5 DiffuseBxDF + 0.5 DielectricBxDF` built from pbrt's BxDFs, furnace tests, and a render of a mixed OSL closure against pbrt's `MixMaterial`.
+* All integrators on matte, conductor, glass and emitter scenes, OSL against the pbrt material.

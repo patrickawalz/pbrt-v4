@@ -34,6 +34,8 @@ namespace pbrt
             { "glossy", "surface glossy(color Cs = 1, float alpha = 0.3, float eta = 1.5, string dist = \"ggx\") { Ci = Cs * microfacet(dist, N, alpha, eta, 0); }" },
             { "layered", "surface layered(color Cs = color(0.8, 0.2, 0.2), float roughness = 0.15) { Ci = layer(dielectric_bsdf(N, vector(0, 0, 0), " +
                          "color(1), color(0), roughness, roughness, 1.5, \"ggx\"), oren_nayar_diffuse_bsdf(N, Cs, 0.0)); }" },
+            { "mixed_glass", "surface mixed_glass(color Cs = color(0.8, 0.2, 0.2), float mixw = 0.5) { float e = backfacing() ? 1.0 / 1.5 : 1.5; " +
+                             "Ci = (1 - mixw) * Cs * diffuse(N) + mixw * (microfacet(\"ggx\", N, 0.2, e, 0) + microfacet(\"ggx\", N, 0.2, e, 1)); }" },
             { "mixed", "surface mixed(color Cs = color(0.8, 0.2, 0.2), float mixw = 0.5) { Ci = (1 - mixw) * Cs * diffuse(N) + " +
                        "mixw * microfacet(\"ggx\", N, 0.2, 1.5, 0); }" },
             { "checkerboard",
@@ -1019,6 +1021,8 @@ namespace pbrt
         // Closures to BxDFs
         // ------------------------------------------------------------------------------------------------------------------------------
 
+        private static Vector3f shadeWo = Normalize(new Vector3f(0.2f, 0.1f, 1));
+
         private static OSLShadeResult ShadeMaterial(string shader, params ParsedParameter[] ps)
         {
             ResetScene();
@@ -1031,7 +1035,7 @@ namespace pbrt
                                                                new FileLoc(), false, "", new Allocator());
             OSLShaderGroup g = OSLGroupBuilder.Build(spec, "material", new Transform(), null);
             SurfaceInteraction si = TextureSurface(new Point2f(0.5f, 0.5f));
-            si.wo = Normalize(new Vector3f(0.2f, 0.1f, 1));
+            si.wo = shadeWo;
             si.shading.n = new Normal3f(0, 0, 1);
             si.shading.dpdu = new Vector3f(1, 0, 0);
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
@@ -1674,6 +1678,229 @@ namespace pbrt
                 EXPECT_LT(rmseO, rmseP * 1.5 + 0.01);
                 EXPECT_LT(rmseP, rmseO * 1.5 + 0.01);
             }
+        }
+
+        // The integrators of pbrt on the same scene with an OSL material and with the pbrt material of the same look
+        [TEST("OslPbrt", "RenderAllIntegrators")]
+        public static void RenderAllIntegrators()
+        {
+            ResetScene();
+            const int xres = 96, yres = 72, spp = 32, seed = 5;
+            string classicGlass = "surface classicglass(float eta = 1.5) { if (backfacing()) { Ci = refraction(N, 1.0 / eta) + reflection(N, 1.0 / eta); } " +
+                                  "else { Ci = reflection(N, eta) + refraction(N, eta); } }";
+            File.WriteAllText(Path.Combine(OslTestShaders.Directory(), "classicglass.osl"), classicGlass);
+            string[] integrators = new string[]
+            {
+                "Integrator \"path\" \"integer maxdepth\" 4",
+                "Integrator \"volpath\" \"integer maxdepth\" 4",
+                "Integrator \"simplepath\" \"integer maxdepth\" 4",
+                "Integrator \"randomwalk\" \"integer maxdepth\" 4",
+                "Integrator \"bdpt\" \"integer maxdepth\" 4",
+                "Integrator \"mlt\" \"integer maxdepth\" 4 \"integer mutationsperpixel\" 32",
+                "Integrator \"sppm\" \"integer maxdepth\" 4 \"integer photonsperiteration\" 20000",
+                "Integrator \"lightpath\" \"integer maxdepth\" 4"
+            };
+            string[] materialNames = new string[] { "matte", "conductor", "glass", "emitter" };
+            string[] oslMaterials = new string[]
+            {
+                "Material \"osl\" \"string shader\" \"matte\" \"rgb Cs\" [0.8 0.3 0.2]",
+                "Material \"osl\" \"string shader\" \"mx_conductor\" \"float roughness\" 0.3",
+                "Material \"osl\" \"string shader\" \"classicglass\"",
+                "Material \"osl\" \"string shader\" \"glow\" \"rgb Ce\" [1 0.6 0.2] \"float power\" 2"
+            };
+            string[] pbrtMaterials = new string[]
+            {
+                "Material \"diffuse\" \"rgb reflectance\" [0.8 0.3 0.2]",
+                "Material \"conductor\" \"rgb eta\" [0.2 0.92 1.1] \"rgb k\" [3.9 2.45 2.14] \"float roughness\" 0.09 \"bool remaproughness\" false",
+                "Material \"dielectric\" \"float eta\" 1.5",
+                "Material \"diffuse\" \"rgb reflectance\" [0 0 0]\nAreaLightSource \"diffuse\" \"rgb L\" [2 1.2 0.4]"
+            };
+            for (int m = 0; m < materialNames.Length; ++m)
+            {
+                for (int k = 0; k < integrators.Length; ++k)
+                {
+                    string integratorName = integrators[k].Split('"')[1];
+                    string only = Environment.GetEnvironmentVariable("OSL_TEST_INTEGRATORS");
+                    if (only != null && Array.IndexOf(only.Split(','), integratorName) < 0)
+                    {
+                        continue;
+                    }
+                    string scene = OslRenderTools.Scene(oslMaterials[m], OslRenderTools.Sphere, "", xres, yres).Replace("Integrator \"path\" \"integer maxdepth\" 5", integrators[k]);
+                    string reference = OslRenderTools.Scene(pbrtMaterials[m], OslRenderTools.Sphere, "", xres, yres).Replace("Integrator \"path\" \"integer maxdepth\" 5", integrators[k]);
+                    string name = materialNames[m] + "_" + integratorName;
+                    OslRender o = OslRenderTools.Render(name + "_osl", scene, spp, seed);
+                    OslRender p = OslRenderTools.Render(name + "_pbrt", reference, spp, seed);
+                    if (o == null || p == null)
+                    {
+                        continue;
+                    }
+                    double mad = OslRender.MeanAbsDiff(o, p);
+                    double[] mo = o.ChannelMeans(), mp = p.ChannelMeans();
+                    string p1 = OslRenderTools.SaveLabelled(o, name + "_osl", "OSL " + materialNames[m].ToUpperInvariant() + " " + integratorName.ToUpperInvariant(), spp, seed);
+                    string p2 = OslRenderTools.SaveLabelled(p, name + "_pbrt", "PBRT " + materialNames[m].ToUpperInvariant() + " " + integratorName.ToUpperInvariant(), spp, seed);
+                    Console.WriteLine("[OslPbrt] " + name + ": mean abs diff " + mad.ToString("F5", CultureInfo.InvariantCulture) + ", OSL means " + OslRenderTools.F(mo) +
+                                      ", pbrt means " + OslRenderTools.F(mp) + "\n    " + p1 + "\n    " + p2);
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        if (Math.Abs(mo[c] - mp[c]) / Math.Max(1e-3, mp[c]) > 0.05)
+                        {
+                            ADD_FAILURE(name + ": channel " + c + " mean " + mo[c] + " (OSL) vs " + mp[c] + " (pbrt)");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------------------------------------------
+        // Layered and mixed closures against independent references built with pbrt's own BxDFs
+        // ------------------------------------------------------------------------------------------------------------------------------
+
+        private static double DirectionalAlbedo(BxDF b, Vector3f wo, BxDFReflTransFlags flags, int n)
+        {
+            return DirectionalAlbedo(b, wo, flags, n, TransportMode.Radiance);
+        }
+
+        private static double DirectionalAlbedo(BxDF b, Vector3f wo, BxDFReflTransFlags flags, int n, TransportMode mode)
+        {
+            RNG rng = new RNG();
+            double sum = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                pstd.optional<BSDFSample> s = b.Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()), mode,
+                                                         flags);
+                if (s.has_value() && s.value().pdf > 0)
+                {
+                    sum += s.value().f.Average() * AbsCosTheta(s.value().wi) / s.value().pdf;
+                }
+            }
+            return sum / n;
+        }
+
+        private static readonly Vector3f[] testWos = new Vector3f[]
+        {
+            new Vector3f(0, 0, 1), new Vector3f(0.2f, 0.1f, 1), new Vector3f(0.7f, 0.2f, 0.7f), new Vector3f(-0.9f, 0.3f, 0.4f)
+        };
+
+        [TEST("OslPbrt", "LayeredIsTopPlusAttenuatedBase")]
+        public static void LayeredIsTopPlusAttenuatedBase()
+        {
+            // layer(dielectric_bsdf(roughness 0.15 -> alpha 0.0225), oren_nayar_diffuse_bsdf(Cs, 0)) is, for MaterialX, f_top + (1 - albedo_top(wo)) * f_base
+            // with pbrt's DielectricBxDF (its reflection part) and DiffuseBxDF as the references; the albedo is integrated by Monte Carlo
+            const float cs = 0.5f;
+            DielectricBxDF top = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.0225f, 0.0225f));
+            DiffuseBxDF baseBxdf = new DiffuseBxDF(new SampledSpectrum(cs));
+            RNG rng = new RNG();
+            double worst = 0;
+            foreach (Vector3f wo0 in testWos)
+            {
+                Vector3f wo = Normalize(wo0);
+                shadeWo = wo;
+                OSLShadeResult r = ShadeMaterial("layered", P("rgb", "Cs", cs, cs, cs), P("float", "roughness", 0.15f));
+                shadeWo = Normalize(new Vector3f(0.2f, 0.1f, 1));
+                ASSERT_TRUE(r.bxdf != null);
+                // the albedo of the reflection part of the top at wo
+                double albedo = DirectionalAlbedo(top, wo, BxDFReflTransFlags.Reflection, 200000);
+                for (int i = 0; i < 40; ++i)
+                {
+                    Vector3f wi = SampleCosineHemisphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                    if (wo.z < 0)
+                    {
+                        wi.z = -wi.z;
+                    }
+                    if (Math.Abs(wi.z) < 0.1f)
+                    {
+                        continue;
+                    }
+                    double expected = top.f(wo, wi, TransportMode.Radiance).Average() + (1 - albedo) * baseBxdf.f(wo, wi, TransportMode.Radiance).Average();
+                    double actual = r.bxdf.f(wo, wi, TransportMode.Radiance).Average();
+                    worst = Math.Max(worst, Math.Abs(actual - expected) / Math.Max(0.05, expected));
+                }
+            }
+            Console.WriteLine("[OslPbrt] layered f vs f_top + (1 - E_top) f_base (pbrt DielectricBxDF, DiffuseBxDF): worst relative error " +
+                              worst.ToString("F4", CultureInfo.InvariantCulture));
+            EXPECT_LT(worst, 0.03);
+        }
+
+        [TEST("OslPbrt", "LayeredFurnaceAndCoatedDiffuse")]
+        public static void LayeredFurnaceAndCoatedDiffuse()
+        {
+            // White furnace: with a white base the layered closure reflects everything (the top reflects E, the base the rest: albedo 1);
+            // with a gray base of 0.5 the albedo is E + (1 - E) * 0.5. pbrt's CoatedDiffuseBxDF (which refracts into the coat and has interreflections)
+            // is printed for comparison: it is a different model (MaterialX layer does not refract), it is not an equality
+            foreach (float cs in new float[] { 1f, 0.5f })
+            {
+                foreach (Vector3f wo0 in testWos)
+                {
+                    Vector3f wo = Normalize(wo0);
+                    shadeWo = wo;
+                    OSLShadeResult r = ShadeMaterial("layered", P("rgb", "Cs", cs, cs, cs), P("float", "roughness", 0.15f));
+                    shadeWo = Normalize(new Vector3f(0.2f, 0.1f, 1));
+                    double albedo = DirectionalAlbedo(r.bxdf, wo, BxDFReflTransFlags.All, 200000);
+                    DielectricBxDF topRef = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.0225f, 0.0225f));
+                    double e = DirectionalAlbedo(topRef, wo, BxDFReflTransFlags.Reflection, 100000);
+                    double expected = e + (1 - e) * cs;
+                    CoatedDiffuseBxDF coated = new CoatedDiffuseBxDF(topRef, new DiffuseBxDF(new SampledSpectrum(cs)), 0.01f, new SampledSpectrum(0f), 0f, 10, 1);
+                    double coatedAlbedo = DirectionalAlbedo(coated, wo, BxDFReflTransFlags.All, 40000);
+                    Console.WriteLine("[OslPbrt] layered furnace Cs=" + cs + " wo.z=" + wo.z.ToString("F2", CultureInfo.InvariantCulture) + ": albedo " +
+                                      albedo.ToString("F4", CultureInfo.InvariantCulture) + ", expected E + (1-E) Cs = " + expected.ToString("F4", CultureInfo.InvariantCulture) +
+                                      " (E = " + e.ToString("F4", CultureInfo.InvariantCulture) + "), pbrt CoatedDiffuse " + coatedAlbedo.ToString("F4", CultureInfo.InvariantCulture));
+                    EXPECT_NEAR(albedo, expected, 0.02);
+                    EXPECT_LT(albedo, 1.02);
+                }
+            }
+        }
+
+        [TEST("OslPbrt", "MixedIsTheWeightedSumOfPbrtBxDFs")]
+        public static void MixedIsTheWeightedSumOfPbrtBxDFs()
+        {
+            // 0.5 * Cs * diffuse + 0.5 * microfacet("ggx", alpha 0.2, eta 1.5, reflection only) is 0.5 * DiffuseBxDF + 0.5 * the reflection part of pbrt's DielectricBxDF
+            const float cs = 0.6f;
+            DielectricBxDF glass = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.2f, 0.2f));
+            DiffuseBxDF diffuse = new DiffuseBxDF(new SampledSpectrum(cs));
+            OSLShadeResult r = ShadeMaterial("mixed", P("rgb", "Cs", cs, cs, cs), P("float", "mixw", 0.5f));
+            ASSERT_TRUE(r.bxdf != null);
+            RNG rng = new RNG();
+            double worst = 0;
+            Vector3f wo = shadeWo;
+            for (int i = 0; i < 60; ++i)
+            {
+                Vector3f wi = SampleCosineHemisphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                if (wi.z < 0.1f)
+                {
+                    continue;
+                }
+                double expected = 0.5 * diffuse.f(wo, wi, TransportMode.Radiance).Average() + 0.5 * glass.f(wo, wi, TransportMode.Radiance).Average();
+                double actual = r.bxdf.f(wo, wi, TransportMode.Radiance).Average();
+                worst = Math.Max(worst, Math.Abs(actual - expected) / Math.Max(0.05, expected));
+            }
+            Console.WriteLine("[OslPbrt] mixed f vs 0.5 DiffuseBxDF + 0.5 DielectricBxDF: worst relative error " + worst.ToString("F5", CultureInfo.InvariantCulture));
+            EXPECT_LT(worst, 1e-3);
+            // furnace: the diffuse (Cs = 1) and the whole dielectric (microfacet reflection + refraction): equal to 0.5 + 0.5 * the albedo of pbrt's DielectricBxDF
+            // (importance mode: no radiance scaling), which is below 1 only by the energy that single scattering microfacet models lose
+            OSLShadeResult white = ShadeMaterial("mixed_glass", P("rgb", "Cs", 1f, 1f, 1f), P("float", "mixw", 0.5f));
+            foreach (Vector3f wo0 in testWos)
+            {
+                Vector3f w = Normalize(wo0);
+                double albedo = DirectionalAlbedo(white.bxdf, w, BxDFReflTransFlags.All, 200000, TransportMode.Importance);
+                double expected = 0.5 + 0.5 * DirectionalAlbedo(glass, w, BxDFReflTransFlags.All, 200000, TransportMode.Importance);
+                Console.WriteLine("[OslPbrt] mixed furnace wo.z=" + w.z.ToString("F2", CultureInfo.InvariantCulture) + ": albedo " + albedo.ToString("F4", CultureInfo.InvariantCulture) +
+                                  ", 0.5 + 0.5 * pbrt DielectricBxDF " + expected.ToString("F4", CultureInfo.InvariantCulture));
+                EXPECT_NEAR(albedo, expected, 0.01);
+                EXPECT_LT(albedo, 1.01);
+            }
+        }
+
+        [TEST("OslPbrt", "RenderMixedVsMixMaterial")]
+        public static void RenderMixedVsMixMaterial()
+        {
+            ResetScene();
+            // 0.5 diffuse + 0.5 rough glass as one OSL closure sum, and pbrt's MixMaterial of a diffuse and a dielectric material (stochastic selection: the same mean)
+            string extra = "MakeNamedMaterial \"mixa\" \"string type\" \"diffuse\" \"rgb reflectance\" [0.8 0.2 0.2]\n" +
+                           "MakeNamedMaterial \"mixb\" \"string type\" \"dielectric\" \"float eta\" 1.5 \"float roughness\" 0.2 \"bool remaproughness\" false\n";
+            OslRenderTools.Compare("mixed_vs_mixmaterial", "Material \"osl\" \"string shader\" \"mixed_glass\" \"rgb Cs\" [0.8 0.2 0.2] \"float mixw\" 0.5",
+                                   "Material \"mix\" \"string materials\" [\"mixa\" \"mixb\"] \"float amount\" 0.5", OslRenderTools.Sphere, extra, 256, 17,
+                                   "OSL 0.5 DIFFUSE + 0.5 GLASS VS PBRT MIXMATERIAL", 0.03, 0.03);
         }
 
         [TEST("OslPbrt", "RenderSpectralModes")]
