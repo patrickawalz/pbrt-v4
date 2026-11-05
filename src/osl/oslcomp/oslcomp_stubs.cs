@@ -16,21 +16,12 @@ namespace OSL
 {
     namespace pvt
     {
-        public abstract partial class ASTNode
-        {
-            public virtual TypeSpec typecheck(TypeSpec expected) { return typespec(); }
-            public TypeSpec typecheck() { return typecheck(new TypeSpec()); }
-        }
-    }
-}
-namespace OSL
-{
-    namespace pvt
-    {
         public partial class OSLCompilerImpl
         {
             public static void coalesce_temporaries(System.Collections.Generic.List<Symbol> symtab) { throw new System.NotImplementedException(); }
             private bool op_uses_sym(Opcode op, Symbol sym, bool read = true, bool write = true) { throw new System.NotImplementedException(); }
+            public void push_nesting(bool isloop = false) { throw new System.NotImplementedException(); }
+            public void pop_nesting(bool isloop = false) { throw new System.NotImplementedException(); }
         }
     }
 }

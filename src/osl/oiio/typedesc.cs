@@ -40,7 +40,7 @@ namespace OIIO
                          STRING = (int)BASETYPE.STRING, PTR = (int)BASETYPE.PTR, USTRINGHASH = (int)BASETYPE.USTRINGHASH;
         public const int SCALAR = (int)AGGREGATE.SCALAR, VEC2 = (int)AGGREGATE.VEC2, VEC3 = (int)AGGREGATE.VEC3, VEC4 = (int)AGGREGATE.VEC4,
                          MATRIX33 = (int)AGGREGATE.MATRIX33, MATRIX44 = (int)AGGREGATE.MATRIX44;
-        public const int NOSEMANTICS = 0, COLOR = 1, POINT = 2, VECTOR = 3, NORMAL = 4;
+        public const int NOSEMANTICS = 0, NOXFORM = 0, COLOR = 1, POINT = 2, VECTOR = 3, NORMAL = 4;
 
         // OIIO's default TypeDesc is an UNKNOWN scalar
         public TypeDesc()
