@@ -2714,6 +2714,10 @@ namespace pbrt
             {
                 shapes = Polygons.Create(name, renderFromObject, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "patch" || name == "patchmesh")
+            {
+                shapes = Patches.CreateMesh(name, renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "bilinearmesh")
             {
                 BilinearPatchMesh mesh = BilinearPatch.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
