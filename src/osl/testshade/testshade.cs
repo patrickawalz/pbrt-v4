@@ -1546,6 +1546,24 @@ namespace OSL.TestShade
                 Console.Out.Write("Groupdata size: " + groupdata_size.ToString(CultureInfo.InvariantCulture) + "\n");
             }
 
+            if (print_group_stats)
+            {
+                string[] metrics = new string[] { "active_layers", "network_depth", "texture_ops", "noise_ops" };
+                // Per-group values
+                foreach (string metric in metrics)
+                {
+                    string key = "stat:compiled_" + metric;
+                    object v;
+                    int value = 0;
+                    if (shadingsys.getattribute(shadergroup, key, TypeDescs.TypeInt, out v))
+                    {
+                        value = Convert.ToInt32(v);
+                    }
+                    Console.Out.Write(key + "=" + value.ToString(CultureInfo.InvariantCulture) + "\n");
+                }
+                print_ranked_group_stats(shadingsys);
+            }
+
             // Give the renderer a chance to do initial cleanup while everything is still alive
             rend.clear();
             shadergroup = null;
@@ -1555,6 +1573,41 @@ namespace OSL.TestShade
             }
             shadingsys.Dispose();
             return 0;
+        }
+
+        // The ranked and aggregate compile stats across every shader group of the shading system, via the system level getattribute
+        private static void print_ranked_group_stats(ShadingSystem shadingsys)
+        {
+            string[] metrics = new string[] { "active_layers", "network_depth", "texture_ops", "noise_ops" };
+            foreach (string metric in metrics)
+            {
+                string key = "stat:compiled_" + metric;
+                int count = 0;
+                int vmin = 0;
+                int vmax = 0;
+                int vmedian = 0;
+                shadingsys.getattribute(key + ":top_count", out count);
+                shadingsys.getattribute(key + ":min", out vmin);
+                shadingsys.getattribute(key + ":max", out vmax);
+                shadingsys.getattribute(key + ":median", out vmedian);
+                Console.Out.Write(key + ": min=" + vmin.ToString(CultureInfo.InvariantCulture) + " max=" + vmax.ToString(CultureInfo.InvariantCulture) +
+                                  " median=" + vmedian.ToString(CultureInfo.InvariantCulture) + " top_count=" + count.ToString(CultureInfo.InvariantCulture) + "\n");
+                if (count <= 0)
+                {
+                    continue;
+                }
+                object names;
+                object values;
+                shadingsys.getattribute(key + ":top_names", new TypeDesc(TypeDesc.STRING, count), out names);
+                shadingsys.getattribute(key + ":top_values", new TypeDesc(TypeDesc.INT, count), out values);
+                string[] top_names = (string[])names;
+                int[] top_values = (int[])values;
+                for (int i = 0; i < count; ++i)
+                {
+                    Console.Out.Write(key + ": top[" + i.ToString(CultureInfo.InvariantCulture) + "]=" + top_values[i].ToString(CultureInfo.InvariantCulture) +
+                                      " \"" + top_names[i] + "\"\n");
+                }
+            }
         }
 
         public static int Main(string[] args)

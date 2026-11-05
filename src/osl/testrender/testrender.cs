@@ -17,6 +17,7 @@ namespace OSL
         private static bool debug2;
         private static bool verbose;
         private static bool runstats;
+        private static bool print_group_stats;
         private static bool profile;
         private static bool O0, O1, O2;
         private static int llvm_opt = 1;  // LLVM optimization level
@@ -139,7 +140,6 @@ namespace OSL
                     case "--optix":
                     case "--saveptx":
                     case "--warmup":
-                    case "--print-group-stats":
                     case "--optix_no_inline":
                     case "--optix_no_inline_layer_funcs":
                     case "--optix_no_merge_layer_funcs":
@@ -155,6 +155,9 @@ namespace OSL
                         break;
                     case "--debug2":
                         debug2 = true;
+                        break;
+                    case "--print-group-stats":
+                        print_group_stats = true;
                         break;
                     case "--runstats":
                     case "--stats":
@@ -348,9 +351,49 @@ namespace OSL
                 Console.Out.Write(shadingsys.getstats(5) + "\n");
             }
 
+            if (print_group_stats)
+            {
+                print_ranked_group_stats(shadingsys);
+            }
+
             // We're done with the shading system now
             rend.clear();
             return 0;
+        }
+
+        // The ranked and aggregate compile stats across every shader group of the shading system, via the system level getattribute
+        private static void print_ranked_group_stats(ShadingSystem shadingsys)
+        {
+            string[] metrics = new string[] { "active_layers", "network_depth", "texture_ops", "noise_ops" };
+            foreach (string metric in metrics)
+            {
+                string key = "stat:compiled_" + metric;
+                int count = 0;
+                int vmin = 0;
+                int vmax = 0;
+                int vmedian = 0;
+                shadingsys.getattribute(key + ":top_count", out count);
+                shadingsys.getattribute(key + ":min", out vmin);
+                shadingsys.getattribute(key + ":max", out vmax);
+                shadingsys.getattribute(key + ":median", out vmedian);
+                Console.Out.Write(key + ": min=" + vmin.ToString(CultureInfo.InvariantCulture) + " max=" + vmax.ToString(CultureInfo.InvariantCulture) +
+                                  " median=" + vmedian.ToString(CultureInfo.InvariantCulture) + " top_count=" + count.ToString(CultureInfo.InvariantCulture) + "\n");
+                if (count <= 0)
+                {
+                    continue;
+                }
+                object names;
+                object values;
+                shadingsys.getattribute(key + ":top_names", new TypeDesc(TypeDesc.STRING, count), out names);
+                shadingsys.getattribute(key + ":top_values", new TypeDesc(TypeDesc.INT, count), out values);
+                string[] top_names = (string[])names;
+                int[] top_values = (int[])values;
+                for (int i = 0; i < count; ++i)
+                {
+                    Console.Out.Write(key + ": top[" + i.ToString(CultureInfo.InvariantCulture) + "]=" + top_values[i].ToString(CultureInfo.InvariantCulture) +
+                                      " \"" + top_names[i] + "\"\n");
+                }
+            }
         }
     }
 }
