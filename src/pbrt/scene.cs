@@ -200,7 +200,13 @@ namespace pbrt
         }
 
         // TransformSet Public Methods
-        public int Count { get { return t.Length; } }
+        public int Count
+        {
+            get
+            {
+                return t.Length;
+            }
+        }
 
         // The times of the keys when they come from a MotionBegin block; null for the two keys at the
         // TransformTimes
@@ -1470,7 +1476,10 @@ namespace pbrt
             graphicsState.ctm = after;
         }
 
-        public override bool InMotionBlock() { return motionBlock != null; }
+        public override bool InMotionBlock()
+        {
+            return motionBlock != null;
+        }
 
         sealed class MotionBlock
         {

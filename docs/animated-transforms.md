@@ -95,4 +95,10 @@ Let `CTM` be the current transformation before `MotionBegin`. The result of the 
 
 ## Tests and numbers
 
+30 tests (`AnimatedTransformNKey.*`, `MotionBlock.*`); the whole suite (926 tests, `OslPbrt.RenderAllIntegrators` excluded) passes except the known `OperatorLeftShiftPrint.Basics`.
+
+Micro benchmark (`AnimatedTransformNKey.BenchmarkInterpolateAndBounds`, same process, best of 5): `Interpolate` with two keys 592 ns old code, 591 ns new; `MotionBounds` (the BVH path, `AnimatedPrimitive.Bounds()`) with two keys 154 us old, 150 us new. Per extra key: `Interpolate` is flat (binary search over the keys, 610 to 670 ns from 2 to 32 keys); `MotionBounds` costs one segment more, about 110 to 140 us per segment (2 keys 85 us, 4 keys 365 us, 8 keys 734 us, 32 keys 4.2 ms), paid once at BVH build time.
+
+Render check (`/tmp/ntransform_renders`, ground truth = mean of 16 static stills): mean absolute difference in linear radiance, N keys / 2 keys: spinning bar 0.0084 / 0.0353, bouncing ball 0.0060 / 0.0147, camera 0.0187 / 0.0716, instanced bars 0.0049 / 0.0115. For the bar, against 64 stills the 4-key render is 0.0045 (the noise of two seeds of the same render differ by 0.0059); the 16-still truth itself differs from the 64-still one by 0.0073, so most of the remaining 0.0084 is the time discretisation of the 16 stills.
+
 `src/pbrt/animatedtransform_n_test.cs` (and, for the comparison, a copy of the old implementation in `animatedtransform_legacy_test.cs`): two keys bit for bit against the old code (24 000 interpolations and 2 000 bounds, 0 differences), keys reproduced exactly at key times, the 270 degree rotation (largest distance from the circle 6e-7, the two key path is 2 units of chord away at the middle), the union of the per segment bounds, conservative bounds with 10^5 times, parsing and its errors, a ray against a moving sphere through the BVH, a camera with three keys in both render spaces, and a micro benchmark.

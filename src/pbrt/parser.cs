@@ -952,7 +952,10 @@ namespace pbrt
         public abstract void MotionBegin(Float[] times, FileLoc loc);
         public abstract void MotionEnd(FileLoc loc);
         // Whether a MotionBegin has not been closed yet
-        public virtual bool InMotionBlock() { return false; }
+        public virtual bool InMotionBlock()
+        {
+            return false;
+        }
 
         public abstract void ColorSpace(string n, FileLoc loc);
         public abstract void PixelFilter(string name, List<ParsedParameter> parameters, FileLoc loc);

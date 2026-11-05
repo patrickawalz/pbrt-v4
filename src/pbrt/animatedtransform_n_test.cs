@@ -275,23 +275,47 @@ namespace pbrt
             bool threw;
 
             threw = false;
-            try { new AnimatedTransform(new Transform[] { id }, new Float[] { 0 }); }
-            catch (ArgumentException) { threw = true; }
+            try
+            {
+                new AnimatedTransform(new Transform[] { id }, new Float[] { 0 });
+            }
+            catch (ArgumentException)
+            {
+                threw = true;
+            }
             EXPECT_TRUE(threw);
 
             threw = false;
-            try { new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 1 }); }
-            catch (ArgumentException) { threw = true; }
+            try
+            {
+                new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 1 });
+            }
+            catch (ArgumentException)
+            {
+                threw = true;
+            }
             EXPECT_TRUE(threw);
 
             threw = false;
-            try { new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 1, 1 }); }
-            catch (ArgumentException) { threw = true; }
+            try
+            {
+                new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 1, 1 });
+            }
+            catch (ArgumentException)
+            {
+                threw = true;
+            }
             EXPECT_TRUE(threw);
 
             threw = false;
-            try { new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 2, 1 }); }
-            catch (ArgumentException) { threw = true; }
+            try
+            {
+                new AnimatedTransform(new Transform[] { id, tr, id }, new Float[] { 0, 2, 1 });
+            }
+            catch (ArgumentException)
+            {
+                threw = true;
+            }
             EXPECT_TRUE(threw);
         }
 
@@ -492,10 +516,22 @@ namespace pbrt
             Transform flat = Scale(1f, 1f, 0f);
             Transform ok = Translate(new Vector3f(1, 0, 0));
             bool twoThrew = false, threeThrew = false;
-            try { new AnimatedTransform(ok, 0f, flat, 1f); }
-            catch (FatalException) { twoThrew = true; }
-            try { new AnimatedTransform(new Transform[] { ok, ok, flat }, new Float[] { 0f, 1f, 2f }); }
-            catch (FatalException) { threeThrew = true; }
+            try
+            {
+                new AnimatedTransform(ok, 0f, flat, 1f);
+            }
+            catch (FatalException)
+            {
+                twoThrew = true;
+            }
+            try
+            {
+                new AnimatedTransform(new Transform[] { ok, ok, flat }, new Float[] { 0f, 1f, 2f });
+            }
+            catch (FatalException)
+            {
+                threeThrew = true;
+            }
             EXPECT_TRUE(twoThrew);
             EXPECT_TRUE(threeThrew);
             // ... but only when the animation moves at all: with equal keys nothing is decomposed
@@ -1407,8 +1443,14 @@ namespace pbrt
                         s += current.Interpolate(times[i]).GetMatrix()[0][3];
                     sink += s;
                 }, 20) / nTimes);
-                boundsLegacy = Math.Min(boundsLegacy, TimeIt(() => { sink += legacy.MotionBounds(box).pMax.x; }, 2000));
-                boundsCurrent = Math.Min(boundsCurrent, TimeIt(() => { sink += current.MotionBounds(box).pMax.x; }, 2000));
+                boundsLegacy = Math.Min(boundsLegacy, TimeIt(() =>
+                {
+                    sink += legacy.MotionBounds(box).pMax.x;
+                }, 2000));
+                boundsCurrent = Math.Min(boundsCurrent, TimeIt(() =>
+                {
+                    sink += current.MotionBounds(box).pMax.x;
+                }, 2000));
             }
             Report("benchmark Interpolate, 2 keys: legacy " + interpolateLegacy.ToString("F1") + " ns, new " +
                    interpolateCurrent.ToString("F1") + " ns");
@@ -1437,7 +1479,10 @@ namespace pbrt
                             s += at.Interpolate(times[i] * scale).GetMatrix()[0][3];
                         sink += s;
                     }, 20) / nTimes);
-                    bnd = Math.Min(bnd, TimeIt(() => { sink += at.MotionBounds(box).pMax.x; }, 500));
+                    bnd = Math.Min(bnd, TimeIt(() =>
+                    {
+                        sink += at.MotionBounds(box).pMax.x;
+                    }, 500));
                 }
                 Report("benchmark " + n + " keys: Interpolate " + interp.ToString("F1") + " ns, MotionBounds " +
                        (bnd / 1000.0).ToString("F1") + " us (" + (n - 1) + " segments)");

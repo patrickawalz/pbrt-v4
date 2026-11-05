@@ -1576,14 +1576,32 @@ namespace pbrt
         }
 
         // The number of keys (0 for a default constructed AnimatedTransform)
-        public int KeyCount { get { return nKeys; } }
+        public int KeyCount
+        {
+            get
+            {
+                return nKeys;
+            }
+        }
 
         // The number of segments between consecutive keys
-        public int SegmentCount { get { return nKeys > 0 ? nKeys - 1 : 0; } }
+        public int SegmentCount
+        {
+            get
+            {
+                return nKeys > 0 ? nKeys - 1 : 0;
+            }
+        }
 
-        public Transform GetKeyTransform(int i) { return keyTransforms[i]; }
+        public Transform GetKeyTransform(int i)
+        {
+            return keyTransforms[i];
+        }
 
-        public Float GetKeyTime(int i) { return keyTimes[i]; }
+        public Float GetKeyTime(int i)
+        {
+            return keyTimes[i];
+        }
 
         // A new AnimatedTransform whose keys are t * (the keys of this one), at the same times
         public AnimatedTransform PreMultiply(Transform t)
