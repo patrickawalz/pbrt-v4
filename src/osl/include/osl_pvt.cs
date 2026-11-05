@@ -23,9 +23,6 @@ namespace OSL
 
     namespace pvt
     {
-        public class ASTNode
-        {
-        }
 
         /// Kinds of shaders
         public enum ShaderType
