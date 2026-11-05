@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Open Shading Language ported to C#: the compiler (oslcomp, from liboslcomp), later the runtime (oslexec, from liboslexec) with a .NET
+       code generator in place of LLVM. Independent of pbrt_lib; the Magi integration (spectral closures, blend modes) is a separate project. -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>osl_lib</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Optimize>true</Optimize>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>OSL</RootNamespace>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <RunAnalyzers>false</RunAnalyzers>
+    <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="**/*_test.cs;bin/**;obj/**" />
+  </ItemGroup>
+</Project>

@@ -18,7 +18,9 @@
     <Compile Include="../../ext/gtest/gtest.cs" />
     <Compile Include="pbrt_test.cs" />
     <Compile Include="../**/*_test.cs" />
+    <Compile Include="../../osl/**/*_test.cs" />
     <ProjectReference Include="../pbrt_lib.csproj" />
+    <ProjectReference Include="../../osl/osl_lib.csproj" />
     <ProjectReference Include="../../opensubdiv_lib/opensubdiv_lib.csproj" />
   </ItemGroup>
 </Project>
