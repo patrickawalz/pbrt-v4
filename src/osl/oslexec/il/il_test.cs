@@ -81,6 +81,16 @@ namespace OSL
             /// Several layers (shader names are layer names); 'connections' are "src.out:dst.in"
             public bool Multi(string[] names, string[] sources, string[] connections, params string[] outputs)
             {
+                if (!Prepare(names, sources, connections, outputs))
+                {
+                    return false;
+                }
+                return Execute();
+            }
+
+            /// Builds the group without executing it
+            public bool Prepare(string[] names, string[] sources, string[] connections, params string[] outputs)
+            {
                 for (int i = 0; i < names.Length; ++i)
                 {
                     if (!Load(names[i], sources[i]))
@@ -105,7 +115,7 @@ namespace OSL
                 {
                     ss.attribute(group, "renderer_outputs", new TypeDesc(TypeDesc.STRING, outputs.Length), outputs);
                 }
-                return Execute();
+                return true;
             }
 
             public bool Execute()
@@ -564,6 +574,54 @@ namespace OSL
                     EXPECT_FLOAT_EQ(r.F("sn"), OslRuntime.osl_snoise_fff(0.3f, 0.4f));
                     EXPECT_FLOAT_EQ(r.F("un"), g1);
                 });
+            }
+
+            /// Saves the compiled group as an assembly, loads it into a second shading system and compares the results with the in-memory compile
+            [TEST("OslIL", "PersistedAssembly")]
+            public static void OslIL_PersistedAssembly()
+            {
+                string[] names = new string[] { "a", "t" };
+                string[] sources = new string[]
+                {
+                    "shader a(output float x = 0, output string s = \"\") { x = 2.5; s = \"hello\"; }",
+                    "shader t(float x = 0, string s = \"\", output float f = 0, output int n = 0, output float nz = 0, output float arr = 0) "
+                    + "{ float a[3] = {1, 2, 3}; for (int i = 0; i < 3; ++i) { arr += a[i] * x; } f = x * 2.0 + arr; n = (s == \"hello\") ? 42 : -1; "
+                    + "nz = noise(point(1, 2, 3)); }"
+                };
+                string[] conns = new string[] { "a.x:t.x", "a.s:t.s" };
+                string file = Path.Combine(Path.GetTempPath(), "osl_il_persisted_" + Environment.ProcessId + ".dll");
+                float f0;
+                float nz0;
+                using (IlRun r1 = new IlRun())
+                {
+                    // The ops of a group are dropped once it is compiled in memory (group_post_jit_cleanup), so the assembly is generated first
+                    EXPECT_TRUE(r1.Prepare(names, sources, conns, "f", "n", "nz"));
+                    r1.thread = r1.ss.create_thread_info();
+                    r1.ctx = r1.ss.get_context(r1.thread);
+                    EXPECT_TRUE(BackendIL.save_group_assembly(r1.group, r1.ctx, file));
+                    EXPECT_EQ(r1.Errors(), "");
+                    EXPECT_TRUE(r1.Execute());
+                    EXPECT_EQ(r1.Errors(), "");
+                    f0 = r1.F("f");
+                    nz0 = r1.F("nz");
+                    EXPECT_FLOAT_EQ(f0, 20.0f);
+                    EXPECT_EQ(r1.I("n"), 42);
+                }
+                EXPECT_TRUE(File.Exists(file));
+                using (IlRun r2 = new IlRun())
+                {
+                    EXPECT_TRUE(r2.Prepare(names, sources, conns, "f", "n", "nz"));
+                    r2.thread = r2.ss.create_thread_info();
+                    r2.ctx = r2.ss.get_context(r2.thread);
+                    EXPECT_TRUE(BackendIL.load_group_assembly(r2.group, r2.ctx, file));
+                    EXPECT_TRUE(r2.group.jitted() != 0);
+                    EXPECT_TRUE(r2.ss.execute(r2.ctx, r2.group, 0, 0, ref r2.sg, null, null));
+                    EXPECT_EQ(r2.Errors(), "");
+                    EXPECT_FLOAT_EQ(r2.F("f"), f0);
+                    EXPECT_EQ(r2.I("n"), 42);
+                    EXPECT_FLOAT_EQ(r2.F("nz"), nz0);
+                }
+                File.Delete(file);
             }
 
             [TEST("OslIL", "Smoke")]

@@ -7,7 +7,7 @@
 // The code of a function is first recorded (ILLabel.code of each block of ILFunction.blocks) and then replayed into a System.Reflection.Emit.ILGenerator by an ILTarget:
 //      DynamicILTarget     DynamicMethod, for the JIT use; data blobs live in unmanaged memory whose address is embedded in the code
 //      PersistedILTarget   PersistedAssemblyBuilder, for the .dll; data blobs are initialized static data (RVA fields), strings are re-registered by
-//                          an "osl_group_<name>_strings" function that the init function calls
+//                          an "osl_group_strings" function that the loader calls (backend_persist.cs)
 // Recording first has two advantages: the alloca frame size is only known when the function is complete (all allocas are carved out of one localloc
 // at function entry, like LLVM places allocas in the entry block), and the code can be dumped as text for the llvm_debug options.
 

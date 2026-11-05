@@ -58,6 +58,8 @@ namespace OSL.TestShade
         private static bool vary_vdxdy = false;
         private static bool warmup = false;
         private static bool profile = false;
+        // (not in OpenShadingLanguage) --ilassembly <dir>: compile each group to a persisted assembly in <dir>, load it back and shade with that
+        private static string ilassembly_dir = "";
         private static bool O0 = false, O1 = false, O2 = false;
         private static int llvm_opt = 1;
         private static bool pixelcenters = false;
@@ -301,6 +303,7 @@ namespace OSL.TestShade
             o.Add(opt("raytype", 1, delegate (string[] a) { raytype_name = a[1]; }));
             o.Add(opt("raytype_opt", 0, delegate (string[] a) { raytype_opt = true; }));
             o.Add(opt("iters", 1, delegate (string[] a) { iters = to_int(a[1]); }));
+            o.Add(opt("ilassembly", 1, delegate (string[] a) { ilassembly_dir = a[1]; }));
             o.Add(opt("O0", 0, delegate (string[] a) { O0 = true; }));
             o.Add(opt("O1", 0, delegate (string[] a) { O1 = true; }));
             o.Add(opt("O2", 0, delegate (string[] a) { O2 = true; }));
@@ -1014,6 +1017,21 @@ namespace OSL.TestShade
                 else
                 {
                     shadingsys.attribute("renderer_outputs", aovtype, aovnames.ToArray());
+                }
+            }
+
+            if (ilassembly_dir.Length != 0 && !raytype_opt)
+            {
+                Directory.CreateDirectory(ilassembly_dir);
+                PerThreadInfo pthread = shadingsys.create_thread_info();
+                ShadingContext pctx = shadingsys.get_context(pthread);
+                string pfile = Path.Combine(ilassembly_dir, "group" + System.Diagnostics.Process.GetCurrentProcess().Id + ".dll");
+                bool pok = BackendIL.save_group_assembly(group, pctx, pfile) && BackendIL.load_group_assembly(group, pctx, pfile);
+                shadingsys.release_context(pctx);
+                shadingsys.destroy_thread_info(pthread);
+                if (!pok)
+                {
+                    Console.Error.WriteLine("ilassembly: could not save and load the group");
                 }
             }
 

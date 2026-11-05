@@ -11,7 +11,7 @@ mkdir -p /tmp/tsuite/bin
 ln -sfn $SUITE/common /tmp/tsuite/common
 cat > /tmp/tsuite/bin/testshade <<EOS
 #!/bin/bash
-exec dotnet $TS "\$@"
+exec dotnet $TS $TS_ARGS "\$@"
 EOS
 cat > /tmp/tsuite/bin/oiiotool <<EOS
 #!/bin/bash
