@@ -81,7 +81,7 @@ namespace OSL.pvt
 
         private void report(object ec, string msg)
         {
-            m_context.errorfmt("{}", msg);
+            m_context.runtime_errorfmt("{}", msg);
         }
 
         private int get_document_index(object ec, ustring dictionaryname)
@@ -112,7 +112,9 @@ namespace OSL.pvt
                 }
                 catch (System.IO.IOException e)
                 {
-                    report(ec, "XML parsed with errors: " + e.Message + ", at offset 0");
+                    // pugixml's text for a missing file
+                    string reason = e is System.IO.FileNotFoundException ? "File was not found" : e.Message;
+                    report(ec, "XML parsed with errors: " + reason + ", at offset 0");
                     m_document_map[dictionaryname] = -1;
                     return -1;
                 }

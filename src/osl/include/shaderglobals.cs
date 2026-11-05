@@ -110,6 +110,24 @@ namespace OSL
         }
 
         public static ShadingContext get_context(ShaderGlobals* sg) { return (ShadingContext)from_handle(sg->context); }
+
+        /// OSL::errorfmt(sg, ...): the error goes to the renderer (RendererServices::errorfmt), which decides where it ends up
+        public static void errorfmt(ShaderGlobals* sg, string fmt, params object[] args)
+        {
+            string message = OIIO.Fmt.format(fmt, args);
+            EncodedType type = EncodedType.kUstringHash;
+            ulong value = new OIIO.ustring(message).hash();
+            ((RendererServices)from_handle(sg->renderer)).errorfmt(sg, new OIIO.ustring("{}").hash(), 1, &type, 8, (byte*)&value);
+        }
+
+        /// OSL::warningfmt(sg, ...)
+        public static void warningfmt(ShaderGlobals* sg, string fmt, params object[] args)
+        {
+            string message = OIIO.Fmt.format(fmt, args);
+            EncodedType type = EncodedType.kUstringHash;
+            ulong value = new OIIO.ustring(message).hash();
+            ((RendererServices)from_handle(sg->renderer)).warningfmt(sg, new OIIO.ustring("{}").hash(), 1, &type, 8, (byte*)&value);
+        }
         public static RendererServices get_renderer(ShaderGlobals* sg) { return (RendererServices)from_handle(sg->renderer); }
 
         // The accessor functions of shaderglobals.h, taking the opaque execution context pointer (which is the ShaderGlobals)

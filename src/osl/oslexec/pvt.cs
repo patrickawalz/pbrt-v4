@@ -163,8 +163,9 @@ namespace OSL
         public ShaderGroup(string name, pvt.ShadingSystemImpl shadingsys)
         {
             m_shadingsys = shadingsys;
-            m_name = new ustring(name);
-            m_id = Interlocked.Increment(ref s_next_id) - 1;
+            m_id = Interlocked.Increment(ref s_next_id);
+            // No name -- make one up using the unique id
+            m_name = new ustring(!string.IsNullOrEmpty(name) ? name : "unnamed_group_" + m_id.ToString(System.Globalization.CultureInfo.InvariantCulture));
             m_raytype_queries = -1;
             m_exec_repeat = 1;
             m_unknown_textures_needed = false;

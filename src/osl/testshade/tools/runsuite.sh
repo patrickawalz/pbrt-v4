@@ -8,6 +8,7 @@ TS=${TS_DLL:-$TOOLS/../bin/Release/net10.0/testshade.dll}
 export OSL_TESTSUITE_ROOT=$SUITE
 export OSL_SOURCE_DIR=/home/claude/OpenShadingLanguage
 mkdir -p /tmp/tsuite/bin
+ln -sfn $SUITE/common /tmp/tsuite/common
 cat > /tmp/tsuite/bin/testshade <<EOS
 #!/bin/bash
 exec dotnet $TS "\$@"

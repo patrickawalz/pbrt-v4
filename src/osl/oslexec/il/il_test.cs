@@ -516,13 +516,23 @@ namespace OSL
             {
                 using (IlRun r = new IlRun())
                 {
+                    r.ss.register_closure("diffuse", 1, new ClosureParam[] { ClosureParam.CLOSURE_VECTOR_PARAM(0), ClosureParam.CLOSURE_FINISH_PARAM(12, 4) }, null,
+                                          null);
+                    r.ss.register_closure("emission", 2, new ClosureParam[] { ClosureParam.CLOSURE_FINISH_PARAM(0, 1) }, null, null);
                     bool ok = r.Single(@"shader t(output closure color Cout = 0, output int dummy = 0) {
-                        Cout = 0.5 * diffuse(N) + emission();
+                        Ci = 0.5 * diffuse(N) + emission();
+                        Cout = Ci;
                         dummy = 1;
                     }", "Cout", "dummy");
                     EXPECT_TRUE(ok);
-                    Console.WriteLine("closure errors: " + r.Errors());
                     EXPECT_EQ(r.I("dummy"), 1);
+                    EXPECT_TRUE(r.sg.Ci != null);
+                    if (r.sg.Ci != null)
+                    {
+                        string text = ClosurePrinter.print_closure(r.sg.Ci, r.ss);
+                        EXPECT_TRUE(text.Contains("(0.5, 0.5, 0.5) * diffuse ((0, 0, 1))"));
+                        EXPECT_TRUE(text.Contains("(1, 1, 1) * emission ()"));
+                    }
                 }
             }
 

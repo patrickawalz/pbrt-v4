@@ -206,7 +206,11 @@ namespace OSL
                     pssg->Ci = null;
                     pssg->thread_index = threadindex;
                     pssg->shade_index = shadeindex;
+                    m_exec_sg = pssg;
+                    t_exec_sg = pssg;
                     run_func(pssg, m_heap, userdata_base_ptr, output_base_ptr, shadeindex, sgroup.interactive_arena_ptr());
+                    m_exec_sg = null;
+                    t_exec_sg = null;
                 }
             }
 
@@ -233,7 +237,11 @@ namespace OSL
             }
             fixed (ShaderGlobals* pssg = &ssg)
             {
+                m_exec_sg = pssg;
+                    t_exec_sg = pssg;
                 run_func(pssg, m_heap, userdata_base_ptr, output_base_ptr, shadeindex, group().interactive_arena_ptr());
+                m_exec_sg = null;
+                    t_exec_sg = null;
             }
             if (profile != 0)
             {
@@ -479,6 +487,30 @@ namespace OSL
         public void process_file_output()
         {
             // Only the batched execution buffers file output
+        }
+
+        private ShaderGlobals* m_exec_sg;
+
+        /// The ShaderGlobals of the shader being executed on this thread, for runtime callbacks that don't get it passed in
+        [ThreadStatic]
+        public static ShaderGlobals* t_exec_sg;
+
+        /// The context the optimizer on this thread is working with
+        [ThreadStatic]
+        public static ShadingContext t_opt_ctx;
+
+        /// An error raised by the runtime while a shader executes (OSL::errorfmt(sg, ...) in the C++): it goes through the renderer, so that a
+        /// renderer that journals its messages keeps them in order with the printf output. Outside of execution it is an ordinary context error.
+        public void runtime_errorfmt(string fmt, params object[] args)
+        {
+            if (m_exec_sg != null)
+            {
+                ShaderGlobalsAccess.errorfmt(m_exec_sg, fmt, args);
+            }
+            else
+            {
+                errorfmt(fmt, args);
+            }
         }
 
         public void errorfmt(string fmt, params object[] args) { record_error((int)ErrorCode.EH_ERROR, Fmt.format(fmt, args)); }

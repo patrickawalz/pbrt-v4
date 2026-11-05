@@ -44,6 +44,25 @@ namespace OSL.pvt
             register_generators();
             ss.ilgen_compile_group = compile_group_default;
             ss.ilgen_release = release_group;
+            if (OslRuntime.unknown_colorspace_hook == null)
+            {
+                // The C++ calls OSL::errorfmt(oec, ...) from the color system; the hook has no ShaderGlobals, the executing one is kept per thread
+                OslRuntime.unknown_colorspace_hook = delegate (ulong from, ulong to)
+                {
+                    ShaderGlobals* sg = ShadingContext.t_exec_sg;
+                    if (sg != null)
+                    {
+                        ShaderGlobalsAccess.errorfmt(sg, "Unknown color space transformation \"{}\" -> \"{}\"", OslStrings.from_hash(from),
+                                                     OslStrings.from_hash(to));
+                    }
+                    else if (ShadingContext.t_opt_ctx != null)
+                    {
+                        // Folding a constant transform in the optimizer: ctx->errorfmt in the C++
+                        ShadingContext.t_opt_ctx.errorfmt("Unknown color space transformation \"{}\" -> \"{}\"", OslStrings.from_hash(from),
+                                                          OslStrings.from_hash(to));
+                    }
+                };
+            }
         }
 
         /// The state kept alive by a compiled group

@@ -34,13 +34,13 @@ namespace OSL
                 {
                     if (m.has_data())
                     {
-                        ctx.errorfmt("message \"{}\" already exists (created here: {}:{}) cannot set again from {}:{}", hstr(name), hstr(m.sourcefile),
+                        ctx.runtime_errorfmt("message \"{}\" already exists (created here: {}:{}) cannot set again from {}:{}", hstr(name), hstr(m.sourcefile),
                                      m.sourceline, hstr(sourcefile), sourceline);
                     }
                     else
                     {
                         // NOTE: this cannot be triggered when strict_messages=false because we won't record "failed" getmessage calls
-                        ctx.errorfmt("message \"{}\" was queried before being set (queried here: {}:{}) setting it now ({}:{}) would lead to "
+                        ctx.runtime_errorfmt("message \"{}\" was queried before being set (queried here: {}:{}) setting it now ({}:{}) would lead to "
                                      + "inconsistent results", hstr(name), hstr(m.sourcefile), m.sourceline, hstr(sourcefile), sourceline);
                     }
                     return;
@@ -72,7 +72,7 @@ namespace OSL
                 {
                     if (m.type != type)
                     {
-                        ctx.errorfmt("type mismatch for message \"{}\" ({} as {} here: {}:{}) cannot fetch as {} from {}:{}", hstr(name),
+                        ctx.runtime_errorfmt("type mismatch for message \"{}\" ({} as {} here: {}:{}) cannot fetch as {} from {}:{}", hstr(name),
                                      m.has_data() ? "created" : "queried", m.type.basetype == TypeDesc.PTR ? "closure color" : m.type.c_str(),
                                      hstr(m.sourcefile), m.sourceline, is_closure ? "closure color" : type.c_str(), hstr(sourcefile), sourceline);
                         return 0;
@@ -84,7 +84,7 @@ namespace OSL
                     }
                     if (m.layeridx > layeridx)
                     {
-                        ctx.errorfmt("message \"{}\" was set by layer #{} ({}:{}) but is being queried by layer #{} ({}:{}) - messages may only be "
+                        ctx.runtime_errorfmt("message \"{}\" was set by layer #{} ({}:{}) but is being queried by layer #{} ({}:{}) - messages may only be "
                                      + "transferred from nodes that appear earlier in the shading network", hstr(name), m.layeridx, hstr(m.sourcefile),
                                      m.sourceline, layeridx, hstr(sourcefile), sourceline);
                         return 0;

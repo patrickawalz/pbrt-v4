@@ -890,17 +890,21 @@ namespace OSL.TestShade
         {
             object val;
             string[] result = new string[count];
-            if (shadingsys.getattribute(group, name, new TypeDesc(TypeDesc.STRING, count), out val))
+            if (shadingsys.getattribute(group, name, new TypeDesc(TypeDesc.PTR), out val))
             {
                 if (val is string[] sa)
                 {
                     return sa;
                 }
-                if (val is ustring[] ua)
+                if (val is System.Collections.IEnumerable items)
                 {
-                    for (int i = 0; i < count; ++i)
+                    int k = 0;
+                    foreach (object item in items)
                     {
-                        result[i] = ua[i].@string();
+                        if (k < count)
+                        {
+                            result[k++] = item.ToString();
+                        }
                     }
                 }
             }

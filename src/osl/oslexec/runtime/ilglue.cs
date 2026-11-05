@@ -713,7 +713,7 @@ namespace OSL.pvt
                     int i = d * ncomps + c;
                     if (!float.IsFinite(vals[i]))
                     {
-                        ctx_of(sg).errorfmt("Detected {} value in {}{} at {}:{} (op {})", vals[i], d > 0 ? "the derivatives of " : "", u_from(symbolname_),
+                        ShaderGlobalsAccess.errorfmt((ShaderGlobals*)sg, "Detected {} value in {}{} at {}:{} (op {})", vals[i], d > 0 ? "the derivatives of " : "", u_from(symbolname_),
                                             u_from(sourcefile_), sourceline, u_from(opname_));
                         return;
                     }
@@ -768,7 +768,7 @@ namespace OSL.pvt
             {
                 ustring groupname = u_from(groupname_);
                 ustring layername = u_from(layername_);
-                ctx_of(sg).errorfmt("Detected possible use of uninitialized value in {} {} at {}:{} (group {}, layer {} {}, shader {}, op {} '{}', arg {})",
+                ShaderGlobalsAccess.errorfmt((ShaderGlobals*)sg, "Detected possible use of uninitialized value in {} {} at {}:{} (group {}, layer {} {}, shader {}, op {} '{}', arg {})",
                                     typedesc, u_from(symbolname_), u_from(sourcefile_), sourceline,
                                     groupname.empty() ? new ustring("<unnamed group>") : groupname, layer,
                                     layername.empty() ? new ustring("<unnamed layer>") : layername, u_from(shadername_), opnum, u_from(opname_), argnum);
@@ -782,7 +782,7 @@ namespace OSL.pvt
             {
                 ustring groupname = u_from(groupname_);
                 ustring layername = u_from(layername_);
-                ctx_of(sg).errorfmt("Index [{}] out of range {}[0..{}]: {}:{} (group {}, layer {} {}, shader {})", indexvalue, u_from(symname_), length - 1,
+                ShaderGlobalsAccess.errorfmt((ShaderGlobals*)sg, "Index [{}] out of range {}[0..{}]: {}:{} (group {}, layer {} {}, shader {})", indexvalue, u_from(symname_), length - 1,
                                     u_from(sourcefile_), sourceline, groupname.empty() ? new ustring("<unnamed group>") : groupname, layer,
                                     layername.empty() ? new ustring("<unnamed layer>") : layername, u_from(shadername_));
                 if (indexvalue >= length)
@@ -939,7 +939,7 @@ namespace OSL.pvt
                 *M = Matrix44.identity;
                 if (ctx_of(oec).shadingsys().unknown_coordsys_error())
                 {
-                    ctx_of(oec).errorfmt("Unknown transformation \"{}\"", u_from(from));
+                    ShaderGlobalsAccess.errorfmt((ShaderGlobals*)oec, "Unknown transformation \"{}\"", u_from(from));
                 }
             }
             return ok ? 1 : 0;
@@ -969,7 +969,7 @@ namespace OSL.pvt
                 *M = Matrix44.identity;
                 if (ctx_of(oec).shadingsys().unknown_coordsys_error())
                 {
-                    ctx_of(oec).errorfmt("Unknown transformation \"{}\"", u_from(to));
+                    ShaderGlobalsAccess.errorfmt((ShaderGlobals*)oec, "Unknown transformation \"{}\"", u_from(to));
                 }
             }
             return ok ? 1 : 0;
@@ -987,7 +987,7 @@ namespace OSL.pvt
             {
                 if (ctx_of(oec).shadingsys().unknown_coordsys_error())
                 {
-                    ctx_of(oec).errorfmt("Unknown transformation \"{}\"", u_from(from_));
+                    ShaderGlobalsAccess.errorfmt((ShaderGlobals*)oec, "Unknown transformation \"{}\"", u_from(from_));
                 }
             }
             return ok;

@@ -79,7 +79,7 @@ def main(argv):
     if maxd > opts["-hardfail"]:
         print("HARD FAILURE")
         return 1
-    if pct > opts["-failpercent"] * 100.0 if opts["-failpercent"] < 1.0 else pct > opts["-failpercent"]:
+    if pct > opts["-failpercent"]:  # -failpercent is a percentage
         print("FAILURE")
         return 1
     return 0

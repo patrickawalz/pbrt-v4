@@ -183,7 +183,7 @@ namespace OSL.TestShade
 
         private static string with_newline(string s)
         {
-            return s.EndsWith("\n") ? s : s + "\n";
+            return s + "\n";
         }
     }
 

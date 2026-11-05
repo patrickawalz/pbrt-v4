@@ -237,7 +237,7 @@ namespace OSL
                     }
                     else
                     {
-                        ShaderGlobalsAccess.get_context(sg).errorfmt("[RendererServices::" + who + "] {}", err);
+                        ShaderGlobalsAccess.errorfmt(sg, "[RendererServices::" + who + "] {}", err);
                     }
                 }
                 else if (errormessage != null)
@@ -337,7 +337,7 @@ namespace OSL
                     }
                     else
                     {
-                        ShaderGlobalsAccess.get_context(sg).errorfmt("[RendererServices::get_texture_info] {}", err);
+                        ShaderGlobalsAccess.errorfmt(sg, "[RendererServices::get_texture_info] {}", err);
                     }
                 }
                 else if (errormessage != null)

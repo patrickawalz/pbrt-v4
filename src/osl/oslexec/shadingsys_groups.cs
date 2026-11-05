@@ -1316,7 +1316,11 @@ namespace OSL.pvt
                 if (Strutil.parse_char(ref p, '['))
                 {
                     int arraylen = -1;
-                    Strutil.parse_int(ref p, out arraylen);
+                    int parsed_len;
+                    if (Strutil.parse_int(ref p, out parsed_len))
+                    {
+                        arraylen = parsed_len;  // the C++ leaves it alone when there is no number: that is the unsized array
+                    }
                     Strutil.parse_char(ref p, ']');
                     type.arraylen = arraylen;
                 }
@@ -1965,7 +1969,16 @@ namespace OSL.pvt
                 if (group.optimized() == 0)
                 {
                     RuntimeOptimizer rop = new RuntimeOptimizer(this, group, ctx);
-                    rop.run();
+                    ShadingContext previous_opt_ctx = ShadingContext.t_opt_ctx;
+                    ShadingContext.t_opt_ctx = ctx;  // for runtime services called while folding constants that have no ShadingContext argument
+                    try
+                    {
+                        rop.run();
+                    }
+                    finally
+                    {
+                        ShadingContext.t_opt_ctx = previous_opt_ctx;
+                    }
                     rop.police_failed_optimizations();
 
                     // Copy some info recorded by the RuntimeOptimizer into the group
