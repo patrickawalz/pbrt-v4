@@ -53,6 +53,12 @@ namespace OSL
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Dual2f operator +(float a, Dual2f b)
+        {
+            return new Dual2f(b.x + a, b.dx, b.dy);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Dual2f operator +(Dual2f a, float b)
         {
             return new Dual2f(a.x + b, a.dx, a.dy);
@@ -115,6 +121,15 @@ namespace OSL
             float bvalinv = 1.0f / b.x;
             float aval_bval = a.x / b.x;
             return new Dual2f(aval_bval, bvalinv * (a.dx - (float)(aval_bval * b.dx)), bvalinv * (a.dy - (float)(aval_bval * b.dy)));
+        }
+
+        // Division of dual by scalar
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Dual2f operator /(Dual2f a, float b)
+        {
+            float bvalinv = 1.0f / b;
+            float aval_bval = a.x / b;
+            return new Dual2f(aval_bval, bvalinv * a.dx, bvalinv * a.dy);
         }
 
         // Division of scalar by dual
@@ -394,6 +409,15 @@ namespace OSL
             float powuvm1 = fmath.fast_safe_pow(u.x, v.x - 1.0f);
             float powuv = powuvm1 * u.x;
             float logu = u.x > 0 ? fmath.fast_log(u.x) : 0.0f;
+            return dualfunc(u, v, powuv, v.x * powuvm1, logu * powuv);
+        }
+
+        // OSL::safe_pow(Dual, Dual): pow(u,v) = < u^v, vu^(v-1) u' + log(u)u^v v' >, via the identity u^v = u * u^(v-1)
+        public static Dual2f safe_pow(Dual2f u, Dual2f v)
+        {
+            float powuvm1 = fmath.safe_pow(u.x, v.x - 1.0f);
+            float powuv = powuvm1 * u.x;
+            float logu = u.x > 0 ? fmath.safe_log(u.x) : 0.0f;
             return dualfunc(u, v, powuv, v.x * powuvm1, logu * powuv);
         }
 

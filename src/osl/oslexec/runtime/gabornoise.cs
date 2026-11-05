@@ -151,6 +151,79 @@ namespace OSL
                     a.m10 * v.m00 + a.m11 * v.m10 + a.m12 * v.m20, a.m10 * v.m01 + a.m11 * v.m11 + a.m12 * v.m21, a.m10 * v.m02 + a.m11 * v.m12 + a.m12 * v.m22,
                     a.m20 * v.m00 + a.m21 * v.m10 + a.m22 * v.m20, a.m20 * v.m01 + a.m21 * v.m11 + a.m22 * v.m21, a.m20 * v.m02 + a.m21 * v.m12 + a.m22 * v.m22);
             }
+
+            // Imath::Matrix33<float>::inverse() (the noexcept form: a singular matrix gives the identity)
+            public Matrix33f inverse()
+            {
+                float[] x = new float[9] { m00, m01, m02, m10, m11, m12, m20, m21, m22 };
+                float[] s;
+                if (x[2] != 0.0f || x[5] != 0.0f || x[8] != 1.0f)
+                {
+                    s = new float[9]
+                    {
+                        x[4] * x[8] - x[7] * x[5], x[7] * x[2] - x[1] * x[8], x[1] * x[5] - x[4] * x[2],
+                        x[6] * x[5] - x[3] * x[8], x[0] * x[8] - x[6] * x[2], x[3] * x[2] - x[0] * x[5],
+                        x[3] * x[7] - x[6] * x[4], x[6] * x[1] - x[0] * x[7], x[0] * x[4] - x[3] * x[1],
+                    };
+                    float r = x[0] * s[0] + x[1] * s[3] + x[2] * s[6];
+                    if (MathF.Abs(r) >= 1.0f)
+                    {
+                        for (int i = 0; i < 9; ++i)
+                        {
+                            s[i] /= r;
+                        }
+                    }
+                    else
+                    {
+                        float mr = MathF.Abs(r) / 1.17549435e-38f;
+                        for (int i = 0; i < 9; ++i)
+                        {
+                            if (mr > MathF.Abs(s[i]))
+                            {
+                                s[i] /= r;
+                            }
+                            else
+                            {
+                                return new Matrix33f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+                            }
+                        }
+                    }
+                    return new Matrix33f(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]);
+                }
+                s = new float[9] { x[4], -x[1], 0.0f, -x[3], x[0], 0.0f, 0.0f, 0.0f, 1.0f };
+                float r2 = x[0] * x[4] - x[3] * x[1];
+                if (MathF.Abs(r2) >= 1.0f)
+                {
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        for (int j = 0; j < 2; ++j)
+                        {
+                            s[i * 3 + j] /= r2;
+                        }
+                    }
+                }
+                else
+                {
+                    float mr = MathF.Abs(r2) / 1.17549435e-38f;
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        for (int j = 0; j < 2; ++j)
+                        {
+                            if (mr > MathF.Abs(s[i * 3 + j]))
+                            {
+                                s[i * 3 + j] /= r2;
+                            }
+                            else
+                            {
+                                return new Matrix33f(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+                            }
+                        }
+                    }
+                }
+                s[6] = -x[6] * s[0] - x[7] * s[3];
+                s[7] = -x[6] * s[1] - x[7] * s[4];
+                return new Matrix33f(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]);
+            }
         }
 
         public static unsafe class GaborNoise
