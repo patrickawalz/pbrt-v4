@@ -296,8 +296,10 @@ namespace OSL
                           "ConnectShaders: destination layer must follow source layer (tried to connect clayer.res -> alayer.f_in)\n        group: G");
                 EXPECT_EQ(errors.errors[1],
                           "ConnectShaders: \"nope\" is not a parameter or global of layer \"alayer\" (shader \"a\")");
-                EXPECT_TRUE(errors.errors[2].StartsWith("ConnectShaders: cannot connect a float (f_out) to a float[3] (arr)\n        group: G"));
-                EXPECT_EQ(errors.errors[3], "ConnectShaders: badly formed source layer/parameter\n        group: G");
+                EXPECT_TRUE(errors.errors[2].StartsWith("ConnectShaders: cannot connect a "));
+                EXPECT_TRUE(errors.errors[2].Contains("(nope)") && errors.errors[2].Contains("invalid connection\n        group: G"));
+                EXPECT_TRUE(errors.errors[3].StartsWith("ConnectShaders: cannot connect a float (f_out) to a float[3] (arr)\n        group: G"));
+                EXPECT_EQ(errors.errors[4], "ConnectShaders: badly formed source layer/parameter\n        group: G");
 
                 // a bad group description reports what is wrong and where
                 ShaderGroup bad = ss.ShaderGroupBegin("H", "surface", "connect a.b c.d;");
