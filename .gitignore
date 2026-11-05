@@ -4,3 +4,6 @@ obj/
 *.user
 .vs/
 src/pbrt/local.props
+
+# chi-square test dumps written to the working directory by the BxDF tests
+chi2test_*.m
