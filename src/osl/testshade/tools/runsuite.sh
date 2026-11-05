@@ -13,11 +13,20 @@ cat > /tmp/tsuite/bin/testshade <<EOS
 #!/bin/bash
 exec dotnet $TS $TS_ARGS "\$@"
 EOS
+# Texture creation (oiiotool patterns, -otex, -oenv, maketx) uses a small program on top of libOpenImageIO, so the textures are what the real tools write
+if [ ! -x /tmp/tsuite/bin/oiiotool_min ] || [ $TOOLS/oiiotool_min.cpp -nt /tmp/tsuite/bin/oiiotool_min ]; then
+  g++ -std=c++17 -O1 -I/tmp/osl-ref/oiio-install/include $TOOLS/oiiotool_min.cpp -o /tmp/tsuite/bin/oiiotool_min -L/tmp/osl-ref/oiio-install/lib \
+      -lOpenImageIO -lOpenImageIO_Util -Wl,-rpath,/tmp/osl-ref/oiio-install/lib || exit 1
+fi
+ln -sf oiiotool_min /tmp/tsuite/bin/maketx
 cat > /tmp/tsuite/bin/oiiotool <<EOS
 #!/bin/bash
-exec python3 $TOOLS/oiiotool_shim.py "\$@"
+case " \$* " in
+  *" --diff "*) exec python3 $TOOLS/oiiotool_shim.py "\$@" ;;
+  *) exec /tmp/tsuite/bin/oiiotool_min "\$@" ;;
+esac
 EOS
-chmod +x /tmp/tsuite/bin/*
+chmod +x /tmp/tsuite/bin/oiiotool
 # The stock harness finds oslc, oslinfo, testrender ... as $BUILD/bin/<app>; oslc is the reference compiler, the others are the C# ports
 BUILD=/tmp/tsuite/osl-build
 mkdir -p $BUILD/bin

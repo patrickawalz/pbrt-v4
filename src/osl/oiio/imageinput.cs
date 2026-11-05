@@ -7,7 +7,7 @@
 //
 // Formats: TIFF (strips and tiles; none, LZW, Deflate and PackBits; 8/16 bit integer, 16/32 bit float; horizontal and floating point predictors; MIP levels
 // stored as IFDs of a "textureformat" file as written by maketx), Radiance HDR, PNG (non interlaced), PPM/PGM (P5, P6) and PFM, BMP (uncompressed 24 and 32 bit).
-// OpenEXR is read by exrinput.cs. Other formats (JPEG, ...) go through ImageReaders.external_reader, which a host sets to its own decoder; without one such files are reported as
+// OpenEXR is read by exrinput.cs and JPEG by jpeginput.cs. Other formats go through ImageReaders.external_reader, which a host sets to its own decoder; without one such files are reported as
 // invalid, as the C++ does for a file that no plugin can open.
 
 using System;
@@ -129,6 +129,10 @@ namespace OIIO
                 else if (ExrReader.is_exr(bytes))
                 {
                     r = ExrReader.read(bytes, out error);
+                }
+                else if (JpegReader.is_jpeg(bytes))
+                {
+                    r = JpegReader.read(bytes, out error);
                 }
                 else if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G')
                 {
