@@ -14,7 +14,7 @@ using OSL.pvt;
 namespace OSL
 {
     // The names of the noise types the generic noise functions accept (strdecls.h, OSL::Hashes)
-    public static class Hashes
+    public static partial class Hashes
     {
         public static readonly ulong uperlin = new ustring("uperlin").hash();
         public static readonly ulong noise = new ustring("noise").hash();

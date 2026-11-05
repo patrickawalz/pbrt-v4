@@ -103,6 +103,12 @@ namespace OSL
         }
 
         // Division of duals
+        // Vec3 * Dual<float> (a non-dual value times a dual, as Dual<Vec3>)
+        public static Dual2v3 operator *(Vec3 b, Dual2f a)
+        {
+            return new Dual2v3(b * a.x, b * a.dx, b * a.dy);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Dual2f operator /(Dual2f a, Dual2f b)
         {
@@ -220,6 +226,23 @@ namespace OSL
         }
 
         public static Dual2v3 operator *(float b, Dual2v3 a)
+        {
+            return new Dual2v3(a.x * b, a.dx * b, a.dy * b);
+        }
+
+        // Dual<Vec3> + Dual<Vec3>
+        public static Dual2v3 operator +(Dual2v3 a, Dual2v3 b)
+        {
+            return new Dual2v3(a.x + b.x, a.dx + b.dx, a.dy + b.dy);
+        }
+
+        // Multiplication of Dual<Vec3> by Dual<float>: the chain rule
+        public static Dual2v3 operator *(Dual2v3 a, Dual2f b)
+        {
+            return new Dual2v3(a.x * b.x, (a.x * b.dx) + (a.dx * b.x), (a.x * b.dy) + (a.dy * b.x));
+        }
+
+        public static Dual2v3 operator *(Dual2v3 a, float b)
         {
             return new Dual2v3(a.x * b, a.dx * b, a.dy * b);
         }
