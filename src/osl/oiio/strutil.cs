@@ -708,12 +708,174 @@ namespace OIIO
             return sign + body;
         }
 
-        /// Format one value with the part of a replacement field after the colon
+        /// The printf %e body of a non-negative finite value: d.ddde+XX ('alt' with no fractional digits keeps the point)
+        private static string exponent_body(double a, int prec, bool upper, bool alt)
+        {
+            string s = format_e(a, prec, upper);
+            if (alt && prec == 0)
+            {
+                int epos = s.IndexOfAny(new char[] { 'e', 'E' });
+                s = s.Substring(0, epos) + "." + s.Substring(epos);
+            }
+            return s;
+        }
+
+        // Digits (without trailing zeros stripped) and exponent of the correctly rounded value with the given number of significant digits
+        private static void rounded_digits(double a, int significant, out string digits, out int exponent)
+        {
+            string es = a.ToString("e" + (significant - 1), CultureInfo.InvariantCulture);
+            int epos = es.IndexOf('e');
+            exponent = int.Parse(es.Substring(epos + 1), CultureInfo.InvariantCulture);
+            digits = es.Substring(0, epos).Replace(".", "");
+        }
+
+        // Lay out digits d1d2d3... with the first digit at decimal exponent x, in the fixed or the exponent style of {fmt}'s general format
+        private static string general_body(string digits, int x, int threshold, bool upper, bool alt)
+        {
+            if (!alt)
+            {
+                digits = digits.TrimEnd('0');
+                if (digits.Length == 0)
+                {
+                    digits = "0";
+                }
+            }
+            if (x < -4 || x >= threshold)
+            {
+                string mantissa = digits.Substring(0, 1);
+                if (digits.Length > 1)
+                {
+                    mantissa += "." + digits.Substring(1);
+                }
+                else if (alt)
+                {
+                    mantissa += ".";
+                }
+                return mantissa + two_digit_exp(x, upper);
+            }
+            if (x < 0)
+            {
+                return "0." + new string('0', -x - 1) + digits;
+            }
+            string whole;
+            string fraction;
+            if (digits.Length <= x + 1)
+            {
+                whole = digits + new string('0', x + 1 - digits.Length);
+                fraction = "";
+            }
+            else
+            {
+                whole = digits.Substring(0, x + 1);
+                fraction = digits.Substring(x + 1);
+            }
+            if (fraction.Length == 0 && alt)
+            {
+                fraction = "0";
+            }
+            return fraction.Length > 0 ? whole + "." + fraction : whole;
+        }
+
+        private static string float_body(double a, bool isfloat, char type, int prec, bool alt)
+        {
+            bool upper = char.IsUpper(type);
+            switch (type)
+            {
+                case 'f':
+                case 'F':
+                {
+                    string text = a.ToString("F" + (prec < 0 ? 6 : prec), CultureInfo.InvariantCulture);
+                    if (alt && prec == 0)
+                    {
+                        text += ".";
+                    }
+                    return text;
+                }
+                case 'e':
+                case 'E':
+                    return exponent_body(a, prec < 0 ? 6 : prec, upper, alt);
+                case 'g':
+                case 'G':
+                case '\0':
+                {
+                    if (type == '\0' && prec < 0)
+                    {
+                        string shortest;
+                        int exp10;
+                        shortest_digits(a, isfloat, out shortest, out exp10);
+                        return general_body(shortest, exp10 - 1, 16, false, alt);
+                    }
+                    int p = prec < 0 ? 6 : (prec == 0 ? 1 : prec);
+                    string digits;
+                    int x;
+                    if (a == 0.0)
+                    {
+                        digits = new string('0', p);
+                        x = 0;
+                    }
+                    else
+                    {
+                        rounded_digits(a, p, out digits, out x);
+                    }
+                    return general_body(digits, x, p, upper, alt);
+                }
+                default:
+                    throw new FormatException("invalid type specifier");
+            }
+        }
+
+        private static string integer_digits(ulong mag, char type, bool alt, out string prefix)
+        {
+            prefix = "";
+            switch (type)
+            {
+                case 'x':
+                    prefix = alt ? "0x" : "";
+                    return mag.ToString("x", CultureInfo.InvariantCulture);
+                case 'X':
+                    prefix = alt ? "0X" : "";
+                    return mag.ToString("X", CultureInfo.InvariantCulture);
+                case 'o':
+                    prefix = alt && mag != 0 ? "0" : "";
+                    return Convert.ToString((long)mag, 8);
+                case 'b':
+                case 'B':
+                    prefix = alt ? "0" + type : "";
+                    return Convert.ToString((long)mag, 2);
+                default:
+                    return mag.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static int code_point_count(string s)
+        {
+            int n = 0;
+            for (int i = 0; i < s.Length; ++i)
+            {
+                if (!char.IsLowSurrogate(s[i]))
+                {
+                    ++n;
+                }
+            }
+            return n;
+        }
+
+        /// Format one value with the part of a replacement field after the colon (the standard format specification of {fmt}); an invalid
+        /// specification throws a FormatException with the message {fmt} uses.
         public static string format_arg(string spec, object arg)
         {
+            if (arg is ustring)
+            {
+                arg = ((ustring)arg).@string();
+            }
+            bool is_string = arg is string;
+            bool is_float = arg is float || arg is double;
+            bool is_unsigned = arg is uint || arg is ulong || arg is ushort || arg is byte;
+            bool is_integer = arg is int || arg is long || arg is short || arg is sbyte || is_unsigned;
+            bool is_numeric = is_float || is_integer;
             char fill = ' ';
             char align = '\0';
-            char sign = '-';
+            char sign = '\0';
             bool alt = false;
             bool zero = false;
             int width = 0;
@@ -722,6 +884,10 @@ namespace OIIO
             int p = 0;
             if (spec.Length >= 2 && (spec[1] == '<' || spec[1] == '>' || spec[1] == '^'))
             {
+                if (spec[0] == '{' || spec[0] == '}')
+                {
+                    throw new FormatException("invalid fill character '{'");
+                }
                 fill = spec[0];
                 align = spec[1];
                 p = 2;
@@ -733,15 +899,31 @@ namespace OIIO
             }
             if (p < spec.Length && (spec[p] == '+' || spec[p] == '-' || spec[p] == ' '))
             {
+                if (!is_numeric)
+                {
+                    throw new FormatException("format specifier requires numeric argument");
+                }
+                if (is_unsigned)
+                {
+                    throw new FormatException("format specifier requires signed argument");
+                }
                 sign = spec[p++];
             }
             if (p < spec.Length && spec[p] == '#')
             {
+                if (!is_numeric)
+                {
+                    throw new FormatException("format specifier requires numeric argument");
+                }
                 alt = true;
                 ++p;
             }
             if (p < spec.Length && spec[p] == '0')
             {
+                if (!is_numeric)
+                {
+                    throw new FormatException("format specifier requires numeric argument");
+                }
                 zero = true;
                 ++p;
             }
@@ -752,92 +934,114 @@ namespace OIIO
             if (p < spec.Length && spec[p] == '.')
             {
                 ++p;
+                if (is_integer)
+                {
+                    throw new FormatException("precision not allowed for this argument type");
+                }
+                if (p >= spec.Length || !char.IsDigit(spec[p]))
+                {
+                    throw new FormatException("missing precision specifier");
+                }
                 prec = 0;
                 while (p < spec.Length && char.IsDigit(spec[p]))
                 {
                     prec = prec * 10 + (spec[p++] - '0');
                 }
             }
+            if (p < spec.Length && spec[p] == 'L')
+            {
+                if (!is_numeric)
+                {
+                    throw new FormatException("format specifier requires numeric argument");
+                }
+                ++p;
+            }
             if (p < spec.Length)
             {
-                type = spec[p];
+                type = spec[p++];
+            }
+            if (p < spec.Length)
+            {
+                throw new FormatException("invalid format string");
             }
 
             string text;
-            bool numeric = false;
-            bool negative = false;
-            if (arg is ustring)
+            string prefix = "";
+            bool nonfinite = false;
+            if (is_string)
             {
-                arg = ((ustring)arg).@string();
-            }
-            if (arg is string)
-            {
-                text = (string)arg;
-                if (prec >= 0 && prec < text.Length)
+                if (type != '\0' && type != 's')
                 {
-                    text = text.Substring(0, prec);
+                    throw new FormatException("invalid type specifier");
+                }
+                text = (string)arg;
+                if (prec >= 0 && prec < code_point_count(text))
+                {
+                    int count = 0;
+                    int cut = 0;
+                    while (cut < text.Length && count < prec)
+                    {
+                        count += char.IsLowSurrogate(text[cut]) ? 0 : 1;
+                        ++cut;
+                        if (cut < text.Length && char.IsLowSurrogate(text[cut]))
+                        {
+                            ++cut;
+                        }
+                    }
+                    text = text.Substring(0, cut);
                 }
             }
             else if (arg is bool)
             {
+                if (type != '\0' && type != 's')
+                {
+                    throw new FormatException("invalid type specifier");
+                }
                 text = (bool)arg ? "true" : "false";
             }
             else if (arg is char)
             {
                 text = ((char)arg).ToString();
             }
-            else if (arg is float || arg is double)
+            else if (is_float)
             {
-                numeric = true;
                 bool isfloat = arg is float;
                 double v = isfloat ? (double)(float)arg : (double)arg;
-                negative = v < 0 || (v == 0 && 1.0 / v < 0);
-                double a = Math.Abs(v);
-                if (double.IsNaN(v))
+                bool negative = isfloat ? BitConverter.SingleToInt32Bits((float)arg) < 0 : BitConverter.DoubleToInt64Bits(v) < 0;
+                if (type != '\0' && "fFeEgG".IndexOf(type) < 0)
                 {
-                    text = "nan";
-                    negative = false;
-                    zero = false;
+                    throw new FormatException("invalid type specifier");
                 }
-                else if (double.IsInfinity(v))
+                if (double.IsNaN(v) || double.IsInfinity(v))
                 {
-                    text = "inf";
-                    zero = false;
-                }
-                else if (type == 'f' || type == 'F')
-                {
-                    text = a.ToString("F" + (prec < 0 ? 6 : prec), CultureInfo.InvariantCulture);
-                }
-                else if (type == 'e' || type == 'E')
-                {
-                    text = format_e(a, prec < 0 ? 6 : prec, type == 'E');
-                }
-                else if (type == 'g' || type == 'G')
-                {
-                    text = format_g(a, prec < 0 ? 6 : prec, type == 'G', alt);
-                }
-                else if (prec >= 0)
-                {
-                    text = format_g(a, prec, false, alt);
+                    nonfinite = true;
+                    text = double.IsNaN(v) ? "nan" : "inf";
+                    if (char.IsUpper(type))
+                    {
+                        text = text.ToUpperInvariant();
+                    }
                 }
                 else
                 {
-                    text = format_default_float(a, isfloat);
+                    text = float_body(Math.Abs(v), isfloat, type, prec, alt);
                 }
+                prefix = negative ? "-" : (sign == '+' ? "+" : (sign == ' ' ? " " : ""));
             }
-            else if (arg is int || arg is long || arg is uint || arg is ulong || arg is short || arg is ushort || arg is byte || arg is sbyte)
+            else if (is_integer)
             {
-                numeric = true;
+                if (type != '\0' && "dxXobBc".IndexOf(type) < 0)
+                {
+                    throw new FormatException("invalid type specifier");
+                }
                 if (type == 'c')
                 {
                     text = ((char)Convert.ToInt32(arg)).ToString();
-                    numeric = false;
                 }
                 else
                 {
-                    bool isunsigned = arg is uint || arg is ulong || arg is ushort || arg is byte;
                     ulong mag;
-                    if (isunsigned)
+                    bool negative = false;
+                    if (is_unsigned)
                     {
                         mag = Convert.ToUInt64(arg);
                     }
@@ -847,15 +1051,9 @@ namespace OIIO
                         negative = sv < 0;
                         mag = negative ? (ulong)(-(sv + 1)) + 1UL : (ulong)sv;
                     }
-                    switch (type)
-                    {
-                        case 'x': text = mag.ToString("x", CultureInfo.InvariantCulture); if (alt) { text = "0x" + text; } break;
-                        case 'X': text = mag.ToString("X", CultureInfo.InvariantCulture); if (alt) { text = "0X" + text; } break;
-                        case 'o': text = Convert.ToString((long)mag, 8); if (alt) { text = "0" + text; } break;
-                        case 'b':
-                        case 'B': text = Convert.ToString((long)mag, 2); if (alt) { text = "0" + type + text; } break;
-                        default: text = mag.ToString(CultureInfo.InvariantCulture); break;
-                    }
+                    string basePrefix;
+                    text = integer_digits(mag, type, alt, out basePrefix);
+                    prefix = (negative ? "-" : (sign == '+' ? "+" : (sign == ' ' ? " " : ""))) + basePrefix;
                 }
             }
             else if (arg is IntPtr)
@@ -867,42 +1065,34 @@ namespace OIIO
                 text = arg == null ? "" : arg.ToString();
             }
 
-            string signtext = "";
-            if (numeric)
+            int length = code_point_count(prefix) + code_point_count(text);
+            if (width <= length)
             {
-                if (negative)
-                {
-                    signtext = "-";
-                }
-                else if (sign == '+')
-                {
-                    signtext = "+";
-                }
-                else if (sign == ' ')
-                {
-                    signtext = " ";
-                }
+                return prefix + text;
             }
-            if (width > signtext.Length + text.Length)
+            int pad = width - length;
+            if (zero && !nonfinite && align == '\0')
             {
-                int pad = width - signtext.Length - text.Length;
-                if (zero && numeric && align == '\0')
-                {
-                    return signtext + new string('0', pad) + text;
-                }
-                char a2 = align != '\0' ? align : (numeric ? '>' : '<');
-                if (a2 == '<')
-                {
-                    return signtext + text + new string(fill, pad);
-                }
-                if (a2 == '>')
-                {
-                    return new string(fill, pad) + signtext + text;
-                }
-                int left = pad / 2;
-                return new string(fill, left) + signtext + text + new string(fill, pad - left);
+                return prefix + new string('0', pad) + text;
             }
-            return signtext + text;
+            if (align == '\0')
+            {
+                align = (is_numeric && (!nonfinite || zero)) ? '>' : '<';
+            }
+            if (zero && !nonfinite && fill == ' ')
+            {
+                fill = '0';
+            }
+            if (align == '<')
+            {
+                return prefix + text + new string(fill, pad);
+            }
+            if (align == '>')
+            {
+                return new string(fill, pad) + prefix + text;
+            }
+            int left = pad / 2;
+            return new string(fill, left) + prefix + text + new string(fill, pad - left);
         }
     }
 
@@ -992,6 +1182,17 @@ namespace OIIO
                 }
                 dirs.Add(d);
             }
+        }
+
+        /// The extension of the file name including the dot (".oso"), or an empty string (OIIO Filesystem::extension)
+        public static string extension(string filepath, bool include_dot = true)
+        {
+            string ext = Path.GetExtension(filepath);
+            if (!include_dot && ext.StartsWith("."))
+            {
+                ext = ext.Substring(1);
+            }
+            return ext;
         }
 
         /// Find the file in the directories (and optionally the current directory first), or return an empty string

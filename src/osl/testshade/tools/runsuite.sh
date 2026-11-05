@@ -18,6 +18,15 @@ cat > /tmp/tsuite/bin/oiiotool <<EOS
 exec python3 $TOOLS/oiiotool_shim.py "\$@"
 EOS
 chmod +x /tmp/tsuite/bin/*
+# The stock harness finds oslc, oslinfo, testrender ... as $BUILD/bin/<app>; oslc is the reference compiler, the others are the C# ports
+BUILD=/tmp/tsuite/osl-build
+mkdir -p $BUILD/bin
+OSLINFO_DLL=${OSLINFO_DLL:-$TOOLS/../../oslinfo/bin/Release/net10.0/oslinfo.dll}
+TESTRENDER_DLL=${TESTRENDER_DLL:-$TOOLS/../../testrender/bin/Release/net10.0/testrender.dll}
+printf '#!/bin/bash\nexec /tmp/osl-ref/bin/oslc "$@"\n' > $BUILD/bin/oslc
+printf '#!/bin/bash\nexec dotnet %s "$@"\n' "$OSLINFO_DLL" > $BUILD/bin/oslinfo
+printf '#!/bin/bash\nexec dotnet %s "$@"\n' "$TESTRENDER_DLL" > $BUILD/bin/testrender
+chmod +x $BUILD/bin/*
 export OSL_TESTSHADE_NAME=/tmp/tsuite/bin/testshade
 export PATH=/tmp/tsuite/bin:$PATH
 J=8
@@ -27,11 +36,11 @@ run_one() {
   n=$1
   w=/tmp/tsuite/$n
   rm -rf $w; mkdir -p $w
-  (cd $w && timeout ${TS_TIMEOUT:-300} python3 $SUITE/runtest.py $w /tmp/osl-ref > $w/runtest.log 2>&1)
+  (cd $w && timeout ${TS_TIMEOUT:-300} python3 $SUITE/runtest.py $w $BUILD > $w/runtest.log 2>&1)
   rc=$?
   if [ $rc -eq 0 ]; then echo "PASS $n"; else echo "FAIL $n ($rc)"; fi
 }
 export -f run_one
-export SUITE
+export SUITE BUILD
 echo $NAMES | tr ' ' '\n' | xargs -P $J -I{} bash -c 'run_one {}' | sort -k2 > /tmp/tsuite/results.txt
 grep -c PASS /tmp/tsuite/results.txt | sed 's/^/pass: /'; grep -c FAIL /tmp/tsuite/results.txt | sed 's/^/fail: /'
