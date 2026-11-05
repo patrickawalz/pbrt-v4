@@ -60,6 +60,8 @@ namespace OSL.TestShade
         private static bool profile = false;
         // (not in OpenShadingLanguage) --ilassembly <dir>: compile each group to a persisted assembly in <dir>, load it back and shade with that
         private static string ilassembly_dir = "";
+        // (not in OpenShadingLanguage) --ilreport <file>: write the list of shadeops the IL backend could not map to a managed implementation
+        private static string ilreport_file = "";
         private static bool O0 = false, O1 = false, O2 = false;
         private static int llvm_opt = 1;
         private static bool pixelcenters = false;
@@ -303,6 +305,7 @@ namespace OSL.TestShade
             o.Add(opt("raytype", 1, delegate (string[] a) { raytype_name = a[1]; }));
             o.Add(opt("raytype_opt", 0, delegate (string[] a) { raytype_opt = true; }));
             o.Add(opt("iters", 1, delegate (string[] a) { iters = to_int(a[1]); }));
+            o.Add(opt("ilreport", 1, delegate (string[] a) { ilreport_file = a[1]; }));
             o.Add(opt("ilassembly", 1, delegate (string[] a) { ilassembly_dir = a[1]; }));
             o.Add(opt("O0", 0, delegate (string[] a) { O0 = true; }));
             o.Add(opt("O1", 0, delegate (string[] a) { O1 = true; }));
@@ -1507,6 +1510,10 @@ namespace OSL.TestShade
             // Give the renderer a chance to do initial cleanup while everything is still alive
             rend.clear();
             shadergroup = null;
+            if (ilreport_file.Length != 0)
+            {
+                File.WriteAllText(ilreport_file, ILRuntimeTable.report());
+            }
             shadingsys.Dispose();
             return 0;
         }

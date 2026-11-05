@@ -624,6 +624,20 @@ namespace OSL
                 File.Delete(file);
             }
 
+            /// The list of declared shadeops without a managed implementation; also written to the file named by OSL_IL_REPORT, if set
+            [TEST("OslIL", "ShadeopReport")]
+            public static void OslIL_ShadeopReport()
+            {
+                string report = ILRuntimeTable.report();
+                string path = Environment.GetEnvironmentVariable("OSL_IL_REPORT");
+                if (!string.IsNullOrEmpty(path))
+                {
+                    File.WriteAllText(path, report);
+                }
+                // Every op generator must find its shadeops: the names that are still unmapped are listed in the report, none may be called by the tests
+                EXPECT_EQ(ILRuntimeTable.missing_called().Length, 0);
+            }
+
             [TEST("OslIL", "Smoke")]
             public static void OslIL_Smoke()
             {
