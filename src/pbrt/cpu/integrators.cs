@@ -1029,6 +1029,7 @@ namespace pbrt
 
             Float p_b = 0, etaScale = 1;
             bool specularBounce = false, anyNonSpecularBounces = false;
+            int oslRayType = 0;  // (not in pbrt-v4) the ray type of the ray, for the raytype() of OSL shaders
             LightSampleContext prevIntrCtx = default;
 
             // Sample path from camera and accumulate radiance estimate
@@ -1059,10 +1060,12 @@ namespace pbrt
                     break;
                 }
                 // Incorporate emission from surface hit by ray
+                si.value().intr.rayType = oslRayType;
                 SampledSpectrum Le = si.value().intr.Le(-ray.d, lambda);
                 if ((bool)Le)
                 {
-                    if (depth == 0 || specularBounce)
+                    // (not in pbrt-v4) emission of an OSL shader comes with no area light to sample: no MIS
+                    if (depth == 0 || specularBounce || si.value().intr.areaLight == null)
                         L += beta * Le;
                     else
                     {
@@ -1145,6 +1148,7 @@ namespace pbrt
                 p_b = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
                 DCHECK(!IsInf(beta.y(lambda)));
                 specularBounce = bs.value().IsSpecular();
+                oslRayType = OSLRayType.FromFlags(bs.value().flags);
                 anyNonSpecularBounces |= !bs.value().IsSpecular();
                 if (bs.value().IsTransmission())
                     etaScale *= Sqr(bs.value().eta);
@@ -3834,7 +3838,7 @@ namespace pbrt
                             SampledSpectrum Le = si.value().intr.Le(-ray.d, lambda);
                             if ((bool)Le)
                             {
-                                if (depth == 0 || specularBounce)
+                                if (depth == 0 || specularBounce || si.value().intr.areaLight == null)
                                     L += beta * Le;
                                 else
                                 {
@@ -4733,6 +4737,7 @@ namespace pbrt
             public PLight pL = PLight.Zero();
             public Vector3f cameraDirection;
             bool specularBounce = false, anyNonSpecularBounces = false;
+            int oslRayType = 0;  // (not in pbrt-v4) the ray type of the ray, for the raytype() of OSL shaders
             int depth = 0;
             Float etaScale = 1;
             LightSampleContext prevIntrContext = default;
@@ -4971,11 +4976,12 @@ namespace pbrt
 
             public override void OnSurfaceHit(WalkContext ctx, SurfaceInteraction isect)
             {
+                isect.rayType = oslRayType;
                 SampledSpectrum LeSurf = isect.Le(-ctx.ray.d, ctx.lambda);
                 if ((bool)LeSurf)
                 {
                     // Add contribution of emission from intersected surface
-                    if (depth == 0 || specularBounce)
+                    if (depth == 0 || specularBounce || isect.areaLight == null)
                     {
                         L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
                         if (polarised)
@@ -5098,6 +5104,7 @@ namespace pbrt
                 fneeOrigin = isect.p();
                 // Update volumetric integrator path state after surface scattering
                 specularBounce = bs.IsSpecular();
+                oslRayType = OSLRayType.FromFlags(bs.flags);
                 anyNonSpecularBounces |= !bs.IsSpecular();
                 if (bs.IsTransmission())
                     etaScale *= Sqr(bs.eta);

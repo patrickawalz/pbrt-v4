@@ -32,5 +32,6 @@
   <ItemGroup>
     <ProjectReference Include="../opensubdiv_lib/opensubdiv_lib.csproj" />
     <ProjectReference Include="$(RgbSpecProject)" />
+    <ProjectReference Include="../osl/osl_lib.csproj" />
   </ItemGroup>
 </Project>

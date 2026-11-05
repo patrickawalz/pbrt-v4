@@ -452,7 +452,13 @@ namespace pbrt
 
         public SampledSpectrum Le(Vector3f w, SampledWavelengths lambda)
         {
-            return areaLight != null ? areaLight.L(p(), n, uv, w, lambda) : new SampledSpectrum(0f);
+            if (areaLight != null)
+                return areaLight.L(p(), n, uv, w, lambda);
+            // (not in pbrt-v4) A surface with an OSL shader emits what the emission closures of the shader say
+            OSLMaterial oslMaterial = material as OSLMaterial;
+            if (oslMaterial != null)
+                return oslMaterial.Emission(this, lambda);
+            return new SampledSpectrum(0f);
         }
 
         public override string ToString()
@@ -481,6 +487,8 @@ namespace pbrt
         public int faceIndex = 0;
         // A number that identifies the object of the hit (the shape of the scene file, mixed with the instance): the seed of the variation of a texture by object
         public int objectId = 0;
+        // (not in pbrt-v4) The ray type of the ray that found the point (OSLRayType bits; 0: a camera ray), for the raytype() of OSL shaders
+        public int rayType = 0;
         public Material material;
         public Light areaLight;
         public Vector3f dpdx, dpdy;

@@ -285,6 +285,8 @@ namespace pbrt
 
             this.film = Film.Create(film.name, film.parameters, exposureTime,
                                     camera.cameraTransform, filt, film.loc, alloc);
+            // (not in pbrt-v4) OSL shaders can ask for the camera and the render space
+            OSLScene.SetCamera(camera, this.film.FullResolution());
             LOG_VERBOSE("Finished creating filter and film");
 
             // Enqueue asynchronous job to create sampler
@@ -966,6 +968,15 @@ namespace pbrt
 
                         FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
                         int mediumPriority = sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority);
+                        if (OSLScene.Enabled)
+                        {
+                            // (not in pbrt-v4) what OSL shaders can ask about the object: its name, transformation and surface area
+                            Float oslArea = 0;
+                            for (ulong j = 0; j < shapeObjs.size(); ++j)
+                                oslArea += shapeObjs[j].Area();
+                            string oslName = sh.parameters.GetOneString("name", sh.name);
+                            OSLScene.AddObject(ObjectIds.Hash(sh.loc), oslName, sh.renderFromObject, null, oslArea);
+                        }
                         sh.parameters.ReportUnused();  // do now so can grab alpha...
 
                         Material mtl = null;
@@ -1144,6 +1155,7 @@ namespace pbrt
             LOG_VERBOSE("Starting top-level accelerator");
             if (primitives.Count != 0)
                 aggregate = CreateAccelerator(accelerator.name, primitives, accelerator.parameters);
+            OSLScene.aggregate = aggregate;  // (not in pbrt-v4) for the trace() of OSL shaders
             LOG_VERBOSE("Finished top-level accelerator");
             return aggregate;
         }
@@ -1357,6 +1369,9 @@ namespace pbrt
         {
             string name = NormalizeUTF8(origName);
             namedCoordinateSystems[name] = graphicsState.ctm.Clone();
+            // (not in pbrt-v4) OSL shaders can use the coordinate system by name
+            OSLScene.AddCoordinateSystem(name, graphicsState.ctm[0], graphicsState.ctm[1], graphicsState.transformStartTime,
+                                         graphicsState.transformEndTime);
         }
 
         public override void CoordSysTransform(string origName, FileLoc loc)
@@ -1764,6 +1779,35 @@ namespace pbrt
                 else
                     Options.displacementEdgeScale = v;
             }
+            else if (nName == "oslsearchpath")
+            {
+                // (not in pbrt-v4) directories (separated by ':') in which "osl" materials and textures look for their shaders (.oso, or .osl to compile)
+                if (value.Length < 3 || value[0] != '"' || value[value.Length - 1] != '"')
+                    ErrorExitDeferred(loc, StringPrintf("%s: expected quoted string for option value", value));
+                else
+                    OSLSystem.AddSearchPath(value.Substring(1, value.Length - 2));
+            }
+            else if (nName == "oslspectral")
+            {
+                // (not in pbrt-v4) how the RGB colors of OSL shaders become spectra: "upsample" (default), "unbounded" or "gray"
+                OSLSpectralMode mode;
+                if (value.Length < 3 || value[0] != '"' || value[value.Length - 1] != '"' ||
+                    !OSLSystem.ParseSpectralMode(value.Substring(1, value.Length - 2), out mode))
+                    ErrorExitDeferred(loc, StringPrintf("%s: expected \"upsample\", \"unbounded\" or \"gray\"", value));
+                else
+                    OSLSystem.spectralMode = mode;
+            }
+            else if (nName == "oslemission")
+            {
+                // (not in pbrt-v4) "illuminant" (default; the color of an emission closure is an RGBIlluminantSpectrum, as the colors of pbrt's lights are)
+                // or "unbounded" (an RGBUnboundedSpectrum)
+                if (value == "\"illuminant\"")
+                    OSLSystem.emissionIlluminant = true;
+                else if (value == "\"unbounded\"")
+                    OSLSystem.emissionIlluminant = false;
+                else
+                    ErrorExitDeferred(loc, StringPrintf("%s: expected \"illuminant\" or \"unbounded\"", value));
+            }
             else if (nName == "msereferenceimage")
             {
                 if (value.Length < 3 || value[0] != '"' || value[value.Length - 1] != '"')
@@ -1937,9 +1981,24 @@ namespace pbrt
                 scene.AddSpectrumTexture(name, new TransformedSceneEntity(texname, dict, loc, RenderFromObject()));
         }
 
+        // (not in pbrt-v4) The shader space of an "osl" material is the coordinate system of its directive: the CTM is passed along as a parameter
+        void AddShaderSpace(List<ParsedParameter> parms, FileLoc loc)
+        {
+            ParsedParameter p = new ParsedParameter(loc);
+            p.type = "float";
+            p.name = "__shaderspace";
+            SquareMatrix4 m = graphicsState.ctm[0].GetMatrix();
+            for (int i = 0; i < 4; ++i)
+                for (int j = 0; j < 4; ++j)
+                    p.AddFloat(m[i][j]);
+            parms.Add(p);
+        }
+
         public override void Material(string name, List<ParsedParameter> parms, FileLoc loc)
         {
             if (!VERIFY_WORLD("Material", loc)) return;
+            if (name == "osl")
+                AddShaderSpace(parms, loc);
 
             ParameterDictionary dict = new ParameterDictionary(parms, graphicsState.materialAttributes,
                                                                graphicsState.colorSpace);
@@ -1952,6 +2011,14 @@ namespace pbrt
         {
             string name = NormalizeUTF8(origName);
             if (!VERIFY_WORLD("MakeNamedMaterial", loc)) return;
+            foreach (ParsedParameter pp in parms)
+            {
+                if (pp.name == "type" && pp.strings.size() == 1 && pp.strings[0] == "osl")
+                {
+                    AddShaderSpace(parms, loc);
+                    break;
+                }
+            }
 
             ParameterDictionary dict = new ParameterDictionary(parms, graphicsState.materialAttributes,
                                                                graphicsState.colorSpace);

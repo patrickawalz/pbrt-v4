@@ -172,6 +172,7 @@ namespace pbrt
             dvdy = si.dvdy;
             faceIndex = si.faceIndex;
             objectId = si.objectId;
+            this.si = si;
         }
         public TextureEvalContext(Point3f p, Vector3f dpdx, Vector3f dpdy, Normal3f n, Point2f uv, Float dudx, Float dudy,
                                   Float dvdx, Float dvdy, int faceIndex, int objectId = 0)
@@ -202,6 +203,8 @@ namespace pbrt
         public Float dudx, dudy, dvdx, dvdy;
         public int faceIndex;
         public int objectId;
+        // (not in pbrt-v4) the interaction the context was made from (null if made from other data); OSL shaders read the whole interaction
+        public SurfaceInteraction si;
     }
 
     // TexCoord2D Definition
@@ -1890,7 +1893,9 @@ namespace pbrt
                                           FileLoc loc, Allocator alloc, bool gpu)
         {
             FloatTexture tex = null;
-            if (name == "constant")
+            if (name == "osl")
+                tex = OSLFloatTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "constant")
                 tex = FloatConstantTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "scale")
                 tex = FloatScaledTexture.Create(renderFromTexture, parameters, loc, alloc);
@@ -1979,7 +1984,9 @@ namespace pbrt
                                              SpectrumType spectrumType, FileLoc loc, Allocator alloc, bool gpu)
         {
             SpectrumTexture tex = null;
-            if (name == "constant")
+            if (name == "osl")
+                tex = OSLSpectrumTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "constant")
                 tex = SpectrumConstantTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "scale")
                 tex = SpectrumScaledTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);

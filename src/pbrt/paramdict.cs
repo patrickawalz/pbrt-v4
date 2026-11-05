@@ -619,6 +619,9 @@ namespace pbrt
 
         public static implicit operator ParameterDictionary(TextureParameterDictionary t) { return t.dict; }
 
+        // (not in pbrt-v4) the named textures, for the "osl" material that connects textures to shader parameters
+        public NamedTextures Textures() { return textures; }
+
         public Float GetOneFloat(string name, Float def) { return dict.GetOneFloat(name, def); }
         public int GetOneInt(string name, int def) { return dict.GetOneInt(name, def); }
         public bool GetOneBool(string name, bool def) { return dict.GetOneBool(name, def); }

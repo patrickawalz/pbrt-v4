@@ -97,13 +97,16 @@ namespace pbrt
             wo = si.wo;
             ns = si.shading.n;
             dpdus = si.shading.dpdu;
+            this.si = si;
         }
 
         public static implicit operator MaterialEvalContext(SurfaceInteraction si) { return new MaterialEvalContext(si); }
 
         public static implicit operator TextureEvalContext(MaterialEvalContext c)
         {
-            return new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex, c.objectId);
+            TextureEvalContext t = new TextureEvalContext(c.p, c.dpdx, c.dpdy, c.n, c.uv, c.dudx, c.dudy, c.dvdx, c.dvdy, c.faceIndex, c.objectId);
+            t.si = c.si;
+            return t;
         }
 
         public override string ToString()
@@ -124,6 +127,8 @@ namespace pbrt
         public Vector3f wo;
         public Normal3f ns;
         public Vector3f dpdus;
+        // (not in pbrt-v4) the interaction the context was made from (null if made from other data); OSL shaders read the whole interaction
+        public SurfaceInteraction si;
     }
 
     // NormalBumpEvalContext Definition
@@ -1531,6 +1536,8 @@ namespace pbrt
             }
             else if (name == "interface")
                 return new InterfaceMaterial();
+            else if (name == "osl")
+                material = OSLMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "coateddiffuse")

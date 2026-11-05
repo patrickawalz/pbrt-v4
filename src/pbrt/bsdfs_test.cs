@@ -430,7 +430,7 @@ namespace pbrt
             return createBSDF(hit, new Allocator());
         }
 
-        private static void TestBSDF(Func<SurfaceInteraction, Allocator, BSDF> createBSDF, string description)
+        internal static void TestBSDF(Func<SurfaceInteraction, Allocator, BSDF> createBSDF, string description)
         {
             const int thetaRes = CHI2_THETA_RES;
             const int phiRes = CHI2_PHI_RES;
@@ -543,7 +543,7 @@ namespace pbrt
         ///////////////////////////////////////////////////////////////////////////
         // Energy Conservation Tests
 
-        private static void TestEnergyConservation(Func<SurfaceInteraction, Allocator, BSDF> createBSDF,
+        internal static void TestEnergyConservation(Func<SurfaceInteraction, Allocator, BSDF> createBSDF,
                                                    string description)
         {
             RNG rng = new RNG();
