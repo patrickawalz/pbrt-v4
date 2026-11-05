@@ -92,6 +92,13 @@ namespace OIIO
 {
     public static class Strutil
     {
+        // The C printf "%.9g" rendering of a float (the shortest form that round-trips), as the .oso writer and the default-literal code use
+        public static string format_g9(float f)
+        {
+            string r = f.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
+            return r.Replace('E', 'e');
+        }
+
         // Convert unprintable characters to C escape sequences (\n, \t, \", \\ ...), as OIIO::Strutil::escape_chars
         public static string escape_chars(string s)
         {

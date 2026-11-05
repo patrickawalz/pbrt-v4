@@ -5,10 +5,6 @@ namespace OSL
     {
         public partial class OSLCompilerImpl
         {
-            public void add_struct_fields(StructSpec structspec, OIIO.ustring basename, SymType symtype, int arraylen, ASTNode node = null, ASTNode init = null)
-            {
-                throw new System.NotImplementedException();
-            }
         }
     }
 }
@@ -20,6 +16,8 @@ namespace OSL
         {
             public static void coalesce_temporaries(System.Collections.Generic.List<Symbol> symtab) { throw new System.NotImplementedException(); }
             private bool op_uses_sym(Opcode op, Symbol sym, bool read = true, bool write = true) { throw new System.NotImplementedException(); }
+            public void struct_field_pair(Symbol sym1, Symbol sym2, int fieldnum, out Symbol field1, out Symbol field2) { throw new System.NotImplementedException(); }
+            public void struct_field_pair(StructSpec structspec, int fieldnum, OIIO.ustring sym1, OIIO.ustring sym2, out Symbol field1, out Symbol field2) { throw new System.NotImplementedException(); }
             public void push_nesting(bool isloop = false) { throw new System.NotImplementedException(); }
             public void pop_nesting(bool isloop = false) { throw new System.NotImplementedException(); }
         }
