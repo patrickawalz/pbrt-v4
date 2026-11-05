@@ -29,6 +29,7 @@ namespace OSL.pvt
     {
         public static readonly OpTableEntry[] entries = new OpTableEntry[]
         {
+            new OpTableEntry("aassign", "aassign", "aassign", "aassign", false, 0),
             new OpTableEntry("abs", "abs", "generic", "abs", true, 0),
             new OpTableEntry("acos", "acos", "generic", "acos", true, 0),
             new OpTableEntry("add", "add", "add", "add", true, 0),
