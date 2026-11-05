@@ -689,152 +689,6 @@ namespace OSL
         }
     }
 
-    /// The BSDL OrenNayarDiffuseLobe (MaterialX oren_nayar_diffuse_bsdf) as the "oren_nayar" closure uses it: white albedo and no energy compensation
-    public sealed unsafe class OrenNayarLobe : BSDF
-    {
-        private Vec3 fX, fY, fZ;
-        private Color3 diff_albedo;
-        private float diff_roughness;
-
-        public OrenNayarLobe(OrenNayarParams p, Vec3 wo)
-        {
-            Vec3 Z = visible_normal(wo, p.N, p.N);
-            float s = MathF.CopySign(1.0f, Z.z);
-            float a = -1.0f / (s + Z.z);
-            float b = Z.x * Z.y * a;
-            fX = new Vec3(1.0f + s * Z.x * Z.x * a, s * b, -s * Z.x);
-            fY = new Vec3(b, s + Z.y * Z.y * a, -Z.y);
-            fZ = Z;
-            diff_albedo = new Color3(1, 1, 1);
-            diff_roughness = Math.Clamp(p.sigma, 0.0f, 1.0f);
-        }
-
-        private static float max_abs_xyz(Vec3 v)
-        {
-            return MathF.Max(MathF.Abs(v.x), MathF.Max(MathF.Abs(v.y), MathF.Abs(v.z)));
-        }
-
-        /// BsdfGlobals::visible_normal
-        private static Vec3 visible_normal(Vec3 wo, Vec3 Ngf, Vec3 N)
-        {
-            if (wo.dot(N) > 0.0f)
-            {
-                return N;
-            }
-            Vec3 V = wo.cross(N);
-            if (max_abs_xyz(V) < 1e-4f)
-            {
-                V = wo.cross(Ngf);
-                if (max_abs_xyz(V) < 1e-4f)
-                {
-                    float s = MathF.CopySign(1.0f, wo.z);
-                    float a = -1.0f / (s + wo.z);
-                    V = new Vec3(wo.x * wo.y * a, s + wo.y * wo.y * a, -wo.y);
-                }
-                else
-                {
-                    V = V3.normalize(V);
-                }
-            }
-            else
-            {
-                V = V3.normalize(V);
-            }
-            return V3.normalized(V.cross(wo) + 1e-4f * wo);
-        }
-
-        private Vec3 local(Vec3 a)
-        {
-            return new Vec3(a.dot(fX), a.dot(fY), a.dot(fZ));
-        }
-
-        private Vec3 world(Vec3 a)
-        {
-            return new Vec3(fX.x * a.x + fY.x * a.y + fZ.x * a.z, fX.y * a.x + fY.y * a.y + fZ.y * a.z, fX.z * a.x + fY.z * a.y + fZ.z * a.z);
-        }
-
-        private BsdfSample eval_local(Vec3 wo, Vec3 wi, Vec3 wi_world)
-        {
-            float cosNI = Math.Clamp(wi.z, 0.0f, 1.0f);
-            float cosNO = Math.Clamp(wo.z, 0.0f, 1.0f);
-            if (cosNI <= 0.0f || cosNO <= 0.0f)
-            {
-                return new BsdfSample();
-            }
-            float cosIO = Math.Clamp(wo.dot(wi), -1.0f, 1.0f);
-            float s = cosIO - cosNI * cosNO;
-            float pdf = cosNI * (float)(1.0 / Math.PI);
-            float s2 = diff_roughness * diff_roughness;
-            float A = 1.0f - 0.50f * s2 / (s2 + 0.33f);
-            float B = 0.45f * s2 / (s2 + 0.09f);
-            float stinv = s > 0.0f ? s / MathF.Max(cosNI, cosNO) : 0.0f;
-            float f_ss = A + B * stinv;
-            return new BsdfSample(wi_world, diff_albedo * f_ss, pdf, 1.0f);
-        }
-
-        public override Color3 get_albedo(Vec3 wo)
-        {
-            return diff_albedo;
-        }
-
-        public override BsdfSample eval(Vec3 wo, Vec3 wi)
-        {
-            return eval_local(local(wo), local(wi), wi);
-        }
-
-        public override BsdfSample sample(Vec3 wo, float rx, float ry, float rz)
-        {
-            Vec3 wo_l = local(wo);
-            if (wo_l.z <= 0.0f)
-            {
-                return new BsdfSample();
-            }
-            Vec3 wi = sample_cos_hemisphere(rx, ry);
-            BsdfSample s = eval_local(wo_l, wi, wi);
-            s.wi = world(s.wi);
-            return s;
-        }
-
-        private static float fast_cos_quadrant(float x)
-        {
-            const float c1 = 0.99998736f;
-            const float c2 = -0.30837047f;
-            const float c3 = 0.01578646f;
-            const float c4 = -0.00029826362f;
-            float x2 = x * x;
-            float cp = c3 + c4 * x2;
-            cp = c2 + cp * x2;
-            cp = c1 + cp * x2;
-            return cp;
-        }
-
-        private static float fast_sin_quadrant(float x)
-        {
-            const float s1 = 0.7853975892066955566406250000000000f;
-            const float s2 = -0.0807407423853874206542968750000000f;
-            const float s3 = 0.0024843954015523195266723632812500f;
-            const float s4 = -0.0000341485538228880614042282104492f;
-            float x2 = x * x;
-            float sp = s3 + s4 * x2;
-            sp = s2 + sp * x2;
-            sp = s1 + sp * x2;
-            return sp * x;
-        }
-
-        private static Vec3 sample_cos_hemisphere(float randu, float randv)
-        {
-            float a = 2 * randu - 1;
-            float qa = MathF.Abs(a);
-            float b = 2 * randv - 1;
-            float qb = MathF.Abs(b);
-            float rad = qa > qb ? qa : qb;
-            float phi = qa > qb ? qb / qa : ((qa == qb) ? 1.0f : 2 - qa / qb);
-            float x = MathF.CopySign(rad * fast_cos_quadrant(phi), a);
-            float y = MathF.CopySign(rad * fast_sin_quadrant(phi), b);
-            return new Vec3(x, y, MathF.Sqrt(1 - rad * rad));
-        }
-    }
-
     public sealed class CompositeBSDF
     {
         private const int MaxEntries = 8;
@@ -978,6 +832,129 @@ namespace OSL
             reg(shadingsys, "refraction", ClosureIDs.REFRACTION_ID,
                 new ClosureParam[] { ClosureParam.CLOSURE_VECTOR_PARAM(0), ClosureParam.CLOSURE_FLOAT_PARAM(12), ClosureParam.CLOSURE_FINISH_PARAM(16, 4) });
             reg(shadingsys, "transparent", ClosureIDs.TRANSPARENT_ID, new ClosureParam[] { ClosureParam.CLOSURE_FINISH_PARAM(1, 1) });
+
+            // See MATERIALX_CLOSURES in stdosl.h
+            reg(shadingsys, "transparent_bsdf", MxClosureIDs.MX_TRANSPARENT_ID, new ClosureParam[] { ClosureParam.CLOSURE_FINISH_PARAM(1, 1) });
+            reg(shadingsys, "subsurface_bssrdf", MxClosureIDs.MX_SUBSURFACE_ID,
+                new ClosureParam[]
+                {
+                    ClosureParam.CLOSURE_VECTOR_PARAM(off(typeof(MxSubsurfaceParams), "N")), ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxSubsurfaceParams), "albedo")),
+                    ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxSubsurfaceParams), "radius")), ClosureParam.CLOSURE_FLOAT_PARAM(off(typeof(MxSubsurfaceParams), "anisotropy")),
+                    ClosureParam.CLOSURE_STRING_KEYPARAM(off(typeof(MxSubsurfaceParams), "label"), "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(MxSubsurfaceParams), 8)
+                });
+            reg(shadingsys, "uniform_edf", MxClosureIDs.MX_UNIFORM_EDF_ID,
+                new ClosureParam[]
+                {
+                    ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxUniformEdfParams), "emittance")),
+                    ClosureParam.CLOSURE_STRING_KEYPARAM(off(typeof(MxUniformEdfParams), "label"), "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(MxUniformEdfParams), 8)
+                });
+            reg(shadingsys, "layer", MxClosureIDs.MX_LAYER_ID,
+                new ClosureParam[]
+                {
+                    ClosureParam.CLOSURE_CLOSURE_PARAM(off(typeof(MxLayerParams), "top")), ClosureParam.CLOSURE_CLOSURE_PARAM(off(typeof(MxLayerParams), "baseclosure")),
+                    ClosureParam.CLOSURE_FINISH_PARAM(sizeof(MxLayerParams), 8)
+                });
+            reg(shadingsys, "anisotropic_vdf", MxClosureIDs.MX_ANISOTROPIC_VDF_ID,
+                new ClosureParam[]
+                {
+                    ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxAnisotropicVdfParams), "albedo")), ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxAnisotropicVdfParams), "extinction")),
+                    ClosureParam.CLOSURE_FLOAT_PARAM(off(typeof(MxAnisotropicVdfParams), "anisotropy")),
+                    ClosureParam.CLOSURE_STRING_KEYPARAM(off(typeof(MxAnisotropicVdfParams), "label"), "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(MxAnisotropicVdfParams), 8)
+                });
+            reg(shadingsys, "medium_vdf", MxClosureIDs.MX_MEDIUM_VDF_ID,
+                new ClosureParam[]
+                {
+                    ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxMediumVdfParams), "albedo")), ClosureParam.CLOSURE_FLOAT_PARAM(off(typeof(MxMediumVdfParams), "transmission_depth")),
+                    ClosureParam.CLOSURE_COLOR_PARAM(off(typeof(MxMediumVdfParams), "transmission_color")), ClosureParam.CLOSURE_FLOAT_PARAM(off(typeof(MxMediumVdfParams), "anisotropy")),
+                    ClosureParam.CLOSURE_FLOAT_PARAM(off(typeof(MxMediumVdfParams), "ior")), ClosureParam.CLOSURE_INT_PARAM(off(typeof(MxMediumVdfParams), "priority")),
+                    ClosureParam.CLOSURE_STRING_KEYPARAM(off(typeof(MxMediumVdfParams), "label"), "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(MxMediumVdfParams), 8)
+                });
+
+            // The BSDFs coming from BSDL: the parameters are those of the entry() of each lobe
+            reg(shadingsys, "conductor_bsdf", MxClosureIDs.MX_CONDUCTOR_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(ConductorData), "N"), vec(typeof(ConductorData), "U"), flt(typeof(ConductorData), "roughness_x"), flt(typeof(ConductorData), "roughness_y"),
+                    col(typeof(ConductorData), "IOR"), col(typeof(ConductorData), "extinction"), str(typeof(ConductorData), "distribution", null),
+                    flt(typeof(ConductorData), "thinfilm_thickness", "thinfilm_thickness"), flt(typeof(ConductorData), "thinfilm_ior", "thinfilm_ior"),
+                    ClosureParam.CLOSURE_FINISH_PARAM(sizeof(ConductorData), 8)
+                });
+            reg(shadingsys, "dielectric_bsdf", MxClosureIDs.MX_DIELECTRIC_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(DielectricData), "N"), vec(typeof(DielectricData), "U"), col(typeof(DielectricData), "refl_tint"), col(typeof(DielectricData), "refr_tint"),
+                    flt(typeof(DielectricData), "roughness_x"), flt(typeof(DielectricData), "roughness_y"), flt(typeof(DielectricData), "IOR"),
+                    str(typeof(DielectricData), "distribution", null), flt(typeof(DielectricData), "thinfilm_thickness", "thinfilm_thickness"),
+                    flt(typeof(DielectricData), "thinfilm_ior", "thinfilm_ior"), col(typeof(DielectricData), "absorption", "absorption"),
+                    flt(typeof(DielectricData), "dispersion", "dispersion"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(DielectricData), 8)
+                });
+            reg(shadingsys, "generalized_schlick_bsdf", MxClosureIDs.MX_GENERALIZED_SCHLICK_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(SchlickData), "N"), vec(typeof(SchlickData), "U"), col(typeof(SchlickData), "refl_tint"), col(typeof(SchlickData), "refr_tint"),
+                    flt(typeof(SchlickData), "roughness_x"), flt(typeof(SchlickData), "roughness_y"), col(typeof(SchlickData), "F0"), col(typeof(SchlickData), "F90"),
+                    flt(typeof(SchlickData), "exponent"), str(typeof(SchlickData), "distribution", null), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(SchlickData), 8)
+                });
+            reg(shadingsys, "sheen_bsdf", MxClosureIDs.MX_SHEEN_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(SheenData), "N"), col(typeof(SheenData), "albedo"), flt(typeof(SheenData), "roughness"), str(typeof(SheenData), "label", "label"),
+                    new ClosureParam(TypeDescs.TypeInt, off(typeof(SheenData), "mode"), "mode", sizeof(int)), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(SheenData), 8)
+                });
+            reg(shadingsys, "burley_diffuse_bsdf", MxClosureIDs.MX_BURLEY_DIFFUSE_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(BurleyDiffuseData), "N"), col(typeof(BurleyDiffuseData), "albedo"), flt(typeof(BurleyDiffuseData), "roughness"),
+                    str(typeof(BurleyDiffuseData), "label", "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(BurleyDiffuseData), 8)
+                });
+            reg(shadingsys, "oren_nayar_diffuse_bsdf", MxClosureIDs.MX_OREN_NAYAR_DIFFUSE_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(OrenNayarDiffuseData), "N"), col(typeof(OrenNayarDiffuseData), "albedo"), flt(typeof(OrenNayarDiffuseData), "roughness"),
+                    new ClosureParam(TypeDescs.TypeInt, off(typeof(OrenNayarDiffuseData), "energy_compensation"), "energy_compensation", sizeof(int)),
+                    str(typeof(OrenNayarDiffuseData), "label", "label"), ClosureParam.CLOSURE_FINISH_PARAM(sizeof(OrenNayarDiffuseData), 8)
+                });
+            reg(shadingsys, "translucent_bsdf", MxClosureIDs.MX_TRANSLUCENT_ID,
+                new ClosureParam[]
+                {
+                    vec(typeof(TranslucentData), "N"), col(typeof(TranslucentData), "albedo"), str(typeof(TranslucentData), "label", "label"),
+                    ClosureParam.CLOSURE_FINISH_PARAM(sizeof(TranslucentData), 8)
+                });
+        }
+
+        private static int off(Type type, string field)
+        {
+            return (int)Marshal.OffsetOf(type, field);
+        }
+
+        private static ClosureParam vec(Type type, string field)
+        {
+            return new ClosureParam(TypeDescs.TypeVector, off(type, field), null, 3 * sizeof(float));
+        }
+
+        private static ClosureParam col(Type type, string field)
+        {
+            return new ClosureParam(TypeDescs.TypeColor, off(type, field), null, 3 * sizeof(float));
+        }
+
+        private static ClosureParam col(Type type, string field, string key)
+        {
+            return new ClosureParam(TypeDescs.TypeColor, off(type, field), key, 3 * sizeof(float));
+        }
+
+        private static ClosureParam flt(Type type, string field)
+        {
+            return new ClosureParam(TypeDescs.TypeFloat, off(type, field), null, sizeof(float));
+        }
+
+        private static ClosureParam flt(Type type, string field, string key)
+        {
+            return new ClosureParam(TypeDescs.TypeFloat, off(type, field), key, sizeof(float));
+        }
+
+        private static ClosureParam str(Type type, string field, string key)
+        {
+            return new ClosureParam(TypeDescs.TypeString, off(type, field), key, sizeof(ulong));
         }
 
         private static void reg(ShadingSystem shadingsys, string name, int id, ClosureParam[] @params)
@@ -988,6 +965,116 @@ namespace OSL
         private static bool is_black(Color3 c)
         {
             return c.x == 0 && c.y == 0 && c.z == 0;
+        }
+
+        private static Color3 clamp3(Color3 c, float min, float max)
+        {
+            return new Color3(MathF.Max(min, MathF.Min(max, c.x)), MathF.Max(min, MathF.Min(max, c.y)), MathF.Max(min, MathF.Min(max, c.z)));
+        }
+
+        /// How much of the light the closures of a layer block: what is left of one minus the albedo of the lobes that can be told
+        private static Color3 evaluate_layer_opacity(ShaderGlobals* sg, float path_roughness, ClosureColor* closure)
+        {
+            // Null closure, the layer is fully transparent
+            if (closure == null)
+            {
+                return new Color3(0);
+            }
+            const int STACK_SIZE = 16;
+            int stack_idx = 0;
+            ClosureColor** ptr_stack = stackalloc ClosureColor*[STACK_SIZE];
+            Color3* weight_stack = stackalloc Color3[STACK_SIZE];
+            // The active branch is tracked apart from the contributions of the completed branches
+            Color3 branch_weight = new Color3(1.0f);
+            Color3 accumulated_weight = new Color3(0.0f);
+            while (closure != null)
+            {
+                switch (closure->id)
+                {
+                    case ClosureIDs.MUL:
+                        {
+                            ClosureMul* mul = ClosureColor.as_mul(closure);
+                            branch_weight *= mul->weight;
+                            closure = mul->closure;
+                            break;
+                        }
+                    case ClosureIDs.ADD:
+                        {
+                            ClosureAdd* add = ClosureColor.as_add(closure);
+                            ptr_stack[stack_idx] = add->closureB;
+                            weight_stack[stack_idx++] = branch_weight;
+                            closure = add->closureA;
+                            break;
+                        }
+                    default:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            Color3 w = new Color3(comp->w);
+                            void* data = ClosureComponent.data(comp);
+                            switch (comp->id)
+                            {
+                                case MxClosureIDs.MX_LAYER_ID:
+                                    {
+                                        MxLayerParams* srcparams = (MxLayerParams*)data;
+                                        closure = srcparams->top;
+                                        ptr_stack[stack_idx] = srcparams->baseclosure;
+                                        weight_stack[stack_idx++] = branch_weight * w;
+                                        break;
+                                    }
+                                case ClosureIDs.REFLECTION_ID:
+                                case ClosureIDs.FRESNEL_REFLECTION_ID:
+                                    {
+                                        Reflection bsdf = new Reflection(*(ReflectionParams*)data);
+                                        branch_weight *= w * bsdf.get_albedo(-sg->I);
+                                        closure = null;
+                                        break;
+                                    }
+                                case MxClosureIDs.MX_DIELECTRIC_ID:
+                                    {
+                                        MxDielectric d = new MxDielectric(*(DielectricData*)data, -sg->I, sg->backfacing != 0, path_roughness);
+                                        branch_weight *= w * (new Color3(1) - d.filter_o(-sg->I).toRGB(0));
+                                        closure = null;
+                                        break;
+                                    }
+                                case MxClosureIDs.MX_GENERALIZED_SCHLICK_ID:
+                                    {
+                                        SchlickData* params_ptr = (SchlickData*)data;
+                                        closure = null;
+                                        // Transmissive dielectrics are opaque
+                                        if (!is_black(params_ptr->refr_tint))
+                                        {
+                                            break;
+                                        }
+                                        MxGeneralizedSchlick d = new MxGeneralizedSchlick(*params_ptr, -sg->I, sg->backfacing != 0, path_roughness);
+                                        branch_weight *= w * (new Color3(1) - d.filter_o(-sg->I).toRGB(0));
+                                        break;
+                                    }
+                                case MxClosureIDs.MX_SHEEN_ID:
+                                    {
+                                        MxSheen d = new MxSheen(*(SheenData*)data, -sg->I, sg->backfacing != 0, path_roughness);
+                                        branch_weight *= w * (new Color3(1) - d.filter_o(-sg->I).toRGB(0));
+                                        closure = null;
+                                        break;
+                                    }
+                                default:
+                                    // Unhandled BSDFs are assumed to be opaque
+                                    closure = null;
+                                    break;
+                            }
+                            break;
+                        }
+                }
+                if (closure == null)
+                {
+                    accumulated_weight += branch_weight;
+                    if (stack_idx > 0)
+                    {
+                        closure = ptr_stack[--stack_idx];
+                        branch_weight = weight_stack[stack_idx];
+                    }
+                }
+            }
+            return accumulated_weight;
         }
 
         /// Walks the closure tree, adding the emission to result.Le and (unless only the light is wanted) a lobe per BSDF closure
@@ -1031,6 +1118,10 @@ namespace OSL
                             {
                                 result.Le += cw;
                             }
+                            else if (comp->id == MxClosureIDs.MX_UNIFORM_EDF_ID)
+                            {
+                                result.Le += cw * ((MxUniformEdfParams*)ClosureComponent.data(comp))->emittance;
+                            }
                             else if (!light_only)
                             {
                                 void* data = ClosureComponent.data(comp);
@@ -1041,8 +1132,17 @@ namespace OSL
                                         ok = result.bsdf.add_bsdf(cw, new Diffuse(*(DiffuseParams*)data, false));
                                         break;
                                     case ClosureIDs.OREN_NAYAR_ID:
-                                        ok = result.bsdf.add_bsdf(cw, new OrenNayarLobe(*(OrenNayarParams*)data, -sg->I));
-                                        break;
+                                        {
+                                            OrenNayarParams orig = *(OrenNayarParams*)data;
+                                            OrenNayarDiffuseData converted = new OrenNayarDiffuseData();
+                                            converted.N = orig.N;
+                                            converted.albedo = new Color3(1, 1, 1);
+                                            converted.roughness = orig.sigma;
+                                            converted.energy_compensation = 0;
+                                            converted.label = 0;
+                                            ok = result.bsdf.add_bsdf(cw, new MxOrenNayarDiffuse(converted, -sg->I, sg->backfacing != 0, path_roughness));
+                                            break;
+                                        }
                                     case ClosureIDs.TRANSLUCENT_ID:
                                         ok = result.bsdf.add_bsdf(cw, new Diffuse(*(DiffuseParams*)data, true));
                                         break;
@@ -1074,6 +1174,58 @@ namespace OSL
                                         break;
                                     case ClosureIDs.TRANSPARENT_ID:
                                         ok = result.bsdf.add_bsdf(cw, new Transparent());
+                                        break;
+                                    case MxClosureIDs.MX_OREN_NAYAR_DIFFUSE_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxOrenNayarDiffuse(*(OrenNayarDiffuseData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_BURLEY_DIFFUSE_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxBurleyDiffuse(*(BurleyDiffuseData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_DIELECTRIC_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxDielectric(*(DielectricData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_GENERALIZED_SCHLICK_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxGeneralizedSchlick(*(SchlickData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_CONDUCTOR_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxConductor(*(ConductorData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_TRANSLUCENT_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxTranslucent(*(TranslucentData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_TRANSPARENT_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new Transparent());
+                                        break;
+                                    case MxClosureIDs.MX_SUBSURFACE_ID:
+                                        {
+                                            // TODO in the C++ as well: no BSSRDF support, a diffuse lobe tinted by the albedo
+                                            MxSubsurfaceParams* srcparams = (MxSubsurfaceParams*)data;
+                                            DiffuseParams diffuse_params = new DiffuseParams();
+                                            diffuse_params.N = srcparams->N;
+                                            ok = result.bsdf.add_bsdf(cw * srcparams->albedo, new Diffuse(diffuse_params, false));
+                                            break;
+                                        }
+                                    case MxClosureIDs.MX_SHEEN_ID:
+                                        ok = result.bsdf.add_bsdf(cw, new MxSheen(*(SheenData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        break;
+                                    case MxClosureIDs.MX_LAYER_ID:
+                                        {
+                                            MxLayerParams* srcparams = (MxLayerParams*)data;
+                                            Color3 base_w = weight * (new Color3(1, 1, 1) - clamp3(evaluate_layer_opacity(sg, path_roughness, srcparams->top), 0.0f, 1.0f));
+                                            closure = srcparams->top;
+                                            weight = cw;
+                                            if (!is_black(base_w))
+                                            {
+                                                ptr_stack[stack_idx] = srcparams->baseclosure;
+                                                weight_stack[stack_idx++] = base_w;
+                                            }
+                                            ok = true;
+                                            break;
+                                        }
+                                    case MxClosureIDs.MX_ANISOTROPIC_VDF_ID:
+                                    case MxClosureIDs.MX_MEDIUM_VDF_ID:
+                                        // Media are not ported, the closure only has to be accepted
+                                        ok = true;
                                         break;
                                 }
                                 if (!ok)
