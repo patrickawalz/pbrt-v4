@@ -2714,6 +2714,10 @@ namespace pbrt
             {
                 shapes = Polygons.Create(name, renderFromObject, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "points")
+            {
+                shapes = Points.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "nupatch")
             {
                 shapes = NurbsPatch.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
