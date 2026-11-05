@@ -384,7 +384,9 @@ namespace OSL
                     {
                         ht = -ht;
                     }
-                    Vec3 Ht = V3.normalize(ht);
+                    // Imath normalize() works in place: ht is unit length from here on, so invHt2 below is 1 (as in the C++)
+                    ht = V3.normalize(ht);
+                    Vec3 Ht = ht;
                     float cosHO = Ht.dot(wo_l);
                     float Ft = 1.0f - Optics.fresnel_dielectric(cosHO, eta);
                     if (Ft > 0)

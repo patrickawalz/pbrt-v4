@@ -318,22 +318,22 @@ namespace OSL
         public static unsafe Dual2f fast_sin(Dual2f a)
         {
             float sina, cosa;
-            fmath.fast_sincos(a.x, &sina, &cosa);
+            jitmath.fast_sincos(a.x, &sina, &cosa);
             return dualfunc(a, sina, cosa);
         }
 
         public static unsafe Dual2f fast_cos(Dual2f a)
         {
             float sina, cosa;
-            fmath.fast_sincos(a.x, &sina, &cosa);
+            jitmath.fast_sincos(a.x, &sina, &cosa);
             return dualfunc(a, cosa, -sina);
         }
 
         // f(x) = tan(x), f'(x) = sec^2(x)
         public static Dual2f fast_tan(Dual2f a)
         {
-            float tana = fmath.fast_tan(a.x);
-            float cosa = fmath.fast_cos(a.x);
+            float tana = jitmath.fast_tan(a.x);
+            float cosa = jitmath.fast_cos(a.x);
             float sec2a = 1 / (cosa * cosa);
             return dualfunc(a, tana, sec2a);
         }
@@ -341,24 +341,24 @@ namespace OSL
         // f(x) = cosh(x), f'(x) = sinh(x)
         public static Dual2f fast_cosh(Dual2f a)
         {
-            float f = fmath.fast_cosh(a.x);
-            float df = fmath.fast_sinh(a.x);
+            float f = jitmath.fast_cosh(a.x);
+            float df = jitmath.fast_sinh(a.x);
             return dualfunc(a, f, df);
         }
 
         // f(x) = sinh(x), f'(x) = cosh(x)
         public static Dual2f fast_sinh(Dual2f a)
         {
-            float f = fmath.fast_sinh(a.x);
-            float df = fmath.fast_cosh(a.x);
+            float f = jitmath.fast_sinh(a.x);
+            float df = jitmath.fast_cosh(a.x);
             return dualfunc(a, f, df);
         }
 
         // f(x) = tanh(x), f'(x) = sech^2(x)
         public static Dual2f fast_tanh(Dual2f a)
         {
-            float tanha = fmath.fast_tanh(a.x);
-            float cosha = fmath.fast_cosh(a.x);
+            float tanha = jitmath.fast_tanh(a.x);
+            float cosha = jitmath.fast_cosh(a.x);
             float sech2a = 1.0f / (cosha * cosha);
             return dualfunc(a, tanha, sech2a);
         }
@@ -366,7 +366,7 @@ namespace OSL
         // f(x) = acos(x), f'(x) = -1/(sqrt(1 - x^2))
         public static Dual2f fast_acos(Dual2f a)
         {
-            float f = fmath.fast_acos(a.x);
+            float f = jitmath.fast_acos(a.x);
             float df = MathF.Abs(a.x) < 1.0f ? -1.0f / MathF.Sqrt(1.0f - a.x * a.x) : 0.0f;
             return dualfunc(a, f, df);
         }
@@ -374,7 +374,7 @@ namespace OSL
         // f(x) = asin(x), f'(x) = 1/(sqrt(1 - x^2))
         public static Dual2f fast_asin(Dual2f a)
         {
-            float f = fmath.fast_asin(a.x);
+            float f = jitmath.fast_asin(a.x);
             float df = MathF.Abs(a.x) < 1.0f ? 1.0f / MathF.Sqrt(1.0f - a.x * a.x) : 0.0f;
             return dualfunc(a, f, df);
         }
@@ -382,7 +382,7 @@ namespace OSL
         // f(x) = atan(x), f'(x) = 1/(1 + x^2)
         public static Dual2f fast_atan(Dual2f a)
         {
-            float f = fmath.fast_atan(a.x);
+            float f = jitmath.fast_atan(a.x);
             float df = 1.0f / (1.0f + a.x * a.x);
             return dualfunc(a, f, df);
         }
@@ -390,7 +390,7 @@ namespace OSL
         // f(x,y) = atan2(y,x); f'(x) = y x' / (x^2 + y^2), f'(y) = -x y' / (x^2 + y^2)
         public static Dual2f fast_atan2(Dual2f y, Dual2f x)
         {
-            float atan2xy = fmath.fast_atan2(y.x, x.x);
+            float atan2xy = jitmath.fast_atan2(y.x, x.x);
             float denom = (x.x == 0 && y.x == 0) ? 0.0f : 1.0f / (x.x * x.x + y.x * y.x);
             return dualfunc(y, x, atan2xy, -x.x * denom, y.x * denom);
         }
@@ -398,84 +398,84 @@ namespace OSL
         // f(x) = log(a), f'(x) = 1/x
         public static Dual2f fast_log(Dual2f a)
         {
-            float f = fmath.fast_log(a.x);
-            float df = a.x < fmath.float_min ? 0.0f : 1.0f / a.x;
+            float f = jitmath.fast_log(a.x);
+            float df = a.x < jitmath.float_min ? 0.0f : 1.0f / a.x;
             return dualfunc(a, f, df);
         }
 
         // pow(u,v) = < u^v, vu^(v-1) u' + log(u)u^v v' >
         public static Dual2f fast_safe_pow(Dual2f u, Dual2f v)
         {
-            float powuvm1 = fmath.fast_safe_pow(u.x, v.x - 1.0f);
+            float powuvm1 = jitmath.fast_safe_pow(u.x, v.x - 1.0f);
             float powuv = powuvm1 * u.x;
-            float logu = u.x > 0 ? fmath.fast_log(u.x) : 0.0f;
+            float logu = u.x > 0 ? jitmath.fast_log(u.x) : 0.0f;
             return dualfunc(u, v, powuv, v.x * powuvm1, logu * powuv);
         }
 
         // OSL::safe_pow(Dual, Dual): pow(u,v) = < u^v, vu^(v-1) u' + log(u)u^v v' >, via the identity u^v = u * u^(v-1)
         public static Dual2f safe_pow(Dual2f u, Dual2f v)
         {
-            float powuvm1 = fmath.safe_pow(u.x, v.x - 1.0f);
+            float powuvm1 = jitmath.safe_pow(u.x, v.x - 1.0f);
             float powuv = powuvm1 * u.x;
-            float logu = u.x > 0 ? fmath.safe_log(u.x) : 0.0f;
+            float logu = u.x > 0 ? jitmath.safe_log(u.x) : 0.0f;
             return dualfunc(u, v, powuv, v.x * powuvm1, logu * powuv);
         }
 
         // f(x) = log2(x), f'(x) = 1/(x*log2)
         public static Dual2f fast_log2(Dual2f a)
         {
-            float f = fmath.fast_log2(a.x);
-            float aln2 = a.x * (float)fmath.M_LN2;
-            float df = aln2 < fmath.float_min ? 0.0f : 1.0f / aln2;
+            float f = jitmath.fast_log2(a.x);
+            float aln2 = a.x * (float)jitmath.M_LN2;
+            float df = aln2 < jitmath.float_min ? 0.0f : 1.0f / aln2;
             return dualfunc(a, f, df);
         }
 
         // f(x) = log10(x), f'(x) = 1/(x*log10)
         public static Dual2f fast_log10(Dual2f a)
         {
-            float f = fmath.fast_log10(a.x);
-            float aln10 = a.x * (float)fmath.M_LN10;
-            float df = aln10 < fmath.float_min ? 0.0f : 1.0f / aln10;
+            float f = jitmath.fast_log10(a.x);
+            float aln10 = a.x * (float)jitmath.M_LN10;
+            float df = aln10 < jitmath.float_min ? 0.0f : 1.0f / aln10;
             return dualfunc(a, f, df);
         }
 
         // f(x) = e^x, f'(x) = e^x
         public static Dual2f fast_exp(Dual2f a)
         {
-            float f = fmath.fast_exp(a.x);
+            float f = jitmath.fast_exp(a.x);
             return dualfunc(a, f, f);
         }
 
         // f(x) = 2^x, f'(x) = (2^x)*log(2)
         public static Dual2f fast_exp2(Dual2f a)
         {
-            float f = fmath.fast_exp2(a.x);
-            return dualfunc(a, f, f * (float)fmath.M_LN2);
+            float f = jitmath.fast_exp2(a.x);
+            return dualfunc(a, f, f * (float)jitmath.M_LN2);
         }
 
         // f(x) = e^x - 1, f'(x) = e^x
         public static Dual2f fast_expm1(Dual2f a)
         {
-            float f = fmath.fast_expm1(a.x);
-            float df = fmath.fast_exp(a.x);
+            float f = jitmath.fast_expm1(a.x);
+            float df = jitmath.fast_exp(a.x);
             return dualfunc(a, f, df);
         }
 
         // f(x) = erf(x), f'(x) = (2e^(-x^2))/sqrt(pi)
         public static Dual2f fast_erf(Dual2f a)
         {
-            float f = fmath.fast_erf(a.x);
+            float f = jitmath.fast_erf(a.x);
             float two_over_sqrt_pi = 1.128379167095512573896158903f;
-            float df = fmath.fast_exp(-a.x * a.x) * two_over_sqrt_pi;
+            float df = jitmath.fast_exp(-a.x * a.x) * two_over_sqrt_pi;
             return dualfunc(a, f, df);
         }
 
         // f(x) = erfc(x), f'(x) = -(2e^(-x^2))/sqrt(pi)
         public static Dual2f fast_erfc(Dual2f a)
         {
-            float f = fmath.fast_erfc(a.x);
+            float f = jitmath.fast_erfc(a.x);
             float two_over_sqrt_pi = -1.128379167095512573896158903f;
-            float df = fmath.fast_exp(-a.x * a.x) * two_over_sqrt_pi;
+            float df = jitmath.fast_exp(-a.x * a.x) * two_over_sqrt_pi;
             return dualfunc(a, f, df);
         }
 
@@ -484,7 +484,7 @@ namespace OSL
         {
             if (a.x != 0.0f)
             {
-                float f = fmath.fast_cbrt(a.x);
+                float f = jitmath.fast_cbrt(a.x);
                 float df = 1.0f / (3.0f * f * f);
                 return dualfunc(a, f, df);
             }
@@ -535,7 +535,7 @@ namespace OSL
         public static Dual2f safe_fmod(Dual2f a, Dual2f b)
         {
             Dual2f result = a;
-            result.x = fmath.safe_fmod(a.x, b.x);
+            result.x = jitmath.safe_fmod(a.x, b.x);
             return result;
         }
 

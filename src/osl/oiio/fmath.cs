@@ -2,7 +2,9 @@
 //
 // Ported from OIIO 3.1's fmath.h with the same constants and operation order. Notes on bit-identity with the C++:
 //  * madd/msub/nmadd/nmsub are written as a separate multiply and add. GCC contracts them to an FMA only when the target has one (-mfma/AVX2); a
-//    default x86-64 / SSE build does not, which is what this matches. Define OSL_USE_FMA to use MathF.FusedMultiplyAdd instead.
+//    default x86-64 / SSE build does not, which is what this matches: it is the fmath of the host side C++ (texture system, constant folding, noise,
+//    testrender). The shading ops run as clang bitcode where madd() has "#pragma clang fp contract(fast)", so on an FMA host the JIT fuses them; that
+//    variant is jitmath (fmath_jit.cs, generated from this file by tools/gen_fmath_jit.py). Define OSL_USE_FMA to make this class fuse as well.
 //  * fast_rint uses round-to-nearest-even (std::rint), as an OIIO_SIMD_SSE >= 4 build does. An SSE2-only build rounds ties away from zero; the two
 //    differ only for arguments that are exactly k+0.5.
 //  * The non-fast (libm) functions map to MathF, which on Linux calls the C library's *f functions, but on other platforms may differ in the last bit.

@@ -16,7 +16,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(sin)
         public static float osl_sin_ff(float a)
         {
-            return fmath.fast_sin(a);
+            return jitmath.fast_sin(a);
         }
 
         public static void osl_sin_dfdf(void* r, void* a)
@@ -28,9 +28,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_sin(a->x);
-            r->y = fmath.fast_sin(a->y);
-            r->z = fmath.fast_sin(a->z);
+            r->x = jitmath.fast_sin(a->x);
+            r->y = jitmath.fast_sin(a->y);
+            r->z = jitmath.fast_sin(a->z);
         }
 
         public static void osl_sin_dvdv(void* r_, void* a_)
@@ -48,7 +48,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(cos)
         public static float osl_cos_ff(float a)
         {
-            return fmath.fast_cos(a);
+            return jitmath.fast_cos(a);
         }
 
         public static void osl_cos_dfdf(void* r, void* a)
@@ -60,9 +60,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_cos(a->x);
-            r->y = fmath.fast_cos(a->y);
-            r->z = fmath.fast_cos(a->z);
+            r->x = jitmath.fast_cos(a->x);
+            r->y = jitmath.fast_cos(a->y);
+            r->z = jitmath.fast_cos(a->z);
         }
 
         public static void osl_cos_dvdv(void* r_, void* a_)
@@ -80,7 +80,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(tan)
         public static float osl_tan_ff(float a)
         {
-            return fmath.fast_tan(a);
+            return jitmath.fast_tan(a);
         }
 
         public static void osl_tan_dfdf(void* r, void* a)
@@ -92,9 +92,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_tan(a->x);
-            r->y = fmath.fast_tan(a->y);
-            r->z = fmath.fast_tan(a->z);
+            r->x = jitmath.fast_tan(a->x);
+            r->y = jitmath.fast_tan(a->y);
+            r->z = jitmath.fast_tan(a->z);
         }
 
         public static void osl_tan_dvdv(void* r_, void* a_)
@@ -112,7 +112,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(asin)
         public static float osl_asin_ff(float a)
         {
-            return fmath.fast_asin(a);
+            return jitmath.fast_asin(a);
         }
 
         public static void osl_asin_dfdf(void* r, void* a)
@@ -124,9 +124,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_asin(a->x);
-            r->y = fmath.fast_asin(a->y);
-            r->z = fmath.fast_asin(a->z);
+            r->x = jitmath.fast_asin(a->x);
+            r->y = jitmath.fast_asin(a->y);
+            r->z = jitmath.fast_asin(a->z);
         }
 
         public static void osl_asin_dvdv(void* r_, void* a_)
@@ -144,7 +144,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(acos)
         public static float osl_acos_ff(float a)
         {
-            return fmath.fast_acos(a);
+            return jitmath.fast_acos(a);
         }
 
         public static void osl_acos_dfdf(void* r, void* a)
@@ -156,9 +156,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_acos(a->x);
-            r->y = fmath.fast_acos(a->y);
-            r->z = fmath.fast_acos(a->z);
+            r->x = jitmath.fast_acos(a->x);
+            r->y = jitmath.fast_acos(a->y);
+            r->z = jitmath.fast_acos(a->z);
         }
 
         public static void osl_acos_dvdv(void* r_, void* a_)
@@ -176,7 +176,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(atan)
         public static float osl_atan_ff(float a)
         {
-            return fmath.fast_atan(a);
+            return jitmath.fast_atan(a);
         }
 
         public static void osl_atan_dfdf(void* r, void* a)
@@ -188,9 +188,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_atan(a->x);
-            r->y = fmath.fast_atan(a->y);
-            r->z = fmath.fast_atan(a->z);
+            r->x = jitmath.fast_atan(a->x);
+            r->y = jitmath.fast_atan(a->y);
+            r->z = jitmath.fast_atan(a->z);
         }
 
         public static void osl_atan_dvdv(void* r_, void* a_)
@@ -208,7 +208,7 @@ namespace OSL
         // MAKE_BINARY_PERCOMPONENT_OP(atan2)
         public static float osl_atan2_fff(float a, float b)
         {
-            return fmath.fast_atan2(a, b);
+            return jitmath.fast_atan2(a, b);
         }
 
         public static void osl_atan2_dfdfdf(void* r, void* a, void* b)
@@ -231,9 +231,9 @@ namespace OSL
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
             Vec3* b = (Vec3*)b_;
-            r->x = fmath.fast_atan2(a->x, b->x);
-            r->y = fmath.fast_atan2(a->y, b->y);
-            r->z = fmath.fast_atan2(a->z, b->z);
+            r->x = jitmath.fast_atan2(a->x, b->x);
+            r->y = jitmath.fast_atan2(a->y, b->y);
+            r->z = jitmath.fast_atan2(a->z, b->z);
         }
 
         public static void osl_atan2_dvdvdv(void* r_, void* a_, void* b_)
@@ -264,7 +264,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(sinh)
         public static float osl_sinh_ff(float a)
         {
-            return fmath.fast_sinh(a);
+            return jitmath.fast_sinh(a);
         }
 
         public static void osl_sinh_dfdf(void* r, void* a)
@@ -276,9 +276,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_sinh(a->x);
-            r->y = fmath.fast_sinh(a->y);
-            r->z = fmath.fast_sinh(a->z);
+            r->x = jitmath.fast_sinh(a->x);
+            r->y = jitmath.fast_sinh(a->y);
+            r->z = jitmath.fast_sinh(a->z);
         }
 
         public static void osl_sinh_dvdv(void* r_, void* a_)
@@ -296,7 +296,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(cosh)
         public static float osl_cosh_ff(float a)
         {
-            return fmath.fast_cosh(a);
+            return jitmath.fast_cosh(a);
         }
 
         public static void osl_cosh_dfdf(void* r, void* a)
@@ -308,9 +308,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_cosh(a->x);
-            r->y = fmath.fast_cosh(a->y);
-            r->z = fmath.fast_cosh(a->z);
+            r->x = jitmath.fast_cosh(a->x);
+            r->y = jitmath.fast_cosh(a->y);
+            r->z = jitmath.fast_cosh(a->z);
         }
 
         public static void osl_cosh_dvdv(void* r_, void* a_)
@@ -328,7 +328,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(tanh)
         public static float osl_tanh_ff(float a)
         {
-            return fmath.fast_tanh(a);
+            return jitmath.fast_tanh(a);
         }
 
         public static void osl_tanh_dfdf(void* r, void* a)
@@ -340,9 +340,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_tanh(a->x);
-            r->y = fmath.fast_tanh(a->y);
-            r->z = fmath.fast_tanh(a->z);
+            r->x = jitmath.fast_tanh(a->x);
+            r->y = jitmath.fast_tanh(a->y);
+            r->z = jitmath.fast_tanh(a->z);
         }
 
         public static void osl_tanh_dvdv(void* r_, void* a_)
@@ -359,7 +359,7 @@ namespace OSL
 
         public static void osl_sincos_fff(float x, void* s_, void* c_)
         {
-            fmath.fast_sincos(x, (float*)s_, (float*)c_);
+            jitmath.fast_sincos(x, (float*)s_, (float*)c_);
         }
 
         public static void osl_sincos_dfdff(void* x_, void* s_, void* c_)
@@ -369,7 +369,7 @@ namespace OSL
             float* cosine = (float*)c_;
 
             float s_f, c_f;
-            fmath.fast_sincos(x->x, &s_f, &c_f);
+            jitmath.fast_sincos(x->x, &s_f, &c_f);
 
             float xdx = x->dx, xdy = x->dy; // x might be aliased
             *sine = new Dual2f(s_f, c_f * xdx, c_f * xdy);
@@ -383,7 +383,7 @@ namespace OSL
             Dual2f* cosine = (Dual2f*)c_;
 
             float s_f, c_f;
-            fmath.fast_sincos(x->x, &s_f, &c_f);
+            jitmath.fast_sincos(x->x, &s_f, &c_f);
             float xdx = x->dx, xdy = x->dy; // x might be aliased
             *sine = s_f;
             *cosine = new Dual2f(c_f, -s_f * xdx, -s_f * xdy);
@@ -396,7 +396,7 @@ namespace OSL
             Dual2f* cosine = (Dual2f*)c_;
 
             float s_f, c_f;
-            fmath.fast_sincos(x->x, &s_f, &c_f);
+            jitmath.fast_sincos(x->x, &s_f, &c_f);
             float xdx = x->dx, xdy = x->dy; // x might be aliased
             *sine = new Dual2f(s_f, c_f * xdx, c_f * xdy);
             *cosine = new Dual2f(c_f, -s_f * xdx, -s_f * xdy);
@@ -407,16 +407,16 @@ namespace OSL
             Vec3* x = (Vec3*)x_;
             Vec3* s = (Vec3*)s_;
             Vec3* c = (Vec3*)c_;
-            fmath.fast_sincos(x->x, &s->x, &c->x);
-            fmath.fast_sincos(x->y, &s->y, &c->y);
-            fmath.fast_sincos(x->z, &s->z, &c->z);
+            jitmath.fast_sincos(x->x, &s->x, &c->x);
+            jitmath.fast_sincos(x->y, &s->y, &c->y);
+            jitmath.fast_sincos(x->z, &s->z, &c->z);
         }
 
         // Helpers of the sincos shadeops that take a Dual2<Vec3>, one component at a time (the lambdas sincos_comp in llvm_ops.cpp)
         private static void sincos_comp_sine(Dual2f x, float* sine_val, float* sine_dx, float* sine_dy, float* cosine_val)
         {
             float s_f, c_f;
-            fmath.fast_sincos(x.x, &s_f, &c_f);
+            jitmath.fast_sincos(x.x, &s_f, &c_f);
             *sine_val = s_f;
             *sine_dx = c_f * x.dx;
             *sine_dy = c_f * x.dy;
@@ -426,7 +426,7 @@ namespace OSL
         private static void sincos_comp_cosine(Dual2f x, float* sine_val, float* cosine_val, float* cosine_dx, float* cosine_dy)
         {
             float s_f, c_f;
-            fmath.fast_sincos(x.x, &s_f, &c_f);
+            jitmath.fast_sincos(x.x, &s_f, &c_f);
             *sine_val = s_f;
             *cosine_val = c_f;
             *cosine_dx = -s_f * x.dx;
@@ -436,7 +436,7 @@ namespace OSL
         private static void sincos_comp_both(Dual2f x, float* sine_val, float* sine_dx, float* sine_dy, float* cosine_val, float* cosine_dx, float* cosine_dy)
         {
             float s_f, c_f;
-            fmath.fast_sincos(x.x, &s_f, &c_f);
+            jitmath.fast_sincos(x.x, &s_f, &c_f);
             *sine_val = s_f;
             *sine_dx = c_f * x.dx;
             *sine_dy = c_f * x.dy;
@@ -481,7 +481,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(log)
         public static float osl_log_ff(float a)
         {
-            return fmath.fast_log(a);
+            return jitmath.fast_log(a);
         }
 
         public static void osl_log_dfdf(void* r, void* a)
@@ -493,9 +493,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_log(a->x);
-            r->y = fmath.fast_log(a->y);
-            r->z = fmath.fast_log(a->z);
+            r->x = jitmath.fast_log(a->x);
+            r->y = jitmath.fast_log(a->y);
+            r->z = jitmath.fast_log(a->z);
         }
 
         public static void osl_log_dvdv(void* r_, void* a_)
@@ -513,7 +513,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(log2)
         public static float osl_log2_ff(float a)
         {
-            return fmath.fast_log2(a);
+            return jitmath.fast_log2(a);
         }
 
         public static void osl_log2_dfdf(void* r, void* a)
@@ -525,9 +525,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_log2(a->x);
-            r->y = fmath.fast_log2(a->y);
-            r->z = fmath.fast_log2(a->z);
+            r->x = jitmath.fast_log2(a->x);
+            r->y = jitmath.fast_log2(a->y);
+            r->z = jitmath.fast_log2(a->z);
         }
 
         public static void osl_log2_dvdv(void* r_, void* a_)
@@ -545,7 +545,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(log10)
         public static float osl_log10_ff(float a)
         {
-            return fmath.fast_log10(a);
+            return jitmath.fast_log10(a);
         }
 
         public static void osl_log10_dfdf(void* r, void* a)
@@ -557,9 +557,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_log10(a->x);
-            r->y = fmath.fast_log10(a->y);
-            r->z = fmath.fast_log10(a->z);
+            r->x = jitmath.fast_log10(a->x);
+            r->y = jitmath.fast_log10(a->y);
+            r->z = jitmath.fast_log10(a->z);
         }
 
         public static void osl_log10_dvdv(void* r_, void* a_)
@@ -577,7 +577,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(exp)
         public static float osl_exp_ff(float a)
         {
-            return fmath.fast_exp(a);
+            return jitmath.fast_exp(a);
         }
 
         public static void osl_exp_dfdf(void* r, void* a)
@@ -589,9 +589,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_exp(a->x);
-            r->y = fmath.fast_exp(a->y);
-            r->z = fmath.fast_exp(a->z);
+            r->x = jitmath.fast_exp(a->x);
+            r->y = jitmath.fast_exp(a->y);
+            r->z = jitmath.fast_exp(a->z);
         }
 
         public static void osl_exp_dvdv(void* r_, void* a_)
@@ -609,7 +609,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(exp2)
         public static float osl_exp2_ff(float a)
         {
-            return fmath.fast_exp2(a);
+            return jitmath.fast_exp2(a);
         }
 
         public static void osl_exp2_dfdf(void* r, void* a)
@@ -621,9 +621,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_exp2(a->x);
-            r->y = fmath.fast_exp2(a->y);
-            r->z = fmath.fast_exp2(a->z);
+            r->x = jitmath.fast_exp2(a->x);
+            r->y = jitmath.fast_exp2(a->y);
+            r->z = jitmath.fast_exp2(a->z);
         }
 
         public static void osl_exp2_dvdv(void* r_, void* a_)
@@ -641,7 +641,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(expm1)
         public static float osl_expm1_ff(float a)
         {
-            return fmath.fast_expm1(a);
+            return jitmath.fast_expm1(a);
         }
 
         public static void osl_expm1_dfdf(void* r, void* a)
@@ -653,9 +653,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_expm1(a->x);
-            r->y = fmath.fast_expm1(a->y);
-            r->z = fmath.fast_expm1(a->z);
+            r->x = jitmath.fast_expm1(a->x);
+            r->y = jitmath.fast_expm1(a->y);
+            r->z = jitmath.fast_expm1(a->z);
         }
 
         public static void osl_expm1_dvdv(void* r_, void* a_)
@@ -673,7 +673,7 @@ namespace OSL
         // MAKE_BINARY_PERCOMPONENT_OP(pow)
         public static float osl_pow_fff(float a, float b)
         {
-            return fmath.fast_safe_pow(a, b);
+            return jitmath.fast_safe_pow(a, b);
         }
 
         public static void osl_pow_dfdfdf(void* r, void* a, void* b)
@@ -696,9 +696,9 @@ namespace OSL
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
             Vec3* b = (Vec3*)b_;
-            r->x = fmath.fast_safe_pow(a->x, b->x);
-            r->y = fmath.fast_safe_pow(a->y, b->y);
-            r->z = fmath.fast_safe_pow(a->z, b->z);
+            r->x = jitmath.fast_safe_pow(a->x, b->x);
+            r->y = jitmath.fast_safe_pow(a->y, b->y);
+            r->z = jitmath.fast_safe_pow(a->z, b->z);
         }
 
         public static void osl_pow_dvdvdv(void* r_, void* a_, void* b_)
@@ -731,9 +731,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_safe_pow(a->x, b);
-            r->y = fmath.fast_safe_pow(a->y, b);
-            r->z = fmath.fast_safe_pow(a->z, b);
+            r->x = jitmath.fast_safe_pow(a->x, b);
+            r->y = jitmath.fast_safe_pow(a->y, b);
+            r->z = jitmath.fast_safe_pow(a->z, b);
         }
 
         public static void osl_pow_dvdvdf(void* r_, void* a_, void* b_)
@@ -763,7 +763,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(erf)
         public static float osl_erf_ff(float a)
         {
-            return fmath.fast_erf(a);
+            return jitmath.fast_erf(a);
         }
 
         public static void osl_erf_dfdf(void* r, void* a)
@@ -775,9 +775,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_erf(a->x);
-            r->y = fmath.fast_erf(a->y);
-            r->z = fmath.fast_erf(a->z);
+            r->x = jitmath.fast_erf(a->x);
+            r->y = jitmath.fast_erf(a->y);
+            r->z = jitmath.fast_erf(a->z);
         }
 
         public static void osl_erf_dvdv(void* r_, void* a_)
@@ -795,7 +795,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(erfc)
         public static float osl_erfc_ff(float a)
         {
-            return fmath.fast_erfc(a);
+            return jitmath.fast_erfc(a);
         }
 
         public static void osl_erfc_dfdf(void* r, void* a)
@@ -807,9 +807,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_erfc(a->x);
-            r->y = fmath.fast_erfc(a->y);
-            r->z = fmath.fast_erfc(a->z);
+            r->x = jitmath.fast_erfc(a->x);
+            r->y = jitmath.fast_erfc(a->y);
+            r->z = jitmath.fast_erfc(a->z);
         }
 
         public static void osl_erfc_dvdv(void* r_, void* a_)
@@ -827,7 +827,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(cbrt)
         public static float osl_cbrt_ff(float a)
         {
-            return fmath.fast_cbrt(a);
+            return jitmath.fast_cbrt(a);
         }
 
         public static void osl_cbrt_dfdf(void* r, void* a)
@@ -839,9 +839,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.fast_cbrt(a->x);
-            r->y = fmath.fast_cbrt(a->y);
-            r->z = fmath.fast_cbrt(a->z);
+            r->x = jitmath.fast_cbrt(a->x);
+            r->y = jitmath.fast_cbrt(a->y);
+            r->z = jitmath.fast_cbrt(a->z);
         }
 
         public static void osl_cbrt_dvdv(void* r_, void* a_)
@@ -859,7 +859,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(sqrt)
         public static float osl_sqrt_ff(float a)
         {
-            return fmath.safe_sqrt(a);
+            return jitmath.safe_sqrt(a);
         }
 
         public static void osl_sqrt_dfdf(void* r, void* a)
@@ -871,9 +871,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.safe_sqrt(a->x);
-            r->y = fmath.safe_sqrt(a->y);
-            r->z = fmath.safe_sqrt(a->z);
+            r->x = jitmath.safe_sqrt(a->x);
+            r->y = jitmath.safe_sqrt(a->y);
+            r->z = jitmath.safe_sqrt(a->z);
         }
 
         public static void osl_sqrt_dvdv(void* r_, void* a_)
@@ -891,7 +891,7 @@ namespace OSL
         // MAKE_UNARY_PERCOMPONENT_OP(inversesqrt)
         public static float osl_inversesqrt_ff(float a)
         {
-            return fmath.safe_inversesqrt(a);
+            return jitmath.safe_inversesqrt(a);
         }
 
         public static void osl_inversesqrt_dfdf(void* r, void* a)
@@ -903,9 +903,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.safe_inversesqrt(a->x);
-            r->y = fmath.safe_inversesqrt(a->y);
-            r->z = fmath.safe_inversesqrt(a->z);
+            r->x = jitmath.safe_inversesqrt(a->x);
+            r->y = jitmath.safe_inversesqrt(a->y);
+            r->z = jitmath.safe_inversesqrt(a->z);
         }
 
         public static void osl_inversesqrt_dvdv(void* r_, void* a_)
@@ -922,13 +922,13 @@ namespace OSL
 
         public static float osl_logb_ff(float x)
         {
-            return fmath.fast_logb(x);
+            return jitmath.fast_logb(x);
         }
 
         public static void osl_logb_vv(void* r, void* x_)
         {
             Vec3* x = (Vec3*)x_;
-            *(Vec3*)r = new Vec3(fmath.fast_logb(x->x), fmath.fast_logb(x->y), fmath.fast_logb(x->z));
+            *(Vec3*)r = new Vec3(jitmath.fast_logb(x->x), jitmath.fast_logb(x->y), jitmath.fast_logb(x->z));
         }
 
         public static float osl_floor_ff(float x)
@@ -1102,7 +1102,7 @@ namespace OSL
         // MAKE_BINARY_PERCOMPONENT_OP(fmod)
         public static float osl_fmod_fff(float a, float b)
         {
-            return fmath.safe_fmod(a, b);
+            return jitmath.safe_fmod(a, b);
         }
 
         public static void osl_fmod_dfdfdf(void* r, void* a, void* b)
@@ -1125,9 +1125,9 @@ namespace OSL
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
             Vec3* b = (Vec3*)b_;
-            r->x = fmath.safe_fmod(a->x, b->x);
-            r->y = fmath.safe_fmod(a->y, b->y);
-            r->z = fmath.safe_fmod(a->z, b->z);
+            r->x = jitmath.safe_fmod(a->x, b->x);
+            r->y = jitmath.safe_fmod(a->y, b->y);
+            r->z = jitmath.safe_fmod(a->z, b->z);
         }
 
         public static void osl_fmod_dvdvdv(void* r_, void* a_, void* b_)
@@ -1160,9 +1160,9 @@ namespace OSL
         {
             Vec3* r = (Vec3*)r_;
             Vec3* a = (Vec3*)a_;
-            r->x = fmath.safe_fmod(a->x, b);
-            r->y = fmath.safe_fmod(a->y, b);
-            r->z = fmath.safe_fmod(a->z, b);
+            r->x = jitmath.safe_fmod(a->x, b);
+            r->y = jitmath.safe_fmod(a->y, b);
+            r->z = jitmath.safe_fmod(a->z, b);
         }
 
         public static void osl_fmod_dvdvdf(void* r_, void* a_, void* b_)
@@ -1334,7 +1334,7 @@ namespace OSL
         internal static float Vec3Length(Vec3 v)
         {
             float length2 = v.x * v.x + v.y * v.y + v.z * v.z;
-            if (length2 < 2.0f * fmath.float_min)
+            if (length2 < 2.0f * jitmath.float_min)
             {
                 float absX = (v.x >= 0.0f) ? v.x : -v.x;
                 float absY = (v.y >= 0.0f) ? v.y : -v.y;

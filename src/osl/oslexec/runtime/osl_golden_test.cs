@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using OIIO;
 
 namespace OSL
@@ -150,6 +151,17 @@ namespace OSL
                 }
             }
 
+            // The sign and payload of a NaN result depend on the operand order the C++ compiler happened to choose for a commutative operation, which is not
+            // specified by IEEE 754 (and not observable by a shader), so two NaN words compare equal here; every other word has to match bit for bit
+            private static string canonical_nan(string row)
+            {
+                return Regex.Replace(row, "(?<![0-9a-f])[0-9a-f]{8}(?![0-9a-f])", delegate(Match m)
+                {
+                    float f = BitConverter.UInt32BitsToSingle(ParseHex(m.Value));
+                    return float.IsNaN(f) ? "7fc00000" : m.Value;
+                });
+            }
+
             // Returns a description of every row that does not reproduce, empty when all do
             public static string Check(string[] rows)
             {
@@ -159,7 +171,7 @@ namespace OSL
                 {
                     string prefix;
                     string got = prefix_row(rows[r], out prefix);
-                    if (got != rows[r])
+                    if (canonical_nan(got) != canonical_nan(rows[r]))
                     {
                         if (count < 10)
                         {
