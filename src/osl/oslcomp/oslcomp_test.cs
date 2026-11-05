@@ -59,15 +59,15 @@ namespace OSL
                 EXPECT_TRUE(errors.errors[0].Contains("test.osl:4: error: Syntax error: syntax error"));
             }
 
-            [TEST("OslComp", "WriteToNonOutputIsAWarningUnlessWerror")]
-            public static void OslComp_WriteToNonOutputIsAWarningUnlessWerror()
+            [TEST("OslComp", "WriteToNonOutputIsAnError")]
+            public static void OslComp_WriteToNonOutputIsAnError()
             {
                 string source = "shader t4(float a = 1)\n{\n  a = 2;\n}\n";
                 string oso;
                 BufferedErrorHandler errors;
-                EXPECT_TRUE(Compile(source, out oso, out errors));
-                EXPECT_TRUE(errors.warnings.Count == 1 && errors.warnings[0].Contains("cannot write to non-output parameter \"a\""));
-                EXPECT_TRUE(!Compile(source, out oso, out errors, new List<string> { "-Werror" }));
+                // The ast.cpp warning is followed by check_write_legality's error, as in the C++ (see testsuite oslc-err-write-nonoutput)
+                EXPECT_TRUE(!Compile(source, out oso, out errors));
+                EXPECT_TRUE(errors.errors.Count == 1 && errors.errors[0].Contains("test.osl:3: error: cannot write to non-output parameter \"a\""));
             }
 
             [TEST("OslComp", "StructsAndFunctions")]
@@ -78,7 +78,8 @@ namespace OSL
                 string oso;
                 BufferedErrorHandler errors;
                 EXPECT_TRUE(Compile(source, out oso, out errors));
-                EXPECT_TRUE(oso.Contains("%struct{\"P2\"} %structfields{a,b} %structfieldtypes{\"ff\"} %structnfields{2}"));
+                EXPECT_TRUE(oso.Contains("%mystruct{q} %mystructfield{0}"));
+                EXPECT_TRUE(oso.Contains("%mystruct{q} %mystructfield{1}"));
                 EXPECT_TRUE(oso.Contains("\tfunctioncall"));
             }
         }
