@@ -235,7 +235,8 @@ namespace OSL
             }
             if (matches_ci(s, p, "nan"))
             {
-                return float.NaN;
+                // strtof("nan") is a positive quiet NaN (float.NaN in .NET has the sign bit set); "-nan" sets the sign
+                return BitConverter.UInt32BitsToSingle(neg ? 0xFFC00000u : 0x7FC00000u);
             }
             if (p + 1 < s.Length && s[p] == (byte)'0' && (s[p + 1] == (byte)'x' || s[p + 1] == (byte)'X'))
             {
