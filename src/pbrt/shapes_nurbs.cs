@@ -1366,6 +1366,14 @@ namespace pbrt
                 List<int> orders = parameters.GetIntArray("trimorder"), counts = parameters.GetIntArray("trimn");
                 List<Float> knots = parameters.GetFloatArray("trimknots"), mins = parameters.GetFloatArray("trimmin"), maxs = parameters.GetFloatArray("trimmax");
                 List<Float> tu = parameters.GetFloatArray("trimu"), tv = parameters.GetFloatArray("trimv"), tw = parameters.GetFloatArray("trimw");
+                if (tw.Count == 0)
+                {
+                    // non-rational trim curves: the weights are 1
+                    for (int i = 0; i < tu.Count; ++i)
+                    {
+                        tw.Add(1);
+                    }
+                }
                 if (orders.Count != total || counts.Count != total || mins.Count != total || maxs.Count != total)
                 {
                     pbrt.Error(loc, "nupatch: \"trimorder\", \"trimn\", \"trimmin\" and \"trimmax\" must hold one value per trim curve.");
