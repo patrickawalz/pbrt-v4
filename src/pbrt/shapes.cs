@@ -2710,6 +2710,10 @@ namespace pbrt
             {
                 shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
             }
+            else if (name == "polygon" || name == "generalpolygon" || name == "pointspolygons" || name == "pointsgeneralpolygons")
+            {
+                shapes = Polygons.Create(name, renderFromObject, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "bilinearmesh")
             {
                 BilinearPatchMesh mesh = BilinearPatch.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
