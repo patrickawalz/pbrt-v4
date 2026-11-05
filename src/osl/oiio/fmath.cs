@@ -99,18 +99,29 @@ namespace OIIO
                  + (float)(r * (float)((float)(t1 * (float)((float)(v4 * s1) + (float)(v5 * s))) + (float)(t * (float)((float)(v6 * s1) + (float)(v7 * s)))));
         }
 
+        // A float to int conversion with the x86 behaviour of cvttss2si, which the C++ gets: NaN and out of range values give INT_MIN (C# saturates)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int float_to_int(float x)
+        {
+            if (!(x >= -2147483648.0f && x < 2147483648.0f))
+            {
+                return int.MinValue;
+            }
+            return (int)x;
+        }
+
         // Return floor(x) cast to an int.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int ifloor(float x)
         {
-            return (int)MathF.Floor(x);
+            return float_to_int(MathF.Floor(x));
         }
 
         // Round to nearest integer, returning as an int (used by the sin/cos/tan range reduction)
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int fast_rint(float x)
         {
-            return (int)MathF.Round(x, MidpointRounding.ToEven);
+            return float_to_int(MathF.Round(x, MidpointRounding.ToEven));
         }
 
         // Safe (clamping) sqrt: safe_sqrt(x<0) returns 0, not NaN.
@@ -133,7 +144,7 @@ namespace OIIO
         {
             if (b != 0.0f)
             {
-                int N = (int)(a / b);
+                int N = float_to_int(a / b);
                 return a - (float)(N * b);
             }
             return 0.0f;
