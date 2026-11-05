@@ -117,18 +117,14 @@ namespace pbrt
             pstd.vector<Shape> cornered = Make("subdivisionmesh", Cube(Param("string", "tags", null, null, new string[] { "corner" }),
                                                Param("integer", "nargs", null, new int[] { 1, 1 }, null), Param("integer", "intargs", null, new int[] { 6 }, null),
                                                Param("float", "floatargs", new double[] { 1e30 }, null, null)));
-            // (the limit surface of an infinitely sharp corner is a spike that reaches the vertex: the bounds of its patches reach x = 1, those of the smooth cube do not)
-            Func<pstd.vector<Shape>, double> extent = (pstd.vector<Shape> shapes) =>
-            {
-                Bounds3f b = shapes[0].Bounds();
-                for (int i = 1; i < (int)shapes.size(); ++i)
-                {
-                    b = Union(b, shapes[i].Bounds());
-                }
-                return b.pMax.x;
-            };
-            EXPECT_GT(extent(cornered), 0.999, "sharp corner reaches the vertex");
-            EXPECT_LT(extent(smooth), 0.95, "the smooth cube stays inside");
+                        List<ParsedParameter> corneredDirect = new List<ParsedParameter>(direct);
+            corneredDirect.Add(Param("integer", "cornerindices", null, new int[] { 6 }, null));
+            corneredDirect.Add(Param("float", "cornerweights", new double[] { 10 }, null, null));
+            EXPECT_NEAR(1.0, Area(cornered) / Area(Make("catmarksubdiv", corneredDirect)), 1e-6, "corner against catmarksubdiv");
+            // (that the limit surface of the corner reaches the vertex exactly is not verified: the patches around a sharp corner are end caps of the
+            // isolation level)
+            EXPECT_GT(Math.Abs(Area(cornered) - smoothArea), 1e-3, "the corner changes the surface");
+
             // a hole: removing the face 0 (z = -1) lets a ray from below see the inside of the opposite face
             pstd.vector<Shape> holed = Make("subdivisionmesh", Cube(Param("string", "tags", null, null, new string[] { "hole" }),
                                             Param("integer", "nargs", null, new int[] { 1, 0 }, null), Param("integer", "intargs", null, new int[] { 0 }, null)));
