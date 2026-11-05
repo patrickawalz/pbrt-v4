@@ -362,7 +362,7 @@ namespace OSL
             {
                 return found;
             }
-            found = new Regex(r.@string(), RegexOptions.CultureInvariant);
+            found = new Regex(EcmaRegex.translate(r.@string()), RegexOptions.CultureInvariant);
             m_regex_map[r] = found;
             lock (m_shadingsys.m_stat_mutex)
             {
