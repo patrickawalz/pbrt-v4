@@ -971,6 +971,7 @@ namespace OSL
             Color3 path_radiance = new Color3(0, 0, 0);
             uint prev_id = ~0u;
             float bsdf_pdf = inf;  // camera ray has only one possible direction
+            MediumStack medium_stack = new MediumStack();
 
             for (int b = 0; b <= max_bounces; b++)
             {
@@ -997,6 +998,11 @@ namespace OSL
                         }
                     }
                     break;
+                }
+
+                if (medium_stack.integrate(r, sampler, ref hit, ref path_weight, ref path_radiance, ref bsdf_pdf))
+                {
+                    continue;
                 }
 
                 // construct a shader globals for the hit point
@@ -1043,7 +1049,7 @@ namespace OSL
                 shadingsys.execute(ctx, m_shaders[shaderID].surf, ref sg);
                 ShadingResult result = new ShadingResult();
                 bool last_bounce = b == max_bounces;
-                ShadingClosures.process_closure(&sg, r.roughness, result, sg.Ci, last_bounce);
+                ShadingClosures.process_closure(&sg, r.roughness, result, medium_stack, sg.Ci, last_bounce);
 
                 int lightprims_size = m_lightprims.Count;
 
@@ -1134,7 +1140,7 @@ namespace OSL
                                 // execute the light shader (for emissive closures only)
                                 shadingsys.execute(ctx, m_shaders[lightShaderID].surf, ref light_sg);
                                 ShadingResult light_result = new ShadingResult();
-                                ShadingClosures.process_closure(&light_sg, r.roughness, light_result, light_sg.Ci, true);
+                                ShadingClosures.process_closure(&light_sg, r.roughness, light_result, medium_stack, light_sg.Ci, true);
                                 // accumulate contribution
                                 path_radiance += contrib * light_result.Le;
                             }
@@ -1152,6 +1158,21 @@ namespace OSL
                 // Just simply use roughness as spread slope
                 r.spread = MathF.Max(r.spread, p.roughness);
                 r.roughness = p.roughness;
+
+                // has the sampled dir crossed the surface?
+                bool transmitted = sg.Ng.dot(p.wi) < 0;
+                if (transmitted)
+                {
+                    if (sg.backfacing == 0)
+                    {
+                        // entering and crossing the surface
+                        medium_stack.add_medium(result.medium_data);
+                    }
+                    else
+                    {
+                        medium_stack.pop_medium();
+                    }
+                }
 
                 if (!(path_weight.x > 0) && !(path_weight.y > 0) && !(path_weight.z > 0))
                 {

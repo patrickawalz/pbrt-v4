@@ -195,6 +195,23 @@ namespace OIIO
             return clamp(u, -1.0f, 1.0f);
         }
 
+        /// Fast approximate sin(x * pi), maximum absolute error 0.000918954611
+        public static float fast_sinpi(float x)
+        {
+            // Strip the integral part off, so the domain is [-1,1]
+            float z = x - ((x + 25165824.0f) - 25165824.0f);
+            float y = z - z * MathF.Abs(z);
+            const float Q = 3.10396624f;
+            const float P = 3.584135056f;
+            return y * (Q + P * MathF.Abs(y));
+        }
+
+        /// Fast approximate cos(x * pi)
+        public static float fast_cospi(float x)
+        {
+            return fast_sinpi(x + 0.5f);
+        }
+
         public static unsafe void fast_sincos(float x, float* sine, float* cosine)
         {
             int q = fast_rint((float)(x * (float)M_1_PI));

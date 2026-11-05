@@ -792,6 +792,10 @@ namespace OSL
     {
         public Color3 Le = new Color3(0, 0, 0);
         public CompositeBSDF bsdf = new CompositeBSDF();
+
+        // Tracks medium properties for both volumetric and dielectric surface boundaries. The priority is used to resolve a winner against neighboring
+        // dielectric boundaries in process_closure. For false intersections, the winner's IOR is used and surface shading is skipped.
+        public MediumParams medium_data = new MediumParams();
     }
 
     public static unsafe class ShadingClosures
@@ -1078,8 +1082,8 @@ namespace OSL
         }
 
         /// Walks the closure tree, adding the emission to result.Le and (unless only the light is wanted) a lobe per BSDF closure
-        public static void process_bsdf_closure(ShaderGlobals* sg, float path_roughness, ShadingResult result, ClosureColor* closure, Color3 w,
-                                                bool light_only)
+        public static void process_bsdf_closure(ShaderGlobals* sg, float path_roughness, ShadingResult result, MediumStack medium_stack,
+                                                ClosureColor* closure, Color3 w, bool light_only)
         {
             if (closure == null)
             {
@@ -1182,10 +1186,24 @@ namespace OSL
                                         ok = result.bsdf.add_bsdf(cw, new MxBurleyDiffuse(*(BurleyDiffuseData*)data, -sg->I, sg->backfacing != 0, path_roughness));
                                         break;
                                     case MxClosureIDs.MX_DIELECTRIC_ID:
-                                        ok = result.bsdf.add_bsdf(cw, new MxDielectric(*(DielectricData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        if (medium_stack.false_intersection_with(result.medium_data))
+                                        {
+                                            ok = result.bsdf.add_bsdf(cw, new Transparent());
+                                        }
+                                        else
+                                        {
+                                            ok = result.bsdf.add_bsdf(cw, new MxDielectric(*(DielectricData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        }
                                         break;
                                     case MxClosureIDs.MX_GENERALIZED_SCHLICK_ID:
-                                        ok = result.bsdf.add_bsdf(cw, new MxGeneralizedSchlick(*(SchlickData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        if (medium_stack.false_intersection_with(result.medium_data))
+                                        {
+                                            ok = result.bsdf.add_bsdf(cw, new Transparent());
+                                        }
+                                        else
+                                        {
+                                            ok = result.bsdf.add_bsdf(cw, new MxGeneralizedSchlick(*(SchlickData*)data, -sg->I, sg->backfacing != 0, path_roughness));
+                                        }
                                         break;
                                     case MxClosureIDs.MX_CONDUCTOR_ID:
                                         ok = result.bsdf.add_bsdf(cw, new MxConductor(*(ConductorData*)data, -sg->I, sg->backfacing != 0, path_roughness));
@@ -1244,9 +1262,165 @@ namespace OSL
             }
         }
 
-        public static void process_closure(ShaderGlobals* sg, float path_roughness, ShadingResult result, ClosureColor* Ci, bool light_only)
+        /// Walks the closure tree for the media: the volume closures set the medium the surface leads into, the refractive MaterialX closures its IOR
+        public static void process_medium_closure(ShaderGlobals* sg, float path_roughness, ShadingResult result, MediumStack medium_stack, ClosureColor* closure,
+                                                  Color3 w)
         {
-            process_bsdf_closure(sg, path_roughness, result, Ci, new Color3(1), light_only);
+            if (closure == null)
+            {
+                return;
+            }
+            const int STACK_SIZE = 16;
+            int stack_idx = 0;
+            ClosureColor** ptr_stack = stackalloc ClosureColor*[STACK_SIZE];
+            Color3* weight_stack = stackalloc Color3[STACK_SIZE];
+            Color3 weight = w;
+            while (closure != null)
+            {
+                switch (closure->id)
+                {
+                    case ClosureIDs.MUL:
+                        {
+                            ClosureMul* mul = ClosureColor.as_mul(closure);
+                            weight *= mul->weight;
+                            closure = mul->closure;
+                            break;
+                        }
+                    case ClosureIDs.ADD:
+                        {
+                            ClosureAdd* add = ClosureColor.as_add(closure);
+                            weight_stack[stack_idx] = weight;
+                            ptr_stack[stack_idx++] = add->closureB;
+                            closure = add->closureA;
+                            break;
+                        }
+                    case MxClosureIDs.MX_LAYER_ID:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            MxLayerParams* layer_params = (MxLayerParams*)ClosureComponent.data(comp);
+                            Color3 base_w = weight * (new Color3(1) - clamp3(evaluate_layer_opacity(sg, path_roughness, layer_params->top), 0.0f, 1.0f));
+                            closure = layer_params->top;
+                            ptr_stack[stack_idx] = layer_params->baseclosure;
+                            weight_stack[stack_idx++] = base_w;
+                            break;
+                        }
+                    case MxClosureIDs.MX_ANISOTROPIC_VDF_ID:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            Color3 cw = weight * new Color3(comp->w);
+                            MxAnisotropicVdfParams* vdf = (MxAnisotropicVdfParams*)ClosureComponent.data(comp);
+                            result.medium_data.sigma_t = cw * vdf->extinction;
+                            result.medium_data.sigma_s = vdf->albedo * result.medium_data.sigma_t;
+                            result.medium_data.medium_g = vdf->anisotropy;
+                            result.medium_data.priority = 0;  // always intersect
+
+                            // clamp sigma_s to be less than sigma_t
+                            result.medium_data.sigma_s = new Color3(MathF.Min(result.medium_data.sigma_s.x, result.medium_data.sigma_t.x),
+                                                                    MathF.Min(result.medium_data.sigma_s.y, result.medium_data.sigma_t.y),
+                                                                    MathF.Min(result.medium_data.sigma_s.z, result.medium_data.sigma_t.z));
+                            closure = null;
+                            break;
+                        }
+                    case MxClosureIDs.MX_MEDIUM_VDF_ID:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            Color3 cw = weight * new Color3(comp->w);
+                            MxMediumVdfParams* vdf = (MxMediumVdfParams*)ClosureComponent.data(comp);
+
+                            // when both albedo and transmission_color are black, this is a vacuum medium used only to carry the IOR for dielectric surfaces
+                            bool is_vacuum = is_black(vdf->albedo) && is_black(vdf->transmission_color);
+                            if (is_vacuum)
+                            {
+                                result.medium_data.sigma_t = new Color3(0.0f);
+                                result.medium_data.sigma_s = new Color3(0.0f);
+                            }
+                            else
+                            {
+                                const float epsilon = 1e-10f;
+                                Color3 t_color = vdf->transmission_color;
+                                result.medium_data.sigma_t = new Color3(-fmath.fast_log(fmax(t_color.x, epsilon)), -fmath.fast_log(fmax(t_color.y, epsilon)),
+                                                                        -fmath.fast_log(fmax(t_color.z, epsilon)));
+                                result.medium_data.sigma_t *= cw / vdf->transmission_depth;
+                                result.medium_data.sigma_s = vdf->albedo * result.medium_data.sigma_t;
+
+                                // clamp sigma_s to be less than sigma_t
+                                result.medium_data.sigma_s = new Color3(MathF.Min(result.medium_data.sigma_s.x, result.medium_data.sigma_t.x),
+                                                                        MathF.Min(result.medium_data.sigma_s.y, result.medium_data.sigma_t.y),
+                                                                        MathF.Min(result.medium_data.sigma_s.z, result.medium_data.sigma_t.z));
+                            }
+                            result.medium_data.medium_g = vdf->anisotropy;
+                            result.medium_data.refraction_ior = sg->backfacing != 0 ? 1.0f / vdf->ior : vdf->ior;
+                            result.medium_data.priority = vdf->priority;
+                            closure = null;
+                            break;
+                        }
+                    case MxClosureIDs.MX_DIELECTRIC_ID:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            DielectricData* dielectric = (DielectricData*)ClosureComponent.data(comp);
+                            if (!is_black(weight * new Color3(comp->w) * dielectric->refr_tint))
+                            {
+                                float new_ior = sg->backfacing != 0 ? 1.0f / dielectric->IOR : dielectric->IOR;
+                                result.medium_data.refraction_ior = new_ior;
+                                MediumParams current_params = medium_stack.get_current_params();
+                                if (current_params != null && result.medium_data.priority <= current_params.priority)
+                                {
+                                    result.medium_data.refraction_ior = current_params.refraction_ior;
+                                }
+                            }
+                            closure = null;
+                            break;
+                        }
+                    case MxClosureIDs.MX_GENERALIZED_SCHLICK_ID:
+                        {
+                            ClosureComponent* comp = ClosureColor.as_comp(closure);
+                            SchlickData* schlick = (SchlickData*)ClosureComponent.data(comp);
+                            if (!is_black(weight * new Color3(comp->w) * schlick->refr_tint))
+                            {
+                                float avg_F0 = fmin(fmax((schlick->F0.x + schlick->F0.y + schlick->F0.z) / 3.0f, 0.0f), 0.99f);
+                                float sqrt_F0 = MathF.Sqrt(avg_F0);
+                                float ior = (1 + sqrt_F0) / (1 - sqrt_F0);
+                                float new_ior = sg->backfacing != 0 ? 1.0f / ior : ior;
+                                result.medium_data.refraction_ior = new_ior;
+                                MediumParams current_params = medium_stack.get_current_params();
+                                if (current_params != null && result.medium_data.priority <= current_params.priority)
+                                {
+                                    result.medium_data.refraction_ior = current_params.refraction_ior;
+                                }
+                            }
+                            closure = null;
+                            break;
+                        }
+                    default:
+                        closure = null;
+                        break;
+                }
+                if (closure == null && stack_idx > 0)
+                {
+                    closure = ptr_stack[--stack_idx];
+                    weight = weight_stack[stack_idx];
+                }
+            }
+        }
+
+        private static float fmax(float a, float b)
+        {
+            return (a < b) ? b : a;
+        }
+
+        private static float fmin(float a, float b)
+        {
+            return (b < a) ? b : a;
+        }
+
+        public static void process_closure(ShaderGlobals* sg, float path_roughness, ShadingResult result, MediumStack medium_stack, ClosureColor* Ci,
+                                           bool light_only)
+        {
+            if (!light_only)
+            {
+                process_medium_closure(sg, path_roughness, result, medium_stack, Ci, new Color3(1));
+            }
+            process_bsdf_closure(sg, path_roughness, result, medium_stack, Ci, new Color3(1), light_only);
         }
 
         public static Vec3 process_background_closure(ClosureColor* closure)
