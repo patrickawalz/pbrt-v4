@@ -242,8 +242,7 @@ namespace OSL
                 }
                 else if (errormessage != null)
                 {
-                    // gettextureinfo failed but did not provide an error, so none should be emitted
-                    *errormessage = 0UL;
+                    *errormessage = Strings.unknown.hash();
                 }
             }
         }
