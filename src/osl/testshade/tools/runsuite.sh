@@ -1,0 +1,36 @@
+#!/bin/bash
+# (not in OpenShadingLanguage) Runs OSL testsuite directories against the C# testshade with the stock runtest.py.
+# usage: runsuite.sh [-j N] [name ...]    (no names: every directory with a run.py)  Results: /tmp/tsuite/results.txt
+export LD_LIBRARY_PATH=/tmp/osl-ref/lib:/tmp/osl-ref/oiio-install/lib:/tmp/osl-ref/ocio-install/lib
+SUITE=/home/claude/OpenShadingLanguage/testsuite
+TOOLS=$(cd "$(dirname "$0")" && pwd)
+TS=${TS_DLL:-$TOOLS/../bin/Release/net10.0/testshade.dll}
+export OSL_TESTSUITE_ROOT=$SUITE
+export OSL_SOURCE_DIR=/home/claude/OpenShadingLanguage
+mkdir -p /tmp/tsuite/bin
+cat > /tmp/tsuite/bin/testshade <<EOS
+#!/bin/bash
+exec dotnet $TS "\$@"
+EOS
+cat > /tmp/tsuite/bin/oiiotool <<EOS
+#!/bin/bash
+exec python3 $TOOLS/oiiotool_shim.py "\$@"
+EOS
+chmod +x /tmp/tsuite/bin/*
+export OSL_TESTSHADE_NAME=/tmp/tsuite/bin/testshade
+export PATH=/tmp/tsuite/bin:$PATH
+J=8
+if [ "$1" = "-j" ]; then J=$2; shift 2; fi
+if [ $# -gt 0 ]; then NAMES="$@"; else NAMES=$(cd $SUITE && for d in */; do d=${d%/}; [ -f $d/run.py ] && echo $d; done); fi
+run_one() {
+  n=$1
+  w=/tmp/tsuite/$n
+  rm -rf $w; mkdir -p $w
+  (cd $w && timeout ${TS_TIMEOUT:-300} python3 $SUITE/runtest.py $w /tmp/osl-ref > $w/runtest.log 2>&1)
+  rc=$?
+  if [ $rc -eq 0 ]; then echo "PASS $n"; else echo "FAIL $n ($rc)"; fi
+}
+export -f run_one
+export SUITE
+echo $NAMES | tr ' ' '\n' | xargs -P $J -I{} bash -c 'run_one {}' | sort -k2 > /tmp/tsuite/results.txt
+grep -c PASS /tmp/tsuite/results.txt | sed 's/^/pass: /'; grep -c FAIL /tmp/tsuite/results.txt | sed 's/^/fail: /'
