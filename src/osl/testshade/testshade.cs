@@ -1166,6 +1166,44 @@ namespace OSL.TestShade
             }
         }
 
+        private static int s_next_thread_index = 0;
+        [ThreadStatic]
+        private static int t_thread_index;
+        [ThreadStatic]
+        private static bool t_thread_index_set;
+
+        /// The index of the calling thread among the threads that shade (the first thread to ask is 0), as testshade.cpp's this_threads_index
+        private static int this_threads_index()
+        {
+            if (!t_thread_index_set)
+            {
+                t_thread_index = System.Threading.Interlocked.Increment(ref s_next_thread_index) - 1;
+                t_thread_index_set = true;
+            }
+            return t_thread_index;
+        }
+
+        /// Shade the whole image on num_threads threads: the rows are shared out in chunks (OIIO::ImageBufAlgo::parallel_image splits along y)
+        private static void shade_image_parallel(SimpleRenderer r, ShaderGroup group, int xbegin, int xend, int ybegin, int yend, bool save)
+        {
+            int nthreads = num_threads;
+            int rows = yend - ybegin;
+            if (nthreads <= 1 || rows <= 1)
+            {
+                shade_region(r, group, xbegin, xend, ybegin, yend, save);
+                return;
+            }
+            int chunks = Math.Min(rows, nthreads * 4);
+            System.Threading.Tasks.ParallelOptions options = new System.Threading.Tasks.ParallelOptions();
+            options.MaxDegreeOfParallelism = nthreads;
+            System.Threading.Tasks.Parallel.For(0, chunks, options, delegate (int chunk)
+            {
+                int y0 = ybegin + (int)((long)rows * chunk / chunks);
+                int y1 = ybegin + (int)((long)rows * (chunk + 1) / chunks);
+                shade_region(r, group, xbegin, xend, y0, y1, save);
+            });
+        }
+
         private static void shade_region(SimpleRenderer r, ShaderGroup group, int xbegin, int xend, int ybegin, int yend, bool save)
         {
             PerThreadInfo thread_info = shadingsys.create_thread_info();
@@ -1179,7 +1217,7 @@ namespace OSL.TestShade
                 for (int x = xbegin; x < xend; ++x, ++shadeindex)
                 {
                     setup_shaderglobals(ref shaderglobals, x, y);
-                    int thread_index = 0;
+                    int thread_index = this_threads_index();
 
                     // Actually run the shader for this point
                     if (entrylayer_index.Count == 0)
@@ -1452,7 +1490,7 @@ namespace OSL.TestShade
             for (int iter = 0; iter < iters; ++iter)
             {
                 bool save = (iter == (iters - 1));  // save on last iteration
-                shade_region(rend, shadergroup, 0, xres, 0, yres, save);
+                shade_image_parallel(rend, shadergroup, 0, xres, 0, yres, save);
 
                 // If any reparam was requested, do it now
                 if (reparams.Count != 0 && reparam_layer.Length != 0 && (iter + 1 < iters))
