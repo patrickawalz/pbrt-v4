@@ -44,6 +44,7 @@ namespace OSL
         {
             public const int OSO_FILE_VERSION_MAJOR = 1;
             public const int OSO_FILE_VERSION_MINOR = 0;
+            public static string OSL_SHADER_INSTALL_DIR = "";
             public const string OSL_LIBRARY_VERSION_STRING = "1.15.0";
 
             public OSLCompilerImpl(ErrorHandler errhandler)
@@ -206,6 +207,16 @@ namespace OSL
                     }
                 }
 
+                // The shader install directory (OSL_SHADER_INSTALL_DIR in the C++ build; here it is set by the host)
+                if (OSL_SHADER_INSTALL_DIR.Length != 0)
+                {
+                    string install_loc = OSL_SHADER_INSTALL_DIR + "/stdosl.h";
+                    if (File.Exists(install_loc))
+                    {
+                        return install_loc;
+                    }
+                }
+
                 string myprefix = Path.GetDirectoryName(Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd('/', '\\')) ?? "") ?? "";
                 string[] prefixes =
                 {
@@ -230,6 +241,29 @@ namespace OSL
                         }
                     }
                 }
+                // Look for an "oslc" binary in the $PATH (in case the running executable is not the actual oslc), and if found, look in
+                // places relative to it.
+                string oslcbin = OperatingSystem.IsWindows() ? "oslc.exe" : "oslc";
+                string pathvar = Environment.GetEnvironmentVariable("PATH") ?? "";
+                foreach (string pdir in pathvar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (File.Exists(Path.Combine(pdir, oslcbin)))
+                    {
+                        string dir = Path.GetDirectoryName(pdir.TrimEnd('/', '\\'));  // the parent of the bin dir
+                        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                        {
+                            foreach (string sfx in suffixes)
+                            {
+                                if (File.Exists(dir + sfx))
+                                {
+                                    return dir + sfx;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+
                 return "";
             }
 
