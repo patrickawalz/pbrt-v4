@@ -2722,6 +2722,14 @@ namespace pbrt
             {
                 shapes = Points.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "teapot" || (name == "geometry" && parameters.GetOneString("type", "teapot") == "teapot"))
+            {
+                shapes = Teapot.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
+            else if (name == "volume")
+            {
+                shapes = Volumes.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "curves")
             {
                 shapes = RenderManCurves.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
