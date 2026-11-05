@@ -90,7 +90,7 @@ namespace OIIO
 
 namespace OIIO
 {
-    public static class Strutil
+    public static partial class Strutil
     {
         // The C printf "%.9g" rendering of a float (the shortest form that round-trips), as the .oso writer and the default-literal code use
         public static string format_g9(float f)
