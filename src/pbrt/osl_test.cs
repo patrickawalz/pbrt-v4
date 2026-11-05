@@ -1610,6 +1610,72 @@ namespace pbrt
             }
         }
 
+        private static double Rmse(OslRender a, OslRender b)
+        {
+            double sum = 0;
+            for (int i = 0; i < a.rgb.Length; ++i)
+            {
+                double d = a.rgb[i] - b.rgb[i];
+                sum += d * d;
+            }
+            return Math.Sqrt(sum / a.rgb.Length);
+        }
+
+        [TEST("OslPbrt", "RenderEmissionStrategies")]
+        public static void RenderEmissionStrategies()
+        {
+            ResetScene();
+            const int xres = 128, yres = 96, spp = 32, seed = 21, refSpp = 1024;
+            string objectShape = "Shape \"sphere\" \"float radius\" 1";
+            string body = "Material \"diffuse\" \"rgb reflectance\" [0.5 0.5 0.5]";
+            // a small emitter: where light sampling matters
+            string oslEmitter = "AttributeBegin\nMaterial \"osl\" \"string shader\" \"glow\" \"rgb Ce\" [1 0.6 0.2] \"float power\" 40\nTranslate 2.0 1.2 -1\n" +
+                                "Shape \"sphere\" \"float radius\" 0.12\nAttributeEnd\n";
+            string pbrtEmitter = "AttributeBegin\nAreaLightSource \"diffuse\" \"rgb L\" [40 24 8]\nMaterial \"diffuse\" \"rgb reflectance\" [0 0 0]\n" +
+                                 "Translate 2.0 1.2 -1\nShape \"sphere\" \"float radius\" 0.12\nAttributeEnd\n";
+            // no other lights: the emitter lights the scene
+            Func<string, string, string> sceneOf = (string emitter, string integrator) =>
+                "LookAt 0 2 -6  0 0.5 0  0 1 0\nCamera \"perspective\" \"float fov\" 35\n" +
+                "Film \"rgb\" \"integer xresolution\" " + xres + " \"integer yresolution\" " + yres + " \"string filename\" \"out.exr\"\n" +
+                "Sampler \"independent\" \"integer pixelsamples\" 16\n" + integrator + "\nWorldBegin\n" +
+                "AttributeBegin\n" + body + "\n" + objectShape + "\nAttributeEnd\n" + emitter +
+                "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.5 0.5 0.5]\nTranslate 0 -1 0\n" +
+                "Shape \"trianglemesh\" \"integer indices\" [0 1 2 0 2 3] \"point3 P\" [-5 0 -5  5 0 -5  5 0 5  -5 0 5]\nAttributeEnd\n";
+            string[] names = new string[] { "light_only", "bsdf_only", "mis" };
+            string[] labels = new string[] { "LIGHT SAMPLING ONLY", "BSDF SAMPLING ONLY", "MIS (PATH)" };
+            string[] integrators = new string[]
+            {
+                "Integrator \"simplepath\" \"integer maxdepth\" 1 \"bool samplelights\" true \"bool samplebsdf\" false",
+                "Integrator \"simplepath\" \"integer maxdepth\" 1 \"bool samplelights\" false \"bool samplebsdf\" true",
+                "Integrator \"path\" \"integer maxdepth\" 1"
+            };
+            OslRender reference = OslRenderTools.Render("emit_ref_pbrt", sceneOf(pbrtEmitter, integrators[2]), refSpp, 99);
+            ASSERT_TRUE(reference != null);
+            string refPath = OslRenderTools.SaveLabelled(reference, "emit_reference_pbrt_arealight", "PBRT AREA LIGHT REFERENCE MIS", refSpp, 99);
+            Console.WriteLine("[OslPbrt] emitter reference (pbrt area light, path, " + refSpp + " spp): means " + OslRenderTools.F(reference.ChannelMeans()) + "\n    " + refPath);
+            for (int k = 0; k < 3; ++k)
+            {
+                OslRender o = OslRenderTools.Render("emit_osl_" + names[k], sceneOf(oslEmitter, integrators[k]), spp, seed);
+                OslRender p = OslRenderTools.Render("emit_pbrt_" + names[k], sceneOf(pbrtEmitter, integrators[k]), spp, seed);
+                ASSERT_TRUE(o != null && p != null);
+                string p1 = OslRenderTools.SaveLabelled(o, "emit_osl_" + names[k], "OSL EMITTER " + labels[k], spp, seed);
+                string p2 = OslRenderTools.SaveLabelled(p, "emit_pbrt_" + names[k], "PBRT AREA LIGHT " + labels[k], spp, seed);
+                double[] mo = o.ChannelMeans(), mp = p.ChannelMeans(), mr = reference.ChannelMeans();
+                double rmseO = Rmse(o, reference), rmseP = Rmse(p, reference);
+                double relMean = Math.Abs(mo[0] - mr[0]) / mr[0];
+                Console.WriteLine("[OslPbrt] emitter " + labels[k] + " " + spp + " spp: OSL means " + OslRenderTools.F(mo) + ", pbrt " + OslRenderTools.F(mp) +
+                                  ", reference " + OslRenderTools.F(mr) + "; mean abs diff OSL-pbrt " +
+                                  OslRender.MeanAbsDiff(o, p).ToString("F5", CultureInfo.InvariantCulture) + "; RMSE vs reference: OSL " +
+                                  rmseO.ToString("F4", CultureInfo.InvariantCulture) + ", pbrt " + rmseP.ToString("F4", CultureInfo.InvariantCulture) +
+                                  "\n    " + p1 + "\n    " + p2);
+                // the mean of each strategy is the mean of the reference (the strategies are unbiased); the noise of the OSL emitter is that of the area light
+                EXPECT_LT(relMean, 0.08);
+                EXPECT_LT(Math.Abs(mp[0] - mr[0]) / mr[0], 0.08);
+                EXPECT_LT(rmseO, rmseP * 1.5 + 0.01);
+                EXPECT_LT(rmseP, rmseO * 1.5 + 0.01);
+            }
+        }
+
         [TEST("OslPbrt", "RenderSpectralModes")]
         public static void RenderSpectralModes()
         {

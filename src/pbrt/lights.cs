@@ -932,6 +932,42 @@ namespace pbrt
             return pbrt.HashFloat(intr.p()) > a;
         }
 
+        // (not in pbrt-v4) A shape with an OSL material that emits is a DiffuseAreaLight whose radiance is that of the emission closures of the shader at
+        // the point: light sampling, MIS and the power of the light sampler work as for any area light. The light is two sided, as the emission of
+        // an OSL surface is seen from both sides.
+        public OSLMaterial oslMaterial = null;
+        public int oslObjectId = 0;
+        private bool oslMaxComputed = false;
+        private Float oslMaxValue = 0;
+
+        public void SetOSLEmission(OSLMaterial material, int objectId)
+        {
+            oslMaterial = material;
+            oslObjectId = objectId;
+        }
+
+        // The mean emission over the surface (the shader is evaluated at a set of well distributed points); used for the power and the bounds
+        private SampledSpectrum OSLAverageEmission(SampledWavelengths lambda, out Float maxValue)
+        {
+            const int n = 64;
+            SampledSpectrum sum = new SampledSpectrum(0f);
+            maxValue = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                Float u1 = (i + 0.5f) / n;
+                Float g = i * 0.61803398875f;
+                Float u2 = g - (Float)Math.Floor(g);
+                pstd.optional<ShapeSample> ss = shape.Sample(new Point2f(u1, u2));
+                if (!ss || ss.value().pdf == 0)
+                    continue;
+                SampledSpectrum e = oslMaterial.EmissionAt(ss.value().intr.p(), ss.value().intr.n, ss.value().intr.uv, new Vector3f(ss.value().intr.n.x, ss.value().intr.n.y, ss.value().intr.n.z), lambda,
+                                                           oslObjectId);
+                sum += e;
+                maxValue = std.max(maxValue, e.MaxComponentValue());
+            }
+            return sum / n;
+        }
+
         // DiffuseAreaLight Public Methods
         public DiffuseAreaLight(Transform renderFromLight, MediumInterface mediumInterface, Spectrum Le, Float scale,
                                 Shape shape, FloatTexture alpha, Image im, RGBColorSpace imageColorSpace,
@@ -1057,6 +1093,8 @@ namespace pbrt
         public override SampledSpectrum Phi(SampledWavelengths lambda)
         {
             SampledSpectrum L = new SampledSpectrum(0.0f);
+            if (oslMaterial != null)
+                return Pi * 2 * area * OSLAverageEmission(lambda, out Float oslMax);
             if (image)
             {
                 // Compute average light image emission
@@ -1079,7 +1117,16 @@ namespace pbrt
         {
             // Compute _phi_ for diffuse area light bounds
             Float phi = 0;
-            if (image)
+            if (oslMaterial != null)
+            {
+                if (!oslMaxComputed)
+                {
+                    OSLAverageEmission(SampledWavelengths.SampleVisible(0.5f), out oslMaxValue);
+                    oslMaxComputed = true;
+                }
+                phi = oslMaxValue;
+            }
+            else if (image)
             {
                 // Compute average _DiffuseAreaLight_ image channel value
                 // Assume no distinction between colors for an RGB image
@@ -1104,6 +1151,9 @@ namespace pbrt
                 return new SampledSpectrum(0.0f);
             if (AlphaMasked(new Interaction(p, uv)))
                 return new SampledSpectrum(0.0f);
+
+            if (oslMaterial != null)
+                return oslMaterial.EmissionAt(p, n, uv, w, lambda, oslObjectId);
 
             if (image)
             {

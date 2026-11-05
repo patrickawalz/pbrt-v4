@@ -1007,6 +1007,17 @@ namespace pbrt
                             if (sh.lightIndex != -1 && areaList != null)
                                 area = areaList[(int)j];
 
+                            // (not in pbrt-v4) A shape with an OSL material that emits is an area light
+                            OSLMaterial oslEmitter = mtl as OSLMaterial;
+                            if (area == null && oslEmitter != null && oslEmitter.MayEmit())
+                            {
+                                DiffuseAreaLight oslLight = new DiffuseAreaLight(sh.renderFromObject, mi, OSLSystem.ColorSpace().illuminant, 1, shapeObjs[j],
+                                                                                 alphaTex, new Image(), null, true);
+                                oslLight.SetOSLEmission(oslEmitter, ObjectIds.Hash(sh.loc));
+                                oslAreaLights.Add(oslLight);
+                                area = oslLight;
+                            }
+
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(shapeObjs[j], mtl, ObjectIds.Hash(sh.loc)));
                             else
@@ -1192,6 +1203,8 @@ namespace pbrt
 
         object areaLightMutex = new object();
         List<SceneEntity> areaLights = new List<SceneEntity>();
+        /// (not in pbrt-v4) the area lights of the shapes with an emissive OSL material (made when the primitives are)
+        public List<Light> oslAreaLights = new List<Light>();
 
         object textureMutex = new object();
         List<(string, TransformedSceneEntity)> serialFloatTextures = new List<(string, TransformedSceneEntity)>();

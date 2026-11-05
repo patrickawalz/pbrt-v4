@@ -593,6 +593,22 @@ namespace pbrt
             return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
         }
 
+        /// The emission at a point of a shape that is an area light (only the position, the normal and the uv are known there; the tangents are made up)
+        public SampledSpectrum EmissionAt(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda, int objectId)
+        {
+            if (!spec.mayEmit)
+            {
+                return new SampledSpectrum(0f);
+            }
+            Vector3f nv = new Vector3f(n.x, n.y, n.z);
+            Vector3f dpdu, dpdv;
+            CoordinateSystem(nv, &dpdu, &dpdv);
+            SurfaceInteraction si = new SurfaceInteraction(new Point3fi(p), uv, w, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0, false);
+            si.objectId = objectId;
+            OSLShadeResult r = OSLShading.ShadeSurface(group, si, si.shading.n, si.shading.dpdu, ref lambda);
+            return r.hasEmission ? r.emission : new SampledSpectrum(0f);
+        }
+
         /// The radiance that the surface emits towards the viewer at a point (emission() and uniform_edf() closures of the shader)
         public SampledSpectrum Emission(SurfaceInteraction si, SampledWavelengths lambda)
         {

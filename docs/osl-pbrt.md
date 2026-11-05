@@ -102,7 +102,7 @@ Volume closures (VDFs) are ignored.
 
 ## Limits
 
-* Emission of an OSL surface is found by BSDF sampling only (no next event estimation); an emitter with a small area is noisier than the same `AreaLightSource`. Integrators treat a surface without an area light as unsampled and give its emission full weight. Only shaders whose `.oso`/source mentions an emission closure are asked for emission on camera hits.
+* A shape whose OSL material mentions an emission closure becomes a two sided `DiffuseAreaLight` whose radiance is the emission closure of the shader evaluated at the point (position, normal and uv are known there, the tangents are made up). It is sampled by the light sampler and used with MIS like any area light; its power and bounds come from the shader evaluated at 64 points of the shape. Emission that is not found this way (animated shapes) is added at camera/BSDF-sampled hits without MIS.
 * `subsurface` is a diffuse approximation; VDFs are ignored.
 * The ray types and the emission without area light are wired in `PathIntegrator`, `VolPathIntegrator` and SPPM; other integrators (BDPT, random walk) were not checked.
 * Animated shapes are not registered in the object registry (`object:name` is empty for them, `"object"` space is identity).

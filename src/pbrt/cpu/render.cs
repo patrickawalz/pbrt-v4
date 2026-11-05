@@ -51,6 +51,9 @@ namespace pbrt
             Primitive accel = parsedScene.CreateAggregate(textures, shapeIndexToAreaLights, media,
                                                           namedMaterials, materials);
 
+            // (not in pbrt-v4) the shapes with emissive OSL materials are area lights
+            lights.AddRange(parsedScene.oslAreaLights);
+
             Camera camera = parsedScene.GetCamera();
             Film film = camera.GetFilm();
             Sampler sampler = parsedScene.GetSampler();
