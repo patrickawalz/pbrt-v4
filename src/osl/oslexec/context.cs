@@ -343,7 +343,7 @@ namespace OSL
             {
                 return null;  // can't retrieve symbol if we didn't optimize & jit
             }
-            if (sym.dataoffset() >= 0 && m_heapsize > sym.dataoffset() && sym.arena() == SymArena.Heap)
+            if (sym.dataoffset() >= 0 && m_heapsize > sym.dataoffset())
             {
                 return m_heap + sym.dataoffset();
             }

@@ -253,6 +253,7 @@ namespace OSL.pvt
             m_opt_fold_getattribute = true;
             m_opt_middleman = true;
             m_opt_texture_handle = true;
+            BackendIL.install_default_hooks(this);
             m_opt_seed_bblock_aliases = true;
             m_opt_useparam = false;
             m_opt_groupdata = true;
