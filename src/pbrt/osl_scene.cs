@@ -82,15 +82,27 @@ namespace pbrt
             }
             pixelAspect = 1;
             AnimatedTransform renderFromCamera = camera.cameraTransform.RenderFromCamera();
-            worldFromCamera = new AnimatedTransform(worldFromRender * renderFromCamera.Interpolate(0), 0,
-                                                    worldFromRender * renderFromCamera.Interpolate(1), 1);
+            if (renderFromCamera.KeyCount > 2)
+            {
+                worldFromCamera = renderFromCamera.PreMultiply(worldFromRender);
+            }
+            else
+            {
+                worldFromCamera = new AnimatedTransform(worldFromRender * renderFromCamera.Interpolate(0), 0,
+                                                        worldFromRender * renderFromCamera.Interpolate(1), 1);
+            }
         }
 
         public static void AddCoordinateSystem(string name, Transform worldFromCS0, Transform worldFromCS1, Float t0, Float t1)
         {
+            AddCoordinateSystem(name, new AnimatedTransform(worldFromCS0, t0, worldFromCS1, t1));
+        }
+
+        public static void AddCoordinateSystem(string name, AnimatedTransform worldFromCS)
+        {
             lock (mutex)
             {
-                coordinateSystems[name] = new AnimatedTransform(worldFromCS0, t0, worldFromCS1, t1);
+                coordinateSystems[name] = worldFromCS;
             }
         }
 

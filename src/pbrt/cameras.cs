@@ -75,9 +75,8 @@ namespace pbrt
             pbrt.LOG_VERBOSE("World-space position: %s", worldFromRender.Apply(new Point3f(0, 0, 0)));
             // Compute _renderFromCamera_ transformation
             Transform renderFromWorld = pbrt.Inverse(worldFromRender);
-            Transform[] rfc = { renderFromWorld * worldFromCamera.startTransform,
-                                renderFromWorld * worldFromCamera.endTransform };
-            renderFromCamera = new AnimatedTransform(rfc[0], worldFromCamera.startTime, rfc[1], worldFromCamera.endTime);
+            // (every key of an N-key animation is moved to render space, the key times are kept)
+            renderFromCamera = worldFromCamera.PreMultiply(renderFromWorld);
         }
 
         public Transform WorldFromRender() { return worldFromRender; }

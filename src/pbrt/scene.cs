@@ -181,52 +181,67 @@ namespace pbrt
     }
 
     // TransformSet Definition
+    // The transformations of the keys of the CTM: two (start and end time, the times are those of
+    // TransformTimes) or, after a MotionBegin/MotionEnd block, as many as the block has times.
     public unsafe class TransformSet
     {
+        // The number of transformations of a set that has not been through a MotionBegin block
         public const int MaxTransforms = 2;
 
-        public TransformSet()
+        public TransformSet() : this(MaxTransforms)
         {
-            t = new Transform[MaxTransforms];
-            for (int i = 0; i < MaxTransforms; ++i)
+        }
+
+        public TransformSet(int count)
+        {
+            t = new Transform[count];
+            for (int i = 0; i < count; ++i)
                 t[i] = new Transform();
         }
 
         // TransformSet Public Methods
+        public int Count { get { return t.Length; } }
+
+        // The times of the keys when they come from a MotionBegin block; null for the two keys at the
+        // TransformTimes
+        public Float[] times = null;
+
         public Transform this[int i]
         {
             get
             {
                 CHECK_GE(i, 0);
-                CHECK_LT(i, MaxTransforms);
+                CHECK_LT(i, t.Length);
                 return t[i];
             }
             set
             {
                 CHECK_GE(i, 0);
-                CHECK_LT(i, MaxTransforms);
+                CHECK_LT(i, t.Length);
                 t[i] = value;
             }
         }
         public static TransformSet Inverse(TransformSet ts)
         {
-            TransformSet tInv = new TransformSet();
-            for (int i = 0; i < MaxTransforms; ++i)
+            TransformSet tInv = new TransformSet(ts.Count);
+            for (int i = 0; i < ts.Count; ++i)
                 tInv.t[i] = pbrt.Inverse(ts.t[i]);
+            tInv.times = ts.times;
             return tInv;
         }
         public bool IsAnimated()
         {
-            for (int i = 0; i < MaxTransforms - 1; ++i)
+            for (int i = 0; i < t.Length - 1; ++i)
                 if (t[i] != t[i + 1])
                     return true;
             return false;
         }
         public TransformSet Clone()
         {
-            TransformSet c = new TransformSet();
-            for (int i = 0; i < MaxTransforms; ++i)
+            TransformSet c = new TransformSet(t.Length);
+            for (int i = 0; i < t.Length; ++i)
                 c.t[i] = t[i];
+            c.times = times;
             return c;
         }
 
@@ -1228,11 +1243,23 @@ namespace pbrt
         sealed class GraphicsState
         {
 
+            // The start bit selects the first key, the end bit the last key, and only "All" (both bits)
+            // the keys in between of a CTM that has more than two keys
             public void ForActiveTransforms(Func<Transform, Transform> func)
             {
-                for (int i = 0; i < MaxTransforms; ++i)
-                    if ((activeTransformBits & (1 << i)) != 0)
+                int n = ctm.Count;
+                for (int i = 0; i < n; ++i)
+                {
+                    bool active;
+                    if (i == 0)
+                        active = (activeTransformBits & StartTransformBits) != 0;
+                    else if (i == n - 1)
+                        active = (activeTransformBits & EndTransformBits) != 0;
+                    else
+                        active = activeTransformBits == AllTransformsBits;
+                    if (active)
                         ctm[i] = func(ctm[i]);
+                }
             }
 
             public GraphicsState Clone()
@@ -1321,10 +1348,22 @@ namespace pbrt
             return new global::pbrt.Transform((renderFromWorld * graphicsState.ctm[index]).GetMatrix());
         }
 
+        // The animated transformation of the keys of a TransformSet: the keyTransform of each key
+        // transformation index. Two keys at the TransformTimes unless the set comes from a MotionBegin block.
+        AnimatedTransform MakeAnimated(TransformSet set, Func<int, Transform> keyTransform)
+        {
+            if (set.times == null)
+                return new AnimatedTransform(keyTransform(0), graphicsState.transformStartTime,
+                                             keyTransform(1), graphicsState.transformEndTime);
+            Transform[] keys = new Transform[set.Count];
+            for (int i = 0; i < set.Count; ++i)
+                keys[i] = keyTransform(i);
+            return new AnimatedTransform(keys, set.times);
+        }
+
         AnimatedTransform RenderFromObject()
         {
-            return new AnimatedTransform(RenderFromObject(0), graphicsState.transformStartTime,
-                                         RenderFromObject(1), graphicsState.transformEndTime);
+            return MakeAnimated(graphicsState.ctm, (int i) => RenderFromObject(i));
         }
 
         bool CTMIsAnimated() { return graphicsState.ctm.IsAnimated(); }
@@ -1368,14 +1407,89 @@ namespace pbrt
                 Error(loc, StringPrintf("%s: color space unknown", name));
         }
 
+        // One transformation call: applied to the active keys of the CTM or, between MotionBegin and
+        // MotionEnd, recorded as the transformation of the next key
+        void ApplyTransformCall(string kind, Func<Transform, Transform> op, FileLoc loc)
+        {
+            if (motionBlock == null)
+            {
+                graphicsState.ForActiveTransforms(op);
+                return;
+            }
+            if (motionBlock.ops.Count > 0 && motionBlock.kind != kind)
+                ErrorExit(loc, StringPrintf("MotionBegin at %s: all the transformation calls of a block must be of the " +
+                                            "same kind, the first was %s and this one is %s.",
+                                            motionBlock.loc, motionBlock.kind, kind));
+            if (motionBlock.ops.Count == motionBlock.times.Length)
+                ErrorExit(loc, StringPrintf("MotionBegin at %s has %d times but this is transformation call number %d.",
+                                            motionBlock.loc, motionBlock.times.Length, motionBlock.ops.Count + 1));
+            motionBlock.kind = kind;
+            motionBlock.ops.Add(op);
+        }
+
+        public override void MotionBegin(Float[] times, FileLoc loc)
+        {
+            if (motionBlock != null)
+                ErrorExit(loc, StringPrintf("MotionBegin inside the MotionBegin block from %s: blocks cannot be nested.",
+                                            motionBlock.loc));
+            if (times.Length < 2)
+                ErrorExit(loc, "MotionBegin needs at least two times.");
+            for (int i = 0; i < times.Length; ++i)
+                if (float.IsNaN((float)times[i]) || (i > 0 && !(times[i] > times[i - 1])))
+                    ErrorExit(loc, "The times of MotionBegin must increase strictly.");
+            motionBlock = new MotionBlock();
+            motionBlock.times = (Float[])times.Clone();
+            motionBlock.loc = loc;
+        }
+
+        public override void MotionEnd(FileLoc loc)
+        {
+            if (motionBlock == null)
+                ErrorExit(loc, "MotionEnd without a MotionBegin.");
+            MotionBlock block = motionBlock;
+            motionBlock = null;
+            if (block.ops.Count != block.times.Length)
+                ErrorExit(loc, StringPrintf("MotionBegin at %s has %d times but the block has %d transformation calls.",
+                                            block.loc, block.times.Length, block.ops.Count));
+
+            // The CTM before the block, at the time of each key (it is the CTM itself unless it was animated)
+            TransformSet before = graphicsState.ctm;
+            AnimatedTransform beforeAnimated = null;
+            if (before.IsAnimated())
+            {
+                beforeAnimated = MakeAnimated(before, (int i) => before[i]);
+            }
+
+            TransformSet after = new TransformSet(block.times.Length);
+            for (int i = 0; i < block.times.Length; ++i)
+            {
+                Transform ctmAtKey = beforeAnimated != null ? beforeAnimated.Interpolate(block.times[i]) : before[0];
+                after[i] = block.ops[i](ctmAtKey);
+            }
+            after.times = block.times;
+            graphicsState.ctm = after;
+        }
+
+        public override bool InMotionBlock() { return motionBlock != null; }
+
+        sealed class MotionBlock
+        {
+            public Float[] times;
+            public FileLoc loc;
+            public string kind = "";
+            public List<Func<Transform, Transform>> ops = new List<Func<Transform, Transform>>();
+        }
+
+        MotionBlock motionBlock = null;
+
         public override void Identity(FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => new global::pbrt.Transform());
+            ApplyTransformCall("Identity", (Transform t) => new global::pbrt.Transform(), loc);
         }
 
         public override void Translate(Float dx, Float dy, Float dz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Translate(new Vector3f(dx, dy, dz)));
+            ApplyTransformCall("Translate", (Transform t) => t * pbrt.Translate(new Vector3f(dx, dy, dz)), loc);
         }
 
         public override void CoordinateSystem(string origName, FileLoc loc)
@@ -1383,8 +1497,7 @@ namespace pbrt
             string name = NormalizeUTF8(origName);
             namedCoordinateSystems[name] = graphicsState.ctm.Clone();
             // (not in pbrt-v4) OSL shaders can use the coordinate system by name
-            OSLScene.AddCoordinateSystem(name, graphicsState.ctm[0], graphicsState.ctm[1], graphicsState.transformStartTime,
-                                         graphicsState.transformEndTime);
+            OSLScene.AddCoordinateSystem(name, MakeAnimated(graphicsState.ctm, (int i) => graphicsState.ctm[i]));
         }
 
         public override void CoordSysTransform(string origName, FileLoc loc)
@@ -1407,8 +1520,7 @@ namespace pbrt
             namedCoordinateSystems["camera"] = TransformSet.Inverse(cameraFromWorld);
 
             CameraTransform cameraTransform = new CameraTransform(
-                new AnimatedTransform(worldFromCamera[0], graphicsState.transformStartTime,
-                                      worldFromCamera[1], graphicsState.transformEndTime));
+                MakeAnimated(worldFromCamera, (int i) => worldFromCamera[i]));
             renderFromWorld = cameraTransform.RenderFromWorld();
 
             camera = new CameraSceneEntity(name, dict, loc, cameraTransform,
@@ -1487,8 +1599,7 @@ namespace pbrt
             if (!VERIFY_OPTIONS("WorldBegin", loc)) return;
             // Reset graphics state for _WorldBegin_
             currentBlock = BlockState.WorldBlock;
-            for (int i = 0; i < MaxTransforms; ++i)
-                graphicsState.ctm[i] = new global::pbrt.Transform();
+            graphicsState.ctm = new TransformSet();
             graphicsState.activeTransformBits = AllTransformsBits;
             namedCoordinateSystems["world"] = graphicsState.ctm.Clone();
 
@@ -1646,9 +1757,8 @@ namespace pbrt
 
             if (CTMIsAnimated())
             {
-                AnimatedTransform animatedRenderFromInstance = new AnimatedTransform(
-                    RenderFromObject(0) * worldFromRender, graphicsState.transformStartTime,
-                    RenderFromObject(1) * worldFromRender, graphicsState.transformEndTime);
+                AnimatedTransform animatedRenderFromInstance =
+                    MakeAnimated(graphicsState.ctm, (int i) => RenderFromObject(i) * worldFromRender);
 
                 // For very small changes, animatedRenderFromInstance may have both
                 // xforms equal even if CTMIsAnimated() has returned true. Fall
@@ -1666,6 +1776,8 @@ namespace pbrt
 
         public override void EndOfFiles()
         {
+            if (motionBlock != null)
+                ErrorExitDeferred(motionBlock.loc, "Missing MotionEnd for this MotionBegin.");
             if (currentBlock != BlockState.WorldBlock)
                 ErrorExitDeferred("End of files before \"WorldBegin\".");
 
@@ -1878,31 +1990,31 @@ namespace pbrt
 
         public override void Transform(Float[] tr, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) =>
-                pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
+            ApplyTransformCall("Transform", (Transform t) =>
+                pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))), loc);
         }
 
         public override void ConcatTransform(Float[] tr, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) =>
-                t * pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))));
+            ApplyTransformCall("ConcatTransform", (Transform t) =>
+                t * pbrt.Transpose(new global::pbrt.Transform(new SquareMatrix4((pstd.span<Float>)tr))), loc);
         }
 
         public override void Rotate(Float angle, Float dx, Float dy, Float dz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Rotate(angle, new Vector3f(dx, dy, dz)));
+            ApplyTransformCall("Rotate", (Transform t) => t * pbrt.Rotate(angle, new Vector3f(dx, dy, dz)), loc);
         }
 
         public override void Scale(Float sx, Float sy, Float sz, FileLoc loc)
         {
-            graphicsState.ForActiveTransforms((Transform t) => t * pbrt.Scale(sx, sy, sz));
+            ApplyTransformCall("Scale", (Transform t) => t * pbrt.Scale(sx, sy, sz), loc);
         }
 
         public override void LookAt(Float ex, Float ey, Float ez, Float lx, Float ly, Float lz,
                                     Float ux, Float uy, Float uz, FileLoc loc)
         {
             global::pbrt.Transform lookAt = pbrt.LookAt(new Point3f(ex, ey, ez), new Point3f(lx, ly, lz), new Vector3f(ux, uy, uz));
-            graphicsState.ForActiveTransforms((Transform t) => t * lookAt);
+            ApplyTransformCall("LookAt", (Transform t) => t * lookAt, loc);
         }
 
         public override void ActiveTransformAll(FileLoc loc)

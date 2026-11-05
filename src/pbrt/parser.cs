@@ -331,6 +331,14 @@ namespace pbrt
 
         static bool warnedTransformBeginEndDeprecated = false;
 
+        // The directives that are allowed between MotionBegin and MotionEnd: the transformation calls
+        // that supply the transformation of a key, and MotionEnd itself
+        static bool IsMotionBlockDirective(string token)
+        {
+            return token == "MotionEnd" || token == "Identity" || token == "Translate" || token == "Rotate" ||
+                   token == "Scale" || token == "LookAt" || token == "Transform" || token == "ConcatTransform";
+        }
+
         public static void parse(ParserTarget target, Tokenizer t)
         {
             FormattingParserTarget formattingTarget = target as FormattingParserTarget;
@@ -431,6 +439,12 @@ namespace pbrt
                 tok2 = nextToken(TokenOptional);
                 if (tok2 == null)
                     break;
+
+                // Inside MotionBegin/MotionEnd only the transformation directives are allowed
+                if (target.InMotionBlock() && !IsMotionBlockDirective(tok2.token))
+                    ErrorExit(tok2.loc, StringPrintf("\"%s\" is not allowed between MotionBegin and MotionEnd; " +
+                                                     "only Identity, Translate, Rotate, Scale, LookAt, Transform and " +
+                                                     "ConcatTransform are (MotionEnd closes the block).", tok2.token));
 
                 switch (tok2.token[0])
                 {
@@ -594,7 +608,23 @@ namespace pbrt
                         break;
 
                     case 'M':
-                        if (tok2.token == "MakeNamedMaterial")
+                        if (tok2.token == "MotionBegin")
+                        {
+                            if (nextToken(TokenRequired).token != "[")
+                                syntaxError(tok2);
+                            List<Float> motionTimes = new List<Float>();
+                            while (true)
+                            {
+                                Token timeToken = nextToken(TokenRequired);
+                                if (timeToken.token == "]")
+                                    break;
+                                motionTimes.Add((Float)parseFloat(timeToken));
+                            }
+                            target.MotionBegin(motionTimes.ToArray(), tok2.loc);
+                        }
+                        else if (tok2.token == "MotionEnd")
+                            target.MotionEnd(tok2.loc);
+                        else if (tok2.token == "MakeNamedMaterial")
                             basicParamListEntrypoint(target.MakeNamedMaterial, tok2.loc);
                         else if (tok2.token == "MakeNamedMedium")
                             basicParamListEntrypoint(target.MakeNamedMedium, tok2.loc);
@@ -918,6 +948,11 @@ namespace pbrt
         public abstract void ActiveTransformEndTime(FileLoc loc);
         public abstract void ActiveTransformStartTime(FileLoc loc);
         public abstract void TransformTimes(Float start, Float end, FileLoc loc);
+        // MotionBegin [ t0 t1 ... ] ... MotionEnd: one transformation call per time, see docs/animated-transforms.md
+        public abstract void MotionBegin(Float[] times, FileLoc loc);
+        public abstract void MotionEnd(FileLoc loc);
+        // Whether a MotionBegin has not been closed yet
+        public virtual bool InMotionBlock() { return false; }
 
         public abstract void ColorSpace(string n, FileLoc loc);
         public abstract void PixelFilter(string name, List<ParsedParameter> parameters, FileLoc loc);
@@ -1313,6 +1348,21 @@ namespace pbrt
         public override void TransformTimes(Float start, Float end, FileLoc loc)
         {
             Printf("%sTransformTimes %f %f\n", indent(), start, end);
+        }
+
+        public override void MotionBegin(Float[] times, FileLoc loc)
+        {
+            string list = "";
+            for (int i = 0; i < times.Length; ++i)
+                list += StringPrintf("%f ", times[i]);
+            Printf("%sMotionBegin [ %s]\n", indent(), list);
+            catIndentCount += 4;
+        }
+
+        public override void MotionEnd(FileLoc loc)
+        {
+            catIndentCount -= 4;
+            Printf("%sMotionEnd\n", indent());
         }
 
         public override void ColorSpace(string n, FileLoc loc)

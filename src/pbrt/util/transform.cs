@@ -762,6 +762,16 @@ namespace pbrt
     // Transform Function Declarations
 
     // AnimatedTransform Definition
+    //
+    // N-key generalisation of pbrt's two-key AnimatedTransform, modelled on the keyframe animation
+    // tracks of the original Mitsuba (AnimatedTransform / AnimationTrack in mitsuba/core/track.h):
+    // every key is decomposed into translation T, rotation R (a quaternion) and scale S, and each
+    // segment between two consecutive keys is interpolated on its own: T and S linearly, R by a
+    // slerp along the shortest arc between the two quaternions of the segment. Before the first and
+    // after the last key the transformation is clamped. The bounds (MotionBounds, BoundPointMotion)
+    // are those of pbrt: per segment the zeros of the derivative of the motion of a point are found
+    // with interval arithmetic and Newton's method; the bounds of the animation are the union of
+    // the bounds of its segments. With two keys everything is exactly pbrt's AnimatedTransform.
     public unsafe class AnimatedTransform
     {
         // AnimatedTransform Public Methods
@@ -770,76 +780,137 @@ namespace pbrt
 
         public AnimatedTransform(Transform startTransform, Float startTime,
                                  Transform endTransform, Float endTime)
+            : this(new Transform[] { startTransform, endTransform }, new Float[] { startTime, endTime }, false)
         {
-            this.startTransform = startTransform;
-            this.endTransform = endTransform;
-            this.startTime = startTime;
-            this.endTime = endTime;
-            actuallyAnimated = startTransform != endTransform;
+        }
+
+        // N keys: keyTimes must increase strictly, there must be at least two keys.
+        public AnimatedTransform(Transform[] keyTransforms, Float[] keyTimes)
+            : this((Transform[])keyTransforms.Clone(), (Float[])keyTimes.Clone(), true)
+        {
+        }
+
+        private AnimatedTransform(Transform[] keyTransforms, Float[] keyTimes, bool validate)
+        {
+            if (validate)
+            {
+                if (keyTransforms.Length < 2)
+                    throw new ArgumentException("An AnimatedTransform needs at least two keys.");
+                if (keyTransforms.Length != keyTimes.Length)
+                    throw new ArgumentException("An AnimatedTransform needs one time per key transform.");
+                for (int i = 0; i < keyTimes.Length; ++i)
+                {
+                    if (float.IsNaN((float)keyTimes[i]))
+                        throw new ArgumentException("The key times of an AnimatedTransform must not be NaN.");
+                    if (i > 0 && !(keyTimes[i] > keyTimes[i - 1]))
+                        throw new ArgumentException("The key times of an AnimatedTransform must increase strictly.");
+                }
+            }
+            nKeys = keyTransforms.Length;
+            this.keyTransforms = keyTransforms;
+            this.keyTimes = keyTimes;
+            startTransform = keyTransforms[0];
+            endTransform = keyTransforms[nKeys - 1];
+            startTime = keyTimes[0];
+            endTime = keyTimes[nKeys - 1];
+
+            segmentStatic = new bool[nKeys - 1];
+            actuallyAnimated = false;
+            for (int i = 0; i < nKeys - 1; ++i)
+            {
+                segmentStatic[i] = keyTransforms[i] == keyTransforms[i + 1];
+                actuallyAnimated |= !segmentStatic[i];
+            }
             if (!actuallyAnimated)
                 return;
+
+            // Decompose all the keys
+            T = new Vector3f[nKeys];
+            R = new Quaternion[nKeys];
+            S = new SquareMatrix4[nKeys];
             unsafe
             {
-                // Decompose start and end transformations
-                SquareMatrix4 Rm = new SquareMatrix4();
-                Vector3f T0 = new Vector3f(), T1 = new Vector3f();
-                SquareMatrix4 S0 = new SquareMatrix4(), S1 = new SquareMatrix4();
-                startTransform.Decompose(&T0, &Rm, &S0);
-                T[0] = T0; S[0] = S0;
-                R[0] = (Quaternion)new Transform(Rm);
-
-                endTransform.Decompose(&T1, &Rm, &S1);
-                T[1] = T1; S[1] = S1;
-                R[1] = (Quaternion)new Transform(Rm);
+                for (int i = 0; i < nKeys; ++i)
+                {
+                    SquareMatrix4 Rm = new SquareMatrix4();
+                    Vector3f Ti = new Vector3f();
+                    SquareMatrix4 Si = new SquareMatrix4();
+                    keyTransforms[i].Decompose(&Ti, &Rm, &Si);
+                    T[i] = Ti;
+                    S[i] = Si;
+                    R[i] = (Quaternion)new Transform(Rm);
+                }
             }
 
-            // Flip _R[1]_ if needed to select shortest path
-            if (Dot(R[0], R[1]) < 0)
-                R[1] = -R[1];
+            // Every segment follows the shortest arc between its two keys: the sign of the quaternion at
+            // the end of the segment is chosen relative to the quaternion at its start (a quaternion and its
+            // negation are the same rotation). Each segment is thereby exactly pbrt's two key animation
+            // between its keys.
+            Rend = new Quaternion[nKeys - 1];
+            for (int k = 0; k < nKeys - 1; ++k)
+                Rend[k] = Dot(R[k], R[k + 1]) < 0 ? -R[k + 1] : R[k + 1];
 
-            hasRotation = Dot(R[0], R[1]) < 0.9995f;
-
-            // Compute terms of motion derivative function
-            if (hasRotation)
+            // Compute the terms of the motion derivative function of every segment
+            segments = new MotionSegment[nKeys - 1];
+            for (int k = 0; k < nKeys - 1; ++k)
             {
-                Float cosTheta = Dot(R[0], R[1]);
-                Float theta = SafeACos(cosTheta);
-                Quaternion qperp = Normalize(R[1] - R[0] * cosTheta);
+                if (segmentStatic[k])
+                {
+                    segments[k] = new MotionSegment();
+                    continue;
+                }
+                bool segmentHasRotation = Dot(R[k], Rend[k]) < 0.9995f;
+                if (segmentHasRotation)
+                    segments[k] = BuildSegment(T[k], T[k + 1], R[k], Rend[k], S[k], S[k + 1]);
+                else
+                    segments[k] = new MotionSegment();
+                segments[k].hasRotation = segmentHasRotation;
+            }
+        }
 
-                Float t0x = T[0].x;
-                Float t0y = T[0].y;
-                Float t0z = T[0].z;
-                Float t1x = T[1].x;
-                Float t1y = T[1].y;
-                Float t1z = T[1].z;
-                Float q0x = R[0].v.x;
-                Float q0y = R[0].v.y;
-                Float q0z = R[0].v.z;
-                Float q0w = R[0].w;
-                Float qperpx = qperp.v.x;
-                Float qperpy = qperp.v.y;
-                Float qperpz = qperp.v.z;
-                Float qperpw = qperp.w;
-                Float s000 = S[0][0][0];
-                Float s001 = S[0][0][1];
-                Float s002 = S[0][0][2];
-                Float s010 = S[0][1][0];
-                Float s011 = S[0][1][1];
-                Float s012 = S[0][1][2];
-                Float s020 = S[0][2][0];
-                Float s021 = S[0][2][1];
-                Float s022 = S[0][2][2];
-                Float s100 = S[1][0][0];
-                Float s101 = S[1][0][1];
-                Float s102 = S[1][0][2];
-                Float s110 = S[1][1][0];
-                Float s111 = S[1][1][1];
-                Float s112 = S[1][1][2];
-                Float s120 = S[1][2][0];
-                Float s121 = S[1][2][1];
-                Float s122 = S[1][2][2];
+        // The terms of the motion derivative of a point for the segment between two keys
+        private static MotionSegment BuildSegment(Vector3f T0, Vector3f T1, Quaternion R0, Quaternion R1,
+                                                  SquareMatrix4 S0, SquareMatrix4 S1)
+        {
+            MotionSegment seg = new MotionSegment();
+            Float cosTheta = Dot(R0, R1);
+            Float theta = SafeACos(cosTheta);
+            Quaternion qperp = Normalize(R1 - R0 * cosTheta);
 
-            c1[0] = new DerivativeTerm(
+            Float t0x = T0.x;
+            Float t0y = T0.y;
+            Float t0z = T0.z;
+            Float t1x = T1.x;
+            Float t1y = T1.y;
+            Float t1z = T1.z;
+            Float q0x = R0.v.x;
+            Float q0y = R0.v.y;
+            Float q0z = R0.v.z;
+            Float q0w = R0.w;
+            Float qperpx = qperp.v.x;
+            Float qperpy = qperp.v.y;
+            Float qperpz = qperp.v.z;
+            Float qperpw = qperp.w;
+            Float s000 = S0[0][0];
+            Float s001 = S0[0][1];
+            Float s002 = S0[0][2];
+            Float s010 = S0[1][0];
+            Float s011 = S0[1][1];
+            Float s012 = S0[1][2];
+            Float s020 = S0[2][0];
+            Float s021 = S0[2][1];
+            Float s022 = S0[2][2];
+            Float s100 = S1[0][0];
+            Float s101 = S1[0][1];
+            Float s102 = S1[0][2];
+            Float s110 = S1[1][0];
+            Float s111 = S1[1][1];
+            Float s112 = S1[1][2];
+            Float s120 = S1[2][0];
+            Float s121 = S1[2][1];
+            Float s122 = S1[2][2];
+
+            seg.c1[0] = new DerivativeTerm(
                 -t0x + t1x,
                 (-1 + q0y * q0y + q0z * q0z + qperpy * qperpy + qperpz * qperpz) * s000 +
                     q0w * q0z * s010 - qperpx * qperpy * s010 + qperpw * qperpz * s010 -
@@ -866,7 +937,7 @@ namespace pbrt
                     qperpx * qperpz * s122 +
                     q0x * (-(q0y * s012) - q0z * s022 + q0y * s112 + q0z * s122));
 
-            c2[0] = new DerivativeTerm(
+            seg.c2[0] = new DerivativeTerm(
                 0,
                 -(qperpy * qperpy * s000) - qperpz * qperpz * s000 + qperpx * qperpy * s010 -
                     qperpw * qperpz * s010 + qperpw * qperpy * s020 + qperpx * qperpz * s020 +
@@ -902,7 +973,7 @@ namespace pbrt
                     q0z * (q0w * (s012 - s112) + q0x * (-s022 + s122) -
                            2 * (2 * qperpz * s002 + qperpw * s012 - qperpx * s022) * theta));
 
-            c3[0] = new DerivativeTerm(
+            seg.c3[0] = new DerivativeTerm(
                 0,
                 -2 *
                     (q0x * qperpy * s010 - q0w * qperpz * s010 + q0w * qperpy * s020 +
@@ -932,7 +1003,7 @@ namespace pbrt
                             2 * qperpz * s102 + qperpw * s112 - qperpx * s122)) *
                     theta);
 
-            c4[0] = new DerivativeTerm(
+            seg.c4[0] = new DerivativeTerm(
                 0,
                 -(q0x * qperpy * s010) + q0w * qperpz * s010 - q0w * qperpy * s020 -
                     q0x * qperpz * s020 + q0x * qperpy * s110 - q0w * qperpz * s110 +
@@ -974,7 +1045,7 @@ namespace pbrt
                            2 * qperpz * s102 - qperpw * s112 + qperpx * s122 +
                            2 * q0w * s012 * theta - 2 * q0x * s022 * theta));
 
-            c5[0] = new DerivativeTerm(
+            seg.c5[0] = new DerivativeTerm(
                 0,
                 2 *
                     (qperpy * qperpy * s000 + qperpz * qperpz * s000 -
@@ -1010,7 +1081,7 @@ namespace pbrt
                      q0z * (-(q0w * s012) + q0x * s022 + q0w * s112 - q0x * s122)) *
                     theta);
 
-            c1[1] = new DerivativeTerm(
+            seg.c1[1] = new DerivativeTerm(
                 -t0y + t1y,
                 -(qperpx * qperpy * s000) - qperpw * qperpz * s000 - s010 + q0z * q0z * s010 +
                     qperpx * qperpx * s010 + qperpz * qperpz * s010 - q0y * q0z * s020 +
@@ -1037,7 +1108,7 @@ namespace pbrt
                     q0x * (q0y * (-s002 + s102) + q0w * (s022 - s122)) + q0y * q0z * s122 -
                     qperpw * qperpx * s122 + qperpy * qperpz * s122);
 
-            c2[1] = new DerivativeTerm(
+            seg.c2[1] = new DerivativeTerm(
                 0,
                 qperpx * qperpy * s000 + qperpw * qperpz * s000 + q0z * q0z * s010 -
                     qperpx * qperpx * s010 - qperpz * qperpz * s010 - q0y * q0z * s020 -
@@ -1082,7 +1153,7 @@ namespace pbrt
                     q0w * (-(q0z * s002) + q0z * s102 + 2 * qperpz * s002 * theta -
                            2 * qperpx * s022 * theta));
 
-            c3[1] = new DerivativeTerm(
+            seg.c3[1] = new DerivativeTerm(
                 0,
                 2 *
                     (-(q0x * qperpy * s000) - q0w * qperpz * s000 + 2 * q0x * qperpx * s010 +
@@ -1115,7 +1186,7 @@ namespace pbrt
                          (-(qperpx * s002) - qperpz * s022 + qperpx * s102 + qperpz * s122)) *
                     theta);
 
-            c4[1] = new DerivativeTerm(
+            seg.c4[1] = new DerivativeTerm(
                 0,
                 -(q0x * qperpy * s000) - q0w * qperpz * s000 + 2 * q0x * qperpx * s010 +
                     q0x * qperpw * s020 + q0w * qperpx * s020 + q0x * qperpy * s100 +
@@ -1157,7 +1228,7 @@ namespace pbrt
                            2 * qperpz * s112 + qperpy * s122 - 2 * q0w * s002 * theta -
                            2 * q0y * s022 * theta));
 
-            c5[1] = new DerivativeTerm(
+            seg.c5[1] = new DerivativeTerm(
                 0,
                 -2 *
                     (qperpx * qperpy * s000 + qperpw * qperpz * s000 + q0z * q0z * s010 -
@@ -1190,7 +1261,7 @@ namespace pbrt
                      qperpw * qperpx * s122 - qperpy * qperpz * s122) *
                     theta);
 
-            c1[2] = new DerivativeTerm(
+            seg.c1[2] = new DerivativeTerm(
                 -t0z + t1z,
                 (qperpw * qperpy * s000 - qperpx * qperpz * s000 - q0y * q0z * s010 -
                  qperpw * qperpx * s010 - qperpy * qperpz * s010 - s020 + q0y * q0y * s020 +
@@ -1217,7 +1288,7 @@ namespace pbrt
                  q0x * q0x * (s022 - s122) + s122 - q0y * q0y * s122 -
                  qperpx * qperpx * s122 - qperpy * qperpy * s122));
 
-            c2[2] = new DerivativeTerm(
+            seg.c2[2] = new DerivativeTerm(
                 0,
                 (q0w * q0y * s000 - q0x * q0z * s000 - qperpw * qperpy * s000 +
                  qperpx * qperpz * s000 - q0w * q0x * s010 - q0y * q0z * s010 +
@@ -1259,7 +1330,7 @@ namespace pbrt
                  2 * q0z * qperpy * s012 * theta + 2 * q0y * qperpz * s012 * theta -
                  4 * q0x * qperpx * s022 * theta - 4 * q0y * qperpy * s022 * theta));
 
-            c3[2] = new DerivativeTerm(
+            seg.c3[2] = new DerivativeTerm(
                 0,
                 -2 *
                     (-(q0w * qperpy * s000) + q0x * qperpz * s000 + q0x * qperpw * s010 +
@@ -1289,7 +1360,7 @@ namespace pbrt
                             qperpz * s112 + 2 * qperpy * s122)) *
                     theta);
 
-            c4[2] = new DerivativeTerm(
+            seg.c4[2] = new DerivativeTerm(
                 0,
                 q0w * qperpy * s000 - q0x * qperpz * s000 - q0x * qperpw * s010 -
                     q0w * qperpx * s010 + 2 * q0x * qperpx * s020 - q0w * qperpy * s100 +
@@ -1331,7 +1402,7 @@ namespace pbrt
                            qperpz * s112 - 2 * qperpy * s122 + 2 * q0w * s002 * theta -
                            2 * q0z * s012 * theta));
 
-            c5[2] = new DerivativeTerm(
+            seg.c5[2] = new DerivativeTerm(
                 0,
                 2 *
                     (qperpw * qperpy * s000 - qperpx * qperpz * s000 + q0y * q0z * s010 -
@@ -1366,7 +1437,7 @@ namespace pbrt
                      qperpx * qperpx * s122 - qperpy * qperpy * s122 +
                      q0x * q0x * (-s022 + s122)) *
                     theta);
-            }
+            return seg;
         }
 
         // AnimatedTransform Public Methods
@@ -1494,13 +1565,61 @@ namespace pbrt
             return t.ApplyInverse(it);
         }
 
-        public bool HasScale() { return startTransform.HasScale() || endTransform.HasScale(); }
+        public bool HasScale()
+        {
+            if (keyTransforms == null)
+                return startTransform.HasScale() || endTransform.HasScale();
+            for (int i = 0; i < nKeys; ++i)
+                if (keyTransforms[i].HasScale())
+                    return true;
+            return false;
+        }
+
+        // The number of keys (0 for a default constructed AnimatedTransform)
+        public int KeyCount { get { return nKeys; } }
+
+        // The number of segments between consecutive keys
+        public int SegmentCount { get { return nKeys > 0 ? nKeys - 1 : 0; } }
+
+        public Transform GetKeyTransform(int i) { return keyTransforms[i]; }
+
+        public Float GetKeyTime(int i) { return keyTimes[i]; }
+
+        // A new AnimatedTransform whose keys are t * (the keys of this one), at the same times
+        public AnimatedTransform PreMultiply(Transform t)
+        {
+            Transform[] keys = new Transform[nKeys];
+            for (int i = 0; i < nKeys; ++i)
+                keys[i] = t * keyTransforms[i];
+            return new AnimatedTransform(keys, keyTimes, false);
+        }
 
         public override string ToString()
         {
-            return $"[ AnimatedTransform startTransform: {startTransform} endTransform: {endTransform} " +
-                   $"startTime: {startTime} endTime: {endTime} actuallyAnimated: {actuallyAnimated} T: [ {T[0]} {T[1]} ] " +
-                   $"R: [ {R[0]} {R[1]} ] S: [ {S[0]} {S[1]} ] hasRotation: {hasRotation} ]";
+            string s = $"[ AnimatedTransform startTransform: {startTransform} endTransform: {endTransform} " +
+                       $"startTime: {startTime} endTime: {endTime} actuallyAnimated: {actuallyAnimated} keys: {nKeys}";
+            if (actuallyAnimated && nKeys == 2)
+                s += $" T: [ {T[0]} {T[1]} ] R: [ {R[0]} {Rend[0]} ] S: [ {S[0]} {S[1]} ] hasRotation: {segments[0].hasRotation}";
+            else if (actuallyAnimated)
+                for (int i = 0; i < nKeys; ++i)
+                    s += $" key[{i}]: time {keyTimes[i]} T: {T[i]} R: {R[i]} S: {S[i]}";
+            return s + " ]";
+        }
+
+        // The index k of the segment [keyTimes[k], keyTimes[k + 1]) that contains time, for
+        // keyTimes[0] < time < keyTimes[nKeys - 1]
+        private int FindSegment(Float time)
+        {
+            int lo = 0, hi = nKeys - 1;
+            while (hi - lo > 1)
+            {
+                int mid = (lo + hi) >> 1;
+                if (keyTimes[mid] <= time)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            return lo;
         }
 
         public Transform Interpolate(Float time)
@@ -1511,39 +1630,79 @@ namespace pbrt
             if (time >= endTime)
                 return endTransform;
 
-            Float dt = (time - startTime) / (endTime - startTime);
+            // Find the segment that contains _time_
+            int k = 0;
+            if (nKeys > 2)
+            {
+                k = FindSegment(time);
+                if (time == keyTimes[k] || segmentStatic[k])
+                    return keyTransforms[k];
+            }
+
+            return InterpolateSegment(k, time);
+        }
+
+        // The transformation at a time strictly inside the segment k
+        private Transform InterpolateSegment(int k, Float time)
+        {
+            Float dt = (time - keyTimes[k]) / (keyTimes[k + 1] - keyTimes[k]);
             // Interpolate translation at _dt_
-            Vector3f trans = (1 - dt) * T[0] + dt * T[1];
+            Vector3f trans = (1 - dt) * T[k] + dt * T[k + 1];
 
             // Interpolate rotation at _dt_
-            Quaternion rotate = Slerp(dt, R[0], R[1]);
+            Quaternion rotate = Slerp(dt, R[k], Rend[k]);
 
             // Interpolate scale at _dt_
-            SquareMatrix4 scale = (1 - dt) * S[0] + dt * S[1];
+            SquareMatrix4 scale = (1 - dt) * S[k] + dt * S[k + 1];
 
             // Return computed final transform
             return Translate(trans) * new Transform(rotate) * new Transform(scale);
         }
 
+        // The bounds of the box b over the whole time range: the union of the bounds of the segments
         public Bounds3f MotionBounds(Bounds3f b)
         {
             if (!actuallyAnimated)
                 return startTransform.Apply(b);
-            if (!hasRotation)
-                return Union(startTransform.Apply(b), endTransform.Apply(b));
-            // Return motion bounds accounting for animated rotation
-            Bounds3f bounds = new Bounds3f();
-            for (int corner = 0; corner < 8; ++corner)
-                bounds = Union(bounds, BoundPointMotion(b.Corner(corner)));
+            Bounds3f bounds = SegmentMotionBounds(0, b);
+            for (int k = 1; k < nKeys - 1; ++k)
+                bounds = Union(bounds, SegmentMotionBounds(k, b));
             return bounds;
         }
 
+        // The bounds of the box b over the time range of one segment (between keys segment and segment + 1)
+        public Bounds3f SegmentMotionBounds(int segment, Bounds3f b)
+        {
+            if (segmentStatic[segment])
+                return keyTransforms[segment].Apply(b);
+            if (!segments[segment].hasRotation)
+                return Union(keyTransforms[segment].Apply(b), keyTransforms[segment + 1].Apply(b));
+            // Return motion bounds accounting for animated rotation
+            Bounds3f bounds = new Bounds3f();
+            for (int corner = 0; corner < 8; ++corner)
+                bounds = Union(bounds, SegmentBoundPointMotion(segment, b.Corner(corner)));
+            return bounds;
+        }
+
+        // The bounds of the motion of the point p over the whole time range
         public Bounds3f BoundPointMotion(Point3f p)
         {
             if (!actuallyAnimated)
                 return new Bounds3f(startTransform.Apply(p));
-            Bounds3f bounds = new Bounds3f(startTransform.Apply(p), endTransform.Apply(p));
-            Float cosTheta = Dot(R[0], R[1]);
+            Bounds3f bounds = SegmentBoundPointMotion(0, p);
+            for (int k = 1; k < nKeys - 1; ++k)
+                bounds = Union(bounds, SegmentBoundPointMotion(k, p));
+            return bounds;
+        }
+
+        // The bounds of the motion of the point p over the time range of one segment
+        public Bounds3f SegmentBoundPointMotion(int segment, Point3f p)
+        {
+            if (segmentStatic[segment])
+                return new Bounds3f(keyTransforms[segment].Apply(p));
+            MotionSegment seg = segments[segment];
+            Bounds3f bounds = new Bounds3f(keyTransforms[segment].Apply(p), keyTransforms[segment + 1].Apply(p));
+            Float cosTheta = Dot(R[segment], Rend[segment]);
             Float theta = SafeACos(cosTheta);
             for (int c = 0; c < 3; ++c)
             {
@@ -1552,22 +1711,31 @@ namespace pbrt
                 int nZeros = 0;
                 unsafe
                 {
-                    FindZeros(c1[c].Eval(p), c2[c].Eval(p), c3[c].Eval(p), c4[c].Eval(p),
-                              c5[c].Eval(p), theta, new Interval(0, 1), new pstd.span<Float>(zeros), &nZeros);
+                    FindZeros(seg.c1[c].Eval(p), seg.c2[c].Eval(p), seg.c3[c].Eval(p), seg.c4[c].Eval(p),
+                              seg.c5[c].Eval(p), theta, new Interval(0, 1), new pstd.span<Float>(zeros), &nZeros);
                 }
                 CHECK_LE(nZeros, zeros.Length);
 
                 // Expand bounding box for any motion derivative zeros found
+                // (the point is moved within the segment: a time outside of it, which the root finding allows
+                // for by a small tolerance, is clamped to the keys of the segment, as in a two key animation)
                 for (int i = 0; i < nZeros; ++i)
                 {
-                    Point3f pz = Apply(p, Lerp(zeros[i], startTime, endTime));
+                    Float zeroTime = Lerp(zeros[i], keyTimes[segment], keyTimes[segment + 1]);
+                    Point3f pz;
+                    if (zeroTime <= keyTimes[segment])
+                        pz = keyTransforms[segment].Apply(p);
+                    else if (zeroTime >= keyTimes[segment + 1])
+                        pz = keyTransforms[segment + 1].Apply(p);
+                    else
+                        pz = InterpolateSegment(segment, zeroTime).Apply(p);
                     bounds = Union(bounds, pz);
                 }
             }
             return bounds;
         }
 
-        // AnimatedTransform Public Members
+        // AnimatedTransform Public Members (the first and the last key)
         public Transform startTransform, endTransform;
         public Float startTime = 0, endTime = 1;
 
@@ -1622,10 +1790,14 @@ namespace pbrt
         }
 
         private bool actuallyAnimated = false;
-        private Vector3f[] T = new Vector3f[2];
-        private Quaternion[] R = new Quaternion[2];
-        private SquareMatrix4[] S = new SquareMatrix4[2];
-        private bool hasRotation;
+        private int nKeys = 0;
+        private Transform[] keyTransforms;
+        private Float[] keyTimes;
+        private bool[] segmentStatic;
+        private Vector3f[] T;
+        private Quaternion[] R;     // the rotation of each key
+        private Quaternion[] Rend;  // the rotation at the end of each segment, with the sign that gives the shortest arc
+        private SquareMatrix4[] S;
 
         private struct DerivativeTerm
         {
@@ -1633,9 +1805,17 @@ namespace pbrt
             public Float kc, kx, ky, kz;
             public Float Eval(Point3f p) { return kc + kx * p.x + ky * p.y + kz * p.z; }
         }
-        private DerivativeTerm[] c1 = new DerivativeTerm[3], c2 = new DerivativeTerm[3],
-                                 c3 = new DerivativeTerm[3], c4 = new DerivativeTerm[3],
-                                 c5 = new DerivativeTerm[3];
+
+        // The terms of the motion derivative of a point in one segment
+        private sealed class MotionSegment
+        {
+            public bool hasRotation;
+            public DerivativeTerm[] c1 = new DerivativeTerm[3], c2 = new DerivativeTerm[3],
+                                    c3 = new DerivativeTerm[3], c4 = new DerivativeTerm[3],
+                                    c5 = new DerivativeTerm[3];
+        }
+        private MotionSegment[] segments;
     }
+
 
 }  // namespace pbrt
