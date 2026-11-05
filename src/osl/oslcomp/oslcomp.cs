@@ -45,7 +45,7 @@ namespace OSL
             public const int OSO_FILE_VERSION_MAJOR = 1;
             public const int OSO_FILE_VERSION_MINOR = 0;
             public static string OSL_SHADER_INSTALL_DIR = "";
-            public const string OSL_LIBRARY_VERSION_STRING = "1.15.0";
+            public const string OSL_LIBRARY_VERSION_STRING = "1.16.0.0dev";
 
             public OSLCompilerImpl(ErrorHandler errhandler)
             {

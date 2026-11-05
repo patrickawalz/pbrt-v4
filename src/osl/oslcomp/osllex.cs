@@ -19,6 +19,7 @@ namespace OSL
             public int i;
             public float f;
             public string s;
+            public ASTNode n;
         }
 
         // YYLTYPE Definition
