@@ -19,6 +19,7 @@
     <Compile Include="pbrt_test.cs" />
     <Compile Include="../**/*_test.cs" />
     <Compile Include="../../osl/**/*_test.cs" />
+    <Compile Remove="../../osl/osl_test/**" />  <!-- the host of the OSL tests has its own Main -->
     <ProjectReference Include="../pbrt_lib.csproj" />
     <ProjectReference Include="../../osl/osl_lib.csproj" />
     <ProjectReference Include="../../opensubdiv_lib/opensubdiv_lib.csproj" />
