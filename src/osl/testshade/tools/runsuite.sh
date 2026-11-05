@@ -19,6 +19,11 @@ if [ ! -x /tmp/tsuite/bin/oiiotool_min ] || [ $TOOLS/oiiotool_min.cpp -nt /tmp/t
       -lOpenImageIO -lOpenImageIO_Util -Wl,-rpath,/tmp/osl-ref/oiio-install/lib || exit 1
 fi
 ln -sf oiiotool_min /tmp/tsuite/bin/maketx
+# The render-* directories compare images with the real idiff (built from the OIIO source next to the reference build)
+if [ ! -x /tmp/tsuite/bin/idiff ] && [ -f /tmp/osl-ref/oiio-src/src/idiff/idiff.cpp ]; then
+  g++ -std=c++17 -O1 -w -I/tmp/osl-ref/oiio-install/include -I/tmp/osl-ref/oiio-src/src/include /tmp/osl-ref/oiio-src/src/idiff/idiff.cpp \
+      -o /tmp/tsuite/bin/idiff -L/tmp/osl-ref/oiio-install/lib -lOpenImageIO -lOpenImageIO_Util -Wl,-rpath,/tmp/osl-ref/oiio-install/lib || exit 1
+fi
 cat > /tmp/tsuite/bin/oiiotool <<EOS
 #!/bin/bash
 case " \$* " in

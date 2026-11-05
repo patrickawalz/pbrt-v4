@@ -499,6 +499,45 @@ namespace OIIO
             return MathF.CopySign(1.0f - 1.0f / v, x);
         }
 
+        public static float fast_ierf(float x)
+        {
+            // from: Approximating the erfinv function by Mike Giles; to avoid trouble at the limit, clamp input to 1-eps
+            float a = MathF.Abs(x);
+            if (a > 0.99999994f)
+            {
+                a = 0.99999994f;
+            }
+            float w = -fast_log((1.0f - a) * (1.0f + a));
+            float p;
+            if (w < 5.0f)
+            {
+                w = w - 2.5f;
+                p = 2.81022636e-08f;
+                p = madd(p, w, 3.43273939e-07f);
+                p = madd(p, w, -3.5233877e-06f);
+                p = madd(p, w, -4.39150654e-06f);
+                p = madd(p, w, 0.00021858087f);
+                p = madd(p, w, -0.00125372503f);
+                p = madd(p, w, -0.00417768164f);
+                p = madd(p, w, 0.246640727f);
+                p = madd(p, w, 1.50140941f);
+            }
+            else
+            {
+                w = MathF.Sqrt(w) - 3.0f;
+                p = -0.000200214257f;
+                p = madd(p, w, 0.000100950558f);
+                p = madd(p, w, 0.00134934322f);
+                p = madd(p, w, -0.00367342844f);
+                p = madd(p, w, 0.00573950773f);
+                p = madd(p, w, -0.0076224613f);
+                p = madd(p, w, 0.00943887047f);
+                p = madd(p, w, 1.00167406f);
+                p = madd(p, w, 2.83297682f);
+            }
+            return p * x;
+        }
+
         public static float fast_erfc(float x)
         {
             return 1.0f - fast_erf(x);
