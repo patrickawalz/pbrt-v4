@@ -420,7 +420,7 @@ namespace OSL
                 Matrix22f Sigma_GF_Gi = Sigma_GF * Sigma_G_i;
                 gabor_mul_m22_v2(Sigma_GF_Gi, omega_x, omega_y, out omega_f_x, out omega_f_y);
                 w_f = c_GF;
-                a_f = MathF.Sqrt(M_TWO_PI_F * MathF.Sqrt(Sigma_GF.determinant()));
+                a_f = MathF.Sqrt((float)((Math.PI * 2.0) * MathF.Sqrt(Sigma_GF.determinant()))); // M_TWO_PI is a double here
                 phi_f = phi;
             }
 
