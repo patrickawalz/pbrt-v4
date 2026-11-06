@@ -71,7 +71,8 @@ namespace pbrt
             // Helpful warnings
             if (haveScatteringMedia && parsedScene.integrator.name != "volpath" &&
                 parsedScene.integrator.name != "simplevolpath" &&
-                parsedScene.integrator.name != "bdpt" && parsedScene.integrator.name != "mlt")
+                parsedScene.integrator.name != "bdpt" && parsedScene.integrator.name != "bdptinc" &&
+                parsedScene.integrator.name != "mlt")
                 Warning(StringPrintf("Scene has scattering media but \"%s\" integrator doesn't support " +
                                      "volume scattering. Consider using \"volpath\", \"simplevolpath\", " +
                                      "\"bdpt\", or \"mlt\".",

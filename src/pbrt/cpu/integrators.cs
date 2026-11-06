@@ -272,6 +272,8 @@ namespace pbrt
                 integrator = RandomWalkIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "bdpt")
                 integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "bdptinc")
+                integrator = BDPTIncrementalIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "mlt")
                 integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
             else if (name == "function")
