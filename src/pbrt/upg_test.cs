@@ -1,6 +1,7 @@
 // (not in pbrt-v4) upg_test.cs: the tests of unbiased photon gathering (cpu/upg.cs, docs/upg.md)
 
 using System;
+using System.Text;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -86,6 +87,11 @@ namespace pbrt
             cases.Add(("conductor alpha 0.3", ConductorBSDF(0.3f, 0.3f)));
             cases.Add(("conductor alpha 0.3 x 0.1", ConductorBSDF(0.3f, 0.1f)));
             cases.Add(("conductor alpha 0.8", ConductorBSDF(0.8f, 0.8f)));
+            // The phase functions of the media (phase 2)
+            cases.Add(("isotropic phase function", new BSDF(new HGPhaseFunction(0))));
+            cases.Add(("Henyey-Greenstein g 0.6", new BSDF(new HGPhaseFunction(0.6f))));
+            cases.Add(("Henyey-Greenstein g -0.5", new BSDF(new HGPhaseFunction(-0.5f))));
+            cases.Add(("Henyey-Greenstein g 0.9", new BSDF(new HGPhaseFunction(0.9f))));
             return cases;
         }
 
@@ -195,9 +201,63 @@ namespace pbrt
         // The room of the paper's kind of scene: diffuse walls, a red wall, a glossy (copper) floor, a diffuse sphere and an area
         // light. Variants: "direct" (the light shines down), "indirect" (the light shines up: everything the camera sees is lit by
         // bounces), "caustic" (a small light over a nearly mirror-like floor, so a bright patch of reflected light on the ceiling)
+        // The media of the scenes of phase 2: the room (x in [-2, 2], y in [0, 2], z in [-4, 2]) filled with a medium, the camera in it.
+        // The variant "kind:name" is the room variant "name" with the medium "kind"
+        static string MediumDeclaration(string kind)
+        {
+            switch (kind)
+            {
+            case "fog":
+                // (constant spectra: an RGB triple of three equal values is a spectrum that varies by a few 1e-4)
+                return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"spectrum sigma_a\" [300 0.05 900 0.05] \"spectrum sigma_s\" [300 0.35 900 0.35] \"float g\" 0\n";
+            case "fogray":
+                return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.05 0.05 0.05] \"rgb sigma_s\" [0.5 0.5 0.5] \"float g\" 0 \"float rayleigh\" 1\n";
+            case "foghg":
+                return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.05 0.05 0.05] \"rgb sigma_s\" [0.35 0.35 0.35] \"float g\" 0.6\n";
+            case "fogdense":
+                return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.05 0.05 0.05] \"rgb sigma_s\" [1.2 1.2 1.2] \"float g\" 0.3\n";
+            case "foggrid":
+            {
+                // A smooth density on a grid over the room: the extinction varies by a factor of five
+                int nx = 8, ny = 4, nz = 12;
+                StringBuilder sb = new StringBuilder();
+                sb.Append("MakeNamedMedium \"fog\" \"string type\" \"uniformgrid\" \"rgb sigma_a\" [0.05 0.05 0.05] \"rgb sigma_s\" [0.4 0.4 0.4] \"float g\" 0.3 " +
+                          "\"integer nx\" " + nx + " \"integer ny\" " + ny + " \"integer nz\" " + nz + " \"point3 p0\" [-2 0 -4] \"point3 p1\" [2 2 2] \"float density\" [");
+                for (int z = 0; z < nz; ++z)
+                {
+                    for (int y = 0; y < ny; ++y)
+                    {
+                        for (int x = 0; x < nx; ++x)
+                        {
+                            double d = 0.35 + 0.65 * (0.5 + 0.5 * Math.Sin(0.9 * x + 0.5) * Math.Cos(1.3 * y + 0.2) * Math.Sin(0.6 * z + 1.0));
+                            sb.Append(d.ToString("R", CultureInfo.InvariantCulture)).Append(' ');
+                        }
+                    }
+                }
+                sb.Append("]\n");
+                return sb.ToString();
+            }
+            case "fogosl":
+            {
+                string directory = OslVolumeShaders.Directory();
+                return "Translate -2 0 -4\nScale 4 2 6\nMakeNamedMedium \"fog\" \"string type\" \"osl\" \"string shader\" \"" + directory +
+                       "/vtrig.osl\" \"float amp\" 0.7 \"point3 p0\" [0 0 0] \"point3 p1\" [1 1 1]\nIdentity\n";
+            }
+            default:
+                return "";
+            }
+        }
+
         public static string RoomScene(string variant, string integratorLine, int resolution, int spp)
         {
-            string s = "Option \"rendercoordsys\" \"world\"\n";
+            string mediaText = "";
+            int colon = variant.IndexOf(':');
+            if (colon >= 0)
+            {
+                mediaText = MediumDeclaration(variant.Substring(0, colon)) + "MediumInterface \"\" \"fog\"\n";
+                variant = variant.Substring(colon + 1);
+            }
+            string s = "Option \"rendercoordsys\" \"world\"\n" + mediaText;
             s += "LookAt 0 1.0 -3.6  0 1.0 0  0 1 0\nCamera \"perspective\" \"float fov\" 55\n";
             s += "Film \"rgb\" \"integer xresolution\" " + resolution + " \"integer yresolution\" " + resolution + " \"string filename\" \"out.exr\"\n";
             s += "Sampler \"independent\" \"integer pixelsamples\" " + spp + "\n" + integratorLine + "\nWorldBegin\n";
@@ -314,7 +374,7 @@ namespace pbrt
             UpgBound bound = UpgBound.Full;
             if (useBound)
             {
-                bound = UpgBound.Compute(shooter.bsdf, shooter.si.wo, shooter.p(), center, radius);
+                bound = UpgBound.Compute(shooter.bsdf, shooter.type == VertexType.Surface ? shooter.si.wo : shooter.mi.wo, shooter.p(), center, radius);
             }
             UpgWalker walker = new UpgWalker(fx.integrator, fx.camera, new IndependentSampler(1, 1234 + streamBase));
             SampledWavelengths lambda = fx.Wavelengths();
@@ -409,7 +469,7 @@ namespace pbrt
         // A second computation from the raw densities (doubles, logarithms) gives the same weight for every technique.
 
         static void CheckPathWeights(Fixture fx, Vertex[] eye, int T, Float beta, bool gatheringPreferred, ref int checkedPaths, ref double worstSum,
-                                     ref double worstRaw, ref int gatheringTechniques)
+                                     ref double worstRaw, ref int gatheringTechniques, Func<Vertex, Vertex, double> mediumFactor = null, bool strict = true)
         {
             UpgIntegrator integrator = fx.integrator;
             UpgMis mis = integrator.Mis;
@@ -541,7 +601,9 @@ namespace pbrt
                 int t = k + 1 - s;
                 Float w = weight(s, t, new UpgMisQuery(mis, variants[m], m));
                 double density = keepLight ? dE[m] : dL[m];
-                double pc = Math.Min(mis.Measure(x[m]) * density, 1.0);
+                // (the density of a vertex in a medium has the factor of the collision, see UpgMis: here from the coefficients of the medium)
+                double factor = mediumFactor != null && x[m].type == VertexType.Medium ? mediumFactor(x[m], keepLight ? x[m + 1] : x[m - 1]) : 1.0;
+                double pc = Math.Min(mis.Measure(x[m]) * density * factor, 1.0);
                 weights.Add(w);
                 names.Add("gather m=" + m + (keepLight ? " keep light vertex" : " keep camera vertex"));
                 logDensity.Add(Math.Log(lightPaths * pc) + logP[s]);
@@ -559,7 +621,10 @@ namespace pbrt
                 denominator += Math.Exp(beta * (logDensity[i] - maxLog));
             }
             worstSum = Math.Max(worstSum, Math.Abs(sumWeights - 1));
-            EXPECT_TRUE(Math.Abs(sumWeights - 1) < 1e-4);
+            if (strict)
+            {
+                EXPECT_TRUE(Math.Abs(sumWeights - 1) < 1e-4);
+            }
             for (int i = 0; i < logDensity.Count; ++i)
             {
                 double raw = Math.Exp(beta * (logDensity[i] - maxLog)) / denominator;
@@ -569,7 +634,10 @@ namespace pbrt
                 {
                     Console.WriteLine("[Upg] weight mismatch for technique " + names[i] + ": renderer " + weights[i] + ", raw densities " + raw + " (k " + k + ")");
                 }
-                EXPECT_TRUE(error <= 1e-4 + 1e-3 * raw);
+                if (strict)
+                {
+                    EXPECT_TRUE(error <= 1e-4 + 1e-3 * raw);
+                }
             }
             ++checkedPaths;
         }
@@ -1096,12 +1164,24 @@ namespace pbrt
         [TEST("Upg", "PolarisedUnbiasedness")]
         public static void Upg_PolarisedUnbiasedness()
         {
+            PolarisedUnbiasednessCase("polarised", "pol");
+        }
+
+        // Rayleigh scattering in a medium polarises the light (the Mueller matrix of the scattering at the connection vertices that are in the medium)
+        [TEST("Upg", "PolarisedRayleighFog")]
+        public static void Upg_PolarisedRayleighFog()
+        {
+            PolarisedUnbiasednessCase("fogray:direct", "polray");
+        }
+
+        static void PolarisedUnbiasednessCase(string sceneVariant, string tag)
+        {
             string common = " \"integer maxdepth\" 5 \"integer photons\" 512";
             string[] measures = new string[] { "intensity", "s1", "s2" };
             foreach (string measure in measures)
             {
                 Variant reference = PolarisedVariant("bdpt", "Integrator \"bdpt\" \"integer maxdepth\" 5", 64, 64, measure);
-                List<float[]> referenceImages = RenderSeeds("pol_" + measure + "_ref", RoomScene("polarised", reference.integratorLine, 12, reference.spp),
+                List<float[]> referenceImages = RenderSeeds(tag + "_" + measure + "_ref", RoomScene(sceneVariant, reference.integratorLine, 12, reference.spp),
                                                             reference.spp, 1000, reference.seeds);
                 Variant[] variants = new Variant[]
                 {
@@ -1111,7 +1191,7 @@ namespace pbrt
                 };
                 for (int v = 0; v < variants.Length; ++v)
                 {
-                    List<float[]> images = RenderSeeds("pol_" + measure + "_v" + v, RoomScene("polarised", variants[v].integratorLine, 12, variants[v].spp),
+                    List<float[]> images = RenderSeeds(tag + "_" + measure + "_v" + v, RoomScene(sceneVariant, variants[v].integratorLine, 12, variants[v].spp),
                                                        variants[v].spp, 1 + 100 * v, variants[v].seeds);
                     double meanA, meanB;
                     double t = TStatistic(images, referenceImages, -1, out meanA, out meanB);
@@ -1163,6 +1243,255 @@ namespace pbrt
                 }
                 Console.WriteLine("[Upg] polarised " + measure + " of the scene without a polarising element: largest |value| " + largest.ToString("G3", CultureInfo.InvariantCulture) + " (the intensity is about " + mb.ToString("G3", CultureInfo.InvariantCulture) + ")");
                 EXPECT_TRUE(largest < 1e-5);
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------
+        // Phase 2: media (our own extension: the paper is about surfaces)
+
+        // (a) The reciprocal estimator in an infinite homogeneous medium: the shooter is a scattering event of the camera sub-path, the
+        // neighbourhood is a ball, and the probability that the tentative ray (the phase function's direction and the sampled distance to
+        // its first scattering event) ends in the ball is the integral over the cone and the chord of the ball:
+        //     p_c = int dOmega  phase(wo, w)  (sigma_s / sigma_t) (exp(-sigma_t r_1) - exp(-sigma_t r_2)),
+        // r_1,2 = D cos(a) -+ sqrt(d^2 - D^2 sin^2(a)) for the angle a to the axis of the cone (the absorption ends the ray, so
+        // the density of a scattering event is sigma_s T).
+        static string InfiniteMediumScene(string medium)
+        {
+            string s = "Option \"rendercoordsys\" \"world\"\n" + medium + "MediumInterface \"\" \"fog\"\n";
+            s += "LookAt 0 0 0  0 0 1  0 1 0\nCamera \"perspective\" \"float fov\" 20\n";
+            s += "Film \"rgb\" \"integer xresolution\" 1 \"integer yresolution\" 1 \"string filename\" \"out.exr\"\n";
+            s += "Sampler \"independent\" \"integer pixelsamples\" 1\nIntegrator \"upg\" \"integer maxdepth\" 3 \"integer photons\" 1 \"float radius\" 0.5\nWorldBegin\n";
+            s += "LightSource \"point\" \"rgb I\" [1 1 1] \"point3 from\" [0 0 0]\n";
+            s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.5 0.5 0.5]\nTranslate 0 5000 0\nShape \"sphere\" \"float radius\" 1\nAttributeEnd\n";
+            return s;
+        }
+
+        static double BallProbability(Vertex shooter, Point3f center, Float radius, double sigmaS, double sigmaT, int n, int m)
+        {
+            Vector3f wo = shooter.mi.wo;
+            Point3f origin = shooter.p();
+            Vector3f toCenter = center - origin;
+            double distance = Length(toCenter);
+            Vector3f axis = toCenter / (Float)distance;
+            Vector3f e1 = Normalize(Cross(axis, Math.Abs(axis.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0)));
+            Vector3f e2 = Cross(axis, e1);
+            double halfAngle = Math.Asin(radius / distance);
+            double sum = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                double a = (i + 0.5) / n * halfAngle;
+                double sinA = Math.Sin(a), cosA = Math.Cos(a);
+                double chord = Math.Sqrt(Math.Max((double)radius * radius - distance * distance * sinA * sinA, 0));
+                double near = distance * cosA - chord, far = distance * cosA + chord;
+                double radial = sigmaS / sigmaT * (Math.Exp(-sigmaT * near) - Math.Exp(-sigmaT * far));
+                double around = 0;
+                for (int j = 0; j < m; ++j)
+                {
+                    double phi = (j + 0.5) / m * 2 * Math.PI;
+                    Vector3f w = (Float)cosA * axis + (Float)sinA * ((Float)Math.Cos(phi) * e1 + (Float)Math.Sin(phi) * e2);
+                    around += shooter.bsdf.PDF(wo, w);
+                }
+                sum += around / m * 2 * Math.PI * radial * sinA;
+            }
+            return sum * halfAngle / n;
+        }
+
+        static void MediumReciprocalCase(string label, string phaseG, double g, Float radius, Vector3f offset)
+        {
+            double sigmaA = 0.2, sigmaS = 0.6;
+            string medium = "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.2 0.2 0.2] \"rgb sigma_s\" [0.6 0.6 0.6] \"float g\" " + phaseG + "\n";
+            Fixture fx = Fixture.Build(InfiniteMediumScene(medium));
+            SampledWavelengths lambda = fx.Wavelengths();
+            Vertex shooter = null;
+            for (int i = 0; i < 200 && shooter == null; ++i)
+            {
+                Vertex[] path = new Vertex[4];
+                int count = fx.CameraPath(new Point2i(0, 0), i, path, ref lambda);
+                if (count >= 2 && path[1].type == VertexType.Medium)
+                {
+                    shooter = path[1];
+                }
+            }
+            ASSERT_TRUE(shooter != null);
+            Point3f center = shooter.p() + offset;
+            double pc = BallProbability(shooter, center, radius, sigmaS, sigmaA + sigmaS, 4000, 96);
+            double pcCoarse = BallProbability(shooter, center, radius, sigmaS, sigmaA + sigmaS, 2000, 48);
+            double quadratureError = Math.Abs(pc - pcCoarse) / pc;
+            Console.WriteLine("[Upg] " + label + ": quadrature p_c " + pc.ToString("G6", CultureInfo.InvariantCulture) + " (relative difference to the coarse rule " +
+                              quadratureError.ToString("G3", CultureInfo.InvariantCulture) + ")");
+            EXPECT_TRUE(quadratureError < 1e-3);
+            for (int bounded = 0; bounded < 2; ++bounded)
+            {
+                int runs = bounded == 1 ? 400000 : 40000;
+                EstimatorResult r = RunEstimator(fx, shooter, center, radius, bounded == 1, runs, 51 + bounded);
+                double expected = 1.0 / pc;
+                double z = (r.mean - expected) / r.standardError;
+                Console.WriteLine("[Upg] " + label + (bounded == 1 ? ", with the angular bound" : ", without the bound") + ": p_b " + r.pb.ToString("G4", CultureInfo.InvariantCulture) +
+                                  ", mean trials " + r.meanTrials.ToString("G4", CultureInfo.InvariantCulture) + ", estimate " + r.mean.ToString("G6", CultureInfo.InvariantCulture) + " +- " +
+                                  r.standardError.ToString("G3", CultureInfo.InvariantCulture) + ", 1/p_c " + expected.ToString("G6", CultureInfo.InvariantCulture) + ", z " +
+                                  z.ToString("F2", CultureInfo.InvariantCulture));
+                EXPECT_TRUE(Math.Abs(z) < 4.0);
+                EXPECT_TRUE(Math.Abs(r.meanTrials - r.pb / pc) < 0.03 * (r.pb / pc) + 0.05);
+            }
+        }
+
+        [TEST("Upg", "MediumReciprocalEstimator")]
+        public static void Upg_MediumReciprocalEstimator()
+        {
+            MediumReciprocalCase("infinite medium, isotropic phase function, d 0.4 at distance 0.8", "0", 0, 0.4f, new Vector3f(0.7f, 0.2f, 0.3f));
+            MediumReciprocalCase("infinite medium, isotropic phase function, d 0.15 at distance 1.5", "0", 0, 0.15f, new Vector3f(-1.1f, 0.6f, 0.8f));
+            MediumReciprocalCase("infinite medium, Henyey-Greenstein g 0.6, d 0.3", "0.6", 0.6, 0.3f, new Vector3f(0.5f, -0.4f, 0.6f));
+            MediumReciprocalCase("infinite medium, Henyey-Greenstein g -0.5, d 0.3", "-0.5", -0.5, 0.3f, new Vector3f(0.5f, -0.4f, 0.6f));
+        }
+
+        // (c) The MIS weights of all the techniques add to one on paths with vertices in a medium (the same function and the same check
+        // as the paths of surfaces; the raw-density computation has the factor sigma_s exp(-sigma_t x) of the collision from the
+        // coefficients of the medium, not from the code that is tested)
+        [TEST("Upg", "MediumMisWeightsSumToOne")]
+        public static void Upg_MediumMisWeightsSumToOne()
+        {
+            Fixture fx = Fixture.Build(RoomScene("fog:direct", "Integrator \"upg\" \"integer maxdepth\" 6 \"integer photons\" 400 \"float radius\" 0.25", 8, 1));
+            int maxDepth = fx.integrator.MaxDepth;
+            Func<Vertex, Vertex, double> factor = (Vertex x, Vertex neighbour) => 0.35 * Math.Exp(-0.4 * Length(x.p() - neighbour.p()));
+            foreach (Float beta in new Float[] { 2, 1 })
+            {
+                int checkedPaths = 0, mediumPaths = 0, gatheringTechniques = 0;
+                double worstSum = 0, worstRaw = 0, worstShort = 0;
+                int shortPaths = 0;
+                SampledWavelengths lambda = fx.Wavelengths();
+                fx.integrator.Mis.SetWavelengths(lambda);
+                for (int i = 0; i < 400000 && mediumPaths < 150; ++i)
+                {
+                    Vertex[] eye = new Vertex[maxDepth + 2];
+                    int n = fx.CameraPath(new Point2i(i % 8, (i / 8) % 8), i, eye, ref lambda);
+                    for (int T = 3; T <= n; ++T)
+                    {
+                        Vertex last = eye[T - 1];
+                        if (last.type == VertexType.Surface && last.si.areaLight != null)
+                        {
+                            bool hasMedium = false, wellConditioned = true;
+                            for (int j = 1; j < T - 1; ++j)
+                            {
+                                if (eye[j].type == VertexType.Medium)
+                                {
+                                    hasMedium = true;
+                                    // The density of a vertex that a view of the path recomputes from the geometry differs from the walk's by the
+                                    // offset of the origin of the ray, relative to the distance and the cosine (4e-4 at a distance of 0.1 and a
+                                    // grazing angle: a property of the float geometry of bdpt's densities, not of the weights)
+                                    wellConditioned &= Length(eye[j].p() - eye[j - 1].p()) > 0.25f && Length(eye[j].p() - eye[j + 1].p()) > 0.25f;
+                                }
+                            }
+                            if (hasMedium)
+                            {
+                                int before = checkedPaths;
+                                double worstBefore = worstSum;
+                                if (wellConditioned)
+                                {
+                                    CheckPathWeights(fx, eye, T, beta, false, ref checkedPaths, ref worstSum, ref worstRaw, ref gatheringTechniques, factor);
+                                    if (checkedPaths > before)
+                                    {
+                                        ++mediumPaths;
+                                    }
+                                }
+                                else
+                                {
+                                    double ignoredRaw = 0;
+                                    int ignoredCount = 0;
+                                    CheckPathWeights(fx, eye, T, beta, false, ref ignoredCount, ref worstShort, ref ignoredRaw, ref gatheringTechniques, factor, false);
+                                    shortPaths += ignoredCount;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                Console.WriteLine("[Upg] MIS sums in a medium: beta " + beta + ": " + mediumPaths + " paths with a vertex in the medium, " + gatheringTechniques +
+                                  " gathering techniques, worst |sum - 1| " + worstSum.ToString("G3", CultureInfo.InvariantCulture) + ", worst difference to the raw-density weights " +
+                                  worstRaw.ToString("G3", CultureInfo.InvariantCulture) + "; " + shortPaths +
+                                  " paths with a medium vertex closer than 0.25 to a neighbour (not asserted, float geometry): worst |sum - 1| " + worstShort.ToString("G3", CultureInfo.InvariantCulture));
+                EXPECT_GE(mediumPaths, 100);
+                EXPECT_GT(gatheringTechniques, 100);
+            }
+        }
+
+        // (d) Unbiasedness against bdpt in the room filled with media
+        [TEST("Upg", "UnbiasedFogRoom")]
+        public static void Upg_UnbiasedFogRoom()
+        {
+            UnbiasednessOfScene("fog", "fog:direct", BdptReference(64, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        [TEST("Upg", "UnbiasedForwardScatteringFog")]
+        public static void Upg_UnbiasedForwardScatteringFog()
+        {
+            UnbiasednessOfScene("foghg", "foghg:indirect", BdptReference(64, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        [TEST("Upg", "UnbiasedDenseFog")]
+        public static void Upg_UnbiasedDenseFog()
+        {
+            UnbiasednessOfScene("fogdense", "fogdense:direct", BdptReference(64, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        [TEST("Upg", "UnbiasedGridMedium")]
+        public static void Upg_UnbiasedGridMedium()
+        {
+            UnbiasednessOfScene("foggrid", "foggrid:direct", BdptReference(64, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        [TEST("Upg", "UnbiasedOslMedium")]
+        public static void Upg_UnbiasedOslMedium()
+        {
+            UnbiasednessOfScene("fogosl", "fogosl:direct", BdptReference(64, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        // glossy surfaces in a medium: the copper floor of the caustic-like room under the small light
+        [TEST("Upg", "UnbiasedGlossyInFog")]
+        public static void Upg_UnbiasedGlossyInFog()
+        {
+            UnbiasednessOfScene("fogcaustic", "fog:caustic", BdptReference(128, 96), UnbiasednessVariants(512, 16, 32), 12);
+        }
+
+        // (e) The furnace with a medium: the inside of an emitting diffuse sphere filled with a medium that does not absorb has the
+        // radiance L_e / (1 - a) in every pixel (the sum of the bounces, a medium that only scatters changes nothing)
+        static string MediumFurnaceScene(string integratorLine, int resolution, int spp)
+        {
+            string s = "Option \"rendercoordsys\" \"world\"\n";
+            s += "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0 0 0] \"rgb sigma_s\" [0.25 0.25 0.25] \"float g\" 0.3\nMediumInterface \"\" \"fog\"\n";
+            s += "LookAt 0 0 -1  0 0.2 1  0 1 0\nCamera \"perspective\" \"float fov\" 70\n";
+            s += "Film \"rgb\" \"integer xresolution\" " + resolution + " \"integer yresolution\" " + resolution + " \"string filename\" \"out.exr\"\n";
+            s += "Sampler \"independent\" \"integer pixelsamples\" " + spp + "\n" + integratorLine + "\nWorldBegin\n";
+            s += "AttributeBegin\nAreaLightSource \"diffuse\" \"rgb L\" [1 1 1] \"bool twosided\" true\nMaterial \"diffuse\" \"rgb reflectance\" [0.5 0.5 0.5]\n";
+            s += "Shape \"sphere\" \"float radius\" 3\nAttributeEnd\n";
+            return s;
+        }
+
+        [TEST("Upg", "MediumFurnaceSphere")]
+        public static void Upg_MediumFurnace()
+        {
+            int depth = 40;
+            string common = " \"integer maxdepth\" " + depth + " \"integer photons\" 256";
+            List<float[]> emission = RenderSeeds("mfurnace_le", FurnaceScene("Integrator \"bdpt\" \"integer maxdepth\" 0", 8, 16), 16, 1, 16);
+            MeanAndError(emission, -1, out double le, out double leError);
+            double expected = le / (1 - 0.5);
+            Console.WriteLine("[Upg] medium furnace: the emission seen directly (no medium) " + le.ToString("G6", CultureInfo.InvariantCulture) + ", expected radiance " +
+                              expected.ToString("G6", CultureInfo.InvariantCulture));
+            string[] lines = new string[]
+            {
+                "Integrator \"bdpt\" \"integer maxdepth\" " + depth,
+                "Integrator \"upg\"" + common + " \"float radius\" 0.5 \"bool upgonly\" true",
+                "Integrator \"upg\"" + common + " \"float radius\" 0.5",
+                "Integrator \"upg\"" + common + " \"float radius\" 0.08"
+            };
+            string[] labels = new string[] { "bdpt", "upgonly r 0.5", "upg+bdpt r 0.5", "upg+bdpt r 0.08" };
+            for (int i = 0; i < lines.Length; ++i)
+            {
+                List<float[]> images = RenderSeeds("mfurnace_" + i, MediumFurnaceScene(lines[i], 8, 16), 16, 1 + 100 * i, 32);
+                MeanAndError(images, -1, out double mean, out double error);
+                double t = (mean - expected) / Math.Sqrt(error * error + leError * leError * 4);
+                Console.WriteLine("[Upg] medium furnace " + labels[i] + ": mean " + mean.ToString("G6", CultureInfo.InvariantCulture) + " +- " + error.ToString("G3", CultureInfo.InvariantCulture) +
+                                  ", expected " + expected.ToString("G6", CultureInfo.InvariantCulture) + ", t " + t.ToString("F2", CultureInfo.InvariantCulture));
+                EXPECT_TRUE(Math.Abs(t) < 4.0);
             }
         }
     }

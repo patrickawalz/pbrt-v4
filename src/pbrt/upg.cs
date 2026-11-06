@@ -178,6 +178,49 @@ namespace pbrt
 
         public const int None = 0, KeepLightVertex = 1, KeepCameraVertex = 2;
 
+        // The wavelengths of the iteration: the extinction along the segment next to a vertex in a medium is evaluated for the
+        // hero wavelength (the one that the tentative rays sample their collisions with)
+        SampledWavelengths wavelengths;
+        bool hasWavelengths = false;
+
+        public void SetWavelengths(SampledWavelengths lambda)
+        {
+            wavelengths = lambda;
+            hasWavelengths = true;
+        }
+
+        const int TransmittanceSteps = 8;
+
+        // (not in this paper) The factor of the density of a vertex in a medium that the ratios of BDPT leave out: the tentative ray
+        // that starts at the neighbour puts its first scattering event at the vertex with the density sigma_s(x) T(neighbour -> x)
+        // per unit of length along the ray (an event of absorption ends the ray; null collisions do not change the density), next to
+        // the density of the direction. The transmittance is a deterministic quadrature (midpoints of the segment) so that the weight
+        // is a function of the path alone; the quadrature and the use of the medium of the vertex for the whole segment only change
+        // the weights, never the expectation of the estimator.
+        Float MediumFactor(Vertex kept, Vertex neighbour)
+        {
+            if (kept.type != VertexType.Medium || neighbour == null || !hasWavelengths)
+            {
+                return 1;
+            }
+            Medium medium = kept.mi.medium;
+            if (medium == null)
+            {
+                return 1;
+            }
+            Point3f from = neighbour.p();
+            Point3f to = kept.p();
+            Vector3f segment = to - from;
+            Float step = Length(segment) / TransmittanceSteps;
+            Float opticalDepth = 0;
+            for (int i = 0; i < TransmittanceSteps; ++i)
+            {
+                MediumProperties mp = medium.SamplePoint(from + segment * ((i + 0.5f) / TransmittanceSteps), wavelengths, kept.time());
+                opticalDepth += (mp.sigma_a[0] + mp.sigma_s[0]) * step;
+            }
+            return kept.sigmaS0 * MathF.Exp(-opticalDepth);
+        }
+
         public Float Measure(Vertex v)
         {
             if (v.type == VertexType.Medium)
@@ -310,13 +353,13 @@ namespace pbrt
 
         // The probability of the gathering technique that keeps the vertex: the approximation p_c = min(V p, 1) of the paper's
         // Eq. 24, with p the density of sampling the kept vertex from the shooter, per area or per volume
-        Float Probability(Vertex kept, Float density)
+        Float Probability(Vertex kept, Float density, Vertex shooter)
         {
             if (!(density > 0))
             {
                 return 0;
             }
-            return Math.Min(Measure(kept) * density, 1);
+            return Math.Min(Measure(kept) * density * MediumFactor(kept, shooter), 1);
         }
 
         // The terms of the gathering techniques of the path that the strategy (s, t) connects, with the densities of its vertices
@@ -344,7 +387,8 @@ namespace pbrt
                     // direction for variant 2
                     Float density = variant == KeepLightVertex ? (lightOwned ? xm.pdfRev : xm.pdfFwd)
                                                                : (lightOwned ? xm.pdfFwd : xm.pdfRev);
-                    Float pc = Probability(xm, density);
+                    Float pc = Probability(xm, density, variant == KeepLightVertex ? At(lightVertices, cameraVertices, s, t, m + 1)
+                                                                                   : At(lightVertices, cameraVertices, s, t, m - 1));
                     if (!(pc > 0))
                     {
                         continue;
@@ -552,7 +596,95 @@ namespace pbrt
                 }
                 return ConductorBound(conductor.Distribution(), woLocal, axisLocal, cosA, sinA);
             }
+            PhaseBxDF phaseBxDF = bxdf as PhaseBxDF;
+            if (phaseBxDF != null)
+            {
+                HGPhaseFunction hg = phaseBxDF.Phase() as HGPhaseFunction;
+                if (hg != null && hg.Rayleigh() == 0)
+                {
+                    return HenyeyGreensteinBound(wo, axis, cosA, sinA, hg.G());
+                }
+            }
             return Full;
+        }
+
+        // The cos(theta) that SampleHenyeyGreenstein gives for the first random number (theta is measured from wo)
+        static Float HenyeyGreensteinCosTheta(Float g, Float u)
+        {
+            g = Clamp(g, (Float)(-.99), (Float).99);
+            if (Math.Abs(g) < 1e-3f)
+            {
+                return 1 - 2 * u;
+            }
+            return -1 / (2 * g) * (1 + Sqr(g) - Sqr((1 - Sqr(g)) / (1 + g - 2 * g * u)));
+        }
+
+        // The first random number of the sampling for a cos(theta): cos(theta) is monotone in it
+        static Float HenyeyGreensteinInverse(Float g, Float cosTheta)
+        {
+            Float c0 = HenyeyGreensteinCosTheta(g, 0), c1 = HenyeyGreensteinCosTheta(g, 1);
+            bool increasing = c1 > c0;
+            Float lo = 0, hi = 1;
+            for (int i = 0; i < 40; ++i)
+            {
+                Float mid = 0.5f * (lo + hi);
+                bool below = HenyeyGreensteinCosTheta(g, mid) < cosTheta;
+                if (below == increasing)
+                {
+                    lo = mid;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+            return 0.5f * (lo + hi);
+        }
+
+        // The bound for a phase function of Henyey-Greenstein (or isotropic) scattering. The sampling is in the frame of wo: the polar
+        // angle is a monotone function of the first number and the azimuth is 2 pi times the second, so the cone is bounded by
+        // an interval of polar angles, [gamma - A, gamma + A] for the angle gamma between wo and the axis of the cone and its half
+        // angle A, and an interval of azimuth of half width asin(sin A / sin gamma) around the azimuth of the axis (all of the
+        // azimuths if the cone contains the pole). Exact up to the margin, that covers the rounding.
+        static UpgBound HenyeyGreensteinBound(Vector3f wo, Vector3f axis, Float cosA, Float sinA, Float g)
+        {
+            Frame frame = Frame.FromZ(wo);
+            Vector3f local = frame.ToLocal(axis);
+            Float gamma = MathF.Acos(Clamp(local.z, -1, 1));
+            Float halfAngle = MathF.Asin(Math.Min(sinA, 1));
+            Float thetaLo = Math.Max(0, gamma - halfAngle);
+            Float thetaHi = Math.Min(Pi, gamma + halfAngle);
+            Float uA = HenyeyGreensteinInverse(g, MathF.Cos(thetaLo));
+            Float uB = HenyeyGreensteinInverse(g, MathF.Cos(thetaHi));
+            UpgBound b = new UpgBound();
+            Float uMin = Math.Min(uA, uB), uMax = Math.Max(uA, uB);
+            Float margin0 = 0.03f * (uMax - uMin) + 1e-5f;
+            b.u0Lo = Math.Max(0, uMin - margin0);
+            b.u0Hi = Math.Min(1, uMax + margin0);
+            Float sinGamma = MathF.Sin(gamma);
+            // (the cone contains a pole of the frame: the one of wo, or the opposite one)
+            if (gamma <= halfAngle * 1.001f || gamma + halfAngle >= Pi * 0.999f || !(sinGamma > 1e-4f))
+            {
+                b.u1Lo = 0;
+                b.u1Len = 1;
+                return b;
+            }
+            Float halfWidth = MathF.Asin(Math.Min(1, sinA / sinGamma));
+            Float length = halfWidth / Pi;
+            Float margin1 = 0.03f * length + 1e-5f;
+            length += 2 * margin1;
+            if (length >= 1)
+            {
+                b.u1Lo = 0;
+                b.u1Len = 1;
+                return b;
+            }
+            Float center = MathF.Atan2(local.y, local.x) / (2 * Pi);
+            Float start = center - length / 2;
+            start -= MathF.Floor(start);
+            b.u1Lo = start;
+            b.u1Len = length;
+            return b;
         }
 
         static UpgBound DiffuseBound(Vector3f woLocal, Vector3f axisLocal, Float cosA, Float sinA)
@@ -1058,6 +1190,10 @@ namespace pbrt
                                            List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("upg");
+            if (TextureMedium.AddEmissionLights(lights).Count > lights.Count)
+            {
+                ErrorExit(loc, "\"upg\" does not support emissive media (the camera sub-paths do not gather the emission of a medium); use \"bdpt\".");
+            }
             if (!(camera is PerspectiveCamera))
             {
                 ErrorExit("Only the \"perspective\" camera is currently supported with the \"upg\" integrator.");
@@ -1129,6 +1265,7 @@ namespace pbrt
                     uLambda -= MathF.Floor(uLambda);
                 }
                 iterationLambda = film.SampleWavelengths(uLambda);
+                mis.SetWavelengths(iterationLambda);
                 System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
                 TraceLightPaths(iter);
                 watch.Stop();

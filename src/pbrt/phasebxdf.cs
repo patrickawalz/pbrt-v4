@@ -16,6 +16,11 @@ namespace pbrt
             this.phase = phase;
         }
 
+        public PhaseFunction Phase()
+        {
+            return phase;
+        }
+
         public override BxDFFlags Flags()
         {
             return BxDFFlags.Reflection | BxDFFlags.Transmission | BxDFFlags.Glossy;
