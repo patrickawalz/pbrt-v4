@@ -453,7 +453,7 @@ namespace pbrt
         public SampledSpectrum Le(Vector3f w, SampledWavelengths lambda)
         {
             if (areaLight != null)
-                return areaLight.L(p(), n, uv, w, lambda);
+                return areaLight.L(p(), n, uv, w, lambda, time);
             // (not in pbrt-v4) A surface with an OSL shader emits what the emission closures of the shader say
             OSLMaterial oslMaterial = material as OSLMaterial;
             if (oslMaterial != null)

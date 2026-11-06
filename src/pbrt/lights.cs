@@ -4,6 +4,7 @@
 // lights.h / lights.cpp
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 
 namespace pbrt
@@ -114,22 +115,27 @@ namespace pbrt
             pi = si.pi;
             n = si.n;
             ns = si.shading.n;
+            time = si.time;
         }
         public LightSampleContext(Interaction intr)
         {
             pi = intr.pi;
             n = default;
             ns = default;
+            time = intr.time;
         }
-        public LightSampleContext(Point3fi pi, Normal3f n, Normal3f ns)
+        // (the time is not in pbrt-v4; it is the time of the ray, which a light that moves needs: see DiffuseAreaLight)
+        public LightSampleContext(Point3fi pi, Normal3f n, Normal3f ns, Float time = 0)
         {
-            this.pi = pi; this.n = n; this.ns = ns;
+            this.pi = pi; this.n = n; this.ns = ns; this.time = time;
         }
 
         public Point3f p() { return (Point3f)pi; }
 
         public Point3fi pi;
         public Normal3f n, ns;
+        // (not in pbrt-v4) The time of the reference point (of the ray that reaches it)
+        public Float time;
     }
 
     // LightBounds Definition
@@ -253,7 +259,7 @@ namespace pbrt
             return new SampledSpectrum(0.0f);
         }
 
-        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda, Float time)
         {
             return new SampledSpectrum(0.0f);
         }
@@ -910,7 +916,13 @@ namespace pbrt
         public override void PDF_Le(Interaction intr, Vector3f w, Float* pdfPos, Float* pdfDir)
         {
             pbrt.CHECK_NE(intr.n, new Normal3f(0, 0, 0));
-            *pdfPos = shape.PDF(intr);
+            if (animated != null)
+            {
+                // The shape is in the frame of the light: the point is brought into it, at the time of the point
+                *pdfPos = shape.PDF(animated.ApplyInverse(intr)) / areaScale;
+            }
+            else
+                *pdfPos = shape.PDF(intr);
             *pdfDir = twoSided ? (pbrt.CosineHemispherePDF(pbrt.AbsDot(intr.n, w)) / 2)
                                : pbrt.CosineHemispherePDF(pbrt.Dot(intr.n, w));
         }
@@ -1025,12 +1037,108 @@ namespace pbrt
                                 "Proceed at your own risk; your image may have errors.");
         }
 
+        // (not in pbrt-v4) A light that moves. renderFromLight is the AnimatedTransform of the shape, and the shape is then given in the
+        // space of the light (made with an identity transformation, as the shape of an AnimatedPrimitive is): at a time t, a point of the light
+        // is renderFromLight(t) applied to the point of the shape, and a point of render space that looks at the light is brought into the
+        // space of the shape with the inverse. Everything the shape knows (sampling by area or by solid angle, the density of a direction,
+        // the area) is then in the frame of the shape, in which it does not move, and only the points and directions that go in and out
+        // are transformed; the density per solid angle is not changed by a rotation, a translation or a uniform scale (the point of
+        // view moves with the shape). A transformation that is not actually animated changes nothing: the shape is then expected in render space,
+        // as for any static light, and the light is the same object, bit for bit, as without this call.
+        // The keys may carry one uniform scale, the same in all keys (areas are multiplied by its square where an area is a density: the
+        // light's area, its power and the density by area of SampleLe()); another scale is not supported (a warning).
+        public void SetMotion(AnimatedTransform renderFromLightAnimated)
+        {
+            if (renderFromLightAnimated == null || !renderFromLightAnimated.IsAnimated())
+            {
+                return;
+            }
+            animated = renderFromLightAnimated;
+            similarity = animated.IsSimilarity(out Float uniformScale);
+            if (similarity)
+            {
+                areaScale = uniformScale * uniformScale;
+                area = shape.Area() * areaScale;
+            }
+            else
+            {
+                areaScale = 1;
+                pbrt.Warning("The transformation of an animated area light has a scale that is not uniform or differs between the keys. " +
+                             "The area, the power and the density by area of the emitted light use the area of the shape in its own " +
+                             "space, and the bounds of the normals of the light sampler are the entire sphere. Proceed at your own risk.");
+            }
+        }
+
+        public bool IsAnimated()
+        {
+            return animated != null;
+        }
+
+        // The conservative bounds of the normals of the shape over the shutter: a cone around the normal cone of the shape rotated to
+        // the time at which the rotation has turned by half of its total angle, opened by that half angle (the total angle is the sum of
+        // the angles of the segments, a bound of the angle between the rotations at any two times). A rotation by pi or more, or a scale
+        // that is not a similarity, gives the entire sphere.
+        private DirectionCone AnimatedNormalBounds(DirectionCone cone)
+        {
+            if (cone.IsEmpty() || !similarity)
+                return similarity ? cone : DirectionCone.EntireSphere();
+            Float total = animated.TotalRotationAngle();
+            Float half = total / 2;
+            Transform atCentre = animated.Interpolate(animated.TimeAtRotationAngle(half));
+            Vector3f centre = pbrt.Normalize(atCentre.Apply(cone.w));
+            if (!(total > 0))
+                return new DirectionCone(centre, cone.cosTheta);
+            // (a margin of 1e-5 radians covers the rounding of the interpolated rotations)
+            Float theta = std.acos(Clamp(cone.cosTheta, -1, 1)) + half + 1e-5f;
+            if (theta >= Pi)
+                return DirectionCone.EntireSphere();
+            return new DirectionCone(centre, std.cos(theta));
+        }
+
+        // The context of the sample in the space of the shape
+        private ShapeSampleContext ShapeContextAnimated(LightSampleContext ctx, Transform lightFromRender)
+        {
+            Normal3f n = lightFromRender.Apply(ctx.n);
+            if (pbrt.LengthSquared(n) > 0)
+                n = pbrt.Normalize(n);
+            Normal3f ns = lightFromRender.Apply(ctx.ns);
+            if (pbrt.LengthSquared(ns) > 0)
+                ns = pbrt.Normalize(ns);
+            return new ShapeSampleContext(lightFromRender.Apply(ctx.pi), n, ns, ctx.time);
+        }
+
+        private pstd.optional<LightLiSample> SampleLiAnimated(LightSampleContext ctx, Point2f u, SampledWavelengths lambda)
+        {
+            Transform renderFromLight = animated.Interpolate(ctx.time);
+            Transform lightFromRender = pbrt.Inverse(renderFromLight);
+            pstd.optional<ShapeSample> ss = shape.Sample(ShapeContextAnimated(ctx, lightFromRender), u);
+            if (!ss || ss.value().pdf == 0)
+                return default;
+            pbrt.DCHECK(!pbrt.IsNaN(ss.value().pdf));
+            // Return no light sample if alpha test fails (the test is made in the space of the shape, like the one of the primitive)
+            if (AlphaMasked(ss.value().intr))
+                return default;
+            Interaction intr = renderFromLight.Apply(ss.value().intr);
+            intr.time = ctx.time;
+            intr.mediumInterface = mediumInterface;
+            if (pbrt.LengthSquared(intr.p() - ctx.p()) == 0)
+                return default;
+
+            Vector3f wi = pbrt.Normalize(intr.p() - ctx.p());
+            SampledSpectrum Le = EmittedRadiance(intr.p(), intr.n, intr.uv, -wi, lambda);
+            if (!Le)
+                return default;
+            return new LightLiSample(Le, wi, ss.value().pdf, intr);
+        }
+
         public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
                                                               SampledWavelengths lambda,
                                                               bool allowIncompletePDF = false)
         {
+            if (animated != null)
+                return SampleLiAnimated(ctx, u, lambda);
             // Sample point on shape for _DiffuseAreaLight_
-            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, ctx.time);
             pstd.optional<ShapeSample> ss = shape.Sample(shapeCtx, u);
             if (!ss || ss.value().pdf == 0 || pbrt.LengthSquared(ss.value().intr.p() - ctx.p()) == 0)
                 return default;
@@ -1044,7 +1152,7 @@ namespace pbrt
 
             // Return _LightLiSample_ for sampled point on shape
             Vector3f wi = pbrt.Normalize(ss.value().intr.p() - ctx.p());
-            SampledSpectrum Le = L(ss.value().intr.p(), ss.value().intr.n, ss.value().intr.uv, -wi, lambda);
+            SampledSpectrum Le = L(ss.value().intr.p(), ss.value().intr.n, ss.value().intr.uv, -wi, lambda, ctx.time);
             if (!Le)
                 return default;
             return new LightLiSample(Le, wi, ss.value().pdf, ss.value().intr);
@@ -1052,7 +1160,13 @@ namespace pbrt
 
         public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
         {
-            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, 0 /* time */);
+            if (animated != null)
+            {
+                Transform lightFromRender = pbrt.Inverse(animated.Interpolate(ctx.time));
+                Vector3f wiLight = pbrt.Normalize(lightFromRender.Apply(wi));
+                return shape.PDF(ShapeContextAnimated(ctx, lightFromRender), wiLight);
+            }
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, ctx.time);
             return shape.PDF(shapeCtx, wi);
         }
 
@@ -1062,6 +1176,9 @@ namespace pbrt
         // is sampled uniformly; the shapes that sample by area (a triangle, a disk, a sphere, a cylinder) always are.
         public bool SupportsEquiangular()
         {
+            // (a light that moves is not sampled by area for the distance: the sample of the point has no time)
+            if (animated != null)
+                return false;
             if (shape is BilinearPatch patch)
                 return patch.SamplesUniformArea();
             return shape is Triangle || shape is QuadricBase;
@@ -1141,17 +1258,39 @@ namespace pbrt
             phi *= scale * area * Pi;
 
             DirectionCone nb = shape.NormalBounds();
-            return new LightBounds(shape.Bounds(), nb.w, phi, nb.cosTheta, std.cos(Pi / 2), twoSided);
+            Bounds3f shapeBounds = shape.Bounds();
+            if (animated != null)
+            {
+                // Conservative over the whole shutter: the union of the bounds of the motion of the box, and the cone of the normals
+                // opened by the rotation (see AnimatedNormalBounds)
+                shapeBounds = animated.MotionBounds(shapeBounds);
+                nb = AnimatedNormalBounds(nb);
+            }
+            return new LightBounds(shapeBounds, nb.w, phi, nb.cosTheta, std.cos(Pi / 2), twoSided);
         }
 
-        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        public override SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda, Float time)
         {
             // Check for zero emitted radiance from point on area light
             if (!twoSided && pbrt.Dot(n, w) < 0)
                 return new SampledSpectrum(0.0f);
-            if (AlphaMasked(new Interaction(p, uv)))
+            if (animated == null)
+            {
+                if (AlphaMasked(new Interaction(p, uv)))
+                    return new SampledSpectrum(0.0f);
+            }
+            else if (alpha != null && AlphaMasked(new Interaction(animated.ApplyInverse(p, time), uv)))
+            {
+                // (the alpha texture is evaluated at the point in the space of the shape, as the primitive does)
                 return new SampledSpectrum(0.0f);
+            }
+            return Emission(p, n, uv, w, lambda);
+        }
 
+        // The emission of the light at a point whose alpha test has been made
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private SampledSpectrum Emission(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        {
             if (oslMaterial != null)
                 return oslMaterial.EmissionAt(p, n, uv, w, lambda, oslObjectId);
 
@@ -1169,6 +1308,15 @@ namespace pbrt
                 return scale * Lemit.Sample(lambda);
         }
 
+        // The radiance toward w at a point whose alpha test has been made (SampleLi and SampleLe test the alpha of the sampled point in
+        // the space of the shape, once)
+        private SampledSpectrum EmittedRadiance(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        {
+            if (!twoSided && pbrt.Dot(n, w) < 0)
+                return new SampledSpectrum(0.0f);
+            return Emission(p, n, uv, w, lambda);
+        }
+
         public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
                                                               Float time)
         {
@@ -1182,6 +1330,13 @@ namespace pbrt
             // Return sampled point if alpha masks it
             if (AlphaMasked(ss.value().intr))
                 return default;
+            Float pdfPos = ss.value().pdf;
+            if (animated != null)
+            {
+                // The point is sampled in the space of the shape and brought to render space at the time of the sample
+                ss.Ref().intr = animated.Interpolate(time).Apply(ss.value().intr);
+                pdfPos /= areaScale;
+            }
 
             // Sample a cosine-weighted outgoing direction _w_ for area light
             Vector3f w;
@@ -1214,8 +1369,8 @@ namespace pbrt
             Interaction intr = ss.value().intr;
             Frame nFrame = Frame.FromZ(intr.n);
             w = nFrame.FromLocal(w);
-            SampledSpectrum Le = L(intr.p(), intr.n, intr.uv, w, lambda);
-            return new LightLeSample(Le, new Ray(intr.SpawnRay(w)), intr, ss.value().pdf, pdfDir);
+            SampledSpectrum Le = EmittedRadiance(intr.p(), intr.n, intr.uv, w, lambda);
+            return new LightLeSample(Le, new Ray(intr.SpawnRay(w)), intr, pdfPos, pdfDir);
         }
 
         public override string ToString()
@@ -1227,6 +1382,11 @@ namespace pbrt
         }
 
         // DiffuseAreaLight Private Members
+        // (not in pbrt-v4) The transformation of a light that moves (null: the shape is in render space), whether it is a similarity, and the
+        // factor of the areas (the square of its uniform scale)
+        AnimatedTransform animated;
+        bool similarity = true;
+        Float areaScale = 1;
         Shape shape;
         FloatTexture alpha;
         Float area;
@@ -1238,7 +1398,7 @@ namespace pbrt
 
         public static DiffuseAreaLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
                                               RGBColorSpace colorSpace, FileLoc loc, Allocator alloc, Shape shape,
-                                              FloatTexture alphaTex)
+                                              FloatTexture alphaTex, AnimatedTransform renderFromLightAnimated = null)
         {
             Spectrum L = parameters.GetOneSpectrum("L", null, SpectrumType.Illuminant, alloc);
             Float scale = parameters.GetOneFloat("scale", 1);
@@ -1302,14 +1462,20 @@ namespace pbrt
                     k_e /= image.Resolution().x * image.Resolution().y;
                 }
 
-                k_e *= (twoSided ? 2 : 1) * shape.Area() * Pi;
+                Float shapeArea = shape.Area();
+                if (renderFromLightAnimated != null && renderFromLightAnimated.IsAnimated() &&
+                    renderFromLightAnimated.IsSimilarity(out Float uniformScale))
+                    shapeArea *= uniformScale * uniformScale;
+                k_e *= (twoSided ? 2 : 1) * shapeArea * Pi;
 
                 // now multiply up scale to hit the target power
                 scale *= phi_v / k_e;
             }
 
-            return new DiffuseAreaLight(renderFromLight, new MediumInterface(medium), L, scale, shape, alphaTex, image,
-                                        imageColorSpace, twoSided);
+            DiffuseAreaLight light = new DiffuseAreaLight(renderFromLight, new MediumInterface(medium), L, scale, shape, alphaTex, image,
+                                                          imageColorSpace, twoSided);
+            light.SetMotion(renderFromLightAnimated);
+            return light;
         }
     }
 
@@ -2176,12 +2342,12 @@ namespace pbrt
 
         public static Light CreateArea(string name, ParameterDictionary parameters, Transform renderFromLight,
                                        MediumInterface mediumInterface, Shape shape, FloatTexture alpha, FileLoc loc,
-                                       Allocator alloc)
+                                       Allocator alloc, AnimatedTransform renderFromLightAnimated = null)
         {
             Light area = null;
             if (name == "diffuse")
                 area = DiffuseAreaLight.Create(renderFromLight, mediumInterface.outside, parameters,
-                                               parameters.ColorSpace(), loc, alloc, shape, alpha);
+                                               parameters.ColorSpace(), loc, alloc, shape, alpha, renderFromLightAnimated);
             else
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: area light type unknown.", name));
 

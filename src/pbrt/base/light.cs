@@ -25,7 +25,8 @@ namespace pbrt
         public abstract override string ToString();
 
         // AreaLights only
-        public virtual SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda)
+        // (the time of the point is not in pbrt-v4: the emission of a light that moves is evaluated in the frame it has at that time)
+        public virtual SampledSpectrum L(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda, Float time)
         {
             pbrt.LOG_FATAL("Light::L() called for a light that is not an area light");
             return default;

@@ -904,7 +904,7 @@ namespace pbrt
                         // Add light's emitted radiance if nonzero and light is visible
                         SampledSpectrum Le =
                             light.L(les.value().intr.value().p(), les.value().intr.value().n,
-                                    les.value().intr.value().uv, cs.value().wi, lambda);
+                                    les.value().intr.value().uv, cs.value().wi, lambda, time);
                         if ((bool)Le && Unoccluded(cs.value().pRef, cs.value().pLens))
                         {
                             // Compute visible light's path contribution and add to film
@@ -1827,7 +1827,7 @@ namespace pbrt
             else if (type == VertexType.Light && ei.light is VolumeEmissionLight)
                 return emission;
             else if (si.areaLight != null)
-                return si.areaLight.L(si.p(), si.n, si.uv, w, lambda);
+                return si.areaLight.L(si.p(), si.n, si.uv, w, lambda, si.time);
             else
                 return new SampledSpectrum(0.0f);
         }
@@ -2110,7 +2110,7 @@ namespace pbrt
             // (not in pbrt-v4) The extinction at the point of an emissive medium, for the weight of a camera subpath that gathers it
             if (path[0].ei.light is VolumeEmissionLight emissiveMedium)
             {
-                SampledSpectrum majorant = emissiveMedium.Medium().MajorantAt(ray.o, lambda);
+                SampledSpectrum majorant = emissiveMedium.Medium().MajorantAt(ray.o, lambda, ray.time);
                 path[0].sigmaT0 = majorant[0];
                 path[0].emissionMaj = majorant / majorant[0];
             }
@@ -2254,7 +2254,7 @@ namespace pbrt
                 Vector3f direction = ctx.ray.d / length;
                 Float segmentLength = tMax * length;
                 LightSampleContext segmentContext = new LightSampleContext(new Point3fi(origin), new Normal3f(0, 0, 0),
-                                                                            new Normal3f(0, 0, 0));
+                                                                            new Normal3f(0, 0, 0), ctx.ray.time);
                 // The point on the light that the distance is chosen from
                 Point3f pLight;
                 Interaction yIntr = default;
@@ -2321,7 +2321,7 @@ namespace pbrt
                     Float cosY = AbsDot(yIntr.n, wi);
                     if (cosY == 0)
                         return zero;
-                    SampledSpectrum Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wi, lambda);
+                    SampledSpectrum Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wi, lambda, ctx.ray.time);
                     if (!Lemit)
                         return zero;
                     radiance = Lemit * (cosY / r2);
@@ -2965,7 +2965,7 @@ namespace pbrt
                             sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
                             if (volumeLight != null)
                             {
-                                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda);
+                                SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda, ctx.time);
                                 sampled.sigmaT0 = majorant[0];
                                 sampled.emissionMaj = majorant / majorant[0];
                             }
@@ -4779,7 +4779,7 @@ namespace pbrt
                 seg.origin = ctx.ray.o;
                 seg.direction = ctx.ray.d / length;
                 seg.tMax = tMax * length;
-                seg.context = new LightSampleContext(new Point3fi(ctx.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0));
+                seg.context = new LightSampleContext(new Point3fi(ctx.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ctx.ray.time);
                 seg.r_u0 = ctx.st.r_u;
                 seg.active = true;
                 // (Fong et al., 4.1) Several samples of the segment for the first scatterings, one for the later ones
@@ -4839,7 +4839,7 @@ namespace pbrt
                                 if (fneeRatio < 0)
                                 {
                                     Float pmfDirection = lightSampler.PMF(prevIntrContext, emissionLight);
-                                    fneeRatio = pmfDirection * emissionLight.PdfDirection(fneeOrigin, ctx.ray.d) / fneeScatterPdf;
+                                    fneeRatio = pmfDirection * emissionLight.PdfDirection(fneeOrigin, ctx.ray.d, ctx.ray.time) / fneeScatterPdf;
                                 }
                                 r_sum = r_e * (1 + fneeRatio);
                             }
@@ -4850,7 +4850,7 @@ namespace pbrt
                             if (pmf > 0)
                             {
                                 Float t2 = DistanceSquared(prevIntrContext.p(), p);
-                                Float densityRatio = pmf * emissionLight.PdfPoint(p) * t2 / sigma_maj[0];
+                                Float densityRatio = pmf * emissionLight.PdfPoint(p, ctx.ray.time) * t2 / sigma_maj[0];
                                 r_sum = r_e + ctx.st.r_l * (T_maj_ / T_maj_[0]) * densityRatio;
                             }
                         }
@@ -5229,7 +5229,7 @@ namespace pbrt
                                      Point2f uLight, BoundaryStack stack, out Vector3f wiLight)
         {
             wiLight = default;
-            if (!volumeLight.SampleDirection(intr.p(), uLight, sampler.Get1D(), out Vector3f wi, out Float pdfDirection))
+            if (!volumeLight.SampleDirection(intr.p(), uLight, sampler.Get1D(), intr.time, out Vector3f wi, out Float pdfDirection))
                 return new SampledSpectrum(0.0f);
             wiLight = wi;
 
@@ -5422,7 +5422,7 @@ namespace pbrt
                     Float cosY = AbsDot(yIntr.n, wiLight);
                     if (cosY == 0)
                         return zero;
-                    Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wiLight, lambda);
+                    Lemit = areaLight.L(yIntr.p(), yIntr.n, yIntr.uv, -wiLight, lambda, lightContext.time);
                     if (!Lemit)
                         return zero;
                     target = yIntr;
@@ -5602,7 +5602,7 @@ namespace pbrt
             {
                 if (MediumTracking.Current(stack) != volumeLight.Medium())
                     return new SampledSpectrum(0.0f);
-                r_u *= volumeLight.Medium().MajorantAt(ls.value().pLight.p(), lambda);
+                r_u *= volumeLight.Medium().MajorantAt(ls.value().pLight.p(), lambda, ctx.time);
             }
             // (not in pbrt-v4) Equiangular sampling finds the same path (this vertex, this point light) by choosing the light and then
             // the distance along the segment: its probability, with the null collisions of the walk as that way connects them

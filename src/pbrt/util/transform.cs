@@ -1603,6 +1603,68 @@ namespace pbrt
             return keyTimes[i];
         }
 
+        // (not in pbrt-v4) The angle in radians, from 0 to pi, of the rotation between the two keys of a segment (the shortest arc, as
+        // Interpolate() follows it). The rotation of a segment turns at a constant angular speed (slerp).
+        public Float SegmentRotationAngle(int segment)
+        {
+            if (!actuallyAnimated || segmentStatic[segment])
+                return 0;
+            return 2 * SafeACos(Dot(R[segment], Rend[segment]));
+        }
+
+        // (not in pbrt-v4) The sum of the angles of the segments: no direction rotates away from where it was by more than this
+        // (nor by more than pi), whichever two times are compared.
+        public Float TotalRotationAngle()
+        {
+            Float total = 0;
+            for (int k = 0; k < nKeys - 1; ++k)
+                total += SegmentRotationAngle(k);
+            return total;
+        }
+
+        // (not in pbrt-v4) The time at which the rotation has turned by "angle" radians since the first key, along the path of the
+        // segments (the end time for an angle beyond the total, the start time for an angle of zero or less)
+        public Float TimeAtRotationAngle(Float angle)
+        {
+            if (!actuallyAnimated || !(angle > 0))
+                return startTime;
+            Float turned = 0;
+            for (int k = 0; k < nKeys - 1; ++k)
+            {
+                Float segmentAngle = SegmentRotationAngle(k);
+                if (segmentAngle > 0 && turned + segmentAngle >= angle)
+                    return keyTimes[k] + (angle - turned) / segmentAngle * (keyTimes[k + 1] - keyTimes[k]);
+                turned += segmentAngle;
+            }
+            return endTime;
+        }
+
+        // (not in pbrt-v4) Whether every key is a similarity (a rotation, a translation and one uniform scale, no shear), with the
+        // same scale in all of them; the scale is returned (1 for rigid keys). Then Interpolate() is a similarity with that scale at
+        // every time, normals only rotate, and areas are multiplied by scale squared.
+        public bool IsSimilarity(out Float scale)
+        {
+            scale = 1;
+            for (int i = 0; i < nKeys; ++i)
+            {
+                SquareMatrix4 m = keyTransforms[i].GetMatrix();
+                Vector3f c0 = new Vector3f(m[0][0], m[1][0], m[2][0]);
+                Vector3f c1 = new Vector3f(m[0][1], m[1][1], m[2][1]);
+                Vector3f c2 = new Vector3f(m[0][2], m[1][2], m[2][2]);
+                Float s = Length(c0);
+                Float tolerance = 1e-4f * s;
+                if (!(s > 0) || std.abs(Length(c1) - s) > tolerance || std.abs(Length(c2) - s) > tolerance ||
+                    std.abs(Dot(c0, c1)) > tolerance * s || std.abs(Dot(c0, c2)) > tolerance * s ||
+                    std.abs(Dot(c1, c2)) > tolerance * s)
+                    return false;
+                if (i == 0)
+                    scale = s;
+                else if (std.abs(s - scale) > 1e-4f * scale)
+                    return false;
+            }
+            return true;
+        }
+
         // A new AnimatedTransform whose keys are t * (the keys of this one), at the same times
         public AnimatedTransform PreMultiply(Transform t)
         {
