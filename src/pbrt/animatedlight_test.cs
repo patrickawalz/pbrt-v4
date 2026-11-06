@@ -1676,27 +1676,58 @@ namespace pbrt
             }
         }
 
-        // (a measurement, not a check) The same strategies with the emitter as a bilinear patch. In the code before this change a static two sided
-        // bilinear patch already gives an image with light sampling alone that is 6 to 11 % brighter (depending on the pose) than the one with BSDF sampling alone (the same two
-        // triangles agree), so the difference is not made by the motion: it is reported here and not asserted.
-        [TEST("AnimatedLight", "ReportBilinearPatchLightSamplingAgainstBSDFSampling")]
-        public static void ReportBilinearPatchLightSamplingAgainstBSDFSampling()
+        // The images of simplepath with light sampling alone and with BSDF sampling alone must have the same mean: both estimate the same image. Four seeds each give the
+        // spread of the means (the noise floor); the difference of the two means must be within 4 standard errors of it (the t statistic of the two samples).
+        // The emitter is two sided and its own surface (the default diffuse material) is seen by the camera: before the fix of the sampling of a bilinear patch from a point
+        // on the patch, light sampling gave to that surface the light that the hemisphere sends (6 to 11 % more in the mean of the image).
+        private static void ExpectLightSamplingAgreesWithBSDFSampling(string label, string name, Func<string, string> emitter, string placement)
         {
-            foreach (bool moving in new bool[] { false, true })
+            const int seeds = 4;
+            double[] lights = new double[seeds], bsdf = new double[seeds];
+            for (int seed = 1; seed <= seeds; ++seed)
             {
-                PoseSpec pose = SpinningQuad();
-                string placement = moving ? pose.Moving() : pose.Still(0.5f);
-                OslRender lights = OslRenderTools.Render("anim_bilinear_L" + (moving ? "m" : "s"), Header("simplepath", "\"integer maxdepth\" 5 \"bool samplebsdf\" false", xres, yres) + Room + QuadEmitter(placement), 512, 1, "", OslVolumeShaders.Directory());
-                OslRender bsdf = OslRenderTools.Render("anim_bilinear_B" + (moving ? "m" : "s"), Header("simplepath", "\"integer maxdepth\" 5 \"bool samplelights\" false", xres, yres) + Room + QuadEmitter(placement), 512, 1, "", OslVolumeShaders.Directory());
-                double meanLights = 0, meanBsdf = 0;
-                for (int i = 0; i < lights.rgb.Length; ++i)
-                {
-                    meanLights += lights.rgb[i];
-                    meanBsdf += bsdf.rgb[i];
-                }
-                Report("bilinear patch emitter, " + (moving ? "moving (4 keys)" : "static") + ", simplepath 512 spp: mean of the image with light sampling alone / BSDF sampling alone = " +
-                       (meanLights / meanBsdf).ToString("F4", CultureInfo.InvariantCulture));
+                OslRender l = OslRenderTools.Render(name + "_L", Header("simplepath", "\"integer maxdepth\" 5 \"bool samplebsdf\" false", xres, yres) + Room + emitter(placement), 512, seed, "", OslVolumeShaders.Directory());
+                OslRender b = OslRenderTools.Render(name + "_B", Header("simplepath", "\"integer maxdepth\" 5 \"bool samplelights\" false", xres, yres) + Room + emitter(placement), 512, seed, "", OslVolumeShaders.Directory());
+                ASSERT_TRUE(l != null && b != null);
+                lights[seed - 1] = ImageMean(l);
+                bsdf[seed - 1] = ImageMean(b);
             }
+            double meanLights = 0, meanBsdf = 0;
+            for (int i = 0; i < seeds; ++i)
+            {
+                meanLights += lights[i] / seeds;
+                meanBsdf += bsdf[i] / seeds;
+            }
+            double varianceLights = 0, varianceBsdf = 0;
+            for (int i = 0; i < seeds; ++i)
+            {
+                varianceLights += (lights[i] - meanLights) * (lights[i] - meanLights) / (seeds - 1);
+                varianceBsdf += (bsdf[i] - meanBsdf) * (bsdf[i] - meanBsdf) / (seeds - 1);
+            }
+            double standardError = Math.Sqrt((varianceLights + varianceBsdf) / seeds);
+            double t = (meanLights - meanBsdf) / standardError;
+            Report(label + ", simplepath 512 spp, " + seeds + " seeds: mean with light sampling alone " + meanLights.ToString("F5", CultureInfo.InvariantCulture) + ", with BSDF sampling alone " + meanBsdf.ToString("F5", CultureInfo.InvariantCulture) +
+                   ", ratio " + (meanLights / meanBsdf).ToString("F5", CultureInfo.InvariantCulture) + ", noise floor (standard error of the difference) " + (standardError / meanBsdf).ToString("E2", CultureInfo.InvariantCulture) + " of the mean, t = " + t.ToString("F2", CultureInfo.InvariantCulture));
+            EXPECT_LT(Math.Abs(t), 4.0);
+        }
+
+        private static double ImageMean(OslRender image)
+        {
+            double sum = 0;
+            for (int i = 0; i < image.rgb.Length; ++i)
+            {
+                sum += image.rgb[i];
+            }
+            return sum / image.rgb.Length;
+        }
+
+        [TEST("AnimatedLight", "SimplepathLightSamplingAgreesWithBSDFSamplingForBilinearPatchEmitter")]
+        public static void SimplepathLightSamplingAgreesWithBSDFSamplingForBilinearPatchEmitter()
+        {
+            PoseSpec pose = SpinningQuad();
+            ExpectLightSamplingAgreesWithBSDFSampling("bilinear patch emitter, static", "anim_bilinear_static", QuadEmitter, pose.Still(0.5f));
+            ExpectLightSamplingAgreesWithBSDFSampling("bilinear patch emitter, moving (4 keys)", "anim_bilinear_moving", QuadEmitter, pose.Moving());
+            ExpectLightSamplingAgreesWithBSDFSampling("the same square as two triangles (control), static", "anim_triangles_static", TriangleQuadEmitter, pose.Still(0.5f));
         }
 
         // Emissive media
