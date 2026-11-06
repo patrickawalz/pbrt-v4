@@ -201,6 +201,18 @@ namespace pbrt
             return v.IsConnectible();
         }
 
+        // A memory of the last glossiness values of the thread: every strategy of a sample asks for the same few (vertex, direction)
+        // pairs, and each costs several BSDF density evaluations
+        struct GlossinessEntry
+        {
+            public Vertex vertex;
+            public Point3f position;
+            public Point3f to;
+            public Float value;
+        }
+
+        [ThreadStatic] static GlossinessEntry[] glossinessCache;
+
         // How much the scattering at v depends on the direction: the peak of its density around the mirror direction (or straight
         // through) for the direction of arrival toward the point to
         public static Float Glossiness(Vertex v, Point3f to)
@@ -209,6 +221,31 @@ namespace pbrt
             {
                 return 0;
             }
+            if (glossinessCache == null)
+            {
+                glossinessCache = new GlossinessEntry[512];
+            }
+            Point3f position = v.p();
+            int hash = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v) * 31 + BitConverter.SingleToInt32Bits(to.x) * 17 +
+                       BitConverter.SingleToInt32Bits(to.y) * 7 + BitConverter.SingleToInt32Bits(to.z);
+            int slot = (hash ^ (hash >> 9)) & 511;
+            GlossinessEntry entry = glossinessCache[slot];
+            if (entry.vertex == v && entry.to.x == to.x && entry.to.y == to.y && entry.to.z == to.z && entry.position.x == position.x &&
+                entry.position.y == position.y && entry.position.z == position.z)
+            {
+                return entry.value;
+            }
+            Float value = ComputeGlossiness(v, to);
+            entry.vertex = v;
+            entry.position = position;
+            entry.to = to;
+            entry.value = value;
+            glossinessCache[slot] = entry;
+            return value;
+        }
+
+        static Float ComputeGlossiness(Vertex v, Point3f to)
+        {
             Vector3f wo = to - v.p();
             if (LengthSquared(wo) == 0)
             {
@@ -981,7 +1018,7 @@ namespace pbrt
             Bounds3f sceneBounds = aggregate != null ? aggregate.Bounds() : new Bounds3f();
             this.sceneBounds = sceneBounds;
             Float diagonal = sceneBounds.pMax.x >= sceneBounds.pMin.x ? Length(sceneBounds.Diagonal()) : 1;
-            this.radius = radius > 0 ? radius : 0.5f * diagonal / MathF.Sqrt(lightPathCount);
+            this.radius = radius > 0 ? radius : 0.1f * diagonal / MathF.Sqrt(lightPathCount);
             mis = new UpgMis();
             mis.beta = misBeta;
             mis.lightPaths = lightPathCount;
