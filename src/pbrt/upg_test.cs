@@ -163,7 +163,7 @@ namespace pbrt
             }
 
             // The camera sub-path of the pixel sample
-            public int CameraPath(Point2i pixel, int sampleIndex, Vertex[] path, ref SampledWavelengths lambda)
+            public int CameraPath(Point2i pixel, int sampleIndex, Vertex[] path, ref SampledWavelengths lambda, bool polarised = false)
             {
                 for (int i = 0; i < path.Length; ++i)
                 {
@@ -178,7 +178,7 @@ namespace pbrt
                 }
                 scratch.Reset();
                 return BDPT.GenerateCameraSubpath(integrator, cameraRay.value().ray, ref lambda, sampler, scratch, path.Length, camera,
-                                                  path, false, false, null, null);
+                                                  path, false, polarised, null, null);
             }
         }
 
@@ -218,7 +218,17 @@ namespace pbrt
                 s += "AttributeBegin\nMaterial \"conductor\" \"float roughness\" 0.12 \"spectrum eta\" \"metal-Cu-eta\" \"spectrum k\" \"metal-Cu-k\"\n";
             }
             s += Quad("-2 0 -4", "2 0 -4", "2 0 2", "-2 0 2") + "AttributeEnd\n";
-            s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.3 0.5 0.8]\nTranslate 0.8 0.35 0.6\nShape \"sphere\" \"float radius\" 0.35\nAttributeEnd\n";
+            if (variant == "polarised")
+            {
+                // Smooth spheres polarise (the Fresnel reflection of the light of the room): glass and copper; the floor is rough
+                s += "AttributeBegin\nMaterial \"dielectric\" \"float eta\" 1.5\nTranslate 0.7 0.5 0.8\nShape \"sphere\" \"float radius\" 0.5\nAttributeEnd\n";
+                s += "AttributeBegin\nMaterial \"conductor\" \"float roughness\" 0 \"spectrum eta\" \"metal-Cu-eta\" \"spectrum k\" \"metal-Cu-k\"\n" +
+                     "Translate -0.8 0.35 0.5\nShape \"sphere\" \"float radius\" 0.35\nAttributeEnd\n";
+            }
+            else
+            {
+                s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.3 0.5 0.8]\nTranslate 0.8 0.35 0.6\nShape \"sphere\" \"float radius\" 0.35\nAttributeEnd\n";
+            }
             if (variant == "indirect")
             {
                 // The light faces up, at the height of 1.2: the ceiling above it is lit, everything else only by bounces
@@ -932,6 +942,227 @@ namespace pbrt
                 Console.WriteLine("[Upg] furnace " + labels[i] + ": mean " + mean.ToString("G6", CultureInfo.InvariantCulture) + " +- " + error.ToString("G3", CultureInfo.InvariantCulture) +
                                   ", expected " + expected.ToString("G6", CultureInfo.InvariantCulture) + ", t " + t.ToString("F2", CultureInfo.InvariantCulture));
                 EXPECT_TRUE(Math.Abs(t) < 4.0);
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------
+        // Polarisation (phase 1b)
+        //
+        // The connection of a photon and a camera vertex is the connection of two vertices of BDPT: the Mueller matrix of the camera
+        // sub-path and the Stokes vector of the light sub-path, each relative to its scalar throughput, with the scattering Mueller
+        // matrices of the two connection vertices between them (a surface depolarises), the connection along y -> z.
+
+        // PolarisedUPBP's FresnelReal() (Utils2.hxx, MIT): the reflectances of the s and p components (the reference of the Fresnel
+        // equations; ior < 1 for light that comes from the denser medium)
+        static void UpbpFresnelReal(Float cosInc, Float ior, out Float fs, out Float fp)
+        {
+            if (ior < 1.0f && MathF.Acos(cosInc) >= MathF.Asin(ior))
+            {
+                fs = 1.0f;
+                fp = 1.0f;
+                return;
+            }
+            Float cos2 = cosInc * cosInc;
+            Float sin2 = 1 - cos2;
+            Float n2 = ior * ior;
+            Float sqrtNSin = MathF.Sqrt(n2 - sin2);
+            fs = Sqr(-Sqr(sqrtNSin - cosInc) / (n2 - 1));
+            fp = Sqr((n2 * cosInc - sqrtNSin) / (n2 * cosInc + sqrtNSin));
+        }
+
+        static string MirrorScene(string material)
+        {
+            string s = "Option \"rendercoordsys\" \"world\"\n";
+            s += "LookAt 0.8 0 0.6  0 0 0  0 1 0\nCamera \"perspective\" \"float fov\" 0.5\n";
+            s += "Film \"rgb\" \"integer xresolution\" 1 \"integer yresolution\" 1 \"string filename\" \"out.exr\"\n";
+            s += "Sampler \"independent\" \"integer pixelsamples\" 1\nIntegrator \"upg\" \"integer maxdepth\" 4 \"integer photons\" 1 \"float radius\" 0.5 \"bool polarised\" true\nWorldBegin\n";
+            s += "AttributeBegin\n" + material + "\n" + Quad("-50 -50 0", "50 -50 0", "50 50 0", "-50 50 0") + "AttributeEnd\n";
+            s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.5 0.5 0.5]\n" + Quad("-50 -50 1", "50 -50 1", "50 50 1", "-50 50 1") + "AttributeEnd\n";
+            s += "AttributeBegin\nAreaLightSource \"diffuse\" \"rgb L\" [1 1 1]\n" + Quad("40 40 0.9", "41 40 0.9", "41 41 0.9", "40 41 0.9") + "AttributeEnd\n";
+            return s;
+        }
+
+        // The connection of a camera vertex behind a smooth dielectric reflection (its Mueller matrix is the Fresnel one) and a vertex
+        // of a light sub-path whose Stokes vector is strongly polarised: the Stokes vector that the sensor measures is
+        // (1, D cos 2chi, D sin 2chi, 0) of the scalar contribution, with D = (Rs - Rp) / (Rs + Rp) of the reflection of PolarisedUPBP's
+        // Fresnel equations. The polarisation of the light sub-path does not reach the sensor (the surfaces at the connection depolarise),
+        // the invariants of the frame rotation (S1^2 + S2^2 = D^2 S0^2) and the intensity are checked for every choice of the sensor.
+        [TEST("Upg", "PolarisedConnectionMatchesTheReferenceFormulas")]
+        public static void Upg_PolarisedConnection()
+        {
+            Fixture fx = Fixture.Build(MirrorScene("Material \"dielectric\" \"float eta\" 1.5"));
+            SampledWavelengths lambda = fx.Wavelengths();
+            int found = 0;
+            for (int i = 0; i < 4000 && found < 20; ++i)
+            {
+                Vertex[] eye = new Vertex[5];
+                int n = fx.CameraPath(new Point2i(0, 0), i, eye, ref lambda, true);
+                if (n < 3 || eye[2].type != VertexType.Surface || !(eye[2].bsdf.GetBxDF() is DiffuseBxDF) || !(eye[1].bsdf.GetBxDF() is DielectricBxDF))
+                {
+                    continue;
+                }
+                // eye[1]: the smooth reflection (the sampled direction went to the ceiling), eye[2]: the diffuse vertex it reached
+                Vertex pt = eye[2];
+                // a vertex of a light sub-path: a diffuse vertex of another sub-path, with a light polarised in every component
+                Vertex qs = pt.Clone();
+                qs.si.pi = new Point3fi(new Point3f(0.3f, -0.4f, 1.0f));
+                qs.beta = new SampledSpectrum(0.7f);
+                qs.plight = new PolarisedLightSystem.Light(new StokesVector(new SampledSpectrum(0.7f), new SampledSpectrum(0.5f),
+                                                                           new SampledSpectrum(-0.3f), new SampledSpectrum(0.2f))).InDirection(Normalize(pt.p() - qs.p()), new Vector3f(0, 0, 1));
+                SampledSpectrum scalar = new SampledSpectrum(0.123f);
+                Vector3f cameraDirection = Normalize(eye[1].p() - eye[0].p());
+                // the reflectance at the mirror
+                Vector3f woLocal = eye[1].bsdf.RenderToLocal(eye[1].si.wo);
+                UpbpFresnelReal(AbsCosTheta(woLocal), woLocal.z > 0 ? 1.5f : 1 / 1.5f, out Float fs, out Float fp);
+                double expectedD = (fs - fp) / (double)(fs + fp);
+                double[] measured = new double[4];
+                for (int m = 0; m < 4; ++m)
+                {
+                    PolarisedPathIntegrator.Sensor sensor = new PolarisedPathIntegrator.Sensor();
+                    sensor.analyser = false;
+                    sensor.measurement = (PolarisedPathIntegrator.Measurement)m;
+                    sensor.cameraUp = fx.camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
+                    SampledSpectrum v = BDPT.MeasureConnection(fx.camera, qs, pt, eye, scalar, lambda[0], sensor, cameraDirection);
+                    measured[m] = v[0];
+                }
+                Console.WriteLine("[Upg] polarised connection: S0 " + measured[0].ToString("G5", CultureInfo.InvariantCulture) + " S1 " +
+                                  measured[1].ToString("G5", CultureInfo.InvariantCulture) + " S2 " + measured[2].ToString("G5", CultureInfo.InvariantCulture) +
+                                  " S3 " + measured[3].ToString("G5", CultureInfo.InvariantCulture) + ", D of the reference " + expectedD.ToString("G5", CultureInfo.InvariantCulture));
+                EXPECT_NEAR(measured[0], 0.123, 1e-5);
+                EXPECT_NEAR(Math.Sqrt(measured[1] * measured[1] + measured[2] * measured[2]), Math.Abs(expectedD) * 0.123, 2e-4 * 0.123 + 1e-6);
+                EXPECT_NEAR(measured[3], 0, 1e-5);
+                ++found;
+            }
+            ASSERT_GE(found, 5);
+            Console.WriteLine("[Upg] polarised connection: " + found + " mirror reflections checked");
+        }
+
+        static Variant PolarisedVariant(string label, string line, int spp, int seeds, string measure)
+        {
+            return new Variant { label = label, integratorLine = line + " \"bool polarised\" true \"string measure\" \"" + measure + "\"", spp = spp, seeds = seeds };
+        }
+
+        // The image statistic: a random +-1 projection of the pixels (a Stokes channel has both signs, so its plain mean says little)
+        static List<double> Projections(List<float[]> images, int pattern)
+        {
+            Random random = new Random(777 + pattern);
+            int length = images[0].Length;
+            double[] weights = new double[length];
+            for (int i = 0; i < length; ++i)
+            {
+                weights[i] = random.Next(2) == 0 ? -1.0 : 1.0;
+            }
+            List<double> values = new List<double>();
+            foreach (float[] image in images)
+            {
+                double sum = 0;
+                for (int i = 0; i < length; ++i)
+                {
+                    sum += weights[i] * image[i];
+                }
+                values.Add(sum / length);
+            }
+            return values;
+        }
+
+        static double TOfValues(List<double> a, List<double> b)
+        {
+            double ma = 0, mb = 0, va = 0, vb = 0;
+            foreach (double v in a)
+            {
+                ma += v;
+            }
+            foreach (double v in b)
+            {
+                mb += v;
+            }
+            ma /= a.Count;
+            mb /= b.Count;
+            foreach (double v in a)
+            {
+                va += (v - ma) * (v - ma);
+            }
+            foreach (double v in b)
+            {
+                vb += (v - mb) * (v - mb);
+            }
+            va /= (a.Count - 1) * (double)a.Count;
+            vb /= (b.Count - 1) * (double)b.Count;
+            double denominator = Math.Sqrt(va + vb);
+            return denominator > 0 ? (ma - mb) / denominator : 0;
+        }
+
+        // (2) Polarised UPG against a long polarised bdpt: the Stokes channels S0, S1 and S2 of the room with a glass and a copper sphere
+        [TEST("Upg", "PolarisedUnbiasedness")]
+        public static void Upg_PolarisedUnbiasedness()
+        {
+            string common = " \"integer maxdepth\" 5 \"integer photons\" 512";
+            string[] measures = new string[] { "intensity", "s1", "s2" };
+            foreach (string measure in measures)
+            {
+                Variant reference = PolarisedVariant("bdpt", "Integrator \"bdpt\" \"integer maxdepth\" 5", 64, 64, measure);
+                List<float[]> referenceImages = RenderSeeds("pol_" + measure + "_ref", RoomScene("polarised", reference.integratorLine, 12, reference.spp),
+                                                            reference.spp, 1000, reference.seeds);
+                Variant[] variants = new Variant[]
+                {
+                    PolarisedVariant("upgonly small-radius", "Integrator \"upg\"" + common + " \"float radius\" 0.06 \"bool upgonly\" true", 16, 24, measure),
+                    PolarisedVariant("upg+bdpt large-radius", "Integrator \"upg\"" + common + " \"float radius\" 0.4", 16, 24, measure),
+                    PolarisedVariant("upg+bdpt small-radius", "Integrator \"upg\"" + common + " \"float radius\" 0.06", 16, 24, measure),
+                };
+                for (int v = 0; v < variants.Length; ++v)
+                {
+                    List<float[]> images = RenderSeeds("pol_" + measure + "_v" + v, RoomScene("polarised", variants[v].integratorLine, 12, variants[v].spp),
+                                                       variants[v].spp, 1 + 100 * v, variants[v].seeds);
+                    double meanA, meanB;
+                    double t = TStatistic(images, referenceImages, -1, out meanA, out meanB);
+                    string projections = "";
+                    for (int pattern = 0; pattern < 3; ++pattern)
+                    {
+                        double tp = TOfValues(Projections(images, pattern), Projections(referenceImages, pattern));
+                        projections += " " + tp.ToString("F2", CultureInfo.InvariantCulture);
+                        EXPECT_TRUE(Math.Abs(tp) < 4.0);
+                    }
+                    Console.WriteLine("[Upg] polarised " + measure + ": " + variants[v].label + " (" + variants[v].seeds + " images of 16 spp): mean " + meanA.ToString("G5", CultureInfo.InvariantCulture) +
+                                      " vs " + meanB.ToString("G5", CultureInfo.InvariantCulture) + ", t " + t.ToString("F2", CultureInfo.InvariantCulture) + ", t of three random +-1 projections of the pixels" + projections);
+                    if (measure == "intensity" || Math.Abs(meanB) > 1e-4)
+                    {
+                        EXPECT_TRUE(Math.Abs(t) < 4.0);
+                    }
+                }
+            }
+        }
+
+        // (1) With polarised = true and a scene without a polarising element (diffuse and a rough conductor), S0 is the scalar image and S1..S3 are zero
+        [TEST("Upg", "PolarisedWithoutPolarisingElements")]
+        public static void Upg_PolarisedIdentity()
+        {
+            string common = "Integrator \"upg\" \"integer maxdepth\" 5 \"integer photons\" 512 \"float radius\" 0.06";
+            List<float[]> scalar = RenderSeeds("poli_scalar", RoomScene("direct", common, 12, 16), 16, 1, 32);
+            List<float[]> polarised = RenderSeeds("poli_s0", RoomScene("direct", common + " \"bool polarised\" true", 12, 16), 16, 5001, 32);
+            double ma, mb;
+            double t = TStatistic(polarised, scalar, -1, out ma, out mb);
+            Console.WriteLine("[Upg] polarised S0 " + ma.ToString("G6", CultureInfo.InvariantCulture) + " vs scalar " + mb.ToString("G6", CultureInfo.InvariantCulture) + ", t " + t.ToString("F2", CultureInfo.InvariantCulture));
+            EXPECT_TRUE(Math.Abs(t) < 4.0);
+            // the same seed: the same light, so the images are the same up to the arithmetic of the Mueller matrices
+            List<float[]> sameSeedScalar = RenderSeeds("poli_ss", RoomScene("direct", common, 12, 16), 16, 7, 1);
+            List<float[]> sameSeedPolarised = RenderSeeds("poli_sp", RoomScene("direct", common + " \"bool polarised\" true", 12, 16), 16, 7, 1);
+            double worst = 0;
+            for (int i = 0; i < sameSeedScalar[0].Length; ++i)
+            {
+                worst = Math.Max(worst, Math.Abs(sameSeedScalar[0][i] - sameSeedPolarised[0][i]) / (Math.Abs(sameSeedScalar[0][i]) + 1e-3));
+            }
+            Console.WriteLine("[Upg] polarised S0 against the scalar render of the same seed: worst relative difference " + worst.ToString("G3", CultureInfo.InvariantCulture));
+            EXPECT_TRUE(worst < 1e-3);
+            foreach (string measure in new string[] { "s1", "s2", "s3" })
+            {
+                List<float[]> images = RenderSeeds("poli_" + measure, RoomScene("direct", common + " \"bool polarised\" true \"string measure\" \"" + measure + "\"", 12, 16), 16, 7, 1);
+                double largest = 0;
+                foreach (float v in images[0])
+                {
+                    largest = Math.Max(largest, Math.Abs(v));
+                }
+                Console.WriteLine("[Upg] polarised " + measure + " of the scene without a polarising element: largest |value| " + largest.ToString("G3", CultureInfo.InvariantCulture) + " (the intensity is about " + mb.ToString("G3", CultureInfo.InvariantCulture) + ")");
+                EXPECT_TRUE(largest < 1e-5);
             }
         }
     }

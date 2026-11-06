@@ -3082,6 +3082,28 @@ namespace pbrt
             lambdaRef = lambda;
             return L;
         }
+
+        // (not in pbrt-v4) What the sensor measures of the polarised light of a path that is the connection of the vertex qs of a light
+        // subpath and the vertex pt of a camera subpath (both with their own scattering evaluated), with the scalar contribution L of the
+        // path: the same as the end of ConnectBDPT for s > 1 and t > 1. The polarisation is taken relative to the scalar throughputs of the
+        // two subpaths: the Stokes vector of the light subpath and the Mueller matrix of the camera subpath, each divided by its beta,
+        // with the Mueller matrices of the scattering at the two connection vertices between (the connection direction is qs to pt).
+        // Unbiased photon gathering connects the vertices of a photon and of a camera subpath this way.
+        public static SampledSpectrum MeasureConnection(Camera camera, Vertex qs, Vertex pt, Vertex[] cameraVertices, SampledSpectrum L,
+                                                        Float wavelength, PolarisedPathIntegrator.Sensor pol, Vector3f cameraDirection)
+        {
+            PLight lightSide = qs.plight;
+            lightSide /= SafeBeta(qs.beta);
+            lightSide = ConnectionMueller(qs, Normalize(pt.p() - qs.p()), false) * lightSide;
+            PAttenuation cameraSide = pt.pbeta;
+            cameraSide /= SafeBeta(pt.beta);
+            lightSide = ConnectionMueller(pt, Normalize(qs.p() - pt.p()), true) * lightSide;
+            PLight Lp = cameraSide * lightSide;
+            Lp *= L;
+            Ray cameraRay = new Ray(cameraVertices[0].p(), Normalize(cameraVertices[1].p() - cameraVertices[0].p()), cameraVertices[0].time());
+            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, wavelength, Lp, pol.analyser, pol.analyserAngle, pol.measurement,
+                                                            cameraDirection, pol.cameraUp);
+        }
     }
 
     // BDPTIntegrator Definition

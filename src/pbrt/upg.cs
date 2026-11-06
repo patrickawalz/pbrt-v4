@@ -1000,7 +1000,7 @@ namespace pbrt
         // UpgIntegrator Public Methods
         public UpgIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights, int maxDepth,
                              int lightPaths, Float radius, int minUpgDepth, int maxUpgDepth, Float misBeta, bool gatheringOnly,
-                             bool bdptOnly, bool regularize, int seed, int maxTrials, bool angularBound)
+                             bool bdptOnly, bool regularize, int seed, int maxTrials, bool angularBound, PolarisedPathIntegrator.Sensor sensor = null)
             : base(aggregate, BDPTIntegrator.EmissionLightsForBDPT(lights))
         {
             this.camera = camera;
@@ -1012,6 +1012,12 @@ namespace pbrt
             this.maxTrials = maxTrials;
             this.angularBound = angularBound;
             this.bdptOnly = bdptOnly;
+            // The polarisation of the light is carried along the sub-paths next to the scalar throughput, as in bdpt
+            this.sensor = sensor;
+            if (sensor != null)
+            {
+                sensor.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
+            }
             this.lightSampler = new PowerLightSampler(TextureMedium.AddEmissionLights(lights).ToArray(), new Allocator());
             Bounds2i pixelBounds = camera.GetFilm().PixelBounds();
             this.lightPathCount = lightPaths > 0 ? lightPaths : pixelBounds.Area();
@@ -1076,8 +1082,18 @@ namespace pbrt
             {
                 ErrorExit(loc, "\"upgonly\" and \"bdptonly\" exclude each other.");
             }
+            PolarisedPathIntegrator.Sensor sensor = null;
+            PolarisedPathIntegrator.ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle,
+                                                out PolarisedPathIntegrator.Measurement measurement);
+            if (parameters.GetOneBool("polarised", false))
+            {
+                sensor = new PolarisedPathIntegrator.Sensor();
+                sensor.analyser = analyser;
+                sensor.analyserAngle = analyserAngle;
+                sensor.measurement = measurement;
+            }
             return new UpgIntegrator(camera, sampler, aggregate, lights, maxDepth, lightPaths, radius, minDepth, maxUpgDepth, beta,
-                                     gatheringOnly, bdptOnly, regularize, seed, maxTrials, angularBound);
+                                     gatheringOnly, bdptOnly, regularize, seed, maxTrials, angularBound, sensor);
         }
 
         // Light sub-paths of one iteration
@@ -1169,7 +1185,7 @@ namespace pbrt
                 }
                 SampledWavelengths lambda = iterationLambda;
                 int n = BDPT.GenerateLightSubpath(this, ref lambda, sampler, camera, scratch.Get(), maxDepth + 1, 0, lightSampler, temp,
-                                                  regularize, false);
+                                                  regularize, sensor != null);
                 UpgLightPath path = new UpgLightPath();
                 path.count = n;
                 path.vertices = new Vertex[n];
@@ -1241,7 +1257,7 @@ namespace pbrt
                 cameraVertices[i] = new Vertex();
             }
             int nCamera = BDPT.GenerateCameraSubpath(this, ray, ref lambda, sampler, scratchBuffer, maxDepth + 2, camera,
-                                                     cameraVertices, regularize, false, null, null);
+                                                     cameraVertices, regularize, sensor != null, null, null);
             UpgLightPath paired = lightPaths[pixelIndex % lightPathCount];
             Vertex[] lightVertices = CloneVertices(paired.vertices, paired.count);
             int nLight = paired.count;
@@ -1261,7 +1277,7 @@ namespace pbrt
                     pstd.optional<Point2f> pFilmNew = default;
                     Float misWeight = 0.0f;
                     SampledSpectrum Lpath = BDPT.ConnectBDPT(this, ref lambda, lightVertices, cameraVertices, s, t, lightSampler,
-                                                            camera, sampler, ref pFilmNew, ref misWeight, null, -ray.d, bdptQuery);
+                                                            camera, sampler, ref pFilmNew, ref misWeight, sensor, -ray.d, bdptQuery);
                     if (t != 1)
                     {
                         L += Lpath;
@@ -1276,7 +1292,7 @@ namespace pbrt
             Interlocked.Add(ref UpgStats.ticksBdpt, System.Diagnostics.Stopwatch.GetTimestamp() - bdptStart);
             if (!bdptOnly)
             {
-                L += GatherPhotons(pPixel, iter, pixelIndex, cameraVertices, nCamera, lambda);
+                L += GatherPhotons(pPixel, iter, pixelIndex, cameraVertices, nCamera, lambda, -ray.d);
             }
 
             L = cameraRay.value().weight * L;
@@ -1295,7 +1311,7 @@ namespace pbrt
 
         // Algorithm 1 of the paper, lines 3 to 16, for one camera sub-path
         SampledSpectrum GatherPhotons(Point2i pPixel, int iter, int pixelIndex, Vertex[] cameraVertices, int nCamera,
-                                      SampledWavelengths lambda)
+                                      SampledWavelengths lambda, Vector3f cameraDirection)
         {
             SampledSpectrum total = new SampledSpectrum(0.0f);
             List<int> found = foundBuffers.Get();
@@ -1322,7 +1338,7 @@ namespace pbrt
                     for (int keep = UpgMis.KeepLightVertex; keep <= UpgMis.KeepCameraVertex; ++keep)
                     {
                         SampledSpectrum c = EvaluatePair(walker, path, idx, photon, cameraVertices, e, keep, lambda, pPixel, iter, pixelIndex,
-                                                         ref evaluated, ref trialCount, ref bounded, ref shadow, histogram);
+                                                         cameraDirection, ref evaluated, ref trialCount, ref bounded, ref shadow, histogram);
                         total += c;
                     }
                 }
@@ -1347,7 +1363,7 @@ namespace pbrt
         // The contribution of one photon and one camera vertex within the radius, for the candidate path that keeps the photon
         // (keep = 1) or the camera vertex (keep = 2): zero if that candidate is not the technique of its path
         SampledSpectrum EvaluatePair(UpgWalker walker, UpgLightPath path, int idx, int photonId, Vertex[] cameraVertices, int e, int keep,
-                                     SampledWavelengths lambda, Point2i pPixel, int iter, int pixelIndex, ref long evaluated,
+                                     SampledWavelengths lambda, Point2i pPixel, int iter, int pixelIndex, Vector3f cameraDirection, ref long evaluated,
                                      ref long trialCount, ref long bounded, ref long shadow, long[] histogram)
         {
             SampledSpectrum zero = new SampledSpectrum(0.0f);
@@ -1455,11 +1471,17 @@ namespace pbrt
             ++evaluated;
             trialCount += trialsHere;
             ++histogram[Math.Min(trialsHere, UpgStats.HistogramSize - 1)];
-            return connection * (weight * reciprocal / lightPathCount);
+            SampledSpectrum contribution = connection * (weight * reciprocal / lightPathCount);
+            if (sensor != null && (bool)contribution)
+            {
+                return BDPT.MeasureConnection(camera, qs, pt, cameraVertices, contribution, lambda[0], sensor, cameraDirection);
+            }
+            return contribution;
         }
 
         // UpgIntegrator Private Members
         Camera camera;
+        PolarisedPathIntegrator.Sensor sensor;
         Sampler samplerPrototype;
         int maxDepth;
         bool regularize, angularBound, bdptOnly;

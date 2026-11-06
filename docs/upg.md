@@ -246,3 +246,13 @@ The trial cost with the bound is 0.04 thread-seconds against 279 without it.
   whole square (`p_b = 1`), which is unbiased but slower in proportion to `1 / p_c`.
 * The truncation of a run at `maxtrials` is the only inexact step (counted, zero in all measurements here).
 * Not supported yet: polarisation (phase 1b), participating media (phase 2).
+
+## 9. Polarisation (phase 1b)
+
+`Integrator "upg"` accepts the parameters of polarised `bdpt` (`polarised`, `analyser`, `analyserangle`, `measure`) and builds the same sensor. The sub-paths carry the Mueller matrices (camera) and Stokes vectors (light) as in `bdpt`; the photons keep the Stokes state.
+
+The connection of a photon `y` and an eye vertex `z` is evaluated by `BDPT.MeasureConnection`, in the order of `ConnectBDPT` (and of `ConnectVertices` of polarisedUPBP: camera throughput, then the connection factors, then the light throughput): the Stokes vector of the light side, the scattering matrix at the photon vertex towards `z`, the scattering matrix at `z` towards `y`, the Mueller matrix of the camera side, the sensor. The Booth factor `N_b/p_b`, the BSDF factor `f_c` and all MIS weights stay scalar, so the estimator is unbiased per Stokes channel by linearity. The angular bound is unaffected: only scalar BxDF values enter `p_b`, and the tentative ray is unpolarised.
+
+Limits: only smooth dielectric/conductor events (and, in phase 2, Rayleigh media) polarise. A rough or diffuse connection vertex depolarises (Lambert = depolarising both), so the polarisation that reaches the sensor comes from the camera-side Mueller matrix; light sources are unpolarised. Consequently the signal is small in rooms with rough surfaces (S1 about 1e-5 of the intensity in the test scene), and the Stokes tests use random +-1 projections of the pixels besides the mean.
+
+Tests (`Upg.Polarised*`): connection of a fixed vertex pair behind a dielectric mirror against the Fresnel equations of polarisedUPBP (S0 = scalar, sqrt(S1^2+S2^2) = D S0, S3 = 0, independent of the polarisation of the light side; 20 reflections); polarised UPG(+BDPT) against a 64-image polarised `bdpt` reference for intensity, S1, S2 at two radii (all |t| < 2.6); identity scene (S0 equals scalar UPG, same-seed images identical, S1..S3 exactly 0). Polarised `bdpt` and unpolarised UPG outputs are bit-identical to the versions before the change.
