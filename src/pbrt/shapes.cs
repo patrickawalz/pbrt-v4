@@ -2512,6 +2512,21 @@ namespace pbrt
                                    pdf / pbrt.Length(pbrt.Cross(dpdu, dpdv)));
         }
 
+        // (not in pbrt-v4) Whether the reference point is on the plane of the patch, within its error bounds and the rounding of this test. Sampling the spherical
+        // rectangle from a point a hair above the patch is right (the patch fills the hemisphere seen from it), but pbrt-v4 also does it for a point on the
+        // patch itself (where a ray hit an emitter that has a BSDF: that surface sees no light from its own plane), and the estimate of the light that the patch
+        // sends to itself is then the one of the hemisphere (pi times the radiance) instead of 0. Such a point is sampled by area, as for the triangle
+        // (whose solid angle from a point on its plane is 0): the cosine at the sampled point on the patch makes the density infinite, and the sample is dropped.
+        private static bool ReferencePointOnPlane(ShapeSampleContext ctx, Point3f p00, Point3f p10, Point3f p01)
+        {
+            const Float rounding = 4 * pbrt.MachineEpsilon;
+            Vector3f planeNormal = pbrt.Cross(p10 - p00, p01 - p00);
+            Vector3f toReference = ctx.p() - p00;
+            Vector3f absoluteNormal = pbrt.Abs(planeNormal);
+            Float bound = pbrt.Dot(absoluteNormal, ctx.pi.Error() + rounding * pbrt.Abs(toReference));
+            return std.abs(pbrt.Dot(planeNormal, toReference)) <= bound;
+        }
+
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
         {
             // Get bilinear patch vertices in _p00_, _p01_, _p10_, and _p11_
@@ -2533,7 +2548,7 @@ namespace pbrt
             Vector3f v00 = pbrt.Normalize(p00 - ctx.p()), v10 = pbrt.Normalize(p10 - ctx.p());
             Vector3f v01 = pbrt.Normalize(p01 - ctx.p()), v11 = pbrt.Normalize(p11 - ctx.p());
             if (!IsRectangle(mesh) || mesh.imageDistribution != null ||
-                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
+                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea || ReferencePointOnPlane(ctx, p00, p10, p01))
             {
                 // Return solid angle PDF for area-sampled bilinear patch
                 Float pdf = PDF(isect.value().intr) * (pbrt.DistanceSquared(ctx.p(), isect.value().intr.p()) /
@@ -2573,7 +2588,7 @@ namespace pbrt
             Vector3f v00 = pbrt.Normalize(p00 - ctx.p()), v10 = pbrt.Normalize(p10 - ctx.p());
             Vector3f v01 = pbrt.Normalize(p01 - ctx.p()), v11 = pbrt.Normalize(p11 - ctx.p());
             if (!IsRectangle(mesh) || mesh.imageDistribution != null ||
-                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea)
+                pbrt.SphericalQuadArea(v00, v10, v11, v01) <= MinSphericalSampleArea || ReferencePointOnPlane(ctx, p00, p10, p01))
             {
                 // Sample shape by area and compute incident direction _wi_
                 pstd.optional<ShapeSample> ss = Sample(u);
