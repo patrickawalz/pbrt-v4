@@ -54,7 +54,8 @@ namespace pbrt
             // Test intersection against alpha texture, if present
             if (alpha != null)
             {
-                Float a = alpha.Evaluate(new TextureEvalContext(si.value().intr));
+                // (not in pbrt-v4) the shape of an animated primitive is in its own space: its alpha texture is evaluated in render space at the time of the ray
+                Float a = alpha.Evaluate(new TextureEvalContext(renderFromShape == null ? si.value().intr : renderFromShape.Interpolate(r.time).Apply(si.value().intr)));
                 if (a < 1)
                 {
                     // Possibly ignore intersection based on stochastic alpha test
@@ -86,6 +87,9 @@ namespace pbrt
             else
                 return shape.IntersectP(r, tMax);
         }
+
+        // The animation of the shape when the primitive is inside of an AnimatedPrimitive (null otherwise)
+        public AnimatedTransform renderFromShape;
 
         // GeometricPrimitive Private Members
         Shape shape;

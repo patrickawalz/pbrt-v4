@@ -310,6 +310,129 @@ namespace pbrt
             return new List<Spectrum>();
         }
 
+        // (not in pbrt-v4) The parameters at a time between the keys of a deforming shape (docs/motion-blur.md): the numeric arrays of type float,
+        // point2, point3, vector2, vector3 and normal that every key has with the same number of values are interpolated linearly between the
+        // two keys around the time (clamped outside of the keys); everything else (integers, strings, bools, textures, colors) is that of the first key
+        public static ParameterDictionary Interpolate(ParameterDictionary[] keys, Float[] times, Float time)
+        {
+            int k;
+            Float f;
+            ShapeMotion.FindKey(times, time, out k, out f);
+            ParameterDictionary result = new ParameterDictionary();
+            result.colorSpace = keys[0].colorSpace;
+            result.nOwnedParams = keys[0].nOwnedParams;
+            foreach (ParsedParameter a in keys[0].@params)
+            {
+                ParsedParameter c = new ParsedParameter(a.loc);
+                c.type = a.type;
+                c.name = a.name;
+                c.colorSpace = a.colorSpace;
+                c.mayBeUnused = true;
+                for (int i = 0; i < (int)a.floats.size(); ++i)
+                {
+                    c.floats.push_back(a.floats[i]);
+                }
+                for (int i = 0; i < (int)a.ints.size(); ++i)
+                {
+                    c.ints.push_back(a.ints[i]);
+                }
+                for (int i = 0; i < (int)a.strings.size(); ++i)
+                {
+                    c.strings.push_back(a.strings[i]);
+                }
+                for (int i = 0; i < (int)a.bools.size(); ++i)
+                {
+                    c.bools.push_back(a.bools[i]);
+                }
+                bool numeric = a.type == "float" || a.type == "point2" || a.type == "point3" || a.type == "vector2" || a.type == "vector3" || a.type == "normal";
+                if (numeric && a.floats.size() != 0)
+                {
+                    ParsedParameter b0 = keys[k].Find(a.name, a.type), b1 = keys[k + 1].Find(a.name, a.type);
+                    if (b0 != null && b1 != null && b0.floats.size() == a.floats.size() && b1.floats.size() == a.floats.size())
+                    {
+                        for (int i = 0; i < (int)a.floats.size(); ++i)
+                        {
+                            c.floats[i] = (1 - f) * b0.floats[i] + f * b1.floats[i];
+                        }
+                    }
+                }
+                result.@params.Add(c);
+            }
+            return result;
+        }
+
+        // (not in pbrt-v4) The keys of a deforming shape must have the same parameters: the same names and types; the numeric arrays the same number of
+        // values (they are interpolated); all the other values (integers such as indices, strings, bools, textures, colors) equal. Returns an
+        // error text, or null.
+        public static string CheckKeys(ParameterDictionary[] keys)
+        {
+            for (int k = 1; k < keys.Length; ++k)
+            {
+                if (keys[k].@params.Count != keys[0].@params.Count)
+                {
+                    return "key " + k + " has another number of parameters than the first key";
+                }
+                foreach (ParsedParameter a in keys[0].@params)
+                {
+                    ParsedParameter b = keys[k].Find(a.name, a.type);
+                    if (b == null)
+                    {
+                        return "key " + k + " has no parameter \"" + a.type + " " + a.name + "\"";
+                    }
+                    if (a.floats.size() != b.floats.size() || a.ints.size() != b.ints.size() || a.strings.size() != b.strings.size() || a.bools.size() != b.bools.size())
+                    {
+                        return "\"" + a.type + " " + a.name + "\" has another number of values in key " + k + " than in the first key";
+                    }
+                    bool numeric = a.type == "float" || a.type == "point2" || a.type == "point3" || a.type == "vector2" || a.type == "vector3" || a.type == "normal";
+                    for (int i = 0; i < (int)a.ints.size(); ++i)
+                    {
+                        if (a.ints[i] != b.ints[i])
+                        {
+                            return "\"" + a.type + " " + a.name + "\" is not the same in key " + k + " as in the first key (integers are not interpolated)";
+                        }
+                    }
+                    for (int i = 0; i < (int)a.strings.size(); ++i)
+                    {
+                        if (a.strings[i] != b.strings[i])
+                        {
+                            return "\"" + a.type + " " + a.name + "\" is not the same in key " + k + " as in the first key (strings are not interpolated)";
+                        }
+                    }
+                    for (int i = 0; i < (int)a.bools.size(); ++i)
+                    {
+                        if (a.bools[i] != b.bools[i])
+                        {
+                            return "\"" + a.type + " " + a.name + "\" is not the same in key " + k + " as in the first key";
+                        }
+                    }
+                    if (!numeric)
+                    {
+                        for (int i = 0; i < (int)a.floats.size(); ++i)
+                        {
+                            if (a.floats[i] != b.floats[i])
+                            {
+                                return "\"" + a.type + " " + a.name + "\" is not the same in key " + k + " as in the first key (only float, point, vector and normal arrays are interpolated)";
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        // The parameter of that name and type (null if there is none)
+        internal ParsedParameter Find(string name, string type)
+        {
+            foreach (ParsedParameter p in @params)
+            {
+                if (p.name == name && p.type == type)
+                {
+                    return p;
+                }
+            }
+            return null;
+        }
+
         public List<ParsedParameter> GetParameterVector() { return @params; }
         public List<Spectrum> GetSpectrumArray(string name, SpectrumType spectrumType, Allocator alloc)
         {

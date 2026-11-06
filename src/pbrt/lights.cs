@@ -1004,7 +1004,7 @@ namespace pbrt
         {
             this.shape = shape;
             this.alpha = type == LightType.Area ? alpha : null;
-            this.area = shape.Area();
+            this.area = shape.MeanArea();
             this.twoSided = twoSided;
             this.Lemit = LookupSpectrum(Le);
             this.scale = scale;
@@ -1058,7 +1058,7 @@ namespace pbrt
             if (similarity)
             {
                 areaScale = uniformScale * uniformScale;
-                area = shape.Area() * areaScale;
+                area = shape.MeanArea() * areaScale;
             }
             else
             {
@@ -1115,11 +1115,11 @@ namespace pbrt
             if (!ss || ss.value().pdf == 0)
                 return default;
             pbrt.DCHECK(!pbrt.IsNaN(ss.value().pdf));
-            // Return no light sample if alpha test fails (the test is made in the space of the shape, like the one of the primitive)
-            if (AlphaMasked(ss.value().intr))
-                return default;
             Interaction intr = renderFromLight.Apply(ss.value().intr);
             intr.time = ctx.time;
+            // Return no light sample if alpha test fails (the test is made in render space, like the one of the primitive)
+            if (AlphaMasked(intr))
+                return default;
             intr.mediumInterface = mediumInterface;
             if (pbrt.LengthSquared(intr.p() - ctx.p()) == 0)
                 return default;
@@ -1177,7 +1177,7 @@ namespace pbrt
         public bool SupportsEquiangular()
         {
             // (a light that moves is not sampled by area for the distance: the sample of the point has no time)
-            if (animated != null)
+            if (animated != null || shape.IsDeforming())
                 return false;
             if (shape is BilinearPatch patch)
                 return patch.SamplesUniformArea();
@@ -1279,9 +1279,9 @@ namespace pbrt
                 if (AlphaMasked(new Interaction(p, uv)))
                     return new SampledSpectrum(0.0f);
             }
-            else if (alpha != null && AlphaMasked(new Interaction(animated.ApplyInverse(p, time), uv)))
+            else if (alpha != null && AlphaMasked(new Interaction(p, uv)))
             {
-                // (the alpha texture is evaluated at the point in the space of the shape, as the primitive does)
+                // (the alpha texture is evaluated at the point in render space, as the primitive does)
                 return new SampledSpectrum(0.0f);
             }
             return Emission(p, n, uv, w, lambda);
@@ -1320,16 +1320,13 @@ namespace pbrt
         public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
                                                               Float time)
         {
-            // Sample a point on the area light's _Shape_
-            pstd.optional<ShapeSample> ss = shape.Sample(u1);
+            // Sample a point on the area light's _Shape_ (a shape that deforms is sampled as it is at the time)
+            pstd.optional<ShapeSample> ss = shape.IsDeforming() ? shape.AtTime(time).Sample(u1) : shape.Sample(u1);
             if (!ss)
                 return default;
             ss.value().intr.time = time;
             ss.value().intr.mediumInterface = mediumInterface;
 
-            // Return sampled point if alpha masks it
-            if (AlphaMasked(ss.value().intr))
-                return default;
             Float pdfPos = ss.value().pdf;
             if (animated != null)
             {
@@ -1337,6 +1334,9 @@ namespace pbrt
                 ss.Ref().intr = animated.Interpolate(time).Apply(ss.value().intr);
                 pdfPos /= areaScale;
             }
+            // Return sampled point if alpha masks it
+            if (AlphaMasked(ss.value().intr))
+                return default;
 
             // Sample a cosine-weighted outgoing direction _w_ for area light
             Vector3f w;
