@@ -241,6 +241,9 @@ namespace pbrt
         private OSLShaderGroup group;
         private OSLGroupSpec spec;
         private Transform renderFromMedium;
+        // (not in pbrt-v4) A medium that moves: renderFromMedium is the pose of the first key, the shader and the majorants are defined in it,
+        // and at a time t the medium is that pose moved rigidly by renderFromMedium(t) * inverse(renderFromMedium(first key)) (see SetMotion())
+        private AnimatedTransform animated;
         private Bounds3f bounds;
         private bool boundsGiven;
         private Float sigmaScale, LeScale;
@@ -281,6 +284,34 @@ namespace pbrt
         }
 
         public OSLShaderGroup Group() { return group; }
+
+        /// A medium that moves. The shader runs in the first pose of the medium (the point of the first pose that the motion brings to the
+        /// point of the ray, and the direction of the ray carried the same way): shader space, object space and the common space of the
+        /// shader are those of the medium and move with it. The majorants and the bounds are in the space of the medium and do not move.
+        /// "P" in common ("world") space is the point of the first pose, and a shader that reads a world space direction other than the one of
+        /// the ray sees it in the first pose as well. The time of the ray is the shader's "time".
+        public void SetMotion(AnimatedTransform renderFromMediumAnimated)
+        {
+            if (renderFromMediumAnimated != null && renderFromMediumAnimated.IsAnimated())
+            {
+                animated = renderFromMediumAnimated;
+            }
+        }
+
+        public bool IsAnimated()
+        {
+            return animated != null;
+        }
+
+        private Point3f FirstPose(Point3f p, Float time)
+        {
+            return renderFromMedium.Apply(animated.Interpolate(time).ApplyInverse(p));
+        }
+
+        private Vector3f FirstPose(Vector3f d, Float time)
+        {
+            return renderFromMedium.Apply(animated.Interpolate(time).ApplyInverse(d));
+        }
 
         public Bounds3f MediumBounds() { return bounds; }
 
@@ -635,9 +666,20 @@ namespace pbrt
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
+            return SamplePoint(p, lambda, currentTime);
+        }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
+        {
             if (!prepared)
             {
                 Prepare();
+            }
+            Vector3f direction = currentDirection;
+            if (animated != null)
+            {
+                p = FirstPose(p, time);
+                direction = FirstPose(direction, time);
             }
             if (constantValues)
             {
@@ -654,7 +696,7 @@ namespace pbrt
                 return Empty();
             }
             OSLVolumeValues v;
-            Evaluate(p, currentDirection, currentTime, out v);
+            Evaluate(p, direction, time, out v);
             MediumProperties mp = new MediumProperties();
             mp.sigma_a = sigmaScale * Coefficient(v.sigma_a, lambda);
             mp.sigma_s = sigmaScale * Coefficient(v.sigma_s, lambda);
@@ -720,7 +762,7 @@ namespace pbrt
                 return new HomogeneousMajorantIterator(0, raytMax * Length(ray.d), sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda));
             }
             // Transform ray to medium's space and compute bounds overlap
-            ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+            ray = (animated != null ? animated.Interpolate(ray.time) : renderFromMedium).ApplyInverse(ray, &raytMax);
             Float tMin, tMax;
             if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
             {
@@ -761,7 +803,8 @@ namespace pbrt
             return false;
         }
 
-        public static OSLMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc, Allocator alloc)
+        public static OSLMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc, Allocator alloc,
+                                       AnimatedTransform renderFromMediumAnimated = null)
         {
             OSLScene.Enabled = true;
             Float scale = parameters.GetOneFloat("scale", 1f);
@@ -819,7 +862,9 @@ namespace pbrt
             OSLShaderGroup group = OSLGroupBuilder.Build(spec, "medium", worldFromShader, null);
             group.renderFromShader = renderFromMedium;
             group.hasRenderFromShader = true;
-            return new OSLMedium(spec, group, renderFromMedium, new Bounds3f(p0, p1), boundsGiven, scale, Lescale, options, rayleigh);
+            OSLMedium created = new OSLMedium(spec, group, renderFromMedium, new Bounds3f(p0, p1), boundsGiven, scale, Lescale, options, rayleigh);
+            created.SetMotion(renderFromMediumAnimated);
+            return created;
         }
 
         private static void AddPresetParameter(OSLGroupSpec spec, OSLLayerSpec layer, string name, RGB value)

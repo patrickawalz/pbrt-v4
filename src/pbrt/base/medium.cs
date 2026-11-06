@@ -56,6 +56,12 @@ namespace pbrt
         public abstract override string ToString();
         public abstract bool IsEmissive();
         public abstract MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda);
+        // (not in pbrt-v4) The properties at a point at the time of the ray: a medium that moves (see TextureMedium and OSLMedium) overrides it; for
+        // the others the time does not matter
+        public virtual MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            return SamplePoint(p, lambda);
+        }
 
         // Medium Public Methods
         public abstract RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf);

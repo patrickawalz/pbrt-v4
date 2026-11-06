@@ -342,12 +342,15 @@ namespace pbrt
                 // Check for missing medium ``type'' or animated medium transform
                 if (type.Length == 0)
                     ErrorExit(medium.loc, "No parameter \"string type\" found for medium.");
-                if (medium.renderFromObject.IsAnimated())
-                    Warning(medium.loc, "Animated transformation provided for medium. Only the " +
-                                        "start transform will be used.");
+                // (not in pbrt-v4) The "texture" and "osl" media move with an animated transformation (see TextureMedium.SetMotion and
+                // OSLMedium.SetMotion); the other types do not, and use the start transform
+                bool movingMedium = medium.renderFromObject.IsAnimated() && (type == "texture" || type == "osl");
+                if (medium.renderFromObject.IsAnimated() && !movingMedium)
+                    Warning(medium.loc, StringPrintf("Animated transformation provided for a medium of type \"%s\". Only the \"texture\" and " +
+                                                     "\"osl\" media move; this one uses the start transform.", type));
 
                 return Medium.Create(type, medium.parameters, medium.renderFromObject.startTransform,
-                                     medium.loc, new Allocator());
+                                     medium.loc, new Allocator(), movingMedium ? medium.renderFromObject : null);
             };
 
             lock (mediaMutex)
@@ -552,6 +555,7 @@ namespace pbrt
             Medium lightMedium = GetMedium(light.medium, light.loc);
             lock (lightMutex)
             {
+                // (only the area lights of animated shapes move: see DiffuseAreaLight.SetMotion)
                 if (light.renderFromObject.IsAnimated())
                     Warning(light.loc, "Animated lights aren't supported. Using the start transform.");
 
@@ -855,6 +859,64 @@ namespace pbrt
 
             LOG_VERBOSE("Starting area lights");
             List<Light> lights = new List<Light>();
+            // (not in pbrt-v4) The area lights of one shape entity, static or animated: the shape of an animated entity is made in its own
+            // space (with the identity) and the lights know the AnimatedTransform (see DiffuseAreaLight.SetMotion)
+            Func<string, FileLoc, int, string, int, ParameterDictionary, string, string, Transform, Transform, bool, AnimatedTransform, List<Light>>
+                createAreaLights = (string shapeName, FileLoc shapeLoc, int lightIndex, string shapeMaterialName, int materialIndex,
+                                    ParameterDictionary shapeParameters, string insideMedium, string outsideMedium,
+                                    Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
+                                    AnimatedTransform renderFromObjectAnimated) =>
+                {
+                    string materialName;
+                    if (shapeMaterialName.Length != 0)
+                    {
+                        int idx = namedMaterials.FindIndex(((string, SceneEntity) p) => p.Item1 == shapeMaterialName);
+                        if (idx < 0)
+                            ErrorExit(shapeLoc, StringPrintf("%s: no named material defined.", shapeMaterialName));
+                        CHECK(namedMaterials[idx].Item2.parameters.GetStringArray("type").Count > 0);
+                        materialName = namedMaterials[idx].Item2.parameters.GetOneString("type", "");
+                    }
+                    else
+                    {
+                        CHECK_LT(materialIndex, materials.Count);
+                        materialName = materials[materialIndex].name;
+                    }
+                    if (materialName == "interface" || materialName == "none" || materialName == "")
+                    {
+                        Warning(shapeLoc, "Ignoring area light specification for shape " +
+                                          "with \"interface\" material.");
+                        return null;
+                    }
+
+                    pstd.vector<Shape> shapeObjects = Shape.Create(
+                        shapeName, renderFromObject, objectFromRender, reverseOrientation,
+                        shapeParameters, textures.floatTextures, shapeLoc, alloc);
+
+                    FloatTexture alphaTex = getAlphaTexture(shapeParameters, shapeLoc);
+
+                    bool materialVolume = MaterialEntityHasVolume(shapeMaterialName, materialIndex);
+                    MediumInterface mi = new MediumInterface(
+                        materialVolume ? null : findMedium(insideMedium, shapeLoc),
+                        materialVolume ? null : findMedium(outsideMedium, shapeLoc),
+                        shapeParameters.GetOneInt("mediumpriority", MediumInterface.noPriority));
+
+                    List<Light> shapeLights = new List<Light>();
+                    SceneEntity areaLightEntity = areaLights[lightIndex];
+                    for (ulong k = 0; k < shapeObjects.size(); ++k)
+                    {
+                        Shape ps = shapeObjects[k];
+                        Light area = Light.CreateArea(areaLightEntity.name, areaLightEntity.parameters,
+                                                      renderFromObject, mi, ps, alphaTex,
+                                                      areaLightEntity.loc, alloc, renderFromObjectAnimated);
+                        if (area != null)
+                        {
+                            lights.Add(area);
+                            shapeLights.Add(area);
+                        }
+                    }
+                    return shapeLights;
+                };
+
             // Area Lights
             for (int i = 0; i < shapes.Count; ++i)
             {
@@ -863,55 +925,28 @@ namespace pbrt
                 if (sh.lightIndex == -1)
                     continue;
 
-                string materialName;
-                if (sh.materialName.Length != 0)
-                {
-                    int idx = namedMaterials.FindIndex(((string, SceneEntity) p) => p.Item1 == sh.materialName);
-                    if (idx < 0)
-                        ErrorExit(sh.loc, StringPrintf("%s: no named material defined.", sh.materialName));
-                    CHECK(namedMaterials[idx].Item2.parameters.GetStringArray("type").Count > 0);
-                    materialName = namedMaterials[idx].Item2.parameters.GetOneString("type", "");
-                }
-                else
-                {
-                    CHECK_LT(sh.materialIndex, materials.Count);
-                    materialName = materials[sh.materialIndex].name;
-                }
-                if (materialName == "interface" || materialName == "none" || materialName == "")
-                {
-                    Warning(sh.loc, "Ignoring area light specification for shape " +
-                                    "with \"interface\" material.");
+                List<Light> shapeLights = createAreaLights(sh.name, sh.loc, sh.lightIndex, sh.materialName, sh.materialIndex,
+                                                           sh.parameters, sh.insideMedium, sh.outsideMedium, sh.renderFromObject,
+                                                           sh.objectFromRender, sh.reverseOrientation, null);
+                if (shapeLights == null)
                     continue;
-                }
-
-                pstd.vector<Shape> shapeObjects = Shape.Create(
-                    sh.name, sh.renderFromObject, sh.objectFromRender, sh.reverseOrientation,
-                    sh.parameters, textures.floatTextures, sh.loc, alloc);
-
-                FloatTexture alphaTex = getAlphaTexture(sh.parameters, sh.loc);
-
-                bool materialVolume = MaterialEntityHasVolume(sh.materialName, sh.materialIndex);
-                MediumInterface mi = new MediumInterface(
-                    materialVolume ? null : findMedium(sh.insideMedium, sh.loc),
-                    materialVolume ? null : findMedium(sh.outsideMedium, sh.loc),
-                    sh.parameters.GetOneInt("mediumpriority", MediumInterface.noPriority));
-
-                List<Light> shapeLights = new List<Light>();
-                SceneEntity areaLightEntity = areaLights[sh.lightIndex];
-                for (ulong k = 0; k < shapeObjects.size(); ++k)
-                {
-                    Shape ps = shapeObjects[k];
-                    Light area = Light.CreateArea(areaLightEntity.name, areaLightEntity.parameters,
-                                                  sh.renderFromObject, mi, ps, alphaTex,
-                                                  areaLightEntity.loc, alloc);
-                    if (area != null)
-                    {
-                        lights.Add(area);
-                        shapeLights.Add(area);
-                    }
-                }
-
                 shapeIndexToAreaLights[i] = shapeLights;
+            }
+
+            // (not in pbrt-v4) Area lights of animated shapes: the entry of the shape i is at the key -1 - i
+            for (int i = 0; i < animatedShapes.Count; ++i)
+            {
+                AnimatedShapeSceneEntity sh = animatedShapes[i];
+
+                if (sh.lightIndex == -1)
+                    continue;
+
+                List<Light> shapeLights = createAreaLights(sh.name, sh.loc, sh.lightIndex, sh.materialName, sh.materialIndex,
+                                                           sh.parameters, sh.insideMedium, sh.outsideMedium, sh.identity,
+                                                           sh.identity, sh.reverseOrientation, sh.renderFromObject);
+                if (shapeLights == null)
+                    continue;
+                shapeIndexToAreaLights[-1 - i] = shapeLights;
             }
 
             LOG_VERBOSE("Finished area lights");
@@ -1055,13 +1090,14 @@ namespace pbrt
             shapes.Clear();
 
             // Animated shapes
-            Func<List<AnimatedShapeSceneEntity>, List<Primitive>> CreatePrimitivesForAnimatedShapes =
-                (List<AnimatedShapeSceneEntity> shapesIn) =>
+            Func<List<AnimatedShapeSceneEntity>, bool, List<Primitive>> CreatePrimitivesForAnimatedShapes =
+                (List<AnimatedShapeSceneEntity> shapesIn, bool topLevel) =>
                 {
                     List<Primitive> prims0 = new List<Primitive>();
 
-                    foreach (AnimatedShapeSceneEntity sh in shapesIn)
+                    for (int shapeIndex = 0; shapeIndex < shapesIn.Count; ++shapeIndex)
                     {
+                        AnimatedShapeSceneEntity sh = shapesIn[shapeIndex];
                         pstd.vector<Shape> shapeObjs =
                             Shape.Create(sh.name, sh.identity, sh.identity, sh.reverseOrientation,
                                          sh.parameters, textures.floatTextures, sh.loc, alloc);
@@ -1092,20 +1128,26 @@ namespace pbrt
                         if (mtl is InterfaceMaterial)
                             mtl = null;
 
+                        // (not in pbrt-v4) The area lights of the shape were made with the shape in its own space and know its motion; the
+                        // emission of a hit is then evaluated at the time of the ray (the primitive is inside the AnimatedPrimitive).
+                        // An animated shape in an instance definition has no area light, as a static one has none (the same warning is given
+                        // when the shape is read).
+                        List<Light> areaList = null;
+                        if (sh.lightIndex != -1 && topLevel)
+                            shapeIndexToAreaLights.TryGetValue(-1 - shapeIndex, out areaList);
+
                         List<Primitive> prims = new List<Primitive>();
                         for (ulong k = 0; k < shapeObjs.size(); ++k)
                         {
                             Shape s = shapeObjs[k];
-                            if (sh.lightIndex != -1)
-                            {
-                                CHECK(sh.renderFromObject.IsAnimated());
-                                ErrorExit(sh.loc, "Animated area lights are not supported.");
-                            }
+                            Light area = null;
+                            if (areaList != null)
+                                area = areaList[(int)k];
 
-                            if (!mi.IsMediumTransition() && alphaTex == null)
+                            if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(s, mtl));
                             else
-                                prims.Add(new GeometricPrimitive(s, mtl, null /* area light */, mi, alphaTex));
+                                prims.Add(new GeometricPrimitive(s, mtl, area, mi, alphaTex));
                         }
 
                         // TODO: could try to be greedy or even segment them according
@@ -1124,7 +1166,7 @@ namespace pbrt
                     }
                     return prims0;
                 };
-            List<Primitive> animatedPrimitives = CreatePrimitivesForAnimatedShapes(animatedShapes);
+            List<Primitive> animatedPrimitives = CreatePrimitivesForAnimatedShapes(animatedShapes, true);
             primitives.AddRange(animatedPrimitives);
 
             animatedShapes.Clear();
@@ -1142,7 +1184,7 @@ namespace pbrt
 
                 List<Primitive> instancePrimitives = CreatePrimitivesForShapes(inst.Value.shapes);
                 List<Primitive> movingInstancePrimitives =
-                    CreatePrimitivesForAnimatedShapes(inst.Value.animatedShapes);
+                    CreatePrimitivesForAnimatedShapes(inst.Value.animatedShapes, false);
                 instancePrimitives.AddRange(movingInstancePrimitives);
 
                 if (instancePrimitives.Count > 1)

@@ -141,8 +141,54 @@ namespace pbrt
             return std.max<Float>(0, std.max(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
         }
 
+        // (not in pbrt-v4) A medium that moves. renderFromMedium is the pose of the first key and the bounds, the textures and the majorant
+        // grid are defined in that pose; at a time t the whole medium (bounds, density, emission) is that of the first pose moved rigidly
+        // by renderFromMedium(t) * inverse(renderFromMedium(first key)). A point p of render space at the time t is therefore looked up at
+        // the point of the first pose that the motion takes to p. The tracking of a ray works in the space of the medium at the time of the
+        // ray, in which the majorant grid does not move.
+        public void SetMotion(AnimatedTransform renderFromMediumAnimated)
+        {
+            if (renderFromMediumAnimated != null && renderFromMediumAnimated.IsAnimated())
+                animated = renderFromMediumAnimated;
+        }
+
+        public bool IsAnimated()
+        {
+            return animated != null;
+        }
+
+        // The first time of the motion (the pose before it is the first pose)
+        public Float StartTime()
+        {
+            return animated != null ? animated.startTime : 0;
+        }
+
+        // The transformation of the medium at the time
+        public Transform RenderFromMedium(Float time)
+        {
+            return animated != null ? animated.Interpolate(time) : renderFromMedium;
+        }
+
+        // The bounds, in render space, of the box of the medium over the whole motion
+        public Bounds3f MotionBounds(Bounds3f boxInMediumSpace)
+        {
+            return animated != null ? animated.MotionBounds(boxInMediumSpace) : renderFromMedium.Apply(boxInMediumSpace);
+        }
+
+        // The point of the first pose that is at p, a point of render space, at the time
+        private Point3f FirstPose(Point3f p, Float time)
+        {
+            return renderFromMedium.Apply(animated.Interpolate(time).ApplyInverse(p));
+        }
+
         // The density at a point in render space; the medium is empty outside its bounds
-        public Float Density(Point3f p)
+        public Float Density(Point3f p, Float time = 0)
+        {
+            return DensityInFirstPose(animated != null ? FirstPose(p, time) : p);
+        }
+
+        // The density at a point given in the first pose
+        private Float DensityInFirstPose(Point3f p)
         {
             if (!pbrt.Inside(renderFromMedium.ApplyInverse(p), bounds))
                 return 0;
@@ -150,7 +196,8 @@ namespace pbrt
             return std.max<Float>(0, densityOffset + densityScale * texture.Evaluate(ctx));
         }
 
-        // The gradient of the density at a point in render space (zero where the density is clamped to zero)
+        // The gradient of the density at a point in render space (zero where the density is clamped to zero); of the first pose for a
+        // medium that moves (it is used by nothing that has a time)
         public Vector3f DensityGradient(Point3f p)
         {
             TextureEvalContext ctx = new TextureEvalContext(p, default, default, default, default, 0, 0, 0, 0, 0);
@@ -165,9 +212,9 @@ namespace pbrt
         public Transform RenderFromMedium() { return renderFromMedium; }
 
         // Emitted radiance per length at the render-space point p (the emission texture times sigma_a, as in pbrt-v4's media)
-        public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda)
+        public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda, Float time = 0)
         {
-            MediumProperties mp = SamplePoint(p, lambda);
+            MediumProperties mp = SamplePoint(p, lambda, time);
             return mp.sigma_a * mp.Le;
         }
 
@@ -182,9 +229,9 @@ namespace pbrt
         }
 
         // The majorant that the tracking of a ray uses at the render-space point p (the finest grid cell that holds it)
-        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda)
+        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time = 0)
         {
-            Point3f pMedium = renderFromMedium.ApplyInverse(p);
+            Point3f pMedium = animated != null ? animated.Interpolate(time).ApplyInverse(p) : renderFromMedium.ApplyInverse(p);
             if (!pbrt.Inside(pMedium, bounds))
                 return new SampledSpectrum(0f);
             SampledSpectrum sigma_t = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
@@ -272,9 +319,16 @@ namespace pbrt
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
+            return SamplePoint(p, lambda, 0);
+        }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            if (animated != null)
+                p = FirstPose(p, time);
             SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
-            Float d = Density(p);
+            Float d = DensityInFirstPose(p);
             sigma_a *= d;
             sigma_s *= d;
             SampledSpectrum Le = new SampledSpectrum(0f);
@@ -290,7 +344,7 @@ namespace pbrt
         public RayMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
         {
             // Transform ray to medium's space and compute bounds overlap
-            ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+            ray = (animated != null ? animated.Interpolate(ray.time) : renderFromMedium).ApplyInverse(ray, &raytMax);
             Float tMin, tMax;
             if (!bounds.IntersectP(ray.o, ray.d, raytMax, &tMin, &tMax))
                 return new DDAMajorantIterator();
@@ -312,7 +366,7 @@ namespace pbrt
         }
 
         public static TextureMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
-                                           Allocator alloc)
+                                           Allocator alloc, AnimatedTransform renderFromMediumAnimated = null)
         {
             string densityTextureName = parameters.GetOneString("density", "");
             if (densityTextureName.Length == 0)
@@ -350,6 +404,7 @@ namespace pbrt
                                                       densityTextureName, densityOffset, densityScale, majorantRes,
                                                       hierarchyRes, hierarchyDepth, refineThreshold, emissionTextureName,
                                                       emissionScale, alloc);
+            created.SetMotion(renderFromMediumAnimated);
             if (emissionTextureName.Length > 0)
             {
                 lock (emissionMedia)
@@ -365,6 +420,7 @@ namespace pbrt
         // TextureMedium Private Members
         private Bounds3f bounds;
         private Transform renderFromMedium;
+        private AnimatedTransform animated;
         private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
         private HGPhaseFunction phase;
         private string densityTextureName;

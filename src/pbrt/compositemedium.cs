@@ -189,6 +189,11 @@ namespace pbrt
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
+            return SamplePoint(p, lambda, 0);
+        }
+
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
+        {
             MediumProperties total = default;
             total.sigma_a = new SampledSpectrum(0f);
             total.sigma_s = new SampledSpectrum(0f);
@@ -196,7 +201,7 @@ namespace pbrt
             MediumProperties[] properties = new MediumProperties[children.Length];
             for (int i = 0; i < children.Length; ++i)
             {
-                properties[i] = children[i].SamplePoint(p, lambda);
+                properties[i] = children[i].SamplePoint(p, lambda, time);
                 total.sigma_a += properties[i].sigma_a;
                 total.sigma_s += properties[i].sigma_s;
                 emission += properties[i].sigma_a * properties[i].Le;

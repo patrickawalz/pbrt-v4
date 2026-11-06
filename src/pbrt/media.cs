@@ -167,7 +167,7 @@ namespace pbrt
                     {
                         // Call callback function for sample within segment
                         T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
-                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
                         if (!callback(ray.Apply(t), mp, sg.sigma_maj, T_maj))
                         {
                             // Returning out of doubly-nested while loop is not as good perf. wise
@@ -1419,7 +1419,7 @@ namespace pbrt
         }
 
         public static Medium Create(string name, ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
-                                    Allocator alloc)
+                                    Allocator alloc, AnimatedTransform renderFromMediumAnimated = null)
         {
             Medium m = null;
             // (not in pbrt-v4) The fraction of Rayleigh scattering of the phase function
@@ -1444,11 +1444,11 @@ namespace pbrt
             }
             else if (name == "texture")
             {
-                m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc);
+                m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc, renderFromMediumAnimated);
             }
             else if (name == "osl")
             {
-                m = OSLMedium.Create(parameters, renderFromMedium, loc, alloc);
+                m = OSLMedium.Create(parameters, renderFromMedium, loc, alloc, renderFromMediumAnimated);
             }
             else
                 ErrorExit(loc, $"{name}: medium unknown.");

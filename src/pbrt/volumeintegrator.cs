@@ -78,7 +78,7 @@ namespace pbrt
                 if (t < tEnd)
                 {
                     T_maj *= FastExp(-(t - tMin) * sigma_maj);
-                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
                     if (!callback(ray.Apply(t), mp, sigma_maj, T_maj))
                         return new SampledSpectrum(1f);
                     T_maj = new SampledSpectrum(1f);
@@ -150,7 +150,7 @@ namespace pbrt
                 T = new SampledSpectrum(1f);
                 return false;
             }
-            MediumProperties mp = medium.SamplePoint(ray.o, lambda);
+            MediumProperties mp = medium.SamplePoint(ray.o, lambda, ray.time);
             Float length = tMax * Length(ray.d);
             if (IsInf(length))
                 length = Float.MaxValue;
@@ -242,7 +242,7 @@ namespace pbrt
                     if (t < sg.tMax)
                     {
                         T_maj *= FastExp(-(t - tMin) * residualMaj);
-                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
                         SampledSpectrum sigma_n = residualMaj - (mp.sigma_a + mp.sigma_s) + control;
                         MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj, residualMaj, sigma_n);
                         if (!T_ray)

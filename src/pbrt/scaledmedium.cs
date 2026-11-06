@@ -67,6 +67,14 @@ namespace pbrt
             return mp;
         }
 
+        public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            MediumProperties mp = medium.SamplePoint(p, lambda, time);
+            mp.sigma_a = mp.sigma_a * scale;
+            mp.sigma_s = mp.sigma_s * scale;
+            return mp;
+        }
+
         public RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda)
         {
             return SampleRay(ray, tMax, lambda, new ScratchBuffer());
