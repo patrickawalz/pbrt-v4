@@ -32,7 +32,9 @@ namespace pbrt
             case "fograyleigh":
                 return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.05 0.05 0.05] \"rgb sigma_s\" [0.5 0.5 0.5] \"float g\" 0 \"float rayleigh\" 1\n";
             case "fogemit":
-                return "MakeNamedMedium \"fog\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.3 0.3 0.3] \"rgb sigma_s\" [0.3 0.3 0.3] \"float g\" 0.2 \"rgb Le\" [1 0.5 0.15] \"float Lescale\" 0.5\n";
+                return MediumText("foghg");
+            case "fognested":
+                return MediumText("foghg") + "MakeNamedMedium \"ball\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.1 0.2 0.3] \"rgb sigma_s\" [1.5 1.0 0.5] \"float g\" -0.3\n";
             case "foggrid":
             {
                 int nx = 8, ny = 4, nz = 12;
@@ -73,7 +75,7 @@ namespace pbrt
             s += "Sampler \"independent\" \"integer pixelsamples\" " + spp + "\n" + integratorLine + "\nWorldBegin\n";
             s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.7 0.7 0.7]\n";
             // (the uniform sky comes in through the missing ceiling)
-            s += (variant == "infinite" ? "" : Quad("-2 2 -4", "2 2 -4", "2 2 2", "-2 2 2")) + Quad("-2 0 2", "2 0 2", "2 2 2", "-2 2 2") + Quad("2 0 2", "2 0 -4", "2 2 -4", "2 2 2") +
+            s += (variant == "infinite" || variant == "distant" ? "" : Quad("-2 2 -4", "2 2 -4", "2 2 2", "-2 2 2")) + Quad("-2 0 2", "2 0 2", "2 2 2", "-2 2 2") + Quad("2 0 2", "2 0 -4", "2 2 -4", "2 2 2") +
                  Quad("2 0 -4", "-2 0 -4", "-2 2 -4", "2 2 -4") + "AttributeEnd\n";
             s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.75 0.2 0.2]\n" + Quad("-2 0 -4", "-2 0 2", "-2 2 2", "-2 2 -4") + "AttributeEnd\n";
             if (variant == "cornell")
@@ -98,6 +100,18 @@ namespace pbrt
             else
             {
                 s += "AttributeBegin\nMaterial \"diffuse\" \"rgb reflectance\" [0.3 0.5 0.8]\nTranslate 0.8 0.35 0.6\nShape \"sphere\" \"float radius\" 0.35\nAttributeEnd\n";
+            }
+            if (media == "fogemit")
+            {
+                // a glowing ball (textured medium with emission) in the fog
+                s += "AttributeBegin\nAttributeBegin\nTranslate -0.4 0.4 -1.0\nScale 1.2 1.2 1.2\nTexture \"dens\" \"float\" \"densitygrid\" \"integer nx\" 2 \"integer ny\" 2 \"integer nz\" 2 \"float density\" [ 1 0.6 0.8 1 0.7 1 0.9 0.5 ]\nTexture \"em\" \"spectrum\" \"constant\" \"rgb value\" [1 0.5 0.15]\n" +
+                     "MakeNamedMedium \"glow\" \"string type\" \"texture\" \"string density\" \"dens\" \"rgb sigma_a\" [0.6 0.7 0.8] \"rgb sigma_s\" [0.8 0.8 0.8] \"float g\" 0.2 " +
+                     "\"integer majorantres\" 4 \"string emission_texture\" \"em\" \"float Lescale\" 3 \"bool emission_nee\" true\nAttributeEnd\n" +
+                     "MediumInterface \"glow\" \"fog\"\nMaterial \"interface\"\nTranslate 0.2 1.0 -0.4\nShape \"sphere\" \"float radius\" 0.6\nAttributeEnd\n";
+            }
+            if (media == "fognested")
+            {
+                s += "AttributeBegin\nMediumInterface \"ball\" \"fog\"\nMaterial \"interface\"\nTranslate 0.2 1.0 -0.4\nShape \"sphere\" \"float radius\" 0.6\nAttributeEnd\n";
             }
             switch (variant)
             {
@@ -141,11 +155,20 @@ namespace pbrt
                 RenderingCoordinateSystem saved = Options.renderingSpace;
                 try
                 {
+                    // (the emission lights of the media are collected in static lists: forget those of the earlier scenes)
+                    TextureMedium.ClearEmissionLights();
                     BasicScene scene = new BasicScene();
                     BasicSceneBuilder builder = new BasicSceneBuilder(scene);
                     pbrt.ParseString(builder, text);
                     SortedDictionary<string, Medium> media = scene.CreateMedia();
                     NamedTextures textures = scene.CreateTextures();
+                    foreach (KeyValuePair<string, Medium> m in media)
+                    {
+                        if (m.Value is TextureMedium textureMedium)
+                        {
+                            textureMedium.ResolveTextures(textures, new FileLoc());
+                        }
+                    }
                     Dictionary<int, List<Light>> shapeIndexToAreaLights = new Dictionary<int, List<Light>>();
                     List<Light> lights = scene.CreateLights(textures, shapeIndexToAreaLights);
                     SortedDictionary<string, Material> namedMaterials = new SortedDictionary<string, Material>(StringComparer.Ordinal);
@@ -293,6 +316,7 @@ namespace pbrt
             public int emissionEnds, samples, strategies, weightsBelowOne, mismatches;
             public double worstWeight, worstRadiance;
             public Float worstExtra;
+            public double largestExtra;
             public string worstCase = "";
         }
 
@@ -345,6 +369,7 @@ namespace pbrt
                         }
                     }
                     double ea = extraOld.Average(), eb = extraNew.Average();
+                    stats.largestExtra = Math.Max(stats.largestExtra, Math.Max(Math.Abs(ea), Math.Abs(eb)));
                     double erel = Math.Abs(ea - eb) / Math.Max(Math.Max(Math.Abs(ea), Math.Abs(eb)), 1e-30);
                     stats.worstExtra = Math.Max(stats.worstExtra, (Float)erel);
                     if (erel > tolerance)
@@ -356,7 +381,7 @@ namespace pbrt
             Console.WriteLine("[BdptInc] weights " + label + ": " + stats.samples + " samples, " + stats.strategies + " strategies, " + stats.weightsBelowOne +
                               " with weight < 1, worst relative weight difference " + stats.worstWeight.ToString("G3", CultureInfo.InvariantCulture) +
                               " (" + stats.worstCase + "), worst contribution difference " + stats.worstRadiance.ToString("G3", CultureInfo.InvariantCulture) +
-                              ", " + stats.emissionEnds + " emission ends, worst equiangular/emission-end difference " + stats.worstExtra.ToString("G3", CultureInfo.InvariantCulture) +
+                              ", " + stats.emissionEnds + " emission ends, worst equiangular/emission-end difference " + stats.worstExtra.ToString("G3", CultureInfo.InvariantCulture) + " (largest such contribution " + stats.largestExtra.ToString("G3", CultureInfo.InvariantCulture) + ")" +
                               ", beyond " + tolerance.ToString("G2", CultureInfo.InvariantCulture) + ": " + stats.mismatches);
             return stats;
         }
@@ -385,7 +410,7 @@ namespace pbrt
         [TEST("BdptInc", "WeightsEqualBdptMedia")]
         public static void BdptInc_WeightsEqualBdptMedia()
         {
-            foreach (string media in new string[] { "fog", "foghg", "fogchrom", "foggrid", "fograyleigh" })
+            foreach (string media in new string[] { "fog", "foghg", "fogchrom", "foggrid", "fograyleigh", "fognested" })
             {
                 WeightStats a = CompareWeights(media, media, "room", "", 8, 24, 3, false, WeightTolerance);
                 EXPECT_EQ(a.mismatches, 0);
@@ -396,7 +421,7 @@ namespace pbrt
         [TEST("BdptInc", "WeightsEqualBdptEmissiveMedium")]
         public static void BdptInc_WeightsEqualBdptEmissiveMedium()
         {
-            WeightStats a = CompareWeights("emissive medium", "fogemit", "room", "", 6, 30, 3, false, WeightTolerance);
+            WeightStats a = CompareWeights("emissive medium", "fogemit", "room", "", 6, 200, 3, false, WeightTolerance);
             EXPECT_EQ(a.mismatches, 0);
             WeightStats b = CompareWeights("emissive medium, no gathering", "fogemit", "room", "\"bool gathermediumemission\" false", 6, 20, 3, false, WeightTolerance);
             EXPECT_EQ(b.mismatches, 0);
