@@ -512,6 +512,9 @@ namespace pbrt
 
         public SampledSpectrum K() { return k; }
 
+        // (not in pbrt-v4) For the angular bound of unbiased photon gathering (see UpgBound)
+        public TrowbridgeReitzDistribution Distribution() { return mfDistrib; }
+
         public override BxDFFlags Flags()
         {
             return mfDistrib.EffectivelySmooth() ? BxDFFlags.SpecularReflection : BxDFFlags.GlossyReflection;

@@ -162,6 +162,10 @@ namespace pbrt
 
         public bool EffectivelySmooth() { return std.max(alpha_x, alpha_y) < 1e-3f; }
 
+        // (not in pbrt-v4) For the angular bound of unbiased photon gathering (see UpgBound)
+        public Float AlphaX() { return alpha_x; }
+        public Float AlphaY() { return alpha_y; }
+
         public Float G1(Vector3f w) { return 1 / (1 + Lambda(w)); }
 
         public Float Lambda(Vector3f w)

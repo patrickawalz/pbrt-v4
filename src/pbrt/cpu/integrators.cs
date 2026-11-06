@@ -272,6 +272,8 @@ namespace pbrt
                 integrator = RandomWalkIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "bdpt")
                 integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "upg")
+                integrator = UpgIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "mlt")
                 integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
             else if (name == "function")
@@ -2508,7 +2510,7 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) The geometry term of a connection without its transmittance
-        static Float GeometryTerm(Vertex v0, Vertex v1)
+        public static Float GeometryTerm(Vertex v0, Vertex v1)
         {
             Vector3f d = v0.p() - v1.p();
             Float g = 1 / LengthSquared(d);
@@ -2524,12 +2526,17 @@ namespace pbrt
 
         public static Float MISWeight(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                       Vertex[] cameraVertices, Vertex sampled, int s, int t,
-                                      LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl)
+                                      LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl,
+                                      UpgMisQuery upg = null)
         {
             if (!MISSum(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler, connRu, connRl,
-                        true, out SampledSpectrum sum))
+                        true, out SampledSpectrum sum, upg))
                 return 1;
             Float average = sum.Average();
+            // (not in pbrt-v4) With unbiased photon gathering among the strategies (see UpgMis) the weight is the density of the
+            // technique that took the sample over the sum of the densities of all of them
+            if (upg != null)
+                return average > 0 ? upg.numerator / average : 0;
             return average > 0 ? 1 / average : 0;
         }
 
@@ -2540,7 +2547,7 @@ namespace pbrt
         public static bool MISSum(Integrator integrator, Camera camera, Vertex[] lightVertices,
                                   Vertex[] cameraVertices, Vertex sampled, int s, int t,
                                   LightSampler lightSampler, SampledSpectrum connRu, SampledSpectrum connRl,
-                                  bool withEquiangular, out SampledSpectrum sumOut)
+                                  bool withEquiangular, out SampledSpectrum sumOut, UpgMisQuery upg = null)
         {
             sumOut = default;
             // (not in pbrt-v4) With a camera subpath that gathers the emission of a medium, a path of length 0 has two strategies: the
@@ -2625,6 +2632,15 @@ namespace pbrt
                 bool hasEmissionEnd = s == 0 && t >= 1 && IsVolumeEmission(cameraVertices[t - 1]);
                 SampledSpectrum emissionEnd = hasEmissionEnd ? cameraVertices[t - 1].emissionMaj : oneSpectrum;
                 SampledSpectrum sum = scatterVertices * cameraWalked * lightWalked * connectionAsConnection * emissionEnd;
+                // (not in pbrt-v4) The techniques of unbiased photon gathering that share the sub-path densities of a strategy
+                // are terms next to it (see UpgMis.Terms): the strategy j has the coefficient bdpt + sum of its gathering terms
+                UpgTerms upgTerms = null;
+                if (upg != null)
+                {
+                    upgTerms = upg.mis.Terms(lightVertices, cameraVertices, s, t);
+                    upg.Select(upgTerms);
+                    sum *= upgTerms.Coefficient(s);
+                }
 
                 // Consider hypothetical connection strategies along the camera subpath
                 Float ri = 1;
@@ -2645,6 +2661,8 @@ namespace pbrt
                         }
                         // The segment that arrives at vertex i is the connection of this strategy; the others, and the connection
                         // of the sample, are walked
+                        if (upgTerms != null)
+                            riTerm = upgTerms.Scale(s + t - i, riTerm);
                         sum += riTerm * (scatterVertices * cameraVertices[i - 1].cumU * walkedAfter * cameraVertices[i].segL *
                                          lightWalked * connectionAsWalk);
                     }
@@ -2681,6 +2699,8 @@ namespace pbrt
                             riOneLight = riTerm;
                             oneLightValid = true;
                         }
+                        if (upgTerms != null)
+                            riTerm = upgTerms.Scale(i, riTerm);
                         if (i > 0)
                         {
                             sum += riTerm * (scatterVertices * lightVertices[i - 1].cumU * walkedAfter * lightVertices[i].segL *
@@ -2882,7 +2902,7 @@ namespace pbrt
                                                   LightSampler lightSampler, Camera camera, Sampler sampler,
                                                   ref pstd.optional<Point2f> pRaster, ref Float misWeightOut,
                                                   PolarisedPathIntegrator.Sensor pol = null,
-                                                  Vector3f cameraDirection = default)
+                                                  Vector3f cameraDirection = default, UpgMisQuery upg = null)
         {
             SampledWavelengths lambda = lambdaRef;
             SampledSpectrum L = new SampledSpectrum(0.0f);
@@ -3009,7 +3029,7 @@ namespace pbrt
             PathIntegrator.pathLength.Add(s + t - 2);
             // Compute MIS weight for connection strategy
             Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler,
-                                                  connRu, connRl)
+                                                  connRu, connRl, upg)
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;
