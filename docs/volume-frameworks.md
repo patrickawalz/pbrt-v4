@@ -1,29 +1,34 @@
-# Volume frameworks: a pluggable architecture (design note, no engine code)
+# Volume frameworks: exponential media and SGGX with selectable trackers (design note, no engine code)
 
-Status: design note, revision 3 (revision 3 = section 4.2 rewritten from the Tungsten source; interface changes listed in 6.1). Nothing in this note changes engine code. Branch `feature/bdpt-incremental-mis`, written against commit `4e3d77b`+.
+Status: design note, **revision 4**. Nothing in this note changes engine code. Branch `feature/bdpt-incremental-mis`, written against commit `17655e3`+. Revisions 1 to 3 are in git history (revision 3 = commit 17655e3 with the Tungsten reading; revision 2 = 6c492d6).
 
-Scope (revision 2): **in** the spec are the exponential null-scattering framework, the non-exponential framework of Bitterli et al., SGGX microflakes, the estimators, and the black box. **Deferred** (not in the spec, no hooks in the interface): spatially correlated media (Jarabo et al.) and the refractive RTE (RRTE); see section 4.5 and section 6.1 for what adding them later would cost. Revision 1 is in git history (ae15c7d).
+Scope (revision 4, a scope change from the user): **in** are the exponential null-scattering framework, the Heitz SGGX microflake framework as Mitsuba 3 supports it, **many trackers and estimators selectable per volume and per query type**, the black box (a volume with its own integrator hidden behind its boundary), and the migration and test plan. **Out** (deferred, no hooks): non-exponential media (Bitterli, d'Eon), spatially correlated media (Jarabo), the refractive RTE (RRTE) and transient rendering. They are one paragraph in Appendix A with the cost of re-adding them; the Tungsten and d'Eon findings of revision 3 are kept in Appendix B because they are useful later.
 
 ## 0. How to read this note
 
 Every factual claim carries a tag:
 
 * **[C]** I read it in the code of this repository (file and line given; lines are of the worktree at this commit).
-* **[P]** I obtained it from the paper or its page with a fetch tool. The tool returns a summary of the page, not raw text, so quotation marks below mean "the summary quotes", not "I checked the PDF". Where two versions of a paper disagree I say so.
-* **[D]** Derived by me from the code and the papers. Not in any paper, not tested. Treat as a hypothesis with a test attached.
+* **[M]** I read it in the Mitsuba source (github.com/mitsuba-renderer/mitsuba3 `master`, commit `aa01500`, 2026-10-13, and mitsuba2 `master`, commit `62863cb`, 2022-08-22; shallow clones read as text, never built or run). Paths relative to the repository root.
+* **[T]** I read it in the Tungsten source (Appendix B only).
+* **[P]** I obtained it from the paper or its page with a fetch tool. **The tool returns a summary of the page, not raw text**, so statements tagged [P] are what the summary says; I did not read any paper as raw text. Equation numbers are the summary's.
+* **[D]** Derived by me from the code and the papers. Not in any paper, not tested. Treat as a hypothesis with a test attached (section 9).
 * **[R]** Recalled from memory, not verified in this session.
-* **[T]** I read it in the source of Benedikt Bitterli's Tungsten renderer (github.com/tunabrain/tungsten, branch `master`, commit `88ea020`, 2019-04-14; shallow clone read as text, never built or run). Paths are relative to `src/core/`. This is the reference implementation of the non-exponential framework, so [T] statements outrank [P] statements about it. "Tungsten does X" says what that code does, which is not always what the paper says it should do; where I found a divergence I say so. Branches `instancing` and `mis-rewrite` were not read.
 
-What I could and could not read is listed in section 11.
+What I could and could not read is in section 12.
 
-## 1. Corrections to the working hypothesis
+## 1. What the scope change does to revision 3
 
-1. **"Every volume has its own integrator" already exists in part.** `VolumeIntegrator` (`volumeintegrator.cs`) is attached to every `Medium` (`Medium.volumeIntegrator`, `media.cs:1413`) and is a pair `(VolumeTracker, TransmittanceEstimator)`, modelled on Fong et al., "Production Volume Rendering" [C]. Trackers: `majorant` (the medium's own majorant iterator), `global`. Transmittance estimators: `ratio`, `analytic` (Beer-Lambert for a homogeneous medium), `tracklength`, `residual` [C]. What is missing is the **transport model** (the free-flight law): the walk, `PathState`, `MediumEvents` and the shadow ray hard-code the exponential law around that pair (section 3).
-2. **Deferred: RRTE exists on another branch.** `experimental/refractive-media` (reverted from this line in commit `1f6dcac`) holds an implementation of the Pediredla 2020 estimators; it needed about 800 lines in `integrators.cs` and 85 in `pathwalk.cs` through `as RefractiveMedium` special cases [C]. It is out of the spec for now (section 4.5). It is cited here only as evidence of what per-framework special-casing in the walk costs. `OSLMedium` already carries `[ThreadStatic] currentDirection/currentTime` because `Medium.SamplePoint` has no direction [C: `osl_volume.cs:215-216`], and the experimental `procedural-media` branch adds spectral tracking, decomposition, adaptive and signed-null flags to `MediumProperties` with `if (mp.spectralTracking)` blocks in volpath only [C: `git show experimental/procedural-media:src/pbrt/media.cs`, `integrators.cs:4375-4440`].
-3. **The incremental MIS is estimator-agnostic only after a change.** The walk stores `pdfFwd/pdfRev` that contain the angular density and the area/volume conversion only (`Vertex.ConvertDensity` multiplies by `1/d^2` and `|cos|`, `integrators.cs:1859`; medium vertices are created with the phase density, `:2435`) [C]. The density of the *distance* (`sigma_t(x) T(x_{i-1}, x_i)`) is not stored. It drops out of every ratio because, in an exponential medium, the same factors appear in every strategy [D: my reading of why the existing weight-equality and unbiasedness tests pass; the one place it is kept is the emission end, `end.pdfFwd = ... * end.sigmaT0`, `:2415`]. For a non-exponential model this cancellation fails (section 4.2) and the distance densities must be stored per segment. For SGGX it still holds with a direction-independent majorant [D, section 4.3], but the phase density must be evaluated with the reversed directions. The recurrence itself (`bdptincremental.cs`) is written in `pdfFwd/pdfRev/segU/segL/cumU` and needs no new term, only different inputs [C+D].
-4. **"Signed weights conflict with MLT" is only partly right.** The current estimators draw their random numbers from `RNG(Hash(ray.o, tMax), Hash(ray.d))` (`pathwalk.cs`, `ShadowRay`) [C], so every estimator is already a deterministic function of the path geometry plus the sampler values, which is what MLT needs. Sign is a milder problem (the target needs `|f|`, the sign is carried) [D]. The real MLT conflict is any component that is not a function of the primary sample vector, e.g. a black box with private randomness [D].
-5. **UPG uses Bernoulli trials, not Booth trials.** `upg.cs` calls the angular bound "the angular bound of the Bernoulli trials" [C]. Its media code is "OUR OWN extension (the paper is surface-only)" [C: `upg.cs:5`] and needs the distance density explicitly (`MediumFactor`: `sigma_s T` by a midpoint quadrature, `upg.cs:200`) [C], which is the same need as in section 4.2.
-6. **SGGX is not a transport model.** It is medium *data* (direction-dependent extinction and a phase function), layer 2 of your three layers, orthogonal to the free-flight law [P+D, section 5.3].
+| Revision 3 item | Revision 4 |
+|---|---|
+| `SegmentRecord` with forward and reverse free-flight densities | **Drops out.** In an exponential medium the distance densities telescope in the MIS ratios (section 3.2). It comes back only as an optional float per segment for estimators without an exact density (the "surrogate", section 6.3) |
+| `EndpointKind` start and end on every segment | **Drops out** (needed only for laws whose density depends on how the flight started) |
+| the `Adjoint` flag | stays dropped; a `BothDirections` flag survives for black boxes only |
+| `OpticalDepth`/`InverseOpticalDepth` | drops out |
+| the MIS-consistency rule "mask strategies through a `NoPdf` volume" | **revised, and I withdraw part of it** (section 6.3): masking is one of three options, not a requirement. Estimators without an evaluable density can take part in MIS with a *surrogate* density as long as the sampling weights stay exact, which is what UPG already does for its collision factor [C: `upg.cs:194-224`] |
+| direction-aware `SamplePoint` | **stays and becomes central** (SGGX) |
+| (new) | **one thing is left in the vertex density for SGGX**: the extinction factor at a scatter vertex (section 3.2) |
+| (new) | per-volume parameters for six query types, validation at scene load, a surrogate policy |
 
 ## 2. Layers
 
@@ -32,373 +37,294 @@ What I could and could not read is listed in section 11.
         |
  PathWalk / shadow rays / connections                      one place that talks to a volume
         |
- VolumeIntegrator  (one per medium, the "black box")       = TransportModel + Tracker/Estimators + capability flags
+ VolumeIntegrator  (one per medium, the "black box")       = trackers + estimators per query type + surrogate policy + flags
         |
- Medium (data)     majorants, sigma_a, sigma_s, Le, phase, SGGX orientation, OSL shader
+ Medium (data)     majorants, sigma_a, sigma_s, Le, phase (with ProjectedArea), grids, OSL shader
 ```
 
-* Layer 1, **transport model**: the free-flight law (what a "segment pdf" and "transmittance" are). Segments are straight lines. Exponential, non-exponential (Bitterli), black box.
-* Layer 2, **medium data**: unchanged classes, plus direction-aware `SamplePoint` for media that need it (SGGX, OSL).
-* Layer 3, **estimator**: how layer 1 is realised numerically: delta, ratio, residual ratio, spectral, decomposition, regular tracking; equiangular and emission strategies are *uses* of a segment.
+* Layer 1, **medium data**: classes as today, plus a direction-aware query (`SamplePoint(p, lambda, w, time)`) and a phase function that knows its projected area.
+* Layer 2, **trackers and estimators**: how free flights are sampled and transmittance is estimated, one choice per query type per volume (section 5).
+* Layer 3, **facade and black box**: the existing `VolumeIntegrator` carries the choices and the capability flags; a black box replaces the walk inside the volume (section 7).
 
-A volume's `VolumeIntegrator` declares **capabilities** (sections 5b and 5c) so the integrators decide, per path, which strategies may include it.
+There is no layer for the free-flight law any more: it is exponential everywhere, so the "transport model" of revisions 1 to 3 shrinks to a flag (`Exponential`, implicit).
 
-## 3. The current code (what exists, what hard-codes exponential)
+## 3. The current code and the SGGX gap
 
-### 3.1 Classes [C]
+### 3.1 What exists [C]
 
-* `Medium` (`base/medium.cs`): `IsEmissive`, `SamplePoint(p, lambda[, time])`, `SampleRay(ray, tMax, lambda, buf)` returning a `RayMajorantIterator` of `RayMajorantSegment {tMin, tMax, sigma_maj}`. `MediumProperties {sigma_a, sigma_s, phase, Le}` (`media.cs:303`). `PhaseFunction {p, Sample_p, PDF}`; `HGPhaseFunction` has a Rayleigh fraction (the polarising part), `MixturePhaseFunction`, `PhaseBxDF` wraps a phase function as a BxDF.
-* Media: `HomogeneousMedium`, `GridMedium`, `RGBGridMedium`, `CloudMedium`, `NanoVDBMedium` (`media.cs`), `TextureMedium` (+ hierarchical majorants, emission light), `OSLMedium`, `CompositeMedium` (overlap: sums coefficients and majorants, `MixturePhaseFunction`), `ScaledMedium` (a material's `volumescale`).
-* Boundaries: `BoundaryStack` (priority stack of `(material, medium)`, `MediumTracking.Current/CrossSurface`), `MediumInterface` with priority, `canOverlap`, `overlapPriority`.
-* Distance sampling: `pbrt.SampleT_maj<Concrete, Iter>` (`media.cs:121`) with the type-test dispatch (`:197`), driven by a `Func<...>` callback per collision.
-* Walk: `PathWalk.Run` (`cpu/pathwalk.cs`) shared by bdpt and bdptinc (and volpath's `PathState` logic); `PathWalkHook` (BeginSegment, BeginCollision, BeginScatter, OnScatterVertex, OnPhaseSampled, ...). `PathState` keeps `beta`, `r_u`, `r_l`, and for bdpt `segU/segL/vtx` (`cpu/pathstate.cs`). `MediumEvents.SampleEvent/RatioTrackingStep/FinishSegment` (`mediumevents.cs`).
-* Shadow rays / connections: `Integrator.TrSegments`, `ShadowRay` (`integrators.cs:134`, `:160`) call `volumeIntegrator.transmittance.{TryClosedForm, TryEstimate, Step, Finish}`.
-* bdpt: `Vertex` (1344 B with its `EndpointInteraction`) holds `pdfFwd/pdfRev/delta`, `stack`, `segU/segL/vtx/cumU`, `sigmaS0/sigmaT0/emission/emissionMaj`; emission ends (`MediumEmissionEnd`), equiangular sampling (`EquiangularSegment`, `EquiangularSampling`), medium emission lights (`VolumeEmissionLight`, `SampleLiVolume`). bdptinc adds `VertexMIS` (84 B).
-* Polarisation: the Mueller matrix of a medium scatter exists only for the Rayleigh part of `HGPhaseFunction` (`cpu/polarisedpath.cs:29-44`); scalar phase functions do not touch the Stokes state.
+* `Medium` (`base/medium.cs:57-67`): `IsEmissive`, `SamplePoint(p, lambda[, time])`, `SampleRay(ray, tMax, lambda, buf)` returning a majorant iterator. `MediumProperties {sigma_a, sigma_s, phase, Le}` (`media.cs:303`). `PhaseFunction` is an abstract class (`base/medium.cs:24`) with `Sample_p(wo, u)` and `PDF`; the phase object is returned per point by `SamplePoint`, so a phase function can already carry local parameters.
+* **There is no SGGX, microflake or projected-area code anywhere in `src/pbrt`** (search for `sggx`, `microflake`, case-insensitive: no hits). `OSLMedium` carries `[ThreadStatic] currentDirection/currentTime` because `SamplePoint` has no direction (`osl_volume.cs:215-216`).
+* The per-volume integrator exists: `VolumeIntegrator {tracker, transmittance}` (`volumeintegrator.cs:268-331`), built from two scene strings, `"string tracker"` (`majorant` default | `global`) and `"string transmittance"` (`ratio` default | `analytic` | `tracklength` | `residual`) (`volumeintegrator.cs:297-298`, also read in `osl_volume.cs:839-840`). Estimators write `T_ray`, `r_l`, `r_u` (`TransmittanceEstimator.TryClosedForm/TryEstimate/Step/Finish`, lines 99-124).
+* Equiangular sampling is an **integrator** switch, `"bool equiangular"` default false (`integrators.cs:3322, 5672`, `bdptincremental.cs:1484`), not a volume parameter.
+* Emission: `MediumEmissionEnd`, `VolumeEmissionLight`, `SampleLiVolume`; UPG refuses emissive media at load (`upg.cs:1192-1195`).
+* Boundaries: `BoundaryStack` with priority, `CompositeMedium` sums coefficients and majorants.
+* Walk: `PathWalk.Run` (`cpu/pathwalk.cs`), `PathState` with `r_u/r_l/segU/segL/vtx`; bdpt `Vertex` 1344 B with `pdfFwd/pdfRev/delta`; bdptinc `VertexMIS` 84 B.
+* Integrators with media: volpath, simplevolpath, bdpt, bdptinc, mlt (through the BDPT evaluator), upg (own extension on the bdpt walk). No medium code in sppm, path, lightpath, simplepath, randomwalk, ao [C, as in revision 2].
 
-### 3.2 Which integrator touches media
+### 3.2 Why most of the non-exponential machinery drops out, and the one thing that does not [D]
 
-| Integrator | Media? | How [C] |
-|---|---|---|
-| `volpath` (`VolPathIntegrator`) | yes | own loop with `volumeIntegrator.tracker`, `PathState`-like `r_u/r_l`, `SampleLd` with `ShadowRay`, emission gather, equiangular, `VolumeEmissionLight` NEE/FNEE |
-| `simplevolpath` | yes | own loop with the tracker callback (`integrators.cs:1309`) |
-| `bdpt` | yes | `PathWalk` + `BDPTWalkHook`, `TrSegments` for connections, `MISWeight/MISSum` with the spectral products |
-| `bdptinc` | yes | copy of the hook on the same walk; stored sums |
-| `mlt` | via `BDPTPathEvaluator` | `mltevaluator.cs` uses `BDPT.ConnectBDPT/MISWeight` and the emission ends (6 media mentions) |
-| `upg` (branch `feature/upg-integrator`) | own extension | tentative rays are the bdpt walk; `MediumFactor` quadrature; polarised |
-| `sppm` | **no** | `SPPMIntegrator` (lines 3665-4262) contains no medium code at all; what an interface surface does there was not checked |
-| `path`, `lightpath`, `simplepath` | no | their walks "skip over medium boundaries" (`integrators.cs:764, 937, 1085`) and ignore the media; `lightpath` also refuses per-entry volumes |
-| `randomwalk`, `ao` | no | no medium code |
+The incremental MIS multiplies ratios `pdfRev(x_j)/pdfFwd(x_j)` over contiguous runs of vertices. For an exponential medium the density of a medium vertex contains `sigma_t(x_j) T(x_{j-1}, x_j)` in `pdfFwd(x_j)` and `sigma_t(x_j) T(x_j, x_{j+1})` in `pdfRev(x_j)`. In the product the transmittance of each segment appears once in a numerator and once in a denominator (`T` is symmetric), and `sigma_t(x_j)` appears in both. That is why `Vertex.ConvertDensity` and `Vertex.PDF` hold only angular densities and area/volume conversion (`integrators.cs:1859`) and the existing weight-equality and unbiasedness tests pass [C+D]. With null scattering the same holds for the null-collision factors, which are carried by `r_u/r_l`. This stays true for every exponential tracker that has an exact path density (section 5).
 
-### 3.3 Everything that hard-codes the exponential law or delta tracking
+**SGGX breaks the cancellation of exactly one factor.** Along a straight segment the extinction is a scalar `sigma_t(x, w)`, and `sigma(w) = sigma(-w)` [P: Eq. 11], so segments are symmetric and their factors still telescope. At a scatter vertex the incoming and outgoing directions differ:
 
-| Where | What |
-|---|---|
-| `media.cs:155,164,169,189` `SampleT_maj` | `SampleExponential`, `FastExp(-dt sigma_maj)`: the free-flight law |
-| `volumeintegrator.cs:70,76,80,89` `GlobalMajorantTracker` | same |
-| `volumeintegrator.cs:157` `AnalyticTransmittanceEstimator` | `exp(-length (sigma_a + sigma_s))` |
-| `volumeintegrator.cs:227-257` `ResidualRatioEstimator` | `exp(-dt sigma_c)` for the control, exponential residual steps |
-| `mediumevents.cs` | `SampleEvent` (`sigma/sigma_maj` as probabilities), `RatioTrackingStep` (`pdf = T_maj[0] sigma_maj[0]`), `FinishSegment` (`T_maj/T_maj[0]`) |
-| `pathstate.cs:105-175` | `NullCollision`, `RealScatter`, `EndSegment`: the r_u/r_l/segU/segL updates are the null-scattering weights |
-| `pathwalk.cs` | event choice by `SampleEvent`, `ctx.st.RealScatter(T_maj_, mp.sigma_s)` |
-| `integrators.cs:4806-4861, 5272-5309` | volpath: collision density `sigma_maj T_maj`, emission weights `T_maj sigma_a Le / ...`, `r_e` |
-| `integrators.cs:2398-2415` | bdpt emission end: `pdfCollision = sigma_maj T_maj`, `end.pdfFwd * sigmaT0` |
-| `integrators.cs:2818-2831, 4968-5027, 5618-5642` and the bdptinc copies | equiangular: pdf of the point is divided by `sigmaS0` etc. |
-| `Vertex.ConvertDensity` and `PDF` | no distance density, relies on the cancellation (section 1.4) |
-| `bdptincremental.cs` `FinishCameraVertex/FinishLightVertex`, `EquiangularTerm` | `segU/segL/cumU` are null-collision ratios, `vtxProduct` uses `sigma_s/sigma_s[0]` |
-| `TextureMedium.ControlExtinction`, `CompositeMedium` | additive coefficients, sum of majorants (valid only if the volumes share the exponential law) |
-| `upg.cs MediumFactor` | `sigma_s T` quadrature |
+* the forward density of the vertex contains `sigma_s(x, w_in)` (collision) and the phase density `fp(w_in -> w_out)` is attached to the *next* vertex;
+* the reverse density contains `sigma_s(x, w_out)` and `fp(w_out -> w_in)`.
 
-## 4. The frameworks: what each changes
+Grouped per vertex, the ratio is `[sigma_s(x,w_out) fp(w_out->w_in)] / [sigma_s(x,w_in) fp(w_in->w_out)]`, and Heitz's reciprocity `sigma(w_in) fp(w_in->w_out) = sigma(w_out) fp(w_out->w_in)` [P: Eq. 8] makes it **exactly 1**. The code as it is (phase density only) would produce `sigma(w_in)/sigma(w_out)` instead, a wrong MIS ratio, which is a bias risk and not only a variance problem, because the weights would no longer sum to one. So the interface needs: **at a medium scatter vertex, `pdfFwd` is multiplied by `sigma_t(x, w_in)` and `pdfRev` by `sigma_t(x, w_out)`** (relative to a direction-independent reference such as the majorant), taken from the phase function's projected area at the vertex. It is one multiplication per medium vertex, no storage (the phase object at the vertex carries `S`), and exactly 1.0 for every phase function that is not direction dependent, so existing output stays bit-identical. The same grouping holds for `MixturePhaseFunction` and `CompositeMedium` if the mixture weights are evaluated per direction [D]. Test: section 9, phase 3 and 4.
 
-For each: the path pdf / free-flight, phase, geometry; whether bidirectional strategies are covered.
+Null collisions inside a segment keep `sigma_n(x, w) = sigma_maj - sigma_t(x, w)`, even in `w`, so `r_u/r_l` are unchanged if the majorant is direction independent, and also with a per-ray direction-dependent majorant provided *all strategies use the same majorant for the same segment* (which `sigma(w) = sigma(-w)` gives) [D].
 
-### 4.1 Standard exponential with null scattering (baseline)
+## 4. SGGX: what the sources say
 
-Free flight `p(t) = sigma_t(t) exp(-int sigma_t)`, `T(a,b) = T(b,a)`. Null scattering [P: Miller et al. 2019] turns the rejection steps of delta tracking into explicit path vertices, so that the pdf of a delta-tracked subpath is exact and cheap; ratio tracking is "sampling a null-scattering subpath between two real-scattering vertices"; BPT with delta-tracked subpaths and ratio-tracked connections has exact pdfs used for MIS (their Sec. 5.5). Their BPT is achromatic only ("does not employ spectral MIS and handles achromatic media only") [P]; the hero-wavelength version here (`segU/segL`, section 3) is an extension beyond that paper [C+P]. They do not derive VCM or photon beams [P]. Surfaces get no null scattering [P].
+### 4.1 The paper [P] (fetched as a summary of the PDF, so equation numbers are the summary's)
 
-### 4.2 Non-exponential (Bitterli et al. 2018), read from Tungsten (revision 3)
+* `S` is a symmetric positive-definite 3x3 matrix with six parameters (Sec. 4.2, Eqs. 9-10); `sigma(w) = sqrt(w^T S w)` (Eq. 11; defined as `int <w, wm> D(wm) dwm`, Eq. 4); `sigma_t(w) = rho sigma(w)`, `sigma_s(w) = alpha rho sigma(w)` (Sec. 3.1, Eqs. 2-3).
+* Specular microflake phase: `fp(wi -> wo) = D(wh) / (4 sigma(wi))`, `wh` the half vector (Sec. 5.2, Eq. 24). Diffuse microflake phase: `fp(wi -> wo) = 1/(pi sigma(wi)) int <wo,wm> <wi,wm> D(wm) dwm`, **no analytic form**, with an unbiased Monte Carlo estimate by averaging `<wo, wm>/pi` over visible-normal samples (Eq. 25, Eq. 26, Sec. 5.4).
+* Visible normals `D_wi(wm) = <wi,wm> D(wm)/sigma(wi)` (Eq. 21) are sampled by Algorithm 1 (basis around `wi`, Cholesky-derived vectors, cosine-hemisphere sample); specular: reflect `wi` about the normal; diffuse: cosine-sample around it; the sample weight is 1 (Sec. 5.1, 5.3).
+* Energy conservation `int fp dwo = 1` (Eq. 7) and the unusual reciprocity `sigma(wi) fp(wi->wo) = sigma(wo) fp(wo->wi)` (Eq. 8; no shadowing term, multiple scattering is left to the integrator, footnote 3).
+* Interpolation: the six coefficients of `S` are interpolated linearly (a convex combination of SPD matrices is SPD); prefiltering is linear averaging of `S` (Sec. 4.4, Eqs. 19-20). Density is downsampled separately.
+* The paper **does not discuss majorants, delta tracking or ratio tracking**; the integrator is "out of scope" and the results use Mitsuba's volumetric path tracer [P]. Compact storage keeps `sigma` values in [0, 1]; the summary shows no general bound `sigma(w) <= 1` [P].
 
-Revision 2 of this section rested on fetch-tool summaries of two versions of the paper [P]. Revision 3 replaces it with a reading of the reference implementation [T]. Where the code settles a question the [P] reading is dropped; what the code cannot settle is said so.
+### 4.2 Mitsuba 3 [M]
 
-**(1) The law and the edge throughput.** `Transmittance` (`transmittances/Transmittance.hpp:17-58`) is the whole free-flight law, as four functions of the optical depth `tau` of the segment: `surfaceSurface` (probability to reach a surface, starting on a surface), `surfaceMedium` (density of a collision, starting on a surface), `mediumSurface`, `mediumMedium`; plus `sigmaBar()` (= `surfaceMedium(0)/mediumSurface(0)`, line 54) and two samplers `sampleSurface`/`sampleMedium` (inverse CDF of `tau`). Everything else is built from them with two booleans, `startOnSurface` and `endOnSurface`:
+* **Phase function** `sggx` (`src/phase/sggx.cpp`): takes a `Volume` named `S` (constant volume with six values or grid volume with six channels, lines 18-24, 64); flags `Anisotropic | Microflake` (line 65-66). `sample` draws the visible normal with `sggx_sample` (line 86), `pdf = 0.25 * sggx_pdf(sampled_n, s) / sggx_projected_area(mi.wi, s)` (line 99-100), `wo = reflect(mi.wi, sampled_n)` (line 101), and returns **weight 1** (line 102): the specular variant of the paper (Eq. 24). `eval_pdf` returns the same value for eval and pdf, `pdf = 0.25 * sggx_pdf(normalize(wo + mi.wi), s) / sggx_projected_area(mi.wi, s)` (lines 106-121). **The diffuse variant is commented out** with the comment that it "requires some changes to the phase function interface" (lines 63, 88-103, 112-118): Mitsuba 3 has only the specular microflake.
+* **Helpers** (`include/mitsuba/render/microflake.h`): `sggx_sample` (lines 70-97, the algorithm of the paper with a frame aligned to `wi`), `sggx_pdf` = the NDF `D` in closed form (lines 121-136), `sggx_projected_area = sqrt(wi^T S wi)` (lines 152-163). `S` is passed as `[Sxx, Syy, Szz, Sxy, Sxz, Syz]`; "the user needs to ensure that the parameters indeed represent a positive definite matrix" (lines 61-64): there is no check.
+* **Phase interface** (`include/mitsuba/render/phase.h`): flag `Microflake = 0x04` (line 22), `projected_area(mi)` default 1 (lines 160-176), `max_projected_area()` default 1 (line 179). **`max_projected_area` is declared and never called** (grep over `src` and `include`: only the declaration and the binding).
+* **Medium use of the projected area.** Homogeneous: `sigmat = sigma_t * scale; if (phase has Microflake) sigmat *= phase->projected_area(mi)` (`src/media/homogeneous.cpp:153-158`), and this same value is the majorant (`get_majorant`, line 161-165), so a homogeneous SGGX medium samples distances exactly with `rho sigma(w)` along each ray, and `sigma_n = 0`. Heterogeneous: the same multiplication in `get_scattering_coefficients` (`heterogeneous.cpp:190-191`), **but the majorant is `scale * max(sigma_t volume)` without the projected area** (`heterogeneous.cpp:163, 174, 178-181`) and `sigma_n = majorant - sigma_t(w)` (line 194). It is a valid majorant only if `sigma(w) <= 1` everywhere; nothing checks it, and a violation gives negative `sigma_n` and then negative null-collision probabilities in the integrators [M+D]. The direction of the ray reaches the medium through `mei.wi = -ray.d` (`src/render/medium.cpp:48-49`), set before `get_majorant` and `get_scattering_coefficients` are called (lines 62-79): it is the "Mitsuba way" of direction awareness, with no change to the volume interface.
+* **Grid volume** `eval_6` requires exactly six channels and throws otherwise (`src/volumes/grid.cpp:407-420`); `interpolate_6` exists (line 564; I did not read it, the paper's rule is linear interpolation of the six coefficients [P]).
+* **Tests in the repository** (`src/phase/tests/test_sggx.py`): creation and flags (test01), chi-square tests of the sampling against the pdf for `S = (0.15, 1, 0.8, 0, 0, 0)` and for a skewed `S = (1, 0.35, 0.32, 0.52, 0.44, 0.2)` (test02, test03). Binding tests for the three helpers (`src/render/tests/test_microflake.py`).
+* **Mitsuba 2** (commit `62863cb`): only the hook exists, the `Microflake` flag, `projected_area` and `max_projected_area` in `include/mitsuba/render/phase.h:21, 136-154`; `src/phase` contains only `hg` and `isotropic`, and no medium calls `projected_area` [M: grep]. So the SGGX implementation is a Mitsuba 3 feature; "Mitsuba 2/3 support" in the sense of this note means the Mitsuba 3 code.
+* **Integrators** (`src/integrators`): `volpath`, `volpathmis` and the surface integrators; **no bidirectional volume integrator**, so Mitsuba gives no evidence on the vertex-density question of section 3.2.
+  * `Medium::sample_interaction` (`src/render/medium.cpp:42-82`) draws a free flight with **one majorant per ray** (the sampling channel's component, lines 62-71), delta-tracking style; `mei.sigma_s/sigma_n/sigma_t` come from `get_scattering_coefficients`.
+  * `volpath` (`src/integrators/volpath.cpp`): a channel is chosen uniformly per path (lines 120-123); for spectral media the weight is `tr / tr_pdf` per segment (lines 236-239) and null collisions multiply `sigma_n / null_scatter_prob` (lines 252-253), for non-spectral media the throughput gets `sigma_s / sigma_t` at a real scatter (line 273); shadow rays do delta tracking with `transmittance *= sigma_n` (spectral) or `sigma_n / combined_extinction` (non-spectral) (lines 519-521), i.e. the ratio-tracking form in the non-spectral case. `has_spectral_extinction` is the per-medium switch (`homogeneous.cpp:143`, `heterogeneous.cpp:161`).
+  * `volpathmis` (`volpathmis.cpp`): the spectral MIS of Miller et al. 2019 [M: the documentation block says so, doc block at the top of the file], with weight matrices `p_over_f`, `p_over_f_nee` (lines 152-157, 629-666) updated at free flights, null and real events (lines 283-327). It plays the role of `r_u/r_l` in our walk; I compared the two only at the level of the data they carry, not line by line [D].
+  * None of the Mitsuba code uses a hierarchical majorant grid: the heterogeneous majorant is one global value (`heterogeneous.cpp:163`), against the `majorant` tracker of this repository (per-cell majorants) [M+C].
 
-* `eval(tau, start, end)` (lines 22-30) is the **edge throughput E**: `surfaceSurface(tau)` if both ends are on surfaces, `mediumMedium(tau)/sigmaBar()` if both are in the medium, and `mediumSurface(tau)` for **both** mixed cases. So `E` is symmetric under swapping start and end by construction [T].
-* `surfaceProbability(tau, start)` (lines 35-38) is the discrete probability of a surface end; `mediumPdf(tau, start)` (lines 39-42) is the density of a collision end, per unit `tau`.
-* Concrete laws: exponential (`transmittances/ExponentialTransmittance.cpp`), Erlang (`ErlangTransmittance.cpp:32-67`, `sigmaBar = lambda/2`), Davis (`DavisTransmittance.cpp:31-60`, `sigmaBar = 1`, `mediumSurface = surfaceMedium`); others in the same directory (double exponential, linear, quadratic, pulse, interpolated, Davis-Weinstein) not read in detail. For the two I read, `surfaceMedium = sigmaBar * mediumSurface` and `d/dtau surfaceSurface = -surfaceMedium`.
-* The sampled collision carries the weight `E * rho * sigma_s * sigmaBar / (rho * sigma_t * mediumPdf)` (`media/HomogeneousMedium.cpp:65-108`, `media/VoxelMedium.cpp:141-145`), which is the albedo `sigma_s/sigma_t` for every start kind [D, checked algebraically against `eval` and `mediumPdf`]. The integrand of a path therefore has one factor `sigma_s * sigmaBar` per medium vertex and one factor `1/sigmaBar` per medium-to-medium edge, i.e. a net `sigmaBar` per run of medium vertices [D]. Any new estimator must use this convention, not the textbook `sigma_s` per vertex.
-* **There is no adjoint flag on the medium.** The word `adjoint` occurs in Tungsten only for BSDFs and for light selection (`integrators/TraceBase.hpp:42,130,166,171`, `PathVertex.cpp:61,109,193`, `LightPath.hpp:16,55-69`). The transport direction enters the media code only through which end is called "start" [T]; this is the answer to the "adjoint flag" of the paper summaries.
+### 4.3 Consequences for us [D]
 
-**(2) Forward versus reverse density; birth versus collision.** The reverse density of an edge is **the same function called on the reversed ray with the two flags swapped**: `Medium::transmittanceAndPdfs` (`media/Medium.cpp:45-51`) returns `E(start,end)`, `pdf(ray, start, end)` and `pdf(reversed ray, end, start)`; the BDPT walk does the same for a freshly sampled edge (`integrators/bidirectional_path_tracer/PathVertex.cpp:162-163`). The two values are stored on the edge (`PathEdge.hpp:15-16`, `reverse()` swaps them at line 46-49). They differ because the start kind enters the density: for Erlang `surfaceMedium` and `mediumSurface` differ by `sigmaBar` [T], while `E` is the same. "Birth versus collision" is the **start kind**: `MediumState.firstScatter` (`media/Medium.hpp:30-46`; `reset()` at `integrators/TraceBase.cpp:563` when the walk is at a surface, `advance()` after each medium collision), and in the bidirectional code `PathVertex::onSurface()` = `type != MediumVertex` (`PathVertex.hpp:239-242`), so **camera and emitter vertices count as surfaces**, even if they sit inside a medium [T]. Hence the segment needs two kinds (start, end), not one `origin`: the end kind is known only after the sample (exit versus collision).
+1. **Direction awareness.** Two ways: (M1) the Mitsuba way, the medium multiplies by `phase.ProjectedArea(w)` wherever it builds `sigma_t`; (M2) `SamplePoint(p, lambda, w, time)` returns scaled coefficients. Here `sigma_a` and `sigma_s` are read at many sites (`SampleT_maj` callbacks, `ShadowRay`, `TrSegments`, equiangular, emission, `MediumFactor`, OSL), so M1 would repeat the multiplication at each; M2 puts it inside the medium and the call sites only pass the ray direction. **M2 is recommended**, with a default-forwarding overload so that existing media are untouched.
+2. **Majorant.** A valid direction-independent majorant is `rho_max * sqrt(lambda_max(S))` per cell; since `w^T S w` is linear in `S` and the trilinear interpolant is a convex combination of the corner matrices, `sigma(x, w)^2 <= max over the 8 corners of w^T S_c w <= lambda_max over the corners` [D]. So a per-cell bound from the corner matrices is valid. Mitsuba's global `max(sigma_t)` is valid only for `sigma <= 1`. We should check at load (`max over cells lambda_max(S) <= 1` or fold the factor into the majorant) and assert `sigma_n >= -eps` in debug builds. A tighter per-ray bound that uses the ray direction is possible (`SampleRay` receives the ray) but not needed first.
+3. **Diffuse microflakes** have no closed-form pdf (Eq. 25), so the diffuse phase is an estimator without an evaluable density: sampling and the joint (normal, direction) weight are exact (weight 1), the value for connections is the unbiased estimate of Eq. 26, and the density in MIS needs the surrogate of section 6.3. A cheap positive surrogate is the specular pdf (`D(wh)/(4 sigma)` is positive for every direction since `D > 0`) [D].
+4. **Emission** in an SGGX medium has no definition in the paper (`sigma_a(w) Le` is direction dependent, and a point sampled on a `VolumeEmissionLight` would need the direction). Revision 4 treats it as unsupported with an error at load.
+5. **Polarisation:** the model is scalar. The existing code gives scalar phase functions the identity Mueller matrix [C: `cpu/polarisedpath.cs:29-44`]; an SGGX scatter in a polarised integrator is treated the same way (depolarising), with a one-time warning [D]. A specular flake is a Fresnel reflection with a real Mueller matrix; not designed here.
+6. **Test shortcut:** for `S = I` the NDF is `D = 1/pi`, `sigma(w) = 1`, and the specular microflake phase is `D/(4 sigma) = 1/(4 pi)`: an isotropic phase. So an SGGX medium with `S = I` must equal the isotropic homogeneous medium of the same `rho` exactly in expectation [D: from Eqs. 11, 12, 24 as in the summary], a regression test of the whole stack.
 
-The pass-through surface case: a shadow ray that crosses a transparent surface is split there, and each part is evaluated as a new segment starting on a surface (`TraceBase.cpp:62-125`, `startsOnSurface = true` at line 117). For a non-exponential law this treats the transparent surface as a re-birth, which is right only if the surface really changes the medium. Two divergences inside this one function: the pdf variant passes `didHit || endsOnSurface` as the end kind (line 107) and the plain variant passes `endsOnSurface` (line 111), so for a ray through a transparent surface the two variants differ [T]. It is harmless for the exponential law (the flags are ignored).
+## 5. The tracker and estimator zoo
 
-**(3) Which integrators, and how MIS is computed.**
+Query types of a volume: **F** free-flight sampling in walks; **C** transmittance between two vertices (connections); **S** shadow-ray transmittance (next-event estimation); **D** distance sampling toward a light or vertex (equiangular, and its MIS with F); **E** emission (collision emission at walk collisions, and sampling of a volumetric emitter).
 
-| Tungsten integrator | non-exponential media | how |
-|---|---|---|
-| path tracer (`integrators/path_tracer/PathTracer.cpp:28-140`) | yes | `sampleDistance` per segment; NEE and BSDF/phase sampling combined with the power heuristic on **angular pdfs only** (`TraceBase.cpp:282,350,378`); the distance part is deterministic in a shadow ray, so it needs no pdf in the weight [D] |
-| light tracer (`light_tracer/LightTracer.cpp:40-100`) | yes | the same `sampleDistance` from the emitter (`state.reset()` at birth), `volumeLensSample`/`surfaceLensSample` use `generalizedShadowRay` with explicit flags (`TraceBase.cpp:167,197`) |
-| bidirectional path tracer (`bidirectional_path_tracer/`) | yes | per-edge `pdfForward`/`pdfBackward` folded into the vertex pdfs (`LightPath.cpp:50-53,69-70`), converted to area/volume measure (`LightPath.cpp:81-92`), then Veach's ratio recurrence `pi *= pdfForward[i-1]/pdfBackward[i-1]` (`LightPath.cpp:145,157`). Connection edges get `E` and both pdfs from `generalizedShadowRayAndPdfs` (`LightPath.cpp:344-345,358-359,385-386`) |
-| photon map, progressive photon map (`photon_map/PhotonTracer.cpp`) | walk yes; beams and volume photons evaluate `transmittance(..., true, false)` with fixed flags (lines 131,152,190,292) | density estimation: no free-flight MIS |
-| Kelemen / multiplexed / reversible-jump MLT | **no for media**: `Medium::invertDistance` is `FAIL("not implemented")` (`media/Medium.cpp:40-43`) and no medium overrides it (`PathVertex.cpp:239-240` calls it) | |
-| VCM | none in the repository | |
+Classes of density: **ExactPdf** (the path density in null-scattering space is exact and enters `r_u/r_l`), **Deterministic** (a closed form, no sampling), **NoPdf** (the sampling is exact but the density of the sample cannot be evaluated). "Signed" says whether weights can be negative. The columns on the right say what happens with each consumer; "mask" and "surrogate" are the options of section 6.3.
 
-The BDPT MIS is the same recurrence as ours with `pdfFwd`/`pdfRev` per vertex, and the free-flight densities enter **multiplied into the vertex pdf**: `evalPdfs` (`PathVertex.cpp:295-326`) uses `nextEdge.pdfForward * bsdf/phase pdf` and `prevEdge->pdfBackward * ...`, then `/rSq` and the cosine. So the bookkeeping of the sketch (a forward and a reverse free-flight density per segment, multiplied into the vertex density) is what the reference does [T]. Chains of "forward" (pass-through) vertices are collapsed into one edge whose pdfs are the products (`LightPath.cpp:40-55`). Dirac media (`Transmittance::isDirac`, `Medium::isDirac` at `media/Medium.cpp:58-61`) make a segment non-connectable (`PathVertex.cpp:330-335`), which is the same idea as our delta boundary.
+| Estimator (query) | Source | Needs from the medium | Density class | Signed | Chromatic | bdpt / bdptinc | MLT | UPG | Polarised |
+|---|---|---|---|---|---|---|---|---|---|
+| **delta tracking** with null scattering (F) = the `majorant` tracker | Miller et al. 2019 Sec. 5.2 [P]; pbrt-v4 `SampleT_maj` [C: `media.cs:121`] | piecewise-constant majorant iterator `>= sigma_t`; hierarchical grid optional | ExactPdf in null-scattering space (the marginal free-flight pdf is "unknown" [P: STAR 4.2.1]) | no, unless `sigma_n < 0` | hero-wavelength `r_u/r_l` [C] | yes (today) | yes: RNG hashed from the geometry [C: `pathwalk.cs`] | yes: the tentative ray is the walk [C: `/tmp/upg_work/docs/upg.md`] | yes |
+| **global-majorant tracking** (F) = `global` tracker | [C: `volumeintegrator.cs:41`] | one `sigma_maj` for the whole medium | ExactPdf | no | same | yes | yes | yes | yes |
+| **ratio tracking** (C, S) | Novak et al. 2014 [P: abstract]; STAR 5.3.1 [P] | the majorant of the tracker | ExactPdf if the majorant is the walk's (null vertices are explicit) | only if `sigma_maj < sigma_t` | `r_l/r_u` [C] | yes, with the same majorant per segment | yes | the weights use a deterministic quadrature, not ratio tracking [C] | yes |
+| **track-length / binary delta tracking** (C, S) = `tracklength` | STAR 5.2.2 [P] | majorant | ExactPdf (as delta tracking) | no (0/1) | `r_u/r_l` | yes | yes (hashed) | as ratio | yes |
+| **residual ratio tracking** (C, S, F) = `residual` | Novak et al. 2014 [P: abstract only]; STAR 5.3.2 [P] | control `sigma_c` with a closed-form `T^c`, majorant for the residual `sigma_t - sigma_c` | NoPdf for connections unless it writes the walk's `r_l/r_u` (the code writes them with the residual majorant, which is not the walk's [C: `volumeintegrator.cs:227-257`, audit item of 5c in revision 2]) | weights `1 - (sigma_t - sigma_c)/sigma_r` can be negative | control must be wavelength-wise valid | strategies through it need the surrogate or the mask (6.3) | yes | surrogate | yes |
+| **spectral tracking** (F) | Kutz et al. 2017 [P: Sec. 7] | one majorant for all wavelengths; event probabilities from the path throughput | NoPdf: "the PDF of the free-path sample cannot be evaluated exactly" and MIS only works when the same tracker is used both ways [P] | yes (`sigma_n/sigma_maj` ratios with throughput-derived probabilities) | its purpose; replaces the hero-wavelength ratios | walks only with the mask; or with a surrogate | yes (hashed) | not allowed in revision 4 (error at load) | yes |
+| **decomposition tracking** (F, S) | Kutz et al. 2017 [P]; STAR 4.2.3 [P] | minorant `sigma_c` (closed-form homogeneous part) + residual majorant | NoPdf (residual pdf not explicit [P]) | yes | per-wavelength minorant | as spectral | yes | error | yes |
+| **regular tracking / analytic homogeneous** (F, C, S) | STAR 4.1.2, 5.1.2 [P] | piecewise-constant extinction along the ray (a homogeneous medium, or a nearest-neighbour grid with a DDA) | Deterministic (closed-form inversion, `T = exp(-sigma L)`) | no | exact per wavelength: the ideal for the hero ratios | yes: exact densities, no null vertices | yes | yes | yes |
+| **equiangular** (D) | Kulla and Fajardo 2012 [R]; STAR 6.3 [P] | the geometry; extinction only through the transmittance factor | Deterministic (pdf `~ 1/d^2` along the ray) | no | exact | yes, already (`EquiangularTerm` [C]); the integrator switch `equiangular` becomes a per-volume mode | yes | yes (as the segment `T`) | yes |
+| **collision emission and volumetric emitter sampling** (E) | pbrt-v4 emission at collisions `T_maj sigma_a Le/...` [C: `integrators.cs:4806-4861`]; `VolumeEmissionLight` [C] | `sigma_a`, `Le`; a bound for the sampled emitter | ExactPdf (null-scattering) | no | per-wavelength | yes (`MediumEmissionEnd`) | yes | **not supported** [C: `upg.cs:1192`] | yes |
+| *excluded*: ray marching and quadrature of the optical thickness | STAR 4.1.3, 5.1.3, 5.1.4 [P] | extinction samples | biased (Jensen) | no | n/a | n/a | n/a | n/a | n/a |
 
-Chromatic media: `sampleDistance` picks one colour channel uniformly (`nextDiscrete(3)`) to sample `tau`, and the density is the **channel average** of the per-channel densities (`.avg()`, `VoxelMedium.cpp:138,141`; `HomogeneousMedium.cpp:94,96,126,128`), the weight being `E/pdf_avg`: one-sample MIS over channels. This is a deterministic density, so it feeds the MIS ratios directly [T]. For us this means: the hero-wavelength ratio of the sketch is the ratio of per-wavelength densities, and with a hero-wavelength-only sampler the density to use in the ratios is the average over wavelengths [D], which is not what the exponential null-collision code does today.
+Notes.
+* The Mitsuba equivalents: `volpath` is a single-sampling-channel delta tracker with spectral weights (`volpath.cpp:236-273`), its shadow rays are the spectral or ratio-tracking forms (`:519-521`); `volpathmis` is the spectral-MIS version in the sense of Miller et al. 2019 and corresponds to our `r_u/r_l` (4.2). Neither has decomposition, spectral-tracking-by-throughput, residual or regular tracking, equiangular or emission sampling in the files I looked at [M: not searched for exhaustively].
+* "ExactPdf for ratio tracking" holds only if the null vertices it samples are the same random variables the walk would have sampled, i.e. the same majorant on the same segment. This is the audit item that revision 2 left open (5c.3) and phase 2 below tests.
+* Signed weights and Russian roulette in `ShadowRay` interact (the roulette tests the magnitude of `T_ray`) [C]; the roulette needs a sign-aware rule if signed estimators are enabled.
 
-**(4) Distance sampling in heterogeneous media: no tracking, an optical-depth inversion.** The medium separates the 1D law from the 3D density exactly as the paper says, but the code never does delta tracking: `VoxelMedium::sampleDistance` (`media/VoxelMedium.cpp:97-154`) samples `tau` from the law, divides by `sigma_t` of the sampled channel, and inverts the accumulated density along the ray with `Grid::inverseOpticalDepth` (voxel DDA, `grids/VdbGrid.cpp:379`, `ExactNearest`/`ExactLinear`/`Raymarching` sample methods). The optical depth of an evaluation (`Grid::opticalDepth`, `VdbGrid.cpp:307-377`) is exact for `ExactNearest`/`ExactLinear`, a jittered fixed-step quadrature for `Raymarching`, and a **stochastic residual-ratio estimate** for `ResidualRatio` (lines 332-358). Exponential, atmospheric and homogeneous media have closed-form `inverseOpticalDepth` (`media/ExponentialMedium.cpp:95-103`, `media/AtmosphericMedium.cpp:113`). General case: no majorant-based sampler exists in the code; heterogeneous non-exponential media are limited to what the density field can integrate and invert, which is the "unclear in the general case" of the paper [T agrees with P]. The stochastic estimate is only valid inside a law of the form `exp(-tau)`, because it is then plugged into a nonlinear function; with another law it is biased, and I found no guard against that combination in the files I read [D; guard search incomplete]. For our design: the non-exponential model needs a **deterministic** `OpticalDepth(segment)` and `InverseOpticalDepth(segment, tau)`, not a tracker.
+## 6. Decisions
 
-**(5) Overlapping media.** Not supported, and not by a priority rule either: `Primitive::selectMedium` (`primitives/Primitive.hpp:177-183`) simply returns the exterior or interior medium of the crossed primitive (or keeps the current one if the primitive overrides nothing), so a point is in exactly one medium, with no stack. The BDPT vertex stores one `_medium` pointer (`PathVertex.hpp:63`, `selectMedium` at `PathVertex.cpp:379-392`). Our boundary stack with priority is more than the reference has; the "may be summed only with the same family" rule of 5d stands [T confirms: no summation exists].
+### 6.1 Per-volume and per-query choice: scene parameters
 
-**(6) Reciprocity: what the code settles.** The integrand is reciprocal by construction: `E` depends on `tau` and the unordered pair of end kinds (`Transmittance.hpp:22-30`), and the medium vertex factor `sigma_s * sigmaBar` does not depend on direction. Sampling densities are **not** symmetric (`surfaceMedium != mediumSurface` in general), so each edge stores two densities, as above. That is what the published TOG text claims (modified kernel reciprocal; PT, LT and BDPT agree), and it is what the technical report's remedy ("quantities evaluated consistently", Sec. 3.8 [P]) describes; the report's "not reciprocal" would refer to the unmodified kernel, in which the asymmetry sits in `E`. **I cannot decide from the code which sentence of which paper is "right"**: the repository has no test scenes and no regression test for non-exponential media (a search for `erlang`/`davis` outside the transmittance files finds nothing), so there is no executable evidence that PT = LT = BDPT. What the code does settle is the convention an implementation must follow: symmetric `E` with `sigmaBar` normalisation, asymmetric stored densities. Our phase-4 slab test (PT = LT = BDPT) stays as the proof for our port.
-
-**Code defects noticed (not our problem, but they limit "ground truth")** [T]: `ExponentialMedium::sampleDistance` calls `_transmittance->eval(..., sample.exited)` (line 133) before it assigns `sample.exited` (line 134), so it uses a stale flag (harmless only for the exponential law); `VoxelMedium::pdf` evaluates the density at the **ray start** (`_grid->density(p)`, line 188) although a medium-end collision is at the ray end, so the stored reverse density (`PathVertex.cpp:163`) and the density of a connection edge are wrong for varying density, while the forward density returned by `sampleDistance` (line 141) is right. The MIS weights stay unbiased only if every strategy sees the same stored value for the same edge; a walked edge (forward value from `sampleDistance`) and the same edge seen from a connection (value from `pdf()`) can differ, so I would not copy this function. Treat Tungsten as ground truth for the interface, not for every number.
-
-### 4.3 SGGX microflakes (Heitz et al. 2015)
-
-[P: PDF] `S` a symmetric positive-definite 3x3 matrix; projected area `sigma(w) = sqrt(w^T S w)` (even: `sigma(w) = sigma(-w)`); `sigma_t(w) = rho sigma(w)`, `sigma_s(w) = alpha rho sigma(w)`; phase `fp(wi->wo) = (1/sigma(wi)) int p(wm, wi->wo) <wi, wm> D(wm) dwm`; the "unusual reciprocity" `sigma(wi) fp(wi->wo) = sigma(wo) fp(wo->wi)` (no shadowing, only masking); importance sampling by the distribution of visible normals, weight always 1; the integrator "is independent and out of the scope"; their results use a forward path tracer. The paper does not discuss delta tracking, next-event estimation or bidirectional methods [P].
-My derivation [D]: along a ray with fixed direction `w` the extinction is a scalar, so the exponential machinery applies with `sigma_t(x, w)`; a direction-independent majorant (`>= rho sqrt(lambda_max(S))`) keeps the null coefficient `sigma_n = sigma_maj - sigma_t(x, w)` direction-dependent but even in `w`, so the reversed path sees the same `sigma_n`. The vertex weight `sigma_s(wi) fp(wi->wo)` is symmetric by the reciprocity relation, so the throughput is symmetric. The *sampling* densities are not: forward uses `sigma_t(wi)`, reverse `sigma_t(wo)`, and `fp(wi->wo) != fp(wo->wi)`; so `pdfRev` must be evaluated with the reversed directions (as `Vertex.PDF` already does for the phase function); the distance densities are the direction-independent majorant's and cancel as in the exponential case and the real/null event probabilities use the direction of the ray. This needs `SamplePoint` to take the direction. It is **not** a new transport model. Polarisation: the model is scalar [P]; in a polarised path it can only be treated as depolarising [D].
-
-### 4.4 Estimators (layer 3)
-
-| Estimator | Source | What it needs / gives |
-|---|---|---|
-| delta tracking | classic; null-scattering view [P: Miller 5.2] | exponential law, majorant; exact pdf in null-scattering space |
-| ratio tracking | Novak 2014; = null-subpath sampling [P: Miller] | transmittance estimate; unbiased with negative `sigma_n` allowed [P: Novak abstract: handles negative densities] |
-| residual ratio | Novak et al. 2014 [P: abstract page only] | control `sigma_c` in closed form, ratio tracking on the residual; the repo's `ResidualRatioEstimator` |
-| spectral tracking | Kutz et al. 2017 [P] | one tracker, one majorant for all wavelengths, event probabilities from throughput; "the PDF of the free-path sample cannot be evaluated exactly", MIS only works if the same tracker is used for free-path and transmittance sampling, "does not generalize" (Sec. 7) |
-| decomposition tracking | Kutz et al. 2017 [P] | homogeneous control + residual; weights can be negative |
-| regular tracking / raymarching | Bitterli 2018 [P] | the only unbiased general distance sampler for non-exponential heterogeneous media |
-| equiangular, emission gather/NEE | Kulla-Fajardo, Fong [C: `equiangular.cs`] | uses of a segment, not estimators of the medium |
-
-### 4.5 Deferred: spatially correlated media and the refractive RTE
-
-Not in the spec, no hooks in the interface of section 6. Pointers only:
-
-* Spatially correlated media: Jarabo, Aliaga, Gutierrez, TOG 2018 (arXiv:1805.02651). Forward estimators only (their Mitsuba implementation uses random-walk sampling and next-event estimation); Bitterli et al. say it lacks a path-integral formulation, which "makes integration with bidirectional methods difficult" [P].
-* Refractive RTE: the equation is Ament, Bergmann, Weiskopf, TOG 2014 (a photon-mapping solver) [P: dissertation excerpt]; unbiased path tracing, NEE and bidirectional estimators are Pediredla et al., TOG 2020 [P: project page]; Fraboni et al., SIGGRAPH 2023 talk, bend rays at null events and have NEE but no bidirectional estimator [P]. An implementation of the Pediredla estimators exists on `experimental/refractive-media` (volpath and bdpt, polarised; `docs/refractive-media.md` on that branch) [C].
-
-What re-adding them would cost is in section 6.1.
-
-## 5. Decisions
-
-### 5a. Plug-in granularity
+The facade `VolumeIntegrator {tracker, transmittance}` is extended. Option table:
 
 | Option | What | For | Against |
 |---|---|---|---|
-| A1 monolith | one `IVolume` per framework doing everything | maximum freedom | every framework re-implements majorant tracking, estimators, MIS bookkeeping; no reuse of grid/OSL/emission code |
-| **A2 three layers (recommended)** | `TransportModel` (law + geometry) over `Medium` data, with `Tracker/TransmittanceEstimator` as today, bundled by the existing `VolumeIntegrator` | reuses all media; SGGX needs only a data-layer change; exponential model is the existing code moved behind an interface | combinations need validation (a compatibility table at scene build) |
-| A3 status quo plus `as`-branches | special cases in the walk, as the refractive stage on its branch and the flags of `procedural-media` do | no refactor | about +800 lines in `integrators.cs` for one framework (the refractive branch), `ifs` in every integrator, no way to add a framework without editing all of them (section 1, item 2) |
-| A4 compile-time generics | `PathWalk<TModel>` | no virtual calls | the model is chosen per medium at run time and several can be in one scene; code size multiplies with integrators x models |
+| P1 one string for the whole stack | `"string volumeintegrator" "fong"` with presets | short | presets hide combinations; no per-query choice |
+| **P2 one parameter per query type (recommended)** | extend the existing two strings with three more | already how `tracker` and `transmittance` work [C]; the presets can be added later as sugar | five strings per medium |
+| P3 integrator-level choice | as `equiangular` is today | no change to media | the user's requirement is per volume; two volumes in one scene cannot differ |
 
-Dispatch: **one virtual call per segment** (and per collision through a pull iterator, below), not per strategy-loop step. Today there is a type-test chain per `SampleT_maj` call and a delegate invocation per collision with a closure allocated per walk iteration (`pathwalk.cs`, `new Func` capturing `ctx, hook, scattered, terminated`) [C]; a pull API (`NextEvent(ref state, ...)`) removes both and gives plug-ins their own state.
-Per-medium history state: **transient in `WalkContext`** (a `SegmentState` returned by `BeginSegment`: the progress inside the segment, about 16 bytes plus the majorant-iterator reference of the exponential model; the segment is the walk's straight ray, so no origin, direction or tangent is stored), plus a **persistent `SegmentRecord` in the vertex** (12 bytes: free-flight density forward and reverse for the hero wavelength, and the two endpoint kinds). Not in `PathState` globally (it is per walk, not per vertex, and MIS needs per-vertex values). Rejected: an opaque per-vertex blob owned by the model (variable size, defeats the pooled-vertex plan).
+**Parameters of a medium (`MakeNamedMedium`)**, with the defaults reproducing today's behaviour exactly:
 
-### 5b. The black box
+| Parameter | Query | Values | Default |
+|---|---|---|---|
+| `"string tracker"` | F | `majorant` \| `global` \| `analytic` \| `spectral` \| `decomposition` | `majorant` [C] |
+| `"string transmittance"` | C | `ratio` \| `analytic` \| `tracklength` \| `residual` \| `decomposition` | `ratio` [C] |
+| `"string shadowtransmittance"` | S | same list | the value of `transmittance` (today both queries share it [C]) |
+| `"string distancesampling"` | D | `tracker` \| `equiangular` \| `mis` | `tracker`; overridden to the integrator's `"bool equiangular"` when the medium does not set it |
+| `"string emission"` | E | `collision` \| `light` \| `both` | `both` for an emissive medium (today's behaviour) |
+| `"string surrogate"` | (MIS) | `mask` \| `quadrature` | `mask` (6.3) |
+| `"string phase"` | | `hg` (default) \| `sggx` \| `sggxdiffuse` \| mixture | `hg` |
+| `"string volumeintegrator"` | black box | name of a registered black box (section 7) | none |
+
+Rules of validation at scene load (`ErrorExit(loc, ...)`, as `VolumeIntegrator.Create` does for unknown names [C: `volumeintegrator.cs:297-320`] and as UPG does for emissive media [C: `upg.cs:1192-1195`]); each is a clear error naming the volume, the two parameters and the reason:
+
+1. `analytic` (tracker or transmittance) on a medium whose extinction is not constant along the ray (a trilinear grid): error; allowed on a homogeneous medium and, with a DDA, on a nearest-neighbour grid.
+2. `spectral` or `decomposition` with `upg`: error (the tentative ray's outcome weight would be signed and throughput-dependent, and the collision factor needs an evaluable density).
+3. `spectral`, `decomposition`, `residual` or `sggxdiffuse` with `bdpt`/`bdptinc`/`mlt` and `surrogate = mask`: allowed, warning once per volume that connections through the volume are masked.
+4. `mlt` with any estimator that is not a deterministic function of its random draws and the geometry: error (all listed ones are deterministic given the hashed RNG [C], the black box is the exception).
+5. `sggx` with `"emissive"`: error (4.3, item 4). `sggx` with `sppm`: error (no media code).
+6. `sggx` with a medium type that cannot answer a directional query: error until it implements the overload (`OSLMedium` first needs its thread-statics folded into it).
+7. `sggx` with `tracker = global`: allowed only if the global majorant bounds `rho sqrt(lambda_max(S))`; otherwise error naming the numbers; debug assertion `sigma_n >= -eps` for all trackers.
+8. Overlapping volumes (`CompositeMedium`) with different `tracker`/`transmittance` settings: the composite uses the settings of the volume with the highest priority and warns; SGGX and non-SGGX volumes may overlap only through the directional `SamplePoint` of the composite (4.3 item 1).
+9. Polarised integrators with `sggx`: warning (depolarising).
+
+### 6.2 SGGX and microflake materials as pluggable phase models
 
 | Option | What | Verdict |
 |---|---|---|
-| B1 **delta-boundary** | the volume is entered and left through boundary vertices flagged `delta`; inside, the model samples the walk and returns the weight; no connection to or through the interior | **universal fallback, recommended first** |
-| B2 evaluable black box | exports `Connect`, exact `SegmentDensity`, emission light | per-volume upgrade through capability flags |
-| B3 sub-renderer | the volume runs its own recursive or cached estimator and presents a radiance/transmittance table to the outside | only for volumes that are not light-transport at all (precomputed scattering tables); biased if cached; not a general mechanism |
+| S1 phase function + medium data, as Mitsuba | `SGGXPhaseFunction` carries local `S`; `SamplePoint(p, lambda, w, time)` multiplies `rho` by `phase.ProjectedArea(w)` | **recommended**: the phase is already returned per point [C], and the medium stays a density/albedo/`S` grid |
+| S2 a separate `SGGXMedium` that does everything | own `SamplePoint`, own phase | duplicates the grid, majorant and emission code |
+| S3 a "microflake material" that owns the volume | `S` as a material property and the medium a plain grid | useful with the unified materials and volumes work, not read in this revision [R]; keep the phase interface identical so that S1 and S3 can share it |
 
-B1 in MIS terms [D]: the existing specular-chain rule: `delta` vertices give `a_k = 0` (`bdptincremental.cs:89` and `:123` `!v.delta && !before.delta`, `:750` `!ptMinus.delta` for the connection side) so no strategy connects to the entry and exit vertices, and interior paths are found by walks only. This keeps the weights correct as long as the black box gives an unbiased weight for the exit state and reports `pdfRev = 0` at the exit as specular vertices do. Light subpaths entering the box need the model's **adjoint** mode (Bitterli's adjoint flag has the same shape [P]); a model without adjoint mode makes the box camera-walk-only, which `StrategyAllowed` can express per volume.
-Emission inside a black box: the model reports `Le` along its walk and the gather is added with weight 1 (no competing strategy exists, as with specular light) [D]; if it also exports a `VolumeEmissionLight`-style sampler with exact pdf (capability `EmissionLight`) the existing MIS applies.
-Overlap and nesting: Bitterli's theory supports one global free-flight pdf only [P], and `CompositeMedium` adds coefficients, which is only valid when the volumes share one law [C+D]. Rule: volumes with the same `TransportModel.Family` and `CombinableWith` (today: exponential) combine as `CompositeMedium` does; otherwise the priority stack decides (the existing `MediumInterface.priority`): the volume with the higher priority owns the region and the other is not seen there, with a one-time warning. A black box nested inside another volume pushes on the stack like any medium; segments inside it never reach the outer model.
+The phase interface gains `ProjectedArea(Vector3f w)` (default 1), `MaxProjectedArea()` (default 1, **used** by the majorant code, unlike Mitsuba's) and a flag `DirectionDependent`. Models: **specular microflake** (`sggx`: the paper's Eq. 24, weight 1, pdf closed form, class ExactPdf) in phase 4; **diffuse microflake** (`sggxdiffuse`: sampling Algorithm 1 + cosine hemisphere, weight 1; value by the Eq. 26 estimator with a fixed sample count; class NoPdf, so MIS needs the specular-pdf surrogate or the mask) in phase 5. Interpolation of `S` by the six coefficients, prefilter by averaging, as the paper [P]. Mixed with HG in a `MixturePhaseFunction`: the mixture weights are evaluated per direction (3.2).
 
-### 5c. Estimator selection and the MIS-consistency rule
+### 6.3 Estimators without an evaluable density: three options (revises the rule of revision 2)
 
-Two roles per volume: `Tracker` (distance sampling in walks) and `TransmittanceEstimator` (connections, shadow rays), as today, selected by the medium's parameters (`"string tracker"`, `"string transmittance"`), with defaults from the transport model. Equiangular and emission strategies are uses and stay in the integrators, gated by capability flags.
+MIS weights only need to sum to one over the strategies that can produce a path, and each strategy's *sampling* weight must be exact. Weights computed from *any* positive density function `p~_s(x)` of the path `x`, used identically by every strategy, give an unbiased estimator; they lose variance, not unbiasedness. The requirement is that the value `p~_t(x)` assumed for strategy `t` is the same number whichever strategy asks [D: this is Veach's partition-of-unity condition; UPG's `min(V p, 1)` is the same idea in the code [C: `docs/upg.md`, "p_c in the weights has the collision factor"]]. Revision 2 said strategies through a `NoPdf` volume must be masked. **That was too strong; masking is the safe option, not the only one.** Retraction noted.
 
-Each estimator declares a **class**: `ExactPdf` (delta, ratio with the same majorant, regular tracking by deterministic inversion), `Deterministic` (closed-form), `NoPdf` (residual ratio as a free-path sampler, spectral, decomposition, adaptive).
-
-**Rule** [D, from Veach's requirement that the weights of the strategies that can produce a path sum to one over those strategies; Kutz et al. Sec. 7 says the same in the form "same tracker for free-path and transmittance" [P]]:
-1. Strategies whose segment densities are all `ExactPdf` or `Deterministic` and are expressed in the same path space (same majorant per segment; same free-flight law) are weighted together by the balance heuristic as now.
-2. A strategy that traverses a `NoPdf` volume has its `StrategyAllowed` bit **cleared for that path**, and the remaining strategies get the full weight. The choice depends only on the path (which volumes it crosses), never on random state, which keeps the weights a function of the path. Camera-walk-only is the typical outcome (as `strategies "unidirectional"` already is).
-3. A shadow ray through a volume whose transmittance estimator uses a different majorant than the walk's tracker must not enter the r_u/r_l products; it is `Deterministic` or a separate unweighted term. Today's code does enter them (`ResidualRatioEstimator.TryEstimate` writes `r_l/r_u` with the residual majorant) and the walk uses `majorant`; whether that is exact for bdpt connections I did **not** audit; it needs a test (section 7, phase 3).
-
-### 5d. Compatibility matrix (target, with today's status)
-
-Legend: E exact (unbiased, MIS consistent), A approximate/biased or a documented restriction, U unsupported, `today` is what the code on this branch does.
-
-| Framework | volpath | bdpt | bdptinc | mlt | upg | sppm | polarised | chromatic |
-|---|---|---|---|---|---|---|---|---|
-| exponential + null scattering | E (today) | E (today) | E (today, tests) | E (today, via BDPT evaluator) | own ext., not audited | U (no media code today) | E for Rayleigh phase (today); scalar phase passes Stokes unchanged [C] | E hero-wavelength (today) |
-| SGGX (data layer) | E [D] | E [D] needs direction-aware `SamplePoint` and reversed-direction phase pdf | E [D] same | E [D] | A: `MediumFactor` needs the directional `sigma_t` | U | A: scalar model, depolarising [D] | E [D] |
-| non-exponential homogeneous (Bitterli) | E [P] | E [P: both versions allow it] with stored fwd/rev free-flight densities [D] | E [D] recurrence unchanged, inputs change | E [D] inversion uses one sampler value | A: `MediumFactor` generalised to the model's density | U | U (no paper) [D] | E [D]: per-wavelength densities are deterministic, the null-collision r_u/r_l are replaced by their ratios |
-| non-exponential heterogeneous | E but slow (regular tracking) [P] | E, same | E, same | E | A | U | U | E |
-| black box (B1) | E | E, high variance (no connections inside) | E | E if the box is a deterministic function of its draws | E as a delta boundary | U | depends on the box | depends on the box |
-
-Estimator x framework:
-
-| | exponential | SGGX | non-exp homogeneous | non-exp heterogeneous |
+| Option | What it does | Cost | Variance | Verdict |
 |---|---|---|---|---|
-| delta tracking | E | E [D] | U (only a pink-noise subclass [P]) | U |
-| ratio tracking | E | E [D] | U; use closed form / quadrature (`Deterministic`) | U; regular tracking (`ExactPdf` by quadrature) |
-| residual ratio | E | E with a direction-independent control (min over `w`) [D] | U | U |
-| spectral / decomposition | E in volpath; in bdpt only with the same tracker both ways [P]; signed weights | same | U | U |
-| hero-wavelength r_u/r_l | E (today) | E | replaced by deterministic density ratios | same |
-| equiangular | E | E [D] | A: needs the segment density in the weight | A |
-| emission gather / NEE | E | E | A (volumetric emitter integral: supplement Sec. 5 [P], not studied) | A |
+| N1 mask | `StrategyAllowed` bit cleared, per path, for connection strategies through the volume; remaining strategies get the full weight | none | high for small lights seen through the volume | **default, first** |
+| N2 surrogate by quadrature | every segment in the volume gets a deterministic marginal density `sigma_t(x) T~(a, b)` with `T~` by 8 midpoints (as `MediumFactor`, `upg.cs:200-224` [C]); stored as one float per segment (the "segment record" is back, for these volumes only) and used by all strategies in the weights; the volume's own estimators keep exact sampling weights | 8 `SamplePoint` per segment per path | depends on `T~`, typically small | recommended second, behind `"string surrogate" "quadrature"` |
+| N3 same estimator both ways | require the same tracker for free flight and transmittance (Kutz's condition [P]) | limits combinations | exact | only for spectral tracking in volpath |
 
-### 5e. Performance
+A path may cross volumes of different treatments: ExactPdf volumes keep the null-scattering densities, N2 volumes use marginal surrogates (the null vertices of an N2 volume are auxiliary variables: the weights depend only on the real vertices), N1 volumes mask. The per-path decision depends only on the path (which volumes it crosses), never on random state [D]. With MLT the same: the weight is a function of the path.
 
-* The strategy loops stay straight-line: weights come from stored sums (`bdptincremental.cs`), the model is not called in them.
-* Calls into the model: `BeginSegment` once per segment, `NextEvent` once per collision (today: one delegate call per collision + one closure allocation per walk iteration + a type-test chain per segment) [C]; a virtual call costs a few ns (typical figure, not measured here), against 50-400 us for a whole sample at depth 5-20 in the in-process benchmark [C: `docs/bdpt-incremental.md`]. I expect the plug-in layer to be neutral or slightly faster after the delegate removal, but **I have not measured it**; phase 1 includes that measurement.
-* Memory: `SegmentRecord` of 12 bytes next to a 1344-byte `Vertex` (about +1%) and 84 bytes of `VertexMIS`. A model with no history leaves it zero.
-* Models that are costly by nature: regular tracking (non-exponential heterogeneous).
+### 6.4 What is left of the interface (the answer to "say exactly")
 
-## 6. Interface sketch (sketch only: not compiled, names may change)
+| Item | Needed? |
+|---|---|
+| free-flight densities per segment in the vertex | **no** (exponential telescoping); optional float per segment for N2 volumes |
+| endpoint kinds, birth/collision flags, memory variable | **no** |
+| adjoint flag | **no** |
+| `SamplePoint(p, lambda, w, time)` | **yes** (SGGX, and it removes the OSL thread-statics) |
+| phase `ProjectedArea(w)`, `MaxProjectedArea()`, `DirectionDependent` | **yes** |
+| extinction factor in `pdfFwd/pdfRev` at medium scatter vertices (3.2) | **yes**, one multiplication, skipped when not direction dependent |
+| majorant bound that includes the projected area | **yes** (4.3 item 2) |
+| per-query estimator choice, density class, surrogate policy | **yes** |
+| capability flags `ExactSegmentDensity`, `Connectable`, `EmissionLight`, `BothDirections` | **yes** for black boxes only (7) |
+| pull iterator for trackers | **no longer necessary**; kept optional for removing the delegate and closure per collision [C: `pathwalk.cs`] |
 
-```csharp
-// Kind of one END of a segment (revision 3: two kinds per segment, as in Tungsten's startOnSurface/endOnSurface [T])
-public enum EndpointKind : byte
-{
-    Surface = 0,    // a surface, a camera or a light (Tungsten counts camera and emitter vertices as surfaces)
-    Medium = 1      // a scatterer of the medium
-}
+### 6.5 Performance
 
-public enum SegmentEventKind : byte
-{
-    Collision = 0,
-    Escape = 1
-}
+* The strategy loops stay straight-line: weights come from stored sums, the media are not called in them.
+* Defaults reproduce today's trackers, so the default path pays nothing; a `DirectionDependent` flag test per medium vertex is a predictable branch.
+* New cost lives where it is chosen: N2 (8 samples per segment), the diffuse microflake estimate (a fixed number of VNDF samples per evaluation), regular tracking with a DDA. I have not measured any of them [D]; phase 1 measures the dispatch.
 
-[Flags]
-public enum VolumeCapabilities : uint
-{
-    None = 0,
-    ExactSegmentDensity = 1, // Density() is exact, so strategies through the volume may be MIS-weighted
-    Reserved2 = 2,           // (revision 3: the former Adjoint flag; Tungsten has none, reverse = swap the two endpoint kinds)
-    Connectable = 4,         // strategies may connect to vertices inside; the segment is evaluated by Density/Transmittance
-    EmissionLight = 8,       // exports a light with an exact density
-    Equiangular = 16,
-    Combinable = 32          // may be summed with other volumes of the same Family
-}
+## 7. The black box
 
-// The progress inside one segment. The segment is the walk's straight ray, passed to every call.
-public struct SegmentState
-{
-    public Float tMax;
-    public Float travelled;
-    public Float opticalDepth;          // accumulated optical depth (regular tracking)
-    public Float opticalDepthTarget;    // the sampled free flight, by inverse CDF; 0 if the model does not use it
-    public RayMajorantIterator majorants; // the exponential model: the existing iterator
-}
+A volume that carries its own integrator (any tracker, a procedural or precomputed model) behind its boundary. Exponential only; SGGX volumes are ordinary volumes, not black boxes.
 
-// Persisted in the vertex that ends the segment
-public struct SegmentRecord
-{
-    public Float freeFlightPdfForward;
-    public Float freeFlightPdfReverse;
-    public EndpointKind startKind;       // known before the sample
-    public EndpointKind endKind;         // known after the sample: Escape -> Surface, Collision -> Medium
-}
+**B1, delta boundary (first).** The boundary of the box is a pair of `delta` vertices, exactly like a specular surface: the existing rule gives `a_k = 0` for strategies that connect at a `delta` vertex (`bdptincremental.cs:89`, `:123` `!v.delta && !before.delta`, `:750` `!ptMinus.delta`) [C]. Connections do not cross the boundary: a shadow ray that reaches it is treated as occluded for the connection strategies, and light that passes through is found by walks (camera walks that exit the box and meet a light; light walks that enter it), like light seen through glass [D]. Contract of the box: `Enter(state) -> (exit state, weight, ok)` for the walk, an unbiased weight; a box that can be entered from both sides (`BothDirections`) is usable by light walks, a box that cannot is camera-walk-only, which `StrategyAllowed` expresses. MLT: the box must be a deterministic function of its random draws and the geometry, otherwise an error at load. Emission inside the box: the box reports `Le` along its walk and the gather is added with weight 1 (no competing strategy exists, as with specular light) [D].
 
-public struct SegmentEvent
-{
-    public SegmentEventKind kind;
-    public Point3f position;
-    public MediumProperties properties;      // sampled with the direction of the ray for direction-dependent media
-    public SampledSpectrum majorant;
-    public SampledSpectrum majorantTransmittance;
-}
+**B2, evaluable.** The box exports capabilities and the strategies through it unlock one by one:
 
-public abstract class TransportModel
-{
-    public abstract string Family();
-    public abstract VolumeCapabilities Capabilities();
+| Capability | What the box must give | What it unlocks |
+|---|---|---|
+| `Connectable` | `Transmittance(a, b)` as an unbiased estimate | connection strategies across the box |
+| `ExactSegmentDensity` | a deterministic density for the walk through the box (or the N2 surrogate) | those strategies get MIS weights without the mask |
+| `EmissionLight` | an emitter with an exact density | MIS for the emission gather |
 
-    public abstract void BeginSegment(Medium medium, in Ray ray, Float tMax, EndpointKind startKind,
-                                      SampledWavelengths lambda, out SegmentState state);
+An unbiased *estimate* of a density is not enough for the ratios: a ratio of unbiased estimates is not an unbiased estimate of the ratio. UPG gets around this for the reciprocal of a collision probability with Bernoulli trials (`E[N_b]/p_b = 1/p_c`, proof in `docs/upg.md` [C]) and it applies the trick only to the estimator's factor, never to the MIS weight, which uses the deterministic approximation `min(V p, 1)` [C: `docs/upg.md`]. Same here: a box with only a random density estimate takes the N2 surrogate for its weights and its unbiased estimate for the contribution; a box that offers neither is masked (N1). The pseudo-marginal reading ("could a Bernoulli-trial estimator carry stochastic segment densities in general") stays an open research question [D].
 
-    // Pull: the next collision candidate of the segment, or the escape through its end
-    public abstract SegmentEvent NextEvent(Medium medium, in Ray ray, ref SegmentState state, ref RNG rng, Float u);
+**Different estimators in one path (the MIS-consistency rule, revised).** Each volume has one treatment: ExactPdf (null-scattering densities), surrogate (N2), or mask (N1). A strategy is allowed on a path if no volume on the path masks it; its weight is `p~_s / sum_t p~_t` with the densities of the volumes' treatments. The first volume to be added with a new treatment must add a test that the weights sum to one on a path with mixed treatments (section 9).
 
-    // The densities of the straight segment between two points, for the hero wavelength, and the ratios to the
-    // other wavelengths (today's r_u and r_l, segU and segL)
-    // Revision 3: the REVERSE density is this same call with from/to and the two kinds swapped
-    // (Tungsten: Medium::transmittanceAndPdfs, media/Medium.cpp:45-51); the walk stores both
-    public abstract SegmentRecord Density(Medium medium, Interaction from, Interaction to,
-                                          EndpointKind startKind, EndpointKind endKind,
-                                          SampledWavelengths lambda, out SampledSpectrum ratioUnidirectional,
-                                          out SampledSpectrum ratioLight);
+**Nested and overlapping volumes.** The `BoundaryStack` priority decides which volume owns a region [C: `boundarystack.cs`]. A black box nested in another volume pushes on the stack like any medium; segments inside it never reach the outer volume's trackers. Volumes of the same exponential family overlap as `CompositeMedium` does (sum of coefficients and majorants [C]); the composite uses the settings of the highest priority volume (rule 8). A black box does not take part in a composite: it owns its region (priority), with a one-time warning.
 
-    // The edge throughput E(start, end): symmetric under swapping the kinds [T]; for the exponential model the
-    // kinds are ignored. Non-exponential models take the optical depth from OpticalDepth() below.
-    // Non-exponential heterogeneous models only (deterministic, not a tracker; Tungsten's Grid::opticalDepth /
-    // inverseOpticalDepth, grids/Grid.hpp:24-25): optical depth of a straight segment, and the point where it reaches tau
-    public virtual Float OpticalDepth(Medium medium, in Ray ray, Float tMax) { throw new NotSupportedException(); }
-    public virtual Float InverseOpticalDepth(Medium medium, in Ray ray, Float tMax, Float tau, out bool escaped) { throw new NotSupportedException(); }
+**Emission.** Inside ordinary volumes: unchanged. SGGX: unsupported. Black box: above.
 
-    public abstract SampledSpectrum Transmittance(Medium medium, Interaction from, Interaction to,
-                                                  EndpointKind startKind, EndpointKind endKind,
-                                                  SampledWavelengths lambda, ref RNG rng,
-                                                  out SampledSpectrum ratioUnidirectional,
-                                                  out SampledSpectrum ratioLight);
-}
-```
+## 8. Compatibility matrix (reduced)
 
-`ratioUnidirectional` and `ratioLight` are today's `r_u` and `r_l` (and `segU`/`segL` in bdpt): the interface only names them. `VolumeIntegrator` gains the `TransportModel` and keeps `tracker` and `transmittance`; the exponential model implements `NextEvent` through the existing `SampleT_maj` code so that the random numbers are drawn in the same order (section 7, phase 1). A volume without `ExactSegmentDensity` is walked from the camera only; no separate "forward only" flag exists. A strategy mask per path (`StrategyAllowed`) stays the mechanism for `NoPdf` estimators and black boxes.
+E exact (unbiased, MIS consistent), M exact but with masked connections through the volume, S surrogate weights (unbiased, higher variance), A approximate or a documented restriction, U unsupported. "today" is the code on this branch.
 
-### 6.1 What changed from revision 1, what stays, and the cost of re-adding the deferred frameworks
+| Estimator / medium | volpath | bdpt | bdptinc | mlt | upg | polarised | chromatic |
+|---|---|---|---|---|---|---|---|
+| delta (`majorant`), exponential, HG | E (today) | E (today) | E (today) | E (today) | E (own ext.) | E for Rayleigh (today) | E hero-wavelength (today) |
+| ratio / track-length, exponential | E | E | E | E | E | E | E |
+| analytic / regular tracking, exponential | E | E | E | E | E | E | E, exact ratios |
+| residual ratio | E | M or S (audit of 5c.3, revision 2) | M or S | E | S | E | E |
+| spectral tracking | E | M or S | M or S | E | U | E | E (its purpose) |
+| decomposition tracking | E | M or S | M or S | E | U | E | E |
+| equiangular (distance sampling) | E | E (today) | E (today) | E | E | E | E |
+| emission (collision, light) | E | E | E | E | U (today, error) | E | E |
+| **SGGX specular, any exact tracker** | E [D] | E [D] with the extinction factor (3.2) | E [D] same | E [D] | A: `MediumFactor` needs the directional `sigma_t`; angular bound of the Bernoulli trials is `p_b = 1` (whole square) like the Rayleigh mixture [C: `docs/upg.md`] | A: depolarising | E [D] |
+| SGGX diffuse | E (unbiased value, weight 1) | S or M | S or M | E | A | A | E |
+| SGGX with emission | U | U | U | U | U | U | U |
+| black box B1 | E | E, no connections through | E | E if deterministic | E as delta boundary | depends | depends |
+| black box B2 (flags) | E | E per capability | E | E if deterministic | E | depends | depends |
 
-**Revision 3 (Tungsten) interface changes, in one place:** (a) `SegmentOrigin` (one flag) becomes `EndpointKind` start and end on `SegmentRecord`, `BeginSegment`, `Density`, `Transmittance`; (b) the reverse density is the same `Density` call with from/to and kinds swapped, no separate reverse routine; (c) the `Adjoint` capability is dropped; (d) `OpticalDepth`/`InverseOpticalDepth` added for non-exponential heterogeneous media; (e) the transmittance has the three-case `E` with `sigmaBar` normalisation and the vertex factor `sigma_s * sigmaBar` for non-exponential laws; (f) chromatic MIS uses the wavelength-averaged density for that model. Unchanged: the three layers, the pull iterator question, capability flags `ExactSegmentDensity`/`Connectable`/`EmissionLight`/`Equiangular`/`Combinable`, the delta-boundary black box, estimator classes, phases 0-6.
+## 9. Migration plan and test plan
 
-Removed with RRTE and Jarabo (revision 1 had them): the tangent in `SegmentEvent`; `origin`, `direction` and `length` in `SegmentState` (the walk's ray is the geometry); the index into an `EdgeGeometry` in `SegmentRecord` (so no area Jacobians and no `J(a->b) = (n_a/n_b)^2 J(b->a)` asymmetry to store); `TryConnect` (the boundary-value solve of a curved connection, with its multiple-path count); the masks for connections that cannot be curved (`CurvedConnectionAllowed`); the manual stack popping at the end of a curved path; the estimator class that is not a function of the primary sample vector (the randomised multi-start solver); the `ForwardOnly` idea (a Jarabo model would simply lack `ExactSegmentDensity`); the dispersion limit of curved paths.
+Common rule: before each phase, record image hashes (fixed seed, in-process `RenderImage` of `bdptincremental_stat_test.cs`) of volpath, simplevolpath, bdpt, bdptinc, mlt on the media scenes of `BdptInc` (fog, foghg, fogchrom, foggrid, fograyleigh, fognested, fogemit, equiangular, polarised Rayleigh fog); phases that say "bit-identical" must reproduce them exactly [C: scenes exist].
 
-Stays, and why:
-
-* **Three layers.** The non-exponential law differs from the medium data (layer 1 versus 2), SGGX is layer 2 only, and the estimators (layer 3) are shared by all. What shrank is layer 1: only the free-flight law, never the segment geometry.
-* **`SegmentRecord` with both free-flight densities and the two endpoint kinds**, because the non-exponential law's density depends on the start kind and the reverse of an edge swaps the kinds [T] (revision 2 had one `origin` and an `Adjoint` flag from the paper summaries). Exponential and SGGX volumes leave it zero.
-* **Capability flags.** `ExactSegmentDensity` is needed by the black box and by `NoPdf` estimators; the `Adjoint` flag of revision 2 is **dropped**: Tungsten has no such flag on media or transmittances, every law answers the reversed call by swapping the endpoint kinds, and a law that cannot (no exact density) is already excluded by `ExactSegmentDensity`; `Connectable` by the evaluable black box (B2); `Equiangular` and `EmissionLight` by non-exponential and black-box volumes; `Combinable` by the overlap rule.
-* **Delta-boundary black box, the strategy mask and the MIS-consistency rule (5c).** Unchanged. The black box must still be a deterministic function of its draws to be allowed in MLT.
-* **Direction-aware `SamplePoint`** (SGGX, and it removes OSL's thread-statics).
-
-Corrections to the expectation:
-
-* The pull iterator is **no longer necessary**; its justification is now the removal of the delegate and closure per collision and the state of regular tracking and of black boxes. It is a cleanliness and speed choice, and phase 1 may keep the callback adapter as the only API at first.
-* `SegmentState` is smaller in the geometry fields but still carries progress (optical depth) and, for the exponential model, an iterator reference, so it is not obviously under the revision-1 figure of 32 bytes in memory layout; this does not matter, it is transient.
-* There is **no separate `Connect()`**: for straight segments a connection to a vertex inside a connectable volume is `Density`/`Transmittance`. What the removal of curved paths takes away is the solver, not the need for an evaluable black box.
-* The asymmetry that the curved model had (Jacobians) is replaced, not removed: the non-exponential law has forward and reverse densities that differ, stored in the same record.
-
-What re-adding the deferred frameworks would cost (so that the decision is reversible; no hooks are designed in):
-
-* **RRTE:** the walk assumes that the ray is straight (`ctx.ray` is intersected as a line and handed to the tracker); curved segments need the walk to ask the model for the exit point and the tangent at collisions, a stack pop done by hand, per-vertex tangents and Jacobians (the branch stores an `EdgeGeometry` and two Jacobians per vertex), a connection solver with randomised restarts, a strategy mask for connections that cannot be curved, an estimator class that MLT must exclude, and no support for dispersive indices. The branch is the starting point (the revert commit `1f6dcac` touched 16 files, 4838 lines deleted and 68 added, including the 800 + 85 lines of integrator and walk changes) and could be merged behind the model interface once the walk accepts non-straight segments. This is a change to the walk and the vertex, not only a new model.
-* **Jarabo:** a new `TransportModel` plus a path-integral formulation for bidirectional use, which the authors do not give [P]; until then it lacks `ExactSegmentDensity`, which already keeps it out of every bidirectional strategy. Cost: one model class, no interface change.
-
-## 7. Migration plan (existing output bit-identical until a phase says otherwise)
-
-Common rule: before each phase, record image hashes (fixed seed, in-process `RenderImage` of `bdptincremental_stat_test.cs`) of volpath, simplevolpath, bdpt, bdptinc, mlt on the media scenes of `BdptInc` (fog, foghg, fogchrom, foggrid, fograyleigh, fognested, fogemit, equiangular, polarised Rayleigh fog); the phases below that say "bit-identical" must reproduce them exactly.
-
-| Phase | Change | Output | Test |
+| Phase | Change | Output | Tests |
 |---|---|---|---|
-| 0 | hash harness for the integrators above; add the weights-sum-to-one test for a path | none | the hashes themselves |
-| 1 | `TransportModel` + `ExponentialModel` (moves `SampleT_maj`, `MediumEvents`, `PathState` null-collision code behind the interface; pull iterator with a delegate adapter, optional at first) | bit-identical | hashes; microbenchmark of the segment call (ns per segment, old versus new) |
-| 2 | direction-aware `SamplePoint(p, lambda, w, time)` default-forwarding; fold `OSLMedium`'s thread-statics into it; `SGGXMedium` | bit-identical for old media; new medium | SGGX against its closed forms: `sigma(w)` and `sigma_t`, homogeneous transmittance `exp(-rho sigma(w) L)`, phase normalisation (energy), the reciprocity relation `sigma(wi) fp(wi->wo) = sigma(wo) fp(wo->wi)`, chi-square of visible-normal sampling; volpath/bdpt/bdptinc agreement (t-tests as `UnbiasedAgainstBdpt*`) |
-| 3 | `SegmentRecord` in `Vertex`; `Density()` for the exponential model returns the current factors; bdptinc/bdpt read it; the `ResidualRatioEstimator` MIS question of 5c.3 gets its test | bit-identical (the record is zero for exponential) | hashes; weight equality; test of residual/analytic/tracklength connections against ratio on a grid medium |
-| 4 | `NonExponentialModel` (homogeneous kernel first: the four functions `surfaceSurface/surfaceMedium/mediumSurface/mediumMedium` + `sigmaBar` and the two inverse-CDF samplers as in Tungsten's `Transmittance`; heterogeneous by optical-depth inversion on the grid after, not by tracking) | new | analytic (also against Tungsten's closed forms for Erlang and Davis, section 4.2): `d/dtau surfaceSurface = -surfaceMedium`, `surfaceMedium = sigmaBar * mediumSurface`; the albedo identity of the sampled weight; free-flight pdf integrates to `1 - T`, mean free path; slab transmittance by PT, LT and BDPT agree (Bitterli's Fig. 12 claim reproduced as our test); energy conservation in a closed medium; fixed-seed bdptinc/bdpt weight sums to one with the stored densities |
-| 5 | black box B1 (wrap a medium; delta boundary; `StrategyAllowed` per path) | new | the wrapped exponential medium gives the same expectation as the unwrapped (t-tests), lower strategy count, nested-in-medium and medium-in-box scenes |
-| 6 | spectral and decomposition trackers as `NoPdf` estimators on exponential volumes | new | unbiasedness against ratio tracking on a grid; signed weights; the `StrategyAllowed` mask in bdptinc |
+| 0 | hash harness for the integrators above; weights-sum-to-one test for one path | none | the hashes themselves |
+| 1 | `VolumeIntegrator` gains `shadowTransmittance`, `distanceSampling`, `surrogate`, density class and capability flags; scene parser and validation (6.1) with errors; defaults equal today | bit-identical | hashes; a test per validation rule that the right error appears; microbenchmark of the dispatch (ns per segment) |
+| 2 | split the two estimator queries (C versus S); audit the `ResidualRatioEstimator` MIS question (5c.3 of revision 2); `"string distancesampling"` per volume replaces the integrator bool as a default only | bit-identical with defaults | weight equality bdpt versus bdptinc on grid media with `residual` shadow rays; unbiasedness (t-tests) of connections with each estimator against `ratio` |
+| 3 | `SamplePoint(p, lambda, w, time)` with default forwarding; fold `OSLMedium` thread-statics into it; phase `ProjectedArea`/`DirectionDependent` and the extinction factor in `Vertex.PDF`/`ConvertDensity` (exactly 1 for non-directional phases) | bit-identical | hashes; a synthetic directional phase whose `sigma(w) fp` is symmetric: the MIS ratio at a vertex is 1.0 to float precision |
+| 4 | **SGGX medium + specular microflake phase**, `S` grid volume (six channels, linear interpolation), majorant from `rho sqrt(lambda_max(S))`, load checks (SPD, bound) | new | see below |
+| 5 | extra trackers: `spectral`, `decomposition`, `analytic`/regular for homogeneous and nearest-neighbour grids; `sggxdiffuse`; N2 surrogate | new | see below |
+| 6 | black box B1, then B2 capabilities | new | wrapped exponential medium gives the same expectation as unwrapped (t-tests), nested-in-medium and medium-in-box scenes, MLT determinism test |
 
-## 8. Risks and open questions
+**Phase 4 tests (SGGX closed forms and consistency)** [D unless noted]:
+1. `sigma(w)` against quadrature of `int <w, wm>_+ D(wm) dwm` with `D` of Eq. 12 [P], for `S = I` (`sigma = 1`, `D = 1/pi`), `S = diag(sx^2, sy^2, sz^2)` (`sigma` along each axis = `sx`, `sy`, `sz`), a rotated `S` (`sigma_{R S R^T}(R w) = sigma_S(w)`), the skewed `S` of Mitsuba's test03 [M], and the nearly-flat limit `S = z z^T + eps I` (`sigma(w) ~ |w.z|`); evenness `sigma(w) = sigma(-w)`.
+2. `sigma_t(w) = rho sigma(w)` for the medium, and **homogeneous transmittance `exp(-rho sigma(w) L)`** through a purely absorbing slab for several directions, measured with `analytic`, `ratio`, `tracklength` and `majorant` against the closed form.
+3. Phase: normalisation `int fp dwo = 1` by quadrature; reciprocity `sigma(wi) fp(wi->wo) = sigma(wo) fp(wo->wi)`; chi-square of the visible-normal sampling against the pdf (the two parameter sets of Mitsuba's tests [M]); `S = I` equals the isotropic phase.
+4. `S = I` medium equals the isotropic homogeneous medium, in volpath, bdpt, bdptinc (t-tests); furnace: albedo 1 medium without absorption inside a uniform emitter returns `Le` for volpath, bdpt, bdptinc with a strongly anisotropic `S` (this catches a missing extinction factor, 3.2).
+5. bdpt versus volpath on SGGX scenes (fibre-like and surface-like `S`, grid with varying `S` and `rho`): per-pixel-group t-tests; bdpt versus bdptinc weight equality on SGGX paths; weights sum to one on a path with SGGX vertices.
+6. Majorant: a grid with `sigma(w) > 1` produces the load error (rule 7) and the debug assertion catches a forced violation.
 
-* Reciprocity of the non-exponential kernel: the reference code implements a symmetric `E` with `sigmaBar` normalisation and asymmetric stored densities (section 4.2 item 6); it ships no test, so whether the two paper versions disagree in substance is not settled by it. Phase 4 keeps the numerical test (PT = LT = BDPT on a slab) as the proof for our port.
-* Heterogeneous non-exponential media have no known unbiased fast distance sampler [P]. Tungsten does not track: it integrates and inverts the optical depth along the ray (voxel DDA, closed forms for exponential and atmospheric profiles) [T], so the model needs deterministic `OpticalDepth`/`InverseOpticalDepth` of a segment, and a stochastic optical depth (residual ratio) is invalid with a non-exponential law (4.2 item 4). The cost is the DDA per segment, twice per edge when the reverse density is computed.
-* Direction-dependent extinction in the null-scattering framework (SGGX) is my derivation [D], not in either paper; the test in phase 2 is the proof.
-* Chromatic: Tungsten samples one channel uniformly and uses the channel-averaged density in the weights and MIS ratios [T]; for the non-exponential model our hero-wavelength ratios would come from deterministic densities, which is better than null-collision ratios [D], but the density that enters the MIS is then the wavelength average, not the hero's.
-* Estimators of class `NoPdf` force strategy masks and therefore high variance in bdpt; the benefit is only in walks.
-* Signed weights and `Russian roulette` in `ShadowRay` interact (the roulette tests `T_ray` magnitude) [C]; needs a sign-aware rule.
-* MLT: a black box (or any `NoPdf` estimator) whose sampling is not a deterministic function of its random draws is excluded; the repo's geometry-hashed RNG gives determinism for stochastic estimators but correlates the mutations [D].
-* Pseudo-marginal (stochastic) segment densities: ratios of unbiased estimates are not unbiased estimates of the ratio; the rule in 5c avoids them rather than solving them. Whether an UPG-style trial estimator could carry them is an open research question.
-* Thread safety: models keep state per segment, none per medium; `OSLMedium`'s thread-statics must go.
-* Emission inside non-exponential media: the volumetric emitter path integral exists (supplement Sec. 5) but I did not read it [P: pointer only].
-* Overlap of different laws is unsupported by the theory [P] and by the reference code, which has one medium per point and no stack [T]; the priority rule is a restriction, not a solution.
+**Phase 5 tests:** all trackers unbiased against each other on a grid medium: each of `majorant`, `global`, `spectral`, `decomposition`, and each of `ratio`, `tracklength`, `residual`, `decomposition` for S and C, against the reference `majorant + ratio` at high spp (t-tests); signed-weight handling (Russian roulette); the mixed-treatment path weights sum to one (6.3); `analytic` against the closed form on a homogeneous medium; the diffuse microflake against a high-sample-count brute-force value of Eq. 25 [P]; equiangular with SGGX (the weight uses `sigma_s(x, w) T`).
 
-## 9. Recommendations in one list
+## 10. Risks and open questions
 
-1. Three layers with the existing `VolumeIntegrator` as the facade (A2); straight segments only; a pull iterator (optional at first), a transient `SegmentState` of progress, a 12-byte `SegmentRecord` in the vertex.
-2. Treat SGGX as medium data with a direction-aware `SamplePoint` (phase 2), not as a transport model.
-3. Black box = delta boundary first (B1); capability flags promote volumes to connectable, exact-density, emission-light.
-4. Estimator classes `ExactPdf` / `Deterministic` / `NoPdf`; MIS only among strategies that can all state their density; `NoPdf` volumes mask strategies per path.
-5. Phases 0-3 are refactors that must be bit-identical; every later phase brings an analytic test and a t-test against a brute-force reference.
-6. RRTE and Jarabo are deferred; section 6.1 says what re-adding them costs.
+* The extinction-factor rule of 3.2 is my derivation [D] and Mitsuba contains no bidirectional integrator to corroborate it; the furnace and weight-sum tests of phase 4 are the proof.
+* The residual-ratio MIS question (5c.3 of revision 2) is still unaudited [C+D].
+* Signed estimators (decomposition, spectral) with Russian roulette, MLT targets and path filtering need a sign-aware rule.
+* N2 surrogate quality: a poor surrogate raises variance without bias; the quadrature step count is a parameter (UPG uses 8 [C]).
+* The directional majorant bound is conservative (`lambda_max`); a flat-fibre `S` gives a majorant much larger than most `sigma(w)`, so many null collisions. A per-ray tighter bound is possible [D].
+* Thread safety: media keep no state; `OSLMedium` thread-statics must go with the directional `SamplePoint`.
+* Diffuse microflakes: the value estimate has variance; a deterministic hashed estimate could serve as the surrogate density, the specular pdf is the cheaper choice [D].
+* Polarisation with SGGX is not modelled (depolarising).
+* The UPG angular bound for SGGX sampling (the cosine-hemisphere warp followed by a linear map of the visible-normal construction) was not derived; `p_b = 1` is correct and slower by `1/p_c` [D].
 
-## 10. Phase-1 interface questions for the user
+## 11. Recommendations in one list
 
-* Is the pull iterator wanted in phase 1, or should the callback API stay until the non-exponential model needs state?
-* Do we accept the priority rule for overlapping volumes of different laws?
+1. Keep and extend the existing `VolumeIntegrator`: five query strings plus `surrogate` and `phase`, defaults equal to today (6.1).
+2. SGGX as phase + medium data (S1), direction-aware `SamplePoint` (M2), per-cell majorant `rho sqrt(lambda_max)`, specular first, diffuse later (6.2, 4.3).
+3. Add the extinction factor at medium scatter vertices; test it with the furnace and the `S = I` equivalence (3.2).
+4. Estimators without an evaluable density: mask first (N1), surrogate by quadrature second (N2), never ratios of random estimates (6.3).
+5. Black box = delta boundary first; capabilities unlock connection, density and emission (7).
+6. Validate combinations at scene load with errors that name the volume and the reason (6.1).
+7. Phases 0 to 3 are bit-identical refactors; SGGX, extra trackers and the black box follow (9).
 
-## 11. What I could not verify
+## 12. What I could not verify
 
-* I read none of the papers as raw PDF text: all [P] statements come from a fetch tool that summarises. The Bitterli TOG and TR versions were never both read as text; the reciprocity question is addressed from the code in 4.2 item 6; the SGGX phase function formulas were extracted from garbled text (Eq. 12 exponents unchecked).
-* For the deferred frameworks (pointers only): Pediredla 2020 abstract and project page only (the CMU page was blocked); Ament 2014 a dissertation excerpt (first 100k characters), not the TOG paper; Jarabo 2018 the abstract page; Fraboni 2023 the PDF summary. Novak 2014: abstract page only (PDF fetch failed); d'Eon 2018: abstract.
-* Not read: Vicini et al. 2021 (non-exponential transmittance for scene representations, [R]), d'Eon's later parts, Pediredla's code, LuxCore's media code. `procedural-media` was inspected only at the places cited; it has 36 commits ahead of the merge base that I did not review.
-* The behaviour of `sppm`/`path`/`lightpath`/`simplepath` in scenes with media was inferred from the code (no medium scattering), not by rendering.
-* The claim that distance densities cancel in the exponential case is my reading of the code, corroborated by the weight-equality and unbiasedness tests of bdptinc, but not proven.
-* No performance numbers for the proposed interface exist; section 5e is an estimate.
-* Tungsten (revision 3): read as text only, never built or run, so every [T] statement is a code reading, not an observed behaviour. Read in full: `Transmittance.hpp`, `Medium.hpp/.cpp`, `HomogeneousMedium.cpp`, `VoxelMedium.cpp`, Exponential/Erlang/Davis transmittances, `TraceBase.cpp` (shadow rays, direct light), `PathTracer.cpp`, `PathEdge.hpp`, `PathVertex.cpp`, `LightPath.cpp` (MIS part), parts of `LightTracer.cpp`, `VdbGrid.cpp` (optical depth and inversion, first branches), `ExponentialMedium.cpp`. Only grepped: `PhotonTracer.cpp`, the other transmittance laws, `AtmosphericMedium.cpp`, `Primitive.hpp`. Not read: `BidirectionalPathTracer.cpp`, the MLT integrators, the `instancing` and `mis-rewrite` branches (a MIS rewrite may change item 3), the project's supplemental material and test scenes (none in the repository).
-* From the code I could NOT establish: that PT, LT and BDPT agree for non-exponential media (no test in the repository); which paper sentence on reciprocity is correct; whether a guard prevents the `ResidualRatio` optical-depth mode with a non-exponential law; whether the divergences in 4.2 (stale `exited`, density at ray start in `VoxelMedium::pdf`, shadow-ray flag mismatch) affect Bitterli's published images.
-* The net factor `sigmaBar` per run of medium vertices (4.2 item 1) is my algebra from the code, not a statement in a paper.
+* No paper was read as raw text; all [P] statements, including the SGGX equations and the STAR table, come from a fetch tool that summarises. A direct fetch of the JCGT page was refused by the tool's allowlist; the NVIDIA PDF of the paper and the Dartmouth PDF of the STAR were fetched (the STAR summary covered the first 100000 of 104131 characters). Miller et al. 2019, Kutz et al. 2017 and Novak et al. 2014 were read in earlier revisions only as summaries or abstract pages (Novak 2014: abstract page; the PDF fetch failed).
+* Mitsuba: I read `sggx.cpp`, `microflake.h`, `phase.h`, `homogeneous.cpp`, `heterogeneous.cpp`, `medium.cpp`, the SGGX parts of `volume.h`/`grid.cpp` (not `interpolate_6`), and grepped `volpath.cpp`/`volpathmis.cpp`; I did not read the Mitsuba 3 documentation pages for the media, the Python bindings beyond the tests, or any other branch. Mitsuba 2 was only grepped. Behaviour was inferred from code, never observed (nothing was built or run).
+* The claim that the extinction factor at SGGX vertices is exactly what bdpt/bdptinc need (3.2), the surrogate rule (6.3), the majorant bound (4.3), the `S = I` equivalence and the quadrature check of `sigma` (9) are my derivations [D] and untested.
+* The interaction of Russian roulette, signed weights and MLT was not tested.
+* The unified materials and volumes documents and the per-entry-volume code were not read in this revision; the per-material statement in 6.2 is a design intent.
+* The performance of every proposed estimator is an estimate; none was measured. UPG behaviour comes from `/tmp/upg_work` (`src/pbrt/upg.cs`, `docs/upg.md`) read-only.
+* Revision-3 material (Tungsten, d'Eon) was not re-read for this revision; Appendix B repeats its conclusions with their tags.
+
+## Appendix A. Deferred frameworks and the cost of re-adding them
+
+Out of the spec, no hooks. **Non-exponential media** (Bitterli et al. 2018, d'Eon 2018): needs a free-flight law with the four functions of optical depth and the `sigmaBar` normalisation, a `SegmentRecord` with forward and reverse densities and start/end kinds, the channel-averaged density in the weights, an optical-depth inversion instead of tracking for heterogeneous media, and no overlap of different laws (Appendix B). **Spatially correlated media** (Jarabo et al. 2018): a new transport model and a path-integral formulation for bidirectional use that the authors do not give [P]; until then it lacks an exact density and stays out of bidirectional integrators. **RRTE** (Ament 2014; Pediredla et al. 2020; Fraboni et al. 2023): curved segments make the walk ask the model for exit points and tangents, a manual stack pop, per-vertex tangents and Jacobians, a connection solver with randomised restarts, a strategy mask for connections that cannot be curved, and an estimator class MLT must exclude; an implementation exists on `experimental/refractive-media` (reverted from this line in `1f6dcac`: 16 files, 4838 lines deleted, 68 added, about 800 lines in `integrators.cs` and 85 in `pathwalk.cs`) [C]. **Transient rendering:** a time dimension in the path integral and in the MIS densities; not analysed [R].
+
+## Appendix B. Findings from the Tungsten and d'Eon reading (revision 3, kept for later)
+
+Source: Tungsten `master` 88ea020, read as text, never built or run [T]; paths relative to `src/core/`.
+
+* The law is four functions of the optical depth, `surfaceSurface/surfaceMedium/mediumSurface/mediumMedium`, plus `sigmaBar` and two inverse-CDF samplers (`transmittances/Transmittance.hpp:17-58`). The edge throughput `E(tau, startOnSurface, endOnSurface)` is `surfaceSurface`, `mediumMedium/sigmaBar` or `mediumSurface` for both mixed cases (lines 22-30), so `E` is symmetric under swapping the ends. A sampled collision has weight `E rho sigma_s sigmaBar / (rho sigma_t mediumPdf)` = albedo (`media/HomogeneousMedium.cpp:65-108`, `VoxelMedium.cpp:141-145`): the integrand carries `sigma_s sigmaBar` per medium vertex and `1/sigmaBar` per medium-to-medium edge [D].
+* No adjoint flag on media: the reverse density is the same function on the reversed ray with the start and end kinds swapped (`media/Medium.cpp:45-51`, `PathVertex.cpp:162-163`); stored per edge (`PathEdge.hpp:15-16`). Camera and emitter vertices count as surfaces (`PathVertex.hpp:239-242`).
+* Integrators: path tracer, light tracer, bidirectional path tracer and the photon walks support non-exponential media; MLT does not (`Medium::invertDistance` is `FAIL`, `Medium.cpp:40-43`). BDPT MIS multiplies the edge densities into the vertex densities and applies Veach's ratio recurrence (`LightPath.cpp:50-92, 145, 157`, `PathVertex.cpp:295-326`).
+* Heterogeneous media: optical-depth inversion on a voxel DDA (`VoxelMedium.cpp:97-154`, `grids/VdbGrid.cpp:307-377, 379`); a stochastic residual-ratio optical depth is biased with a non-exponential law (no guard found in the files read). Chromatic: uniform channel choice, channel-averaged density (`VoxelMedium.cpp:138-141`).
+* Overlap: none, one medium per point (`primitives/Primitive.hpp:177-183`).
+* Reciprocity: the integrand is reciprocal by construction, the sampling densities are not; the repository has no test, so the TOG text versus technical report disagreement cannot be settled from the code.
+* Tungsten defects noticed: stale `sample.exited` (`ExponentialMedium.cpp:133-134`); density at the ray start in `VoxelMedium::pdf` (line 188); end-flag mismatch between the two shadow-ray variants (`TraceBase.cpp:107` versus `:111`).
+* d'Eon (arXiv:1803.03259) makes the same split between free paths from correlated and uncorrelated locations [P: abstract].
