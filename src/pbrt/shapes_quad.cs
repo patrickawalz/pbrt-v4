@@ -262,7 +262,7 @@ namespace pbrt
         }
 
         // The (u,v) of the quad as it was given (corner 0 at (0,0)) from the (u,v) of the frame that starts at corner k
-        private static Point2f ToGivenFrame(int rotation, double u, double v)
+        internal static Point2f ToGivenFrame(int rotation, double u, double v)
         {
             switch (rotation & 3)
             {
@@ -299,7 +299,7 @@ namespace pbrt
         }
 
         // Whether the corners (in order around the quad) are those of a rectangle, as BilinearPatch tests it
-        private static bool IsRectangle(Point3f q0, Point3f q1, Point3f q2, Point3f q3)
+        internal static bool IsRectangle(Point3f q0, Point3f q1, Point3f q2, Point3f q3)
         {
             if (q0 == q1 || q1 == q2 || q2 == q3 || q3 == q0)
             {
@@ -1041,7 +1041,7 @@ namespace pbrt
         // Shape "quadmesh": "integer indices" (four per quad, in order around it; none for a single quad), "point3 P", "point2 uv", "normal N",
         // "integer faceIndices", "string sampling"
         public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc,
-                                                Allocator alloc)
+                                                Allocator alloc, bool triangleForm = false)
         {
             List<int> indices = parameters.GetIntArray("indices");
             List<Point3f> P = parameters.GetPoint3fArray("P");
@@ -1091,7 +1091,13 @@ namespace pbrt
                                                   faceIndices.Count, indices.Count / 4));
                 faceIndices = new List<int>();
             }
-            return CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, ParseSampling(parameters.GetOneString("sampling", "solidangle"), loc), alloc);
+            bool projected = ParseSampling(parameters.GetOneString("sampling", "solidangle"), loc);
+            // (comparison) "quadmesh2" is the same shape written in the form of Triangle, see shapes_quad2.cs
+            if (triangleForm)
+            {
+                return Quad2.CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, projected, alloc);
+            }
+            return CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, projected, alloc);
         }
     }
 }  // namespace pbrt

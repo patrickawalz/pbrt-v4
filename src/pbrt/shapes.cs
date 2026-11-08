@@ -3140,6 +3140,10 @@ namespace pbrt
             {
                 shapes = Quad.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "quadmesh2")
+            {
+                shapes = Quad.Create(renderFromObject, reverseOrientation, parameters, loc, alloc, true);
+            }
             else if (name == "rectanglemesh")
             {
                 shapes = Rectangle.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);

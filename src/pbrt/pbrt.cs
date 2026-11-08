@@ -68,6 +68,7 @@ namespace pbrt
                 Triangle.Init(new Allocator());
                 BilinearPatch.Init(new Allocator());
                 Quad.Init(new Allocator());
+                Quad2.Init(new Allocator());
             }
 
             InitBufferCaches();

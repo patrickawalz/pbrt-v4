@@ -23,7 +23,7 @@ namespace pbrt
             return null;
         }
 
-        private static Vector3f RandomDirection(Random random)
+        internal static Vector3f RandomDirection(Random random)
         {
             double z = 1 - 2 * random.NextDouble();
             double r = Math.Sqrt(Math.Max(0, 1 - z * z));
@@ -32,7 +32,7 @@ namespace pbrt
         }
 
         // Four points of a random convex quadrilateral in a random plane, counterclockwise around ez, as the points of a polygon around a center
-        private static Point3f[] RandomQuad(Random random, Point3f center, Float size, out Vector3f ez)
+        internal static Point3f[] RandomQuad(Random random, Point3f center, Float size, out Vector3f ez)
         {
             while (true)
             {
