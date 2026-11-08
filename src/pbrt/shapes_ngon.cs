@@ -120,6 +120,28 @@ namespace pbrt
             return mesh.p[firstVertex + k];
         }
 
+        internal Point3f CornerPoint(int k)
+        {
+            return Corner(k);
+        }
+
+        internal Vector3f PlaneNormal
+        {
+            get
+            {
+                return planeNormal;
+            }
+        }
+
+        // The sample at a point of the plane of the polygon (inside it, to rounding), with the given density
+        internal pstd.optional<ShapeSample> SampleAtPoint(double px, double py, double pz, Float time, Float pdf)
+        {
+            int fan;
+            double b0, b1, b2;
+            FanWeights(px, py, pz, out fan, out b0, out b1, out b2);
+            return SampleAtFan(fan, b0, b1, b2, time, true, pdf);
+        }
+
         // Whether the points (render space, in order around the polygon) are a planar, convex, non-degenerate polygon, and if so the corners that the sampling
         // by projected solid angle uses (those that are not on the line of their neighbors; null if all are).
         public static bool Classify(double[][] c, out int[] keptCorners)

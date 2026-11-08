@@ -2987,6 +2987,10 @@ namespace pbrt
             {
                 shapes = Quad.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);
             }
+            else if (name == "rectanglemesh")
+            {
+                shapes = Rectangle.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "ngonmesh")
             {
                 shapes = Ngon.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);

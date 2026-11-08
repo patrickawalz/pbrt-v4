@@ -98,6 +98,13 @@ namespace pbrt
             return shapes[0] as Ngon;
         }
 
+        private static Rectangle MakeRectangle(Point3f[] p, bool projected)
+        {
+            Ngon inner = MakeNgon(p, projected);
+            EXPECT_TRUE(Rectangle.IsRectangle(p));
+            return new Rectangle(inner, projected);
+        }
+
         private static double[][] ToDouble(Point3f[] p)
         {
             double[][] c = new double[p.Length][];
@@ -426,10 +433,19 @@ namespace pbrt
             return weights;
         }
 
-        private static void CheckSampling(int n, bool projected, int seed, bool edgeOn)
+        private static void CheckSampling(int n, bool projected, int seed, bool edgeOn, bool rectangle = false)
         {
             Random random = new Random(seed);
-            double[][] polygon = ConvexPolygon2D(random, n, 1);
+            double[][] polygon;
+            if (rectangle)
+            {
+                double w = 0.4 + random.NextDouble() * 1.6, h = 0.4 + random.NextDouble() * 1.6;
+                polygon = new double[][] { new double[] { 0, 0 }, new double[] { w, 0 }, new double[] { w, h }, new double[] { 0, h } };
+            }
+            else
+            {
+                polygon = ConvexPolygon2D(random, n, 1);
+            }
             Vector3f ex, ey, ez;
             RandomPlane(random, out ex, out ey, out ez);
             Point3f origin = new Point3f(0.3f, -0.2f, 0.5f);
@@ -443,7 +459,7 @@ namespace pbrt
                 minY = Math.Min(minY, polygon[i][1]);
                 maxY = Math.Max(maxY, polygon[i][1]);
             }
-            Ngon ngon = MakeNgon(corners, projected);
+            Shape ngon = rectangle ? MakeRectangle(corners, projected) : MakeNgon(corners, projected);
 
             // The reference point: off to a side of the polygon, at a distance of about its size (close enough for a large solid angle); with a normal in a random
             // direction (half of the polygon may then be below the horizon)
@@ -459,7 +475,7 @@ namespace pbrt
             ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(p, new Vector3f(0, 0, 0)), ns, ns, 0);
 
             const int cells = 6;
-            double[] expected = CellWeights(polygon, origin, ex, ey, ez, p, nrm, projected, edgeOn && !projected, cells, 40, minX, maxX, minY, maxY);
+            double[] expected = CellWeights(polygon, origin, ex, ey, ez, p, nrm, projected, edgeOn && !projected && !rectangle, cells, 40, minX, maxX, minY, maxY);
             double total = 0;
             for (int c = 0; c < expected.Length; ++c)
             {
@@ -470,6 +486,7 @@ namespace pbrt
             int accepted = 0;
             double worstPdfError = 0;
             int boundaryMisses = 0;
+            double worstSolidAngleError = 0;
             const int count = 60000;
             for (int i = 0; i < count; ++i)
             {
@@ -485,6 +502,11 @@ namespace pbrt
                 int cv = Math.Min(cells - 1, Math.Max(0, (int)((y - minY) / (maxY - minY) * cells)));
                 ++counts[cu * cells + cv];
                 ++accepted;
+                if (rectangle && !projected && !edgeOn)
+                {
+                    // the density is one over the solid angle (the integral of the cosine over the squared distance, by quadrature)
+                    worstSolidAngleError = Math.Max(worstSolidAngleError, Math.Abs(1 / (ss.value().pdf * total) - 1));
+                }
                 // the density of Sample and PDF agree
                 Vector3f wi = pbrt.Normalize(ss.value().intr.p() - p);
                 Float pdf = ngon.PDF(ctx, wi);
@@ -513,13 +535,14 @@ namespace pbrt
                     ++degrees;
                 }
             }
-            Console.WriteLine("[Ngon] n=" + n + (projected ? " projected" : " solidangle") + (edgeOn ? " edge-on" : "") + ": worst |z| " +
+            Console.WriteLine((rectangle ? "[Rectangle] n=" : "[Ngon] n=") + n + (projected ? " projected" : " solidangle") + (edgeOn ? " edge-on" : "") + ": worst |z| " +
                               worstZ.ToString("F2", CultureInfo.InvariantCulture) + ", chi2/dof " +
                               (chiSquare / Math.Max(degrees, 1)).ToString("F2", CultureInfo.InvariantCulture) + ", pdf mismatches " + boundaryMisses + ", worst pdf mismatch " +
                               worstPdfError.ToString("E1", CultureInfo.InvariantCulture));
             EXPECT_LT(worstZ, 5.0);
             EXPECT_LT(chiSquare / Math.Max(degrees, 1), 2.0);
             EXPECT_LT(boundaryMisses, accepted / 2000);
+            EXPECT_LT(worstSolidAngleError, 2e-3);
             EXPECT_LT(worstPdfError, 2e-3);
         }
 
@@ -541,6 +564,25 @@ namespace pbrt
                 CheckSampling(n, false, 200 + n, false);
             }
             CheckSampling(6, false, 301, true);
+        }
+
+        [TEST("Rectangle", "SolidAngleSamplingMatchesQuadrature")]
+        public static void Rectangle_SolidAngleSamplingMatchesQuadrature()
+        {
+            for (int seed = 700; seed < 712; ++seed)
+            {
+                CheckSampling(4, false, seed, false, true);
+            }
+            CheckSampling(4, false, 750, true, true);
+        }
+
+        [TEST("Rectangle", "ProjectedSamplingMatchesQuadrature")]
+        public static void Rectangle_ProjectedSamplingMatchesQuadrature()
+        {
+            for (int seed = 800; seed < 806; ++seed)
+            {
+                CheckSampling(4, true, seed, false, true);
+            }
         }
     }
 }  // namespace pbrt
