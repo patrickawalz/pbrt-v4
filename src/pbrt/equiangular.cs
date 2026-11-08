@@ -28,6 +28,8 @@ namespace pbrt
         // Whether equiangular sampling takes part in the segment's weights, and the density of uniform distance sampling (0: not used)
         public bool equiangular;
         public Float pdfUniform;
+        // (planetary shadow-aware distance sampling) the atmosphere of the segment if the strategy takes part, else null
+        public AtmosphereMedium atmosphere;
     }
 
     public static class EquiangularSampling

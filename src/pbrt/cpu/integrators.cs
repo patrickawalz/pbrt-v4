@@ -5544,9 +5544,11 @@ namespace pbrt
                                  Float analyserAngle = 0,
                                  PolarisedPathIntegrator.Measurement measurement = PolarisedPathIntegrator.Measurement.Intensity,
                                  bool equiangular = false, int equiangularSamples = 1, int equiangularMultipleDepth = int.MaxValue,
-                                 bool uniformDistance = false)
+                                 bool uniformDistance = false, bool shadowAware = false)
             : base(camera, sampler, aggregate, TextureMedium.AddEmissionLights(lights))
         {
+            // (not in pbrt-v4) Planetary shadow-aware distance sampling of the scattering point toward the sun (see ShadowAwareDistance)
+            this.shadowAware = shadowAware && ShadowAwareLights(lights);
             // (not in pbrt-v4) Several equiangular samples per segment for the first scatterings (Fong et al., 4.1)
             this.equiangularSamples = Math.Max(1, equiangularSamples);
             this.equiangularMultipleDepth = equiangularMultipleDepth;
@@ -5598,6 +5600,24 @@ namespace pbrt
 
         static Point2f P2(double x, double y) { return new Point2f((Float)x, (Float)y); }
 
+        // (not in pbrt-v4) A light that the shadow of the planet cuts the segments for: the sun or a distant light, whose direction does not depend on the point
+        internal static bool ShadowAwareLight(Light light)
+        {
+            return light is SunLight || light is DistantLight;
+        }
+
+        static bool ShadowAwareLights(List<Light> lights)
+        {
+            foreach (Light light in lights)
+            {
+                if (ShadowAwareLight(light))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // VolPathIntegrator Method Definitions
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambdaRef,
                                            Sampler sampler, ScratchBuffer scratchBuffer,
@@ -5619,7 +5639,7 @@ namespace pbrt
                 // factor of beta, so its first element is beta
                 st = new PathState(new SampledSpectrum(1.0f), PAttenuation.Identity(), PLight.Zero(), true, polarised, true)
             };
-            ctx.st.trackSegment = (equiangular || uniformDistance) && !polarised;
+            ctx.st.trackSegment = ((equiangular || uniformDistance) && !polarised) || shadowAware;
             VolPathWalkHook hook = new VolPathWalkHook(this, visibleSurf, -ray.d);
             try
             {
@@ -5684,7 +5704,11 @@ namespace pbrt
             public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
             {
                 equiangularSegment.active = false;
-                if ((!vp.equiangular && !vp.uniformDistance) || polarised)
+                // The strategies of the walk's segment: equiangular and uniform distances for the scalar path, and the planet's shadow
+                // for both (the polarised path takes the Mueller matrix of the scattering at the point, see SampleShadowAware)
+                bool classic = (vp.equiangular || vp.uniformDistance) && !polarised;
+                AtmosphereMedium atmosphere = vp.shadowAware ? medium as AtmosphereMedium : null;
+                if (!classic && atmosphere == null)
                 {
                     return;
                 }
@@ -5703,10 +5727,11 @@ namespace pbrt
                 seg.active = true;
                 // (Fong et al., 4.1) Several samples of the segment for the first scatterings, one for the later ones
                 seg.count = depth < vp.equiangularMultipleDepth ? vp.equiangularSamples : 1;
-                seg.equiangular = vp.equiangular;
+                seg.equiangular = classic && vp.equiangular;
                 // (Fong 4.2.1) Uniform distance sampling needs a segment of finite length
-                seg.pdfUniform = vp.uniformDistance && !Float.IsInfinity(seg.tMax) && seg.tMax > 0 ? 1 / seg.tMax : 0;
-                if (vp.equiangular)
+                seg.pdfUniform = classic && vp.uniformDistance && !Float.IsInfinity(seg.tMax) && seg.tMax > 0 ? 1 / seg.tMax : 0;
+                seg.atmosphere = atmosphere;
+                if (seg.equiangular)
                 {
                     for (int i = 0; i < seg.count; ++i)
                     {
@@ -5716,6 +5741,27 @@ namespace pbrt
                 if (seg.pdfUniform > 0)
                 {
                     L += vp.SampleSegmentPoint(ctx, medium, seg, true);
+                }
+                if (atmosphere != null)
+                {
+                    SampledSpectrum Ls = vp.SampleShadowAware(ctx, medium, seg, polarised ? new SampledSpectrum(1.0f) : ctx.st.beta,
+                                                              out Vector3f wiShadow, out MediumInteraction intrShadow);
+                    if ((bool)Ls)
+                    {
+                        if (!polarised)
+                        {
+                            L += Ls;
+                        }
+                        else
+                        {
+                            PLight Lp = new PLight(Ls);
+                            if (PolarisedPathIntegrator.PhaseAttenuation(intrShadow.phase, intrShadow.wo, wiShadow, true, out PAttenuation M))
+                            {
+                                Lp = M * Lp;
+                            }
+                            pL += ctx.st.pa * Lp;
+                        }
+                    }
                 }
             }
 
@@ -5798,10 +5844,25 @@ namespace pbrt
                 }
                 // Sample direct lighting at volume-scattering event
                 intr = new MediumInteraction(p, -ctx.ray.d, ctx.ray.time, rayMedium, mp.phase);
+                EquiangularSegment seg = equiangularSegment.active ? equiangularSegment : null;
+                scatterValid = false;
+                if (seg != null)
+                {
+                    seg.t = Length(p - seg.origin);
+                    seg.sigmaS0 = mp.sigma_s[0];
+                    seg.segL = ctx.st.segL;
+                    // What the direction that the phase function samples from here needs, if it reaches a light (OnSurfaceHit, OnEscape)
+                    scatter.origin = seg.origin; scatter.direction = seg.direction; scatter.tMax = seg.tMax;
+                    scatter.context = seg.context; scatter.r_u0 = seg.r_u0; scatter.segL = seg.segL; scatter.count = seg.count; scatter.equiangular = seg.equiangular; scatter.pdfUniform = seg.pdfUniform;
+                    scatter.atmosphere = seg.atmosphere;
+                    scatter.t = seg.t; scatter.sigmaS0 = seg.sigmaS0;
+                    scatterP = p;
+                    scatterValid = true;
+                }
                 if (polarised)
                 {
                     SampledSpectrum Ld = vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f), ctx.st.r_u,
-                                                     ctx.stack, depth < maxDepth, out Vector3f wiLight);
+                                                     ctx.stack, depth < maxDepth, out Vector3f wiLight, seg);
                     if ((bool)Ld)
                     {
                         PLight Lp = new PLight(Ld);
@@ -5813,20 +5874,6 @@ namespace pbrt
                 }
                 else
                 {
-                    EquiangularSegment seg = equiangularSegment.active ? equiangularSegment : null;
-                    scatterValid = false;
-                    if (seg != null)
-                    {
-                        seg.t = Length(p - seg.origin);
-                        seg.sigmaS0 = mp.sigma_s[0];
-                        seg.segL = ctx.st.segL;
-                        // What the direction that the phase function samples from here needs, if it reaches an area light (OnSurfaceHit)
-                        scatter.origin = seg.origin; scatter.direction = seg.direction; scatter.tMax = seg.tMax;
-                        scatter.context = seg.context; scatter.r_u0 = seg.r_u0; scatter.segL = seg.segL; scatter.count = seg.count; scatter.equiangular = seg.equiangular; scatter.pdfUniform = seg.pdfUniform;
-                        scatter.t = seg.t; scatter.sigmaS0 = seg.sigmaS0;
-                        scatterP = p;
-                        scatterValid = true;
-                    }
                     L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
                                      out Vector3f _, seg);
                 }
@@ -5884,10 +5931,24 @@ namespace pbrt
                                     rl2[c] = scatterRl0[c] != 0 ? ctx.st.r_l[c] / scatterRl0[c] : 0;
                                 r_uniform = scatter.r_u0 * scatter.segL * rl2 * (scatter.pdfUniform * p_l / (scatter.sigmaS0 * scatterPdf));
                             }
+                            // (not in pbrt-v4) The shadow-aware distance sample of that segment finds the same path with the same direction
+                            if (scatterValid && scatter.atmosphere != null && ShadowAwareLight(light))
+                            {
+                                SampledSpectrum density = vp.ShadowAwareDensity(scatter, ctx.lambda, Normalize(ctx.ray.d), scatter.t);
+                                if ((bool)density)
+                                {
+                                    SampledSpectrum rl2 = new SampledSpectrum(0.0f);
+                                    for (int c = 0; c < NSpectrumSamples; ++c)
+                                        rl2[c] = scatterRl0[c] != 0 ? ctx.st.r_l[c] / scatterRl0[c] : 0;
+                                    Float pdfDirection = light.PDF_Li(prevIntrContext, ctx.ray.d, true);
+                                    r_uniform += scatter.r_u0 * scatter.segL * rl2 *
+                                                 (density * (vp.PmfOrZero(scatter.context, light) * pdfDirection / (scatter.sigmaS0 * scatterPdf)));
+                                }
+                            }
                             ctx.st.r_l *= p_l;
                             L += ctx.st.beta * Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average();
                             if (polarised)
-                                pL += ctx.st.pa * new PLight(Le / (ctx.st.r_u + ctx.st.r_l).Average());
+                                pL += ctx.st.pa * new PLight(Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average());
                         }
                     }
                 }
@@ -6335,6 +6396,7 @@ namespace pbrt
             Interaction target;
             Vector3f wiLight;
             Float pmfWalk;          // the density of the walk's connection to the point, per unit solid angle (delta: the delta measure)
+            Float pdfSolidAngle = 0;    // the density of the direction toward the light that the connection takes (the uniform strategy's light)
             if (!uniform)
             {
                 if (areaLight != null)
@@ -6378,6 +6440,7 @@ namespace pbrt
                 target = ls.value().pLight;
                 wiLight = ls.value().wi;
                 pmfWalk = sampledLight.value().p * ls.value().pdf;
+                pdfSolidAngle = ls.value().pdf;
             }
             BSDF phaseBSDF = intr.GetBSDF();
             SampledSpectrum f_hat = phaseBSDF.f(intr.wo, wiLight);
@@ -6418,7 +6481,138 @@ namespace pbrt
             // Uniform distance sampling, with the connection the walk makes
             if (segment.pdfUniform > 0)
                 r_total += r_u0 * rl_seg * rl_light * (segment.pdfUniform * pmfWalk);
+            // The distance in the lit part of the segment, if the light is the sun
+            if (segment.atmosphere != null && ShadowAwareLight(light))
+            {
+                SampledSpectrum density = ShadowAwareDensity(segment, lambda, wiLight, t);
+                if ((bool)density)
+                    r_total += r_u0 * rl_seg * rl_light * (density * (PmfOrZero(segment.context, light) * pdfSolidAngle));
+            }
             return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_light * Lemit / r_total.Average();
+        }
+
+        // (not in pbrt-v4) The density of the shadow-aware strategy for the distance t on the segment, for every wavelength, if the
+        // connection goes in the direction wi toward the sun; zero if the segment has no such strategy for that direction
+        internal SampledSpectrum ShadowAwareDensity(EquiangularSegment segment, SampledWavelengths lambda, Vector3f wi, Float t)
+        {
+            if (segment.atmosphere == null)
+            {
+                return new SampledSpectrum(0.0f);
+            }
+            ShadowAwareDistance distance = ShadowAwareDistance.Scratch();
+            if (!distance.Build(segment.atmosphere, segment.origin, segment.direction, segment.tMax, wi, lambda))
+            {
+                return new SampledSpectrum(0.0f);
+            }
+            return distance.Density(t);
+        }
+
+        // (not in pbrt-v4) Planetary shadow-aware distance sampling (Breyer and Zirr 2022, see ShadowAwareDistance): the direction
+        // toward the sun is chosen from the start of the segment, then the distance of the scattering point only among the lit
+        // pieces of the segment, in proportion to the collisions of the majorant. The path is also found by the walk's collision with
+        // a connection to the light (SampleLd), and by the direction of the phase function reaching the sun, so the three go into
+        // the weights as in SampleSegmentPoint, with a density per wavelength for the distance. beta is the throughput (one for the
+        // polarised path, which keeps it in the Mueller matrix); the scattering at the point is returned for the Mueller matrix.
+        SampledSpectrum SampleShadowAware(WalkContext ctx, Medium medium, EquiangularSegment segment, SampledSpectrum beta,
+                                          out Vector3f wiLight, out MediumInteraction intr)
+        {
+            SampledSpectrum zero = new SampledSpectrum(0.0f);
+            wiLight = default;
+            intr = null;
+            SampledWavelengths lambda = ctx.lambda;
+            Sampler sampler = ctx.sampler;
+            Float uLightChoice = sampler.Get1D();
+            Float uDistance = sampler.Get1D();
+            Point2f uLight = sampler.Get2D();
+            pstd.optional<SampledLight> sampledLight = lightSampler.Sample(segment.context, uLightChoice);
+            if (!sampledLight || !ShadowAwareLight(sampledLight.value().light))
+            {
+                return zero;
+            }
+            Light light = sampledLight.value().light;
+            Float pmfSegment = sampledLight.value().p;
+            pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
+            if (!lsOrigin || !lsOrigin.value().L || lsOrigin.value().pdf == 0)
+            {
+                return zero;
+            }
+            Float pdfDirection = lsOrigin.value().pdf;
+            ShadowAwareDistance distance = ShadowAwareDistance.Scratch();
+            if (!distance.Build(segment.atmosphere, segment.origin, segment.direction, segment.tMax, lsOrigin.value().wi, lambda))
+            {
+                return zero;
+            }
+            if (!distance.Sample(uDistance, out Float t, out SampledSpectrum density))
+            {
+                return zero;
+            }
+            Point3f p = segment.origin + t * segment.direction;
+
+            // The transmittance to the point, as the walk's tracker sees the segment
+            SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
+            RNG rng = new RNG(Hash(segment.origin, t), Hash(segment.direction));
+            Float uTrack = rng.Uniform<Float>();
+            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+                new Ray(segment.origin, segment.direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
+                (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
+                {
+                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mpp.sigma_a - mpp.sigma_s);
+                    MediumEvents.RatioTrackingStep(ref T_seg, ref rl_seg, ref ru_seg, T_maj_, sigma_maj, sigma_n);
+                    return (bool)T_seg;
+                });
+            if (!T_seg)
+            {
+                return zero;
+            }
+            MediumEvents.FinishSegment(ref T_seg, ref rl_seg, ref ru_seg, T_maj);
+
+            // The scattering at the point, and the connection to the sun from there
+            MediumProperties mp = medium.SamplePoint(p, lambda);
+            if (!mp.sigma_s)
+            {
+                return zero;
+            }
+            intr = new MediumInteraction(p, -segment.direction, ctx.ray.time, medium, mp.phase);
+            LightSampleContext lightContext = LightContextAt(intr, false, default);
+            pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
+            if (!ls || !ls.value().L || ls.value().pdf == 0)
+            {
+                return zero;
+            }
+            Vector3f wi = ls.value().wi;
+            wiLight = wi;
+            Float pmfWalk = PmfOrZero(lightContext, light) * ls.value().pdf;
+            BSDF phaseBSDF = intr.GetBSDF();
+            SampledSpectrum f_hat = phaseBSDF.f(intr.wo, wi);
+            if (!f_hat)
+            {
+                return zero;
+            }
+            BoundaryStack stack = ctx.stack;
+            Ray lightRay = intr.SpawnRayTo(ls.value().pLight);
+            RNG rngLight = new RNG(Hash(lightRay.o), Hash(lightRay.d));
+            SampledSpectrum T_light = ShadowRay(lightRay, intr, ls.value().pLight, ref stack, lambda, rngLight, true,
+                                                out SampledSpectrum ru_light, out SampledSpectrum rl_light);
+            if (!T_light)
+            {
+                return zero;
+            }
+
+            // The ways to find the vertex and the connection, relative to the connection's hero wavelength: a collision of the walk and
+            // the sampling of the light (SampleLd), the direction of the phase function reaching the sun, this strategy, and the
+            // others of the segment
+            SampledSpectrum r_u0 = segment.r_u0;
+            SampledSpectrum r_total = r_u0 * ru_seg * rl_light * mp.sigma_s * pmfWalk;
+            if (!IsDeltaLight(light.Type()))
+            {
+                r_total += r_u0 * ru_seg * ru_light * mp.sigma_s * phaseBSDF.PDF(intr.wo, wi);
+            }
+            r_total += r_u0 * rl_seg * rl_light * (density * (pmfSegment * pdfDirection));
+            if (segment.pdfUniform > 0)
+            {
+                r_total += r_u0 * rl_seg * rl_light * (segment.pdfUniform * pmfWalk);
+            }
+            return beta * T_seg * mp.sigma_s * f_hat * T_light * ls.value().L / r_total.Average();
         }
 
         // (not in pbrt-v4) The probability that equiangular sampling chooses the light: it chooses among the lights it takes part with
@@ -6564,6 +6758,16 @@ namespace pbrt
                 r_equiangular += equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
                                  (equiangularSegment.pdfUniform * p_l / equiangularSegment.sigmaS0);
             }
+            // (not in pbrt-v4) ... and by the distance in the lit part of the segment, for the same direction toward the sun
+            if (equiangularSegment != null && equiangularSegment.atmosphere != null && volumeLight == null && ShadowAwareLight(light))
+            {
+                SampledSpectrum density = ShadowAwareDensity(equiangularSegment, lambda, wi, equiangularSegment.t);
+                if ((bool)density)
+                {
+                    r_equiangular += equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
+                                     (density * (PmfOrZero(equiangularSegment.context, light) * ls.value().pdf / equiangularSegment.sigmaS0));
+                }
+            }
             // Return path contribution function estimate for direct lighting
             r_l *= r_p * p_l;
             r_u *= r_p * scatterPDF;
@@ -6598,7 +6802,7 @@ namespace pbrt
             return new VolPathIntegrator(maxDepth, camera, sampler, aggregate,
                                          lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement,
                                          equiangular, equiangularSamples, equiangularMultipleDepth,
-                                         parameters.GetOneBool("uniformdistance", false));
+                                         parameters.GetOneBool("uniformdistance", false), parameters.GetOneBool("shadowaware", false));
         }
 
         // VolPathIntegrator Private Members
@@ -6609,6 +6813,7 @@ namespace pbrt
         bool equiangular;
         int equiangularSamples, equiangularMultipleDepth;
         bool uniformDistance;
+        bool shadowAware;
         bool polarised, analyser;
         Float analyserAngle;
         PolarisedPathIntegrator.Measurement measurement;

@@ -960,6 +960,8 @@ namespace pbrt
         public double CenterX() { return cx; }
         public double CenterY() { return cy; }
         public double CenterZ() { return cz; }
+        // The radius of the planet in scene units, for the shadow it casts
+        public double PlanetRadiusUnits() { return planetRadiusUnits; }
         public double[] ShellRadii() { return shellRadius; }
 
         // The altitude above the planet in metres of a point of the scene
