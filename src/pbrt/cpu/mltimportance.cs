@@ -84,11 +84,12 @@ namespace pbrt
         // epsilon is the fraction of the mean luminance of the image that is added to the luminance of a pixel in the relative error,
         // so that dark pixels do not take all the samples; exponent is the power of the standard deviation by which the visits grow
         // (1 minimizes the sum of the relative variances, 2 equalizes the relative errors); blurRadius is the radius of the filter
-        // of the variance (0: none); robust leaves out the group of a pixel that is farthest from the median (with four groups or more).
+        // of the variance (0: none); robust leaves out the group of a pixel that is farthest from the median (with four groups or more), unless clean
+        // is given (the estimate without the paths that the outlier detector found), which then is the robust one.
         // The noise weights come from that robust variance, the tail weights from the plain variance of all the groups, divided by
         // the luminance to the power tailExponent (below one, the dim paths are visited more than under the luminance).
         public void UpdateFromStage(MLTNoiseEstimate noise, int mutationsPerPixel, Float exponent, Float epsilon, int blurRadius,
-                                    bool robust, Float tailExponent)
+                                    bool robust, Float tailExponent, MLTNoiseEstimate clean = null)
         {
             int groups = noise.Groups;
             double[] estimates = new double[groups];
@@ -134,7 +135,17 @@ namespace pbrt
                 pooledPlainVariance[i] += visits * plainRelative;
                 int used = groups;
                 double center = stageLuminance[i];
-                if (robust && groups >= 4)
+                if (clean != null)
+                {
+                    // The detector has kept the outliers out of the clean estimate: no group is left out, the variance is that of the others
+                    center = 0;
+                    for (int k = 0; k < groups; ++k)
+                    {
+                        estimates[k] = groups * clean.Sum(k, i) / mutationsPerPixel;
+                        center += estimates[k] / groups;
+                    }
+                }
+                else if (robust && groups >= 4)
                 {
                     Array.Copy(estimates, sorted, groups);
                     Array.Sort(sorted);
@@ -369,6 +380,126 @@ namespace pbrt
         readonly int width, height, groups;
         readonly double[][] sums;
         readonly double[] visits;
+    }
+
+
+    // MLTOutlierDetector Definition: the outlier detector of Selectively Metropolised Monte Carlo (Bitterli and Jarosz, "Selectively Metropolised
+    // Monte Carlo light transport simulation", ACM Transactions on Graphics 38(6), 2019). Every pixel has cascaded buffers B_0 ... B_m
+    // that count the samples of the pixel in exponentially spaced luminance ranges (centered on alpha beta^j, alpha 1/2 and beta 2); a sample
+    // splats to the two buffers around its luminance, in proportion to the distance. A sample is an outlier if the counts of the buffers,
+    // interpolated at its luminance, are below tau = max(3, spp / m), or if its luminance is beyond the range (1000). The classification
+    // reads the counts of the stages before, and the samples of a stage are recorded apart and added when the stage ends (the paper's double buffer),
+    // so the classification does not change during a stage.
+    public sealed class MLTOutlierDetector
+    {
+        // MLTOutlierDetector Public Methods
+        public MLTOutlierDetector(Bounds2i bounds)
+        {
+            originX = bounds.pMin.x;
+            originY = bounds.pMin.y;
+            width = bounds.pMax.x - bounds.pMin.x;
+            height = bounds.pMax.y - bounds.pMin.y;
+            counts = new float[width * height * bufferCount];
+            pending = new double[width * height * bufferCount];
+        }
+
+        // Whether any samples have been counted: before that nothing is an outlier
+        public bool Ready { get { return samplesPerPixel > 0; } }
+
+        public int BufferCount { get { return bufferCount; } }
+
+        public void Record(Point2f pRaster, Float luminance)
+        {
+            int index = PixelIndex(pRaster);
+            Position(luminance, out int lower, out Float fraction);
+            AtomicAdd(ref pending[index * bufferCount + lower], 1 - fraction);
+            if (fraction > 0)
+            {
+                AtomicAdd(ref pending[index * bufferCount + lower + 1], fraction);
+            }
+        }
+
+        // The recorded samples join the counts; samplesPerStage is the number of samples per pixel that were recorded
+        public void Commit(double samplesPerStage)
+        {
+            for (int i = 0; i < counts.Length; ++i)
+            {
+                counts[i] += (float)pending[i];
+                pending[i] = 0;
+            }
+            samplesPerPixel += samplesPerStage;
+        }
+
+        public bool IsOutlier(Point2f pRaster, Float luminance)
+        {
+            if (!Ready || !(luminance > 0))
+            {
+                return false;
+            }
+            if (luminance > rangeLimit)
+            {
+                return true;
+            }
+            int index = PixelIndex(pRaster);
+            Position(luminance, out int lower, out Float fraction);
+            double count = (1 - fraction) * counts[index * bufferCount + lower];
+            if (fraction > 0)
+            {
+                count += fraction * counts[index * bufferCount + lower + 1];
+            }
+            double threshold = Math.Max(3.0, samplesPerPixel / bufferCount);
+            return count < threshold;
+        }
+
+        // MLTOutlierDetector Private Methods
+        int PixelIndex(Point2f pRaster)
+        {
+            int x = Math.Clamp((int)MathF.Floor(pRaster.x) - originX, 0, width - 1);
+            int y = Math.Clamp((int)MathF.Floor(pRaster.y) - originY, 0, height - 1);
+            return y * width + x;
+        }
+
+        // The lower buffer of a luminance and the share of the upper one
+        static void Position(Float luminance, out int lower, out Float fraction)
+        {
+            Float position = MathF.Log2(MathF.Max(luminance, 1e-8f) / alpha);
+            if (position <= 0)
+            {
+                lower = 0;
+                fraction = 0;
+                return;
+            }
+            int j = (int)MathF.Floor(position);
+            if (j >= bufferCount - 1)
+            {
+                lower = bufferCount - 1;
+                fraction = 0;
+                return;
+            }
+            lower = j;
+            fraction = position - j;
+        }
+
+        static void AtomicAdd(ref double target, double value)
+        {
+            double initial, computed;
+            do
+            {
+                initial = Volatile.Read(ref target);
+                computed = initial + value;
+            }
+            while (Interlocked.CompareExchange(ref target, computed, initial) != initial);
+        }
+
+        // MLTOutlierDetector Private Members
+        const Float alpha = 0.5f;
+        const Float rangeLimit = 1000;
+        // alpha beta^(bufferCount - 1) is the range limit: 0.5 * 2^11 = 1024
+        const int bufferCount = 12;
+        readonly int originX, originY, width, height;
+        readonly float[] counts;
+        readonly double[] pending;
+        double samplesPerPixel;
     }
 
 }  // namespace pbrt

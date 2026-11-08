@@ -274,6 +274,12 @@ namespace pbrt
                 integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "mlt")
                 integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
+            else if (name == "erpt")
+                integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc, "erpt");
+            else if (name == "pmcer")
+                integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc, "pmcer");
+            else if (name == "jrlt" || name == "smmc" || name == "jrsmmc")
+                integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc, name);
             else if (name == "function")
                 integrator = FunctionIntegrator.Create(parameters, camera, sampler, loc);
             else if (name == "sppm")
@@ -3371,13 +3377,21 @@ namespace pbrt
                              int noiseBlurRadius = 3, Float importanceRange = 16, bool writeImportance = false,
                              int noiseGroups = 4, bool noiseRobust = true, Float stageGrowth = 2,
                              MLTStageKind[] schedule = null, Float tailExponent = 0.75f, Float tailStepProbability = 0.5f,
-                             Float mixturePilot = 0.2f, Float mixtureNoise = 0.5f, Float mixtureTail = 0.3f)
+                             Float mixturePilot = 0.2f, Float mixtureNoise = 0.5f, Float mixtureTail = 0.3f,
+                             string algorithm = "mlt", int chainLength = 16, Float mutationsPerBase = 32, bool perDepthEnergy = true,
+                             Float depthExponent = 1, int population = 2000, int mutationsPerIteration = 16,
+                             Float restoreRate = 1, Float mltRatio = 1, Float outlierFloor = 1, bool outlierNoise = false)
             : base(aggregate, volpath == null ? BDPTIntegrator.EmissionLightsForBDPT(lights) : lights)
         {
             this.noiseImportance = noiseImportance; this.stages = stages; this.noiseExponent = noiseExponent;
             this.noiseEpsilon = noiseEpsilon; this.noiseBlurRadius = noiseBlurRadius; this.importanceRange = importanceRange;
             this.writeImportance = writeImportance;
             this.noiseGroups = Math.Max(2, noiseGroups); this.noiseRobust = noiseRobust; this.stageGrowth = stageGrowth;
+            this.algorithm = algorithm; this.chainLength = Math.Max(1, chainLength); this.mutationsPerBase = Math.Max(1, mutationsPerBase);
+            this.perDepthEnergy = perDepthEnergy; this.depthExponent = depthExponent;
+            this.outlierFloor = outlierFloor; this.outlierNoise = outlierNoise;
+            this.restoreRate = Math.Max(1e-3f, restoreRate); this.mltRatio = Math.Max(0, mltRatio);
+            this.population = Math.Max(1, population); this.mutationsPerIteration = Math.Max(1, mutationsPerIteration);
             this.mixturePilot = mixturePilot; this.mixtureNoise = mixtureNoise; this.mixtureTail = mixtureTail;
             this.schedule = schedule; this.tailExponent = tailExponent; this.tailStepProbability = tailStepProbability;
             // (not in pbrt-v4) With bdpt the emissive media are lights too, and the camera subpaths gather their emission
@@ -3494,6 +3508,17 @@ namespace pbrt
             // Set up connection to display server, if enabled
             if (Options.displayServer.Length != 0)
                 ErrorExit("--display-server is not supported by Magi.");
+
+            if (algorithm != "mlt")
+            {
+                if (algorithm == "jrlt" || algorithm == "smmc" || algorithm == "jrsmmc")
+                    RenderSelectiveRedistribution(camera.GetFilm(), bootstrapLuminance, bootstrapRaster, threadScratchBuffers, timer);
+                else if (algorithm == "pmcer")
+                    RenderPopulationEnergyRedistribution(camera.GetFilm(), bootstrapLuminance, threadScratchBuffers, timer);
+                else
+                    RenderEnergyRedistribution(camera.GetFilm(), bootstrapLuminance, threadScratchBuffers, timer);
+                return;
+            }
 
             // (not in pbrt-v4) The chains follow the importance I(x) = c(x) w(pixel of x); w is one in the first stage (the luminance), and
             // with the noise importance the following stages use the noise of the stage before (see mltimportance.cs). Every stage
@@ -3643,14 +3668,751 @@ namespace pbrt
                     importance.UpdateFromStage(noise, stageMutationsPerPixel, noiseExponent, noiseEpsilon, noiseBlurRadius, noiseRobust, tailExponent);
             }
             if (writeImportance)
+            {
                 importance.WritePFM(RemoveExtension(film.GetFilename()) + ".importance.pfm", MLTStageKind.Noise);
                 importance.WritePFM(RemoveExtension(film.GetFilename()) + ".tail.pfm", MLTStageKind.Tail);
+            }
 
             // Store final image computed with MLT
             ImageMetadata metadata = new ImageMetadata();
             metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
             camera.InitMetadata(metadata);
             camera.GetFilm().WriteImage(metadata, (Float)1 / mutationsPerPixel);
+        }
+
+        // (not in pbrt-v4) Energy redistribution path tracing in primary sample space (Cline, Talbot and Egbert, "Energy Redistribution
+        // Path Tracing", SIGGRAPH 2005): the paths of a path tracer, one random primary sample each, start short Markov chains, as many
+        // as their energy c (the luminance) is worth in units of the deposition energy e_d (floor(u + c / (chainLength e_d))), so
+        // the chains start where the energy is and are in equilibrium from their first step (there is no start-up bias, and no bootstrap
+        // normalisation). Every step of a chain deposits e_d, in the color of the path, where the chain is: here, as in mlt, the
+        // acceptance probability splits the deposit between the proposal and the current state, which has the same mean and less variance.
+        // The state of a chain has the depth (the multiplexed bdpt strategies of mlt) as in mlt, so the paths of every depth have their own
+        // deposition energy (the mean energy of their bootstrap samples over mutationsPerBase, the mean number of mutations of a path);
+        // the paths of a depth are in proportion to its mean energy to the power depthExponent.
+        void RenderEnergyRedistribution(Film film, Float[] bootstrapLuminance, ThreadLocal<ScratchBuffer> threadScratchBuffers,
+                                        Timer timer)
+        {
+            int depthCount = nDepths;
+            double[] meanEnergy = new double[depthCount];
+            for (int i = 0; i < bootstrapLuminance.Length; ++i)
+            {
+                meanEnergy[i % depthCount] += bootstrapLuminance[i];
+            }
+            double energySum = 0;
+            for (int d = 0; d < depthCount; ++d)
+            {
+                meanEnergy[d] /= nBootstrap;
+                energySum += meanEnergy[d];
+            }
+            if (!(energySum > 0))
+                ErrorExit("No light carrying paths found during bootstrap sampling! Are you trying to render a black image?");
+
+            long pixelCount = (long)film.SampleBounds().Area();
+            // The paths of the image: mutationsPerPixel is the budget of path evaluations, a path with its chains takes 1 + mutationsPerBase
+            long totalBases = (long)(pixelCount * Math.Max(1.0, mutationsPerPixel / (1.0 + mutationsPerBase)));
+            double shareSum = 0;
+            double[] share = new double[depthCount];
+            for (int d = 0; d < depthCount; ++d)
+            {
+                share[d] = meanEnergy[d] > 0 ? Math.Pow(meanEnergy[d], depthExponent) : 0;
+                shareSum += share[d];
+            }
+            long[] basesOfDepth = new long[depthCount];
+            long allBases = 0;
+            for (int d = 0; d < depthCount; ++d)
+            {
+                basesOfDepth[d] = (long)Math.Round(totalBases * share[d] / shareSum);
+                allBases += basesOfDepth[d];
+            }
+
+            ProgressReporter progressRender = new ProgressReporter(allBases, "Rendering (energy redistribution)", Options.quiet);
+            long firstBase = 0;
+            for (int depth = 0; depth < depthCount; ++depth)
+            {
+                long depthBases = basesOfDepth[depth];
+                if (depthBases <= 0)
+                    continue;
+                int depthIndex = depth;
+                // The deposition energy of the depth, and what a deposit adds to the film: the image of a depth is the integral of its
+                // contribution over the primary samples, which depthBases random ones estimate, times the number of pixels
+                double depositEnergy = (perDepthEnergy ? meanEnergy[depthIndex] : energySum / depthCount) / mutationsPerBase;
+                Float scale = (Float)(depositEnergy * pixelCount / depthBases);
+                long baseOffset = firstBase;
+                ParallelFor(0, depthBases, (long j) =>
+                {
+                    ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                    int rngIndex = unchecked((int)(nBootstrap * nDepths + (baseOffset + j) * depthCount + depthIndex));
+                    MLTSampler baseSampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma, largeStepProbability,
+                                                            MLTPathEvaluator.nSampleStreams);
+                    Point2f pBase;
+                    SampledWavelengths lambdaBase;
+                    SampledSpectrum LBase = L(scratchBuffer, baseSampler, depthIndex, out pBase, out lambdaBase);
+                    Float cBase = c(LBase, lambdaBase);
+                    scratchBuffer.Reset();
+                    if (cBase > 0)
+                    {
+                        RNG rng = new RNG((uint64_t)rngIndex ^ 0x2545F4914F6CDD1DUL);
+                        int chains = (int)Math.Floor(rng.Uniform<Float>() + cBase / (chainLength * depositEnergy));
+                        for (int chain = 0; chain < chains; ++chain)
+                        {
+                            MLTSampler sampler = baseSampler.Fork(chain);
+                            Point2f pCurrent = pBase;
+                            SampledSpectrum LCurrent = LBase;
+                            SampledWavelengths lambdaCurrent = lambdaBase;
+                            Float cCurrent = cBase;
+                            for (int step = 0; step < chainLength; ++step)
+                            {
+                                sampler.StartIteration();
+                                Point2f pProposed;
+                                SampledWavelengths lambdaProposed;
+                                SampledSpectrum LProposed = L(scratchBuffer, sampler, depthIndex, out pProposed, out lambdaProposed);
+                                Float cProposed = c(LProposed, lambdaProposed);
+                                Float accept = std.min<Float>(1, cProposed / cCurrent);
+                                if (accept > 0)
+                                    film.AddSplat(pProposed, LProposed * (accept * scale / cProposed), lambdaProposed);
+                                film.AddSplat(pCurrent, LCurrent * ((1 - accept) * scale / cCurrent), lambdaCurrent);
+                                if (rng.Uniform<Float>() < accept)
+                                {
+                                    pCurrent = pProposed;
+                                    LCurrent = LProposed;
+                                    lambdaCurrent = lambdaProposed;
+                                    cCurrent = cProposed;
+                                    sampler.Accept();
+                                }
+                                else
+                                    sampler.Reject();
+                                scratchBuffer.Reset();
+                            }
+                        }
+                    }
+                    progressRender.Update(1);
+                });
+                firstBase += depthBases;
+            }
+            progressRender.Done();
+
+            ImageMetadata metadata = new ImageMetadata();
+            metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
+            camera.InitMetadata(metadata);
+            camera.GetFilm().WriteImage(metadata, (Float)1);
+        }
+
+        // (not in pbrt-v4) Jump Restore light transport (Holl, Seidel and Singh, "Jump Restore Light Transport", 2024) and Selectively
+        // Metropolised Monte Carlo (Bitterli and Jarosz, ACM Transactions on Graphics 38(6), 2019) in primary sample space, per depth (the
+        // multiplexed strategies of the evaluator). Every path has the weight w of the outlier detector (cascaded per-pixel luminance
+        // counts): one for an outlier, the floor nu for the others (nu is 0 in "smmc" and "jrsmmc", 1 when the detector is not in the importance).
+        // A plain Monte Carlo estimate takes the part f (1 - w) of every candidate (a uniform primary sample), and Markov chains the part
+        // f w, which they follow with the importance I = c^beta m(pixel) w, where m is the importance map of the noise and tail stages of mlt (the
+        // detector also keeps the outliers out of the variance that the noise map follows: the clean estimate has the deposits of the
+        // paths that are not outliers, the tail map still sees them all). "smmc": seeds in proportion to I from the candidates, chains of
+        // chainLength small steps. "jrlt": every candidate with I > 0 starts a tour of small steps that ends at random with the rate
+        // K(x) = K0 P / I(x), and the time of a tour at every state, the mean 1 / (1 + K) of its exponential hold, is deposited as
+        // L w / I K0 P (the density of the tours is I / (K0 P), so the estimate is unbiased for any normaliser P that does not depend on
+        // the tour; P is the mean of I over the independent bootstrap samples, not below the mean of I of the stage before). "jrsmmc" starts the
+        // tours of Jump Restore from the outliers of the split, with P cross-fitted: the candidates of even and odd index are two independent
+        // halves, and the tours of one half use the mean of I over the other. The stages are unbiased estimates of the image, averaged by their
+        // budgets; the detector learns from the candidates of the stages before (it is committed when a stage ends), so the classification
+        // of a stage is fixed and the split is exact. The number of candidates of a stage follows from the budget and the evaluations per
+        // candidate that the stage before measured (smmc: mltRatio), so it does not depend on the random numbers of the stage.
+        void RenderSelectiveRedistribution(Film film, Float[] bootstrapLuminance, Point2f[] bootstrapRaster,
+                                           ThreadLocal<ScratchBuffer> threadScratchBuffers, Timer timer)
+        {
+            bool jumpRestore = algorithm == "jrlt" || algorithm == "jrsmmc";
+            bool hardSplit = algorithm == "smmc" || algorithm == "jrsmmc";
+            Float floorWeight = hardSplit ? 0 : Math.Clamp(outlierFloor, 0, 1);
+            bool detectorInImportance = floorWeight < 1;
+            bool detectorInNoise = noiseImportance && (hardSplit || outlierNoise);
+            bool useDetector = detectorInImportance || detectorInNoise;
+            int depthCount = nDepths;
+            double[] meanEnergy = new double[depthCount];
+            for (int i = 0; i < bootstrapLuminance.Length; ++i)
+            {
+                meanEnergy[i % depthCount] += bootstrapLuminance[i];
+            }
+            double shareSum = 0;
+            double[] share = new double[depthCount];
+            for (int d = 0; d < depthCount; ++d)
+            {
+                meanEnergy[d] /= nBootstrap;
+                share[d] = meanEnergy[d] > 0 ? Math.Pow(meanEnergy[d], depthExponent) : 0;
+                shareSum += share[d];
+            }
+            if (!(shareSum > 0))
+                ErrorExit("No light carrying paths found during bootstrap sampling! Are you trying to render a black image?");
+
+            long pixelCount = (long)film.SampleBounds().Area();
+            Point2i boundsMin = film.PixelBounds().pMin;
+            MLTImportanceMap importance = new MLTImportanceMap(film.PixelBounds(), importanceRange);
+            MLTOutlierDetector detector = useDetector ? new MLTOutlierDetector(film.PixelBounds()) : null;
+            int stageCount = Math.Max(1, Math.Min(stages, mutationsPerPixel));
+            // The evaluations a candidate takes besides its own: the steps of its tour, or of the chains of the outliers per candidate
+            double extraPerCandidate = jumpRestore ? 1.0 / restoreRate : mltRatio;
+            long nextIndex = (long)nBootstrap * nDepths;
+            // The mean of I over the candidates of the stage before for every depth: P of the tours is not below it, since the bootstrap
+            // alone has few samples of rare outliers, and a P far below the integral of I makes the tours of the outliers very long
+            double[] previousMean = new double[depthCount];
+            long totalOutliers = 0;
+            long totalCandidates = 0;
+            for (int stage = 0; stage < stageCount; ++stage)
+            {
+                int stageMutationsPerPixel = StageMutations(stage, stageCount);
+                if (stageMutationsPerPixel <= 0)
+                {
+                    continue;
+                }
+                MLTStageKind kind = !noiseImportance || stage == 0 ? MLTStageKind.Pilot :
+                                    (schedule != null ? schedule[stage] : MLTStageKind.Noise);
+                importance.Select(kind);
+                Float beta = kind == MLTStageKind.Tail ? tailExponent : 1;
+                // The weight of the detector and the importance I = c^beta m w of a path with the luminance cValue at the raster position p
+                Func<Float, Point2f, Float> detectorWeight = (Float cValue, Point2f p) =>
+                {
+                    if (!detectorInImportance)
+                    {
+                        return 1;
+                    }
+                    return detector.IsOutlier(p, cValue) ? 1 : floorWeight;
+                };
+                Func<Float, Point2f, Float, Float> importanceOf = (Float cValue, Point2f p, Float weight) =>
+                {
+                    return weight > 0 && cValue > 0 ? (beta == 1 ? cValue : MathF.Pow(cValue, beta)) * importance.Weight(p) * weight : 0;
+                };
+                double stageWeight = (double)stageMutationsPerPixel / mutationsPerPixel;
+                double stageCandidates = (double)pixelCount * stageMutationsPerPixel / (1.0 + extraPerCandidate);
+                long[] tourEvaluations = new long[1];
+                long[] stageOutliers = new long[1];
+                long stageCandidateCount = 0;
+                MLTNoiseEstimate noise = noiseImportance && stage < stageCount - 1 ? new MLTNoiseEstimate(importance, noiseGroups) : null;
+                MLTNoiseEstimate clean = noise != null && detectorInNoise ? new MLTNoiseEstimate(importance, noiseGroups) : null;
+                for (int depth = 0; depth < depthCount; ++depth)
+                {
+                    if (!(share[depth] > 0))
+                    {
+                        continue;
+                    }
+                    long candidates = Math.Max(1, (long)Math.Round(stageCandidates * share[depth] / shareSum));
+                    stageCandidateCount += candidates;
+                    int depthIndex = depth;
+                    // What a unit of weight is worth: the candidates are uniform primary samples, the image is their mean times the pixels;
+                    // scaleNoise is the same without the weight of the stage (the noise of the stage is that of an image of its own)
+                    double scaleNoise = (double)pixelCount / candidates;
+                    double scale = scaleNoise * stageWeight;
+                    // The normaliser P of the tours: the mean of I over the bootstrap samples of the depth (independent of the stage)
+                    // under the classification of the stage
+                    double normaliser = 0;
+                    for (int i = 0; i < nBootstrap; ++i)
+                    {
+                        int index = i * depthCount + depthIndex;
+                        Float luminance = bootstrapLuminance[index];
+                        if (luminance > 0)
+                        {
+                            normaliser += importanceOf(luminance, bootstrapRaster[index], detectorWeight(luminance, bootstrapRaster[index]));
+                        }
+                    }
+                    normaliser = Math.Max(Math.Max(normaliser / nBootstrap, meanEnergy[depthIndex] / nBootstrap * (detectorInImportance ? floorWeight : 1)),
+                                          previousMean[depthIndex]);
+                    System.Collections.Concurrent.ConcurrentBag<(int index, Float importanceValue)> seeds =
+                        new System.Collections.Concurrent.ConcurrentBag<(int index, Float importanceValue)>();
+                    double[] importanceSum = new double[1];
+                    long firstIndex = nextIndex;
+                    nextIndex += candidates;
+                    // What a state adds to the noise estimates (the luminance that it splats to its pixel in an image of the stage)
+                    void Note(int group, Point2f pState, double luminance, bool outlierState)
+                    {
+                        int x = (int)pState.x - boundsMin.x;
+                        int y = (int)pState.y - boundsMin.y;
+                        noise?.Add(x, y, group, 1, stageMutationsPerPixel * luminance);
+                        if (!outlierState)
+                        {
+                            clean?.Add(x, y, group, 1, stageMutationsPerPixel * luminance);
+                        }
+                    }
+                    // A tour of Jump Restore: at every state the hold of mean 1 / (1 + K) is deposited, then the tour ends with the
+                    // probability K / (1 + K) and otherwise takes a small step, accepted with min(1, I' / I)
+                    void RunTour(ScratchBuffer scratchBuffer, MLTSampler sampler, Point2f pCurrent, SampledSpectrum LCurrent,
+                                 SampledWavelengths lambdaCurrent, Float cCurrent, Float weightCurrent, int rngIndex, double tourNormaliser)
+                    {
+                        RNG rng = new RNG((uint64_t)rngIndex ^ 0x2545F4914F6CDD1DUL);
+                        int group = rngIndex % noiseGroups;
+                        Float iCurrent = importanceOf(cCurrent, pCurrent, weightCurrent);
+                        long evaluations = 0;
+                        while (true)
+                        {
+                            double kill = restoreRate * tourNormaliser / iCurrent;
+                            double hold = 1.0 / (1.0 + kill);
+                            double factor = restoreRate * tourNormaliser * hold * weightCurrent / iCurrent;
+                            film.AddSplat(pCurrent, LCurrent * (Float)(scale * factor), lambdaCurrent);
+                            if (noise != null)
+                            {
+                                Note(group, pCurrent, cCurrent * scaleNoise * factor, detectorInNoise && detector.IsOutlier(pCurrent, cCurrent));
+                            }
+                            if (rng.Uniform<Float>() < (Float)(kill * hold))
+                            {
+                                break;
+                            }
+                            sampler.StartIteration();
+                            Point2f pProposed;
+                            SampledWavelengths lambdaProposed;
+                            SampledSpectrum LProposed = L(scratchBuffer, sampler, depthIndex, out pProposed, out lambdaProposed);
+                            ++evaluations;
+                            Float cProposed = c(LProposed, lambdaProposed);
+                            Float weightProposed = detectorWeight(cProposed, pProposed);
+                            Float iProposed = importanceOf(cProposed, pProposed, weightProposed);
+                            Float accept = std.min<Float>(1, iProposed / iCurrent);
+                            if (rng.Uniform<Float>() < accept)
+                            {
+                                pCurrent = pProposed;
+                                LCurrent = LProposed;
+                                lambdaCurrent = lambdaProposed;
+                                cCurrent = cProposed;
+                                weightCurrent = weightProposed;
+                                iCurrent = iProposed;
+                                sampler.Accept();
+                            }
+                            else
+                            {
+                                sampler.Reject();
+                            }
+                            scratchBuffer.Reset();
+                        }
+                        System.Threading.Interlocked.Add(ref tourEvaluations[0], evaluations);
+                    }
+                    ProgressReporter progressRender = new ProgressReporter(candidates, "Rendering (" + algorithm + ", stage " + (stage + 1) +
+                                                                           " of " + stageCount + ", depth " + depth + ")", Options.quiet);
+                    ParallelFor(0, candidates, (long j) =>
+                    {
+                        ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                        int rngIndex = unchecked((int)(firstIndex + j));
+                        MLTSampler sampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma, 0, MLTPathEvaluator.nSampleStreams);
+                        Point2f pCurrent;
+                        SampledWavelengths lambdaCurrent;
+                        SampledSpectrum LCurrent = L(scratchBuffer, sampler, depthIndex, out pCurrent, out lambdaCurrent);
+                        Float cCurrent = c(LCurrent, lambdaCurrent);
+                        scratchBuffer.Reset();
+                        if (useDetector)
+                        {
+                            detector.Record(pCurrent, cCurrent);
+                        }
+                        if (!(cCurrent > 0))
+                        {
+                            progressRender.Update(1);
+                            return;
+                        }
+                        Float weight = detectorWeight(cCurrent, pCurrent);
+                        bool outlier = detectorInNoise && detector.IsOutlier(pCurrent, cCurrent);
+                        int group = rngIndex % noiseGroups;
+                        if (weight < 1)
+                        {
+                            // The Monte Carlo part f (1 - w): the paths that are not outliers count as they are
+                            film.AddSplat(pCurrent, LCurrent * (Float)(scale * (1 - weight)), lambdaCurrent);
+                            if (noise != null)
+                            {
+                                Note(group, pCurrent, cCurrent * scaleNoise * (1 - weight), outlier);
+                            }
+                        }
+                        Float iCandidate = importanceOf(cCurrent, pCurrent, weight);
+                        if (iCandidate > 0)
+                        {
+                            AtomicAdd(ref importanceSum[0], iCandidate);
+                            if (hardSplit)
+                            {
+                                seeds.Add((rngIndex, iCandidate));
+                            }
+                            else if (jumpRestore)
+                            {
+                                RunTour(scratchBuffer, sampler, pCurrent, LCurrent, lambdaCurrent, cCurrent, weight, rngIndex, normaliser);
+                            }
+                        }
+                        progressRender.Update(1);
+                    });
+                    progressRender.Done();
+                    stageOutliers[0] += hardSplit ? seeds.Count : 0;
+                    previousMean[depthIndex] = importanceSum[0] / candidates;
+
+                    if (jumpRestore && hardSplit && seeds.Count > 0)
+                    {
+                        // The tours of the outlier candidates, with the normaliser cross-fitted: the tours of one half of the candidates use the
+                        // mean of I over the other half, far better than the bootstrap for rare outliers and independent of the tour
+                        (int index, Float importanceValue)[] tourSeeds = seeds.ToArray();
+                        double[] halfSum = new double[2];
+                        foreach ((int index, Float importanceValue) tourSeed in tourSeeds)
+                        {
+                            halfSum[tourSeed.index & 1] += tourSeed.importanceValue;
+                        }
+                        double halfCandidates = candidates / 2.0;
+                        ParallelFor(0, tourSeeds.Length, (long k) =>
+                        {
+                            ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                            int seedIndex = tourSeeds[k].index;
+                            double tourNormaliser = Math.Max(normaliser, halfSum[1 - (seedIndex & 1)] / halfCandidates);
+                            MLTSampler sampler = new MLTSampler(mutationsPerPixel, seedIndex, sigma, 0, MLTPathEvaluator.nSampleStreams);
+                            Point2f pSeed;
+                            SampledWavelengths lambdaSeed;
+                            SampledSpectrum LSeed = L(scratchBuffer, sampler, depthIndex, out pSeed, out lambdaSeed);
+                            Float cSeed = c(LSeed, lambdaSeed);
+                            scratchBuffer.Reset();
+                            RunTour(scratchBuffer, sampler, pSeed, LSeed, lambdaSeed, cSeed, detectorWeight(cSeed, pSeed), seedIndex, tourNormaliser);
+                        });
+                    }
+
+                    if (!jumpRestore && seeds.Count > 0 && mltRatio > 0)
+                    {
+                        // The Metropolis part of smmc: seeds in proportion to I from the candidates; the integral of I is their sum over
+                        // the candidates, and every step of a chain deposits L w / I times it
+                        (int index, Float importanceValue)[] seedList = seeds.ToArray();
+                        Float[] seedWeights = new Float[seedList.Length];
+                        double seedTotal = 0;
+                        for (int i = 0; i < seedList.Length; ++i)
+                        {
+                            seedWeights[i] = seedList[i].importanceValue;
+                            seedTotal += seedList[i].importanceValue;
+                        }
+                        AliasTable seedTable = new AliasTable(new pstd.span<Float>(seedWeights));
+                        long chains = Math.Max(1, (long)Math.Round(mltRatio * candidates / chainLength));
+                        double stepScale = scale * seedTotal / ((double)chains * chainLength);
+                        double stepScaleNoise = scaleNoise * seedTotal / ((double)chains * chainLength);
+                        long chainOffset = nextIndex;
+                        nextIndex += chains;
+                        ProgressReporter progressChains = new ProgressReporter(chains, "Rendering (" + algorithm + " chains, stage " + (stage + 1) +
+                                                                               " of " + stageCount + ", depth " + depth + ")", Options.quiet);
+                        ParallelFor(0, chains, (long chain) =>
+                        {
+                            ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                            RNG rng = new RNG(MixBits((uint64_t)(chainOffset + chain)) ^ 0x9E3779B97F4A7C15UL);
+                            int group = (int)(chain % noiseGroups);
+                            int seedIndex = seedList[seedTable.Sample(rng.Uniform<Float>())].index;
+                            MLTSampler sampler = new MLTSampler(mutationsPerPixel, seedIndex, sigma, 0, MLTPathEvaluator.nSampleStreams);
+                            Point2f pCurrent;
+                            SampledWavelengths lambdaCurrent;
+                            SampledSpectrum LCurrent = L(scratchBuffer, sampler, depthIndex, out pCurrent, out lambdaCurrent);
+                            Float cCurrent = c(LCurrent, lambdaCurrent);
+                            Float weightCurrent = detectorWeight(cCurrent, pCurrent);
+                            Float iCurrent = importanceOf(cCurrent, pCurrent, weightCurrent);
+                            scratchBuffer.Reset();
+                            for (int step = 0; step < chainLength; ++step)
+                            {
+                                sampler.StartIteration();
+                                Point2f pProposed;
+                                SampledWavelengths lambdaProposed;
+                                SampledSpectrum LProposed = L(scratchBuffer, sampler, depthIndex, out pProposed, out lambdaProposed);
+                                Float cProposed = c(LProposed, lambdaProposed);
+                                Float weightProposed = detectorWeight(cProposed, pProposed);
+                                Float iProposed = importanceOf(cProposed, pProposed, weightProposed);
+                                Float accept = std.min<Float>(1, iProposed / iCurrent);
+                                if (accept > 0)
+                                {
+                                    double factorProposed = accept * weightProposed / iProposed;
+                                    film.AddSplat(pProposed, LProposed * (Float)(stepScale * factorProposed), lambdaProposed);
+                                    if (noise != null)
+                                    {
+                                        Note(group, pProposed, cProposed * stepScaleNoise * factorProposed, detectorInNoise && detector.IsOutlier(pProposed, cProposed));
+                                    }
+                                }
+                                double factorCurrent = (1 - accept) * weightCurrent / iCurrent;
+                                film.AddSplat(pCurrent, LCurrent * (Float)(stepScale * factorCurrent), lambdaCurrent);
+                                if (noise != null)
+                                {
+                                    Note(group, pCurrent, cCurrent * stepScaleNoise * factorCurrent, detectorInNoise && detector.IsOutlier(pCurrent, cCurrent));
+                                }
+                                if (rng.Uniform<Float>() < accept)
+                                {
+                                    pCurrent = pProposed;
+                                    LCurrent = LProposed;
+                                    lambdaCurrent = lambdaProposed;
+                                    cCurrent = cProposed;
+                                    weightCurrent = weightProposed;
+                                    iCurrent = iProposed;
+                                    sampler.Accept();
+                                }
+                                else
+                                {
+                                    sampler.Reject();
+                                }
+                                scratchBuffer.Reset();
+                            }
+                            progressChains.Update(1);
+                        });
+                        progressChains.Done();
+                    }
+                }
+                totalCandidates += stageCandidateCount;
+                totalOutliers += stageOutliers[0];
+                if (useDetector)
+                {
+                    detector.Commit((double)stageCandidateCount / pixelCount);
+                }
+                if (jumpRestore && tourEvaluations[0] > 0 && stageCandidateCount > 0)
+                {
+                    // The evaluations per candidate of this stage plan the next one
+                    extraPerCandidate = Math.Max(0.05, (double)tourEvaluations[0] / stageCandidateCount);
+                }
+                if (noise != null)
+                {
+                    importance.UpdateFromStage(noise, stageMutationsPerPixel, noiseExponent, noiseEpsilon, noiseBlurRadius, noiseRobust, tailExponent, clean);
+                }
+                if (!Options.quiet)
+                {
+                    Console.WriteLine(StringPrintf("%s stage %d (%s): %d candidates, %d outliers (%f%%), %f tour evaluations per candidate",
+                                                   algorithm, stage + 1, kind.ToString(), stageCandidateCount, stageOutliers[0],
+                                                   100.0 * stageOutliers[0] / Math.Max(1, stageCandidateCount), extraPerCandidate));
+                }
+            }
+            if (writeImportance)
+            {
+                importance.WritePFM(RemoveExtension(film.GetFilename()) + ".importance.pfm", MLTStageKind.Noise);
+                importance.WritePFM(RemoveExtension(film.GetFilename()) + ".tail.pfm", MLTStageKind.Tail);
+            }
+
+            ImageMetadata metadata = new ImageMetadata();
+            metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
+            camera.InitMetadata(metadata);
+            camera.GetFilm().WriteImage(metadata, (Float)1);
+        }
+
+        static void AtomicAdd(ref double target, double value)
+        {
+            double initial, computed;
+            do
+            {
+                initial = System.Threading.Volatile.Read(ref target);
+                computed = initial + value;
+            }
+            while (System.Threading.Interlocked.CompareExchange(ref target, computed, initial) != initial);
+        }
+
+        // (not in pbrt-v4) Population Monte Carlo energy redistribution in primary sample space (after Lai, Fan, Chen and Chen, "Population Monte
+        // Carlo Energy Redistribution", EGSR 2007). A population of paths, each with a chain of its own, lives in iterations of
+        // mutationsPerIteration mutations. A path spawns from a random primary sample with the energy c (its luminance), and its chain
+        // lasts floor(u + c / e_d) mutations, each of which deposits e_d as in erpt: the chains are those of erpt, of random length, so the
+        // image is unbiased. The paper eliminates paths at random with probability in proportion to their remaining energy; that would
+        // lose the remaining energy of the paths that go, so here a path goes when it has deposited all of its energy, which makes
+        // the lives in proportion to the energies in the same way. The mutation kernels are small steps of three sizes (sigma / 5, sigma, 5 sigma)
+        // with the weights alpha of the paper: after every iteration alpha = epsilon + (1 - epsilon) A_k / sum A, where A_k is the sum of the
+        // acceptance probabilities of kernel k; a new path starts with the alpha that the paths of its depth (the multiplexed strategies
+        // of the bdpt evaluator) have, so the depths adapt their mutations separately.
+        sealed class EnergyMember
+        {
+            public MLTSampler sampler;
+            public int depth;
+            public int lifeLeft;
+            public Point2f pCurrent;
+            public SampledSpectrum LCurrent;
+            public SampledWavelengths lambdaCurrent;
+            public Float cCurrent;
+            public RNG rng;
+            public Float[] alpha;
+            public bool alive;
+        }
+
+        void RenderPopulationEnergyRedistribution(Film film, Float[] bootstrapLuminance,
+                                                  ThreadLocal<ScratchBuffer> threadScratchBuffers, Timer timer)
+        {
+            int depthCount = nDepths;
+            double[] meanEnergy = new double[depthCount];
+            for (int i = 0; i < bootstrapLuminance.Length; ++i)
+            {
+                meanEnergy[i % depthCount] += bootstrapLuminance[i];
+            }
+            double energySum = 0;
+            for (int d = 0; d < depthCount; ++d)
+            {
+                meanEnergy[d] /= nBootstrap;
+                energySum += meanEnergy[d];
+            }
+            if (!(energySum > 0))
+                ErrorExit("No light carrying paths found during bootstrap sampling! Are you trying to render a black image?");
+
+            long pixelCount = (long)film.SampleBounds().Area();
+            long totalBases = (long)(pixelCount * Math.Max(1.0, mutationsPerPixel / (1.0 + mutationsPerBase)));
+            double shareSum = 0;
+            double[] share = new double[depthCount];
+            for (int d = 0; d < depthCount; ++d)
+            {
+                share[d] = meanEnergy[d] > 0 ? Math.Pow(meanEnergy[d], depthExponent) : 0;
+                shareSum += share[d];
+            }
+            long[] basesOfDepth = new long[depthCount];
+            double[] depositEnergy = new double[depthCount];
+            Float[] scale = new Float[depthCount];
+            long allBases = 0;
+            for (int d = 0; d < depthCount; ++d)
+            {
+                basesOfDepth[d] = (long)Math.Round(totalBases * share[d] / shareSum);
+                allBases += basesOfDepth[d];
+                depositEnergy[d] = (perDepthEnergy ? meanEnergy[d] : energySum / depthCount) / mutationsPerBase;
+                scale[d] = basesOfDepth[d] > 0 ? (Float)(depositEnergy[d] * pixelCount / basesOfDepth[d]) : 0;
+            }
+
+            // The paths to spawn, in random order of their depths
+            int[] spawnDepth = new int[allBases];
+            long fill = 0;
+            for (int d = 0; d < depthCount; ++d)
+            {
+                for (long k = 0; k < basesOfDepth[d]; ++k)
+                {
+                    spawnDepth[fill++] = d;
+                }
+            }
+            RNG shuffle = new RNG(7);
+            for (long i = allBases - 1; i > 0; --i)
+            {
+                long j = (long)(shuffle.Uniform<double>() * (i + 1));
+                int swap = spawnDepth[i];
+                spawnDepth[i] = spawnDepth[j];
+                spawnDepth[j] = swap;
+            }
+
+            const int kernelCount = 3;
+            const Float epsilon = 0.05f;
+            Float[] kernelSigma = { sigma * 0.2f, sigma, sigma * 5 };
+            double[][] depthAcceptance = new double[depthCount][];
+            for (int d = 0; d < depthCount; ++d)
+            {
+                depthAcceptance[d] = new double[kernelCount];
+            }
+            long nextSpawn = 0;
+            EnergyMember[] members = new EnergyMember[population];
+            for (int i = 0; i < members.Length; ++i)
+            {
+                members[i] = new EnergyMember();
+            }
+            ProgressReporter progressRender = new ProgressReporter(allBases, "Rendering (population energy redistribution)", Options.quiet);
+
+            bool anyAlive = true;
+            while (anyAlive)
+            {
+                int aliveCount = 0;
+                ParallelFor(0, members.Length, (long slot) =>
+                {
+                    ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                    EnergyMember member = members[slot];
+                    // Spawn a path in an empty slot (a path that has no energy for a mutation is dropped)
+                    while (!member.alive)
+                    {
+                        long position = System.Threading.Interlocked.Increment(ref nextSpawn) - 1;
+                        if (position >= allBases)
+                            break;
+                        progressRender.Update(1);
+                        int depth = spawnDepth[position];
+                        int rngIndex = unchecked((int)(nBootstrap * nDepths + position));
+                        MLTSampler sampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma, largeStepProbability,
+                                                            MLTPathEvaluator.nSampleStreams);
+                        Point2f pBase;
+                        SampledWavelengths lambdaBase;
+                        SampledSpectrum LBase = L(scratchBuffer, sampler, depth, out pBase, out lambdaBase);
+                        scratchBuffer.Reset();
+                        Float cBase = c(LBase, lambdaBase);
+                        if (!(cBase > 0))
+                            continue;
+                        RNG rng = new RNG((uint64_t)rngIndex ^ 0x2545F4914F6CDD1DUL);
+                        int life = (int)Math.Floor(rng.Uniform<Float>() + cBase / depositEnergy[depth]);
+                        if (life <= 0)
+                            continue;
+                        member.sampler = sampler;
+                        member.depth = depth;
+                        member.lifeLeft = life;
+                        member.pCurrent = pBase;
+                        member.LCurrent = LBase;
+                        member.lambdaCurrent = lambdaBase;
+                        member.cCurrent = cBase;
+                        member.rng = rng;
+                        member.alpha = new Float[kernelCount];
+                        double total = 0;
+                        lock (depthAcceptance[depth])
+                        {
+                            for (int k = 0; k < kernelCount; ++k)
+                            {
+                                total += depthAcceptance[depth][k];
+                            }
+                            for (int k = 0; k < kernelCount; ++k)
+                            {
+                                member.alpha[k] = total > 0 ? (Float)(epsilon + (1 - epsilon) * depthAcceptance[depth][k] / total)
+                                                            : (Float)(1.0 / kernelCount);
+                            }
+                        }
+                        member.alive = true;
+                    }
+                    if (!member.alive)
+                        return;
+                    System.Threading.Interlocked.Increment(ref aliveCount);
+
+                    // Run the mutations of the iteration with the kernels of the path
+                    double[] acceptance = new double[kernelCount];
+                    int steps = Math.Min(mutationsPerIteration, member.lifeLeft);
+                    for (int step = 0; step < steps; ++step)
+                    {
+                        Float alphaSum = 0;
+                        for (int k = 0; k < kernelCount; ++k)
+                        {
+                            alphaSum += member.alpha[k];
+                        }
+                        Float pick = member.rng.Uniform<Float>() * alphaSum;
+                        int kernel = 0;
+                        while (kernel < kernelCount - 1 && pick >= member.alpha[kernel])
+                        {
+                            pick -= member.alpha[kernel];
+                            ++kernel;
+                        }
+                        member.sampler.SetSigma(kernelSigma[kernel]);
+                        member.sampler.StartIteration();
+                        Point2f pProposed;
+                        SampledWavelengths lambdaProposed;
+                        SampledSpectrum LProposed = L(scratchBuffer, member.sampler, member.depth, out pProposed, out lambdaProposed);
+                        Float cProposed = c(LProposed, lambdaProposed);
+                        Float accept = std.min<Float>(1, cProposed / member.cCurrent);
+                        acceptance[kernel] += accept;
+                        if (accept > 0)
+                            film.AddSplat(pProposed, LProposed * (accept * scale[member.depth] / cProposed), lambdaProposed);
+                        film.AddSplat(member.pCurrent, member.LCurrent * ((1 - accept) * scale[member.depth] / member.cCurrent),
+                                      member.lambdaCurrent);
+                        if (member.rng.Uniform<Float>() < accept)
+                        {
+                            member.pCurrent = pProposed;
+                            member.LCurrent = LProposed;
+                            member.lambdaCurrent = lambdaProposed;
+                            member.cCurrent = cProposed;
+                            member.sampler.Accept();
+                        }
+                        else
+                            member.sampler.Reject();
+                        scratchBuffer.Reset();
+                    }
+                    member.lifeLeft -= steps;
+                    if (member.lifeLeft <= 0)
+                    {
+                        member.alive = false;
+                        member.sampler = null;
+                    }
+
+                    // The weights of the kernels: this path's, and its depth's for the paths that come next
+                    double acceptanceTotal = 0;
+                    for (int k = 0; k < kernelCount; ++k)
+                    {
+                        acceptanceTotal += acceptance[k];
+                    }
+                    if (acceptanceTotal > 0)
+                    {
+                        for (int k = 0; k < kernelCount; ++k)
+                        {
+                            member.alpha[k] = (Float)(epsilon + (1 - epsilon) * acceptance[k] / acceptanceTotal);
+                        }
+                    }
+                    lock (depthAcceptance[member.depth])
+                    {
+                        for (int k = 0; k < kernelCount; ++k)
+                        {
+                            depthAcceptance[member.depth][k] += acceptance[k];
+                        }
+                    }
+                });
+                anyAlive = aliveCount > 0;
+            }
+            progressRender.Done();
+
+            ImageMetadata metadata = new ImageMetadata();
+            metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
+            camera.InitMetadata(metadata);
+            camera.GetFilm().WriteImage(metadata, (Float)1);
         }
 
         public override string ToString()
@@ -3663,7 +4425,7 @@ namespace pbrt
         }
 
         public static MLTIntegrator Create(ParameterDictionary parameters, Camera camera, Primitive aggregate,
-                                           List<Light> lights, FileLoc loc)
+                                           List<Light> lights, FileLoc loc, string algorithm = "mlt")
         {
             if (!(camera is PerspectiveCamera))
                 ErrorExit("Only the \"perspective\" camera is currently supported with the " +
@@ -3674,7 +4436,7 @@ namespace pbrt
             int mutationsPerPixel = parameters.GetOneInt("mutationsperpixel", 100);
             if (Options.pixelSamples)
                 mutationsPerPixel = Options.pixelSamples.value();
-            Float largeStepProbability = parameters.GetOneFloat("largestepprobability", 0.3f);
+            Float largeStepProbability = parameters.GetOneFloat("largestepprobability", algorithm == "mlt" ? 0.3f : 0.1f);
             Float sigma = parameters.GetOneFloat("sigma", .01f);
             if (Options.quickRender)
             {
@@ -3732,6 +4494,8 @@ namespace pbrt
                     ErrorExit(loc, StringPrintf("%s: \"stageschedule\" has letters p, n, t and m only.", scheduleText));
                 schedule[k] = k == 0 ? MLTStageKind.Pilot : (letter == 't' ? MLTStageKind.Tail : (letter == 'm' ? MLTStageKind.Mixture : MLTStageKind.Noise));
             }
+            if ((algorithm == "jrlt" || algorithm == "smmc" || algorithm == "jrsmmc") && scheduleText.Contains('m'))
+                ErrorExit(loc, StringPrintf("%s: \"stageschedule\" of \"%s\" has letters p, n and t only.", scheduleText, algorithm));
             return new MLTIntegrator(camera, aggregate, lights, maxDepth, nBootstrap, (int)nChains,
                                      mutationsPerPixel, sigma, largeStepProbability, regularize, volpath, sensor,
                                      gatherMediumEmission, importanceName != "luminance", schedule.Length,
@@ -3741,7 +4505,12 @@ namespace pbrt
                                      parameters.GetOneBool("noiserobust", true), parameters.GetOneFloat("stagegrowth", 2), schedule,
                                      parameters.GetOneFloat("tailexponent", 0.75f), parameters.GetOneFloat("tailstepprobability", 0.5f),
                                      parameters.GetOneFloat("mixturepilot", 0.2f), parameters.GetOneFloat("mixturenoise", 0.5f),
-                                     parameters.GetOneFloat("mixturetail", 0.3f));
+                                     parameters.GetOneFloat("mixturetail", 0.3f), algorithm, parameters.GetOneInt("chainlength", algorithm == "smmc" ? 1000 : 16),
+                                     parameters.GetOneFloat("mutationsperbase", 32), parameters.GetOneBool("perdepthenergy", true),
+                                     parameters.GetOneFloat("depthexponent", 1), parameters.GetOneInt("population", 2000),
+                                     parameters.GetOneInt("mutationsperiteration", 16),
+                                     parameters.GetOneFloat("restorerate", 1), parameters.GetOneFloat("mltratio", 1),
+                                     parameters.GetOneFloat("outlierfloor", 1), parameters.GetOneBool("outliernoise", false));
         }
 
         // MLTIntegrator Private Members
@@ -3759,6 +4528,12 @@ namespace pbrt
         int stages, noiseBlurRadius, noiseGroups;
         Float noiseExponent, noiseEpsilon, importanceRange, stageGrowth, tailExponent, tailStepProbability;
         MLTStageKind[] schedule;
+        string algorithm;
+        int chainLength, population, mutationsPerIteration;
+        Float restoreRate, mltRatio, outlierFloor;
+        bool outlierNoise;
+        Float mutationsPerBase, depthExponent;
+        bool perDepthEnergy;
         Float mixturePilot = 0.2f, mixtureNoise = 0.5f, mixtureTail = 0.3f;
     }
 

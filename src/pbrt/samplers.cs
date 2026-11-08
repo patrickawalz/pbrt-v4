@@ -895,6 +895,28 @@ namespace pbrt
 
         public int GetNextIndex() { return streamIndex + streamCount * sampleIndex++; }
 
+        // (not in pbrt-v4) The standard deviation of the small steps from the next iteration on (the mutation kernels of pmcer)
+        public void SetSigma(Float newSigma) { sigma = newSigma; }
+
+        // (not in pbrt-v4) A sampler that is in the same state as this one (the same primary sample) and has its own random stream:
+        // the chains of energy redistribution that start from one path (erpt) mutate it independently
+        public MLTSampler Fork(int stream)
+        {
+            MLTSampler copy = new MLTSampler(mutationsPerPixel, 0, sigma, largeStepProbability, streamCount);
+            uint64_t high = (uint64_t)(rng.Uniform<Float>() * 4294967296.0);
+            uint64_t low = (uint64_t)(rng.Uniform<Float>() * 4294967296.0);
+            copy.rng = new RNG(MixBits(((high << 32) | low) ^ ((uint64_t)(stream + 1) * 0x9E3779B97F4A7C15UL)));
+            copy.X.resize(X.size());
+            for (ulong i = 0; i < X.size(); ++i)
+            {
+                copy.X[i] = X[i];
+            }
+            copy.currentIteration = currentIteration;
+            copy.largeStep = largeStep;
+            copy.lastLargeStepIteration = lastLargeStepIteration;
+            return copy;
+        }
+
         public override int SamplesPerPixel() { return mutationsPerPixel; }
 
         public override void StartPixelSample(Point2i p, int sampleIndex, int dim = 0)
