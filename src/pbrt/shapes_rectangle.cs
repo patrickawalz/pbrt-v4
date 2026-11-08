@@ -31,7 +31,7 @@ namespace pbrt
         private double lengthY;
 
         // Ureña's spherical rectangle, as seen from a reference point
-        private struct SphericalRectangle
+        internal struct SphericalRectangle
         {
             public double x0, y0, z0, x1, y1;
             public double b0, b1, b0Squared, k, solidAngle;
@@ -111,7 +111,7 @@ namespace pbrt
         }
 
         // The spherical rectangle seen from p; false if p is (nearly) in the plane of the rectangle, or the rectangle is too small to sample that way
-        private bool Prepare(Point3f p, out SphericalRectangle sr)
+        internal static bool Prepare(Point3f corner, Vector3f edgeX, Vector3f edgeY, double lengthX, double lengthY, Point3f p, out SphericalRectangle sr)
         {
             sr = default;
             double dx = (double)corner.x - p.x, dy = (double)corner.y - p.y, dz = (double)corner.z - p.z;
@@ -173,19 +173,9 @@ namespace pbrt
             return new double[] { cx / length, cy / length, cz / length };
         }
 
-        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
+        // The point of the rectangle, as an offset from the reference point, for the random numbers u (Ureña et al. 2013, section 4)
+        internal static void SampleDirection(SphericalRectangle sr, Vector3f edgeX, Vector3f edgeY, Point2f u, out double wx, out double wy, out double wz)
         {
-            if (projectedSampling)
-            {
-                return polygon.Sample(ctx, u);
-            }
-            Point3f p = ctx.p();
-            SphericalRectangle sr;
-            if (!Prepare(p, out sr))
-            {
-                return SampleByArea(ctx, u);
-            }
-
             // Ureña et al. 2013, section 4: the u and v of the spherical rectangle
             double au = u[0] * sr.solidAngle + sr.k;
             double sinAu = Math.Sin(au), cosAu = Math.Cos(au);
@@ -204,9 +194,26 @@ namespace pbrt
             yv = Math.Max(sr.y0, Math.Min(sr.y1, yv));
 
             // the point, in the frame of the reference point: x along the first edge, y along the second, z0 along the (flipped) normal
-            double wx = xu * edgeX.x + yv * edgeY.x + sr.z0 * sr.zx;
-            double wy = xu * edgeX.y + yv * edgeY.y + sr.z0 * sr.zy;
-            double wz = xu * edgeX.z + yv * edgeY.z + sr.z0 * sr.zz;
+            wx = xu * edgeX.x + yv * edgeY.x + sr.z0 * sr.zx;
+            wy = xu * edgeX.y + yv * edgeY.y + sr.z0 * sr.zy;
+            wz = xu * edgeX.z + yv * edgeY.z + sr.z0 * sr.zz;
+        }
+
+        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
+        {
+            if (projectedSampling)
+            {
+                return polygon.Sample(ctx, u);
+            }
+            Point3f p = ctx.p();
+            SphericalRectangle sr;
+            if (!Prepare(corner, edgeX, edgeY, lengthX, lengthY, p, out sr))
+            {
+                return SampleByArea(ctx, u);
+            }
+
+            double wx, wy, wz;
+            SampleDirection(sr, edgeX, edgeY, u, out wx, out wy, out wz);
             return polygon.SampleAtPoint((double)p.x + wx, (double)p.y + wy, (double)p.z + wz, ctx.time, (Float)(1 / sr.solidAngle));
         }
 
@@ -242,7 +249,7 @@ namespace pbrt
                 return 0;
             }
             SphericalRectangle sr;
-            if (Prepare(ctx.p(), out sr))
+            if (Prepare(corner, edgeX, edgeY, lengthX, lengthY, ctx.p(), out sr))
             {
                 return (Float)(1 / sr.solidAngle);
             }
@@ -252,7 +259,8 @@ namespace pbrt
 
         // Shape "rectanglemesh": "point3 P" (four per rectangle, in order around it), "integer indices" (four per rectangle; if absent the points in order),
         // "point2 uv", "normal N", "integer faceIndices" (one per rectangle), "string sampling" ("solidangle" or "projected")
-        public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc, Allocator alloc,
+                                                bool triangleForm = false)
         {
             List<int> indices = parameters.GetIntArray("indices");
             List<Point3f> P = parameters.GetPoint3fArray("P");
@@ -300,6 +308,11 @@ namespace pbrt
             string sampling = parameters.GetOneString("sampling", "solidangle");
             bool projected = Ngon.ParseSampling(sampling, loc);
 
+            // (comparison) "rectanglemesh2" is the same shape written in the form of Triangle, see shapes_rectangle2.cs
+            if (triangleForm)
+            {
+                return Rectangle2.CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, projected, alloc);
+            }
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             for (int r = 0; r < rectangleCount; ++r)
             {

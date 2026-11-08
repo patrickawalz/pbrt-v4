@@ -666,7 +666,7 @@ namespace pbrt
 
         // The polygon of three or more corners as triangles (ear clipping in the plane of the polygon). The triangles are given as corner indices, in the
         // winding of the polygon. A polygon that is not simple, or degenerate, gets a fan for what is left.
-        private static List<int> EarClip(Point3f[] r)
+        internal static List<int> EarClip(Point3f[] r)
         {
             int n = r.Length;
             List<int> triangles = new List<int>();
@@ -765,13 +765,34 @@ namespace pbrt
         public static pstd.vector<Shape> CreateShapes(Transform renderFromObject, bool reverseOrientation, List<int> counts, List<int> indices, List<Point3f> P,
                                                       List<Normal3f> N, List<Point2f> uv, List<int> faceIndices, bool projectedSampling, Allocator alloc)
         {
+            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
+            TriangleMesh fanMesh;
+            List<int[]> polygons;
+            List<int[]> polygonSampleCorners;
+            CreateFans(renderFromObject, reverseOrientation, counts, indices, P, N, uv, faceIndices, alloc, shapes, out fanMesh, out polygons,
+                       out polygonSampleCorners);
+            for (int i = 0; i < polygons.Count; ++i)
+            {
+                shapes.push_back(new Ngon(fanMesh, polygons[i][0], polygons[i][1], polygons[i][2], polygonSampleCorners[i], projectedSampling));
+            }
+            return shapes;
+        }
+
+        // The fans of the polygons that are planar and convex, as one TriangleMesh (the corners of each polygon are contiguous vertices, with the coordinates of
+        // the polygon in its plane for a mesh without texture coordinates), and for each polygon (firstVertex, firstTriangle, corner count) and the corners that the
+        // sampling by projected solid angle uses. The Triangle shapes of the polygons that are not are added to shapes. fanMesh is null if there is no polygon.
+        internal static void CreateFans(Transform renderFromObject, bool reverseOrientation, List<int> counts, List<int> indices, List<Point3f> P,
+                                        List<Normal3f> N, List<Point2f> uv, List<int> faceIndices, Allocator alloc, pstd.vector<Shape> shapes,
+                                        out TriangleMesh fanMesh, out List<int[]> polygons, out List<int[]> polygonSampleCorners)
+        {
             List<Point3f> fanP = new List<Point3f>();
             List<Normal3f> fanN = new List<Normal3f>();
             List<Point2f> fanUV = new List<Point2f>();
             List<int> fanIndices = new List<int>();
             List<int> fanFaces = new List<int>();
-            List<int[]> polygons = new List<int[]>();
-            List<int[]> polygonSampleCorners = new List<int[]>();
+            polygons = new List<int[]>();
+            polygonSampleCorners = new List<int[]>();
+            fanMesh = null;
             List<int> triangleIndices = new List<int>();
             List<int> triangleFaces = new List<int>();
 
@@ -840,7 +861,6 @@ namespace pbrt
                 }
             }
 
-            pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             if (triangleIndices.Count != 0)
             {
                 TriangleMesh triangleMesh = new TriangleMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(triangleIndices), new pstd.vector<Point3f>(P),
@@ -854,19 +874,14 @@ namespace pbrt
             }
             if (polygons.Count != 0)
             {
-                TriangleMesh fanMesh = new TriangleMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(fanIndices), new pstd.vector<Point3f>(fanP),
-                                                        new pstd.vector<Vector3f>(), new pstd.vector<Normal3f>(fanN), new pstd.vector<Point2f>(fanUV),
-                                                        new pstd.vector<int>(faceIndices.Count != 0 ? fanFaces : new List<int>()), alloc);
-                for (int i = 0; i < polygons.Count; ++i)
-                {
-                    shapes.push_back(new Ngon(fanMesh, polygons[i][0], polygons[i][1], polygons[i][2], polygonSampleCorners[i], projectedSampling));
-                }
+                fanMesh = new TriangleMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(fanIndices), new pstd.vector<Point3f>(fanP),
+                                           new pstd.vector<Vector3f>(), new pstd.vector<Normal3f>(fanN), new pstd.vector<Point2f>(fanUV),
+                                           new pstd.vector<int>(faceIndices.Count != 0 ? fanFaces : new List<int>()), alloc);
             }
-            return shapes;
         }
 
         // The coordinates of the corners in the plane of the polygon (the axes: the first edge, and the normal times it), each scaled to [0, 1] over the polygon
-        private static Point2f[] PlanarCoordinates(double[][] c)
+        internal static Point2f[] PlanarCoordinates(double[][] c)
         {
             int n = c.Length;
             double[] center = new double[3];
@@ -925,7 +940,8 @@ namespace pbrt
 
         // Shape "ngonmesh": "integer counts" (the corner count of each polygon; none for a single polygon of all the points), "integer indices" (the corners of
         // all the polygons, in order around each), "point3 P", "point2 uv", "normal N", "integer faceIndices" (one per polygon), "string sampling"
-        public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc, Allocator alloc,
+                                                bool triangleForm = false)
         {
             List<int> counts = parameters.GetIntArray("counts");
             List<int> indices = parameters.GetIntArray("indices");
@@ -985,8 +1001,13 @@ namespace pbrt
                                                   counts.Count));
                 faceIndices = new List<int>();
             }
-            return CreateShapes(renderFromObject, reverseOrientation, counts, indices, P, N, uv, faceIndices,
-                                ParseSampling(parameters.GetOneString("sampling", "projected"), loc), alloc);
+            bool projected = ParseSampling(parameters.GetOneString("sampling", "projected"), loc);
+            // (comparison) "ngonmesh2" is the same shape written in the form of Triangle, see shapes_ngon2.cs
+            if (triangleForm)
+            {
+                return Ngon2.CreateShapes(renderFromObject, reverseOrientation, counts, indices, P, N, uv, faceIndices, projected, alloc);
+            }
+            return CreateShapes(renderFromObject, reverseOrientation, counts, indices, P, N, uv, faceIndices, projected, alloc);
         }
     }
 }  // namespace pbrt

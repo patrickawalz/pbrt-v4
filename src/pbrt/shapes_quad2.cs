@@ -12,7 +12,9 @@
 //  * a static InteractionFromIntersection(mesh, quadIndex, qi, time, wo) that does what BilinearPatch.InteractionFromIntersection does for the hit,
 //  * Area, SolidAngle, Bounds, NormalBounds, Sample, PDF in the order of Triangle.
 //
-// What is shared with Quad: Classify, ComputeV11Coordinates, SolveBilinear, IsRectangle, ToGivenFrame, EdgeFunction, TestTriangle and Basis.
+// What is shared with Quad: Classify, ComputeV11Coordinates, SolveBilinear, IsRectangle, ToGivenFrame, EdgeFunction, TestTriangle and Basis. What is shared with
+// Ngon2 and Rectangle2: the functions of PolygonSampling (shapes_polygon_common.cs): the sampling by projected solid angle and the conversion of the density
+// of a sample by area. The intersection is its own (the quad is split along the diagonal of its frame, which Ngon2 and Rectangle2 do not need).
 
 using System;
 using System.Collections.Generic;
@@ -141,13 +143,8 @@ namespace pbrt
         const Float MinSphericalSampleArea = 3e-4f;
         const Float MaxSphericalSampleArea = 6.22f;
 
-        // The sampling by projected solid angle falls back to the sampling by area when the projected solid angle of the quad is smaller than this
-        const double MinProjectedSampleArea = 1e-8;
-
         [ThreadStatic]
-        static ProjectedSolidAnglePolygon upperPolygon;
-        [ThreadStatic]
-        static ProjectedSolidAnglePolygon lowerPolygon;
+        static Point3f[] cornerScratch;
 
         public static void Init(Allocator alloc)
         {
@@ -541,94 +538,41 @@ namespace pbrt
             {
                 return false;
             }
-            basis = new Quad.Basis(ctx.ns);
-            Point3f reference = ctx.p();
-            double[] x = new double[4];
-            double[] y = new double[4];
-            double[] z = new double[4];
-            for (int k = 0; k < 4; ++k)
+            if (cornerScratch == null)
             {
-                Point3f c = k == 0 ? q0 : (k == 1 ? q1 : (k == 2 ? q2 : q3));
-                double ox = (double)c.x - reference.x;
-                double oy = (double)c.y - reference.y;
-                double oz = (double)c.z - reference.z;
-                x[k] = ox * basis.xx + oy * basis.xy + oz * basis.xz;
-                y[k] = ox * basis.yx + oy * basis.yy + oz * basis.yz;
-                z[k] = ox * basis.zx + oy * basis.zy + oz * basis.zz;
+                cornerScratch = new Point3f[4];
             }
-            if (upperPolygon == null)
-            {
-                upperPolygon = new ProjectedSolidAnglePolygon();
-                lowerPolygon = new ProjectedSolidAnglePolygon();
-            }
-            upper = upperPolygon;
-            lower = lowerPolygon;
-            if (upper.Prepare(4, x, y, z, 1))
-            {
-                upperArea = upper.ProjectedSolidAngle;
-            }
-            if (lower.Prepare(4, x, y, z, -1))
-            {
-                lowerArea = lower.ProjectedSolidAngle;
-            }
-            return upperArea + lowerArea > MinProjectedSampleArea;
+            cornerScratch[0] = q0;
+            cornerScratch[1] = q1;
+            cornerScratch[2] = q2;
+            cornerScratch[3] = q3;
+            return PolygonSampling.PrepareProjected(ctx, cornerScratch, 4, out basis, out upper, out lower, out upperArea, out lowerArea);
         }
 
         // The sample of the direction w from the reference point: the point of the quad in that direction, with the density in solid angle
         pstd.optional<ShapeSample> SampleProjected(QuadMesh mesh, ShapeSampleContext ctx, Point2f u, Quad.Basis basis, ProjectedSolidAnglePolygon upper,
                                                    ProjectedSolidAnglePolygon lower, double upperArea, double lowerArea)
         {
-            double total = upperArea + lowerArea;
-            double pUpper = upperArea / total;
-            double u0 = u[0];
-            ProjectedSolidAnglePolygon chosen;
-            double sign;
-            if (u0 < pUpper)
-            {
-                chosen = upper;
-                sign = 1;
-                u0 = u0 / pUpper;
-            }
-            else
-            {
-                chosen = lower;
-                sign = -1;
-                u0 = (u0 - pUpper) / (1 - pUpper);
-            }
-            u0 = Math.Min(u0, 1 - 1.1102230246251565e-16);
-            chosen.Sample(u0, Math.Min((double)u[1], 1 - 1.1102230246251565e-16), out double lx, out double ly, out double lz);
-            lz *= sign;
-            double wx = lx * basis.xx + ly * basis.yx + lz * basis.zx;
-            double wy = lx * basis.xy + ly * basis.yy + lz * basis.zy;
-            double wz = lx * basis.xz + ly * basis.yz + lz * basis.zz;
-
             // The point of the plane of the quad in that direction, and its coordinates (alpha, beta) in the frame (q0; q1 - q0, q3 - q0)
-            Point3f reference = ctx.p();
             mesh.FrameCorners(quadIndex, out Point3f q0, out Point3f q1, out Point3f q2, out Point3f q3);
             double e1x = (double)q1.x - q0.x, e1y = (double)q1.y - q0.y, e1z = (double)q1.z - q0.z;
             double e3x = (double)q3.x - q0.x, e3y = (double)q3.y - q0.y, e3z = (double)q3.z - q0.z;
             double nx = e1y * e3z - e1z * e3y, ny = e1z * e3x - e1x * e3z, nz = e1x * e3y - e1y * e3x;
-            double denominator = wx * nx + wy * ny + wz * nz;
-            if (denominator == 0)
+            if (!PolygonSampling.SampleProjected(ctx, u, basis, upper, lower, upperArea, lowerArea, q0, nx, ny, nz, out double px, out double py, out double pz,
+                                                 out Float pdf))
             {
                 return default;
             }
-            double rx = (double)q0.x - reference.x, ry = (double)q0.y - reference.y, rz = (double)q0.z - reference.z;
-            double t = (rx * nx + ry * ny + rz * nz) / denominator;
-            if (!(t > 0))
-            {
-                return default;
-            }
-            double dx = t * wx - rx, dy = t * wy - ry, dz = t * wz - rz;
+            double dx = px - q0.x, dy = py - q0.y, dz = pz - q0.z;
             double nn = nx * nx + ny * ny + nz * nz;
             double alpha = ((dy * e3z - dz * e3y) * nx + (dz * e3x - dx * e3z) * ny + (dx * e3y - dy * e3x) * nz) / nn;
             double beta = ((e1y * dz - e1z * dy) * nx + (e1z * dx - e1x * dz) * ny + (e1x * dy - e1y * dx) * nz) / nn;
             Quad.ComputeV11Coordinates(q0, q1, q2, q3, out double a11, out double b11);
             Quad.SolveBilinear(a11, b11, alpha, beta, out double u1, out double v1);
             Point2f uv = Quad.ToGivenFrame(mesh.rotation[quadIndex], u1, v1);
-            Point3f point = new Point3f((Float)(reference.x + t * wx), (Float)(reference.y + t * wy), (Float)(reference.z + t * wz));
+            Point3f point = new Point3f((Float)px, (Float)py, (Float)pz);
             Vector3f pError = pbrt.gamma(6) * (Vector3f)(pbrt.Abs(q0) + pbrt.Abs(q1) + pbrt.Abs(q2) + pbrt.Abs(q3));
-            return SampleAt(mesh, point, pError, uv, ctx.time, true, (Float)(Math.Abs(lz) / total));
+            return SampleAt(mesh, point, pError, uv, ctx.time, true, pdf);
         }
 
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
@@ -642,20 +586,7 @@ namespace pbrt
             if (!SamplesBySolidAngle(mesh, ctx, out Float omegaA, out Float omegaB))
             {
                 // Sample by area and convert the density to solid angle
-                pstd.optional<ShapeSample> ss = Sample(u);
-                ss.Ref().intr.time = ctx.time;
-                Vector3f wi = ss.value().intr.p() - ctx.p();
-                if (pbrt.LengthSquared(wi) == 0)
-                {
-                    return default;
-                }
-                wi = pbrt.Normalize(wi);
-                ss.Ref().pdf /= pbrt.AbsDot(ss.value().intr.n, -wi) / pbrt.DistanceSquared(ctx.p(), ss.value().intr.p());
-                if (pbrt.IsInf(ss.value().pdf))
-                {
-                    return default;
-                }
-                return ss;
+                return PolygonSampling.AreaSampleToSolidAngle(ctx, Sample(u));
             }
 
             Point3f reference = ctx.p();
@@ -729,16 +660,14 @@ namespace pbrt
             if (PrepareProjected(mesh, ctx, out Quad.Basis projectedBasis, out ProjectedSolidAnglePolygon upperPart, out ProjectedSolidAnglePolygon lowerPart,
                                  out double upperArea, out double lowerArea))
             {
-                double cosine = Math.Abs((double)wi.x * projectedBasis.zx + (double)wi.y * projectedBasis.zy + (double)wi.z * projectedBasis.zz);
-                return (Float)(cosine / (upperArea + lowerArea));
+                return PolygonSampling.ProjectedPdf(projectedBasis, wi, upperArea, lowerArea);
             }
             Point3f pHit = PointOfHit(p0, p1, p2, p3, hit.value(), out Vector3f pError);
             if (!SamplesBySolidAngle(mesh, ctx, out Float omegaA, out Float omegaB))
             {
                 // The density of area sampling, in solid angle
                 Normal3f n = (Normal3f)pbrt.Normalize(pbrt.Cross(p1 - p0, p3 - p0));
-                Float areaPdf = (1 / Area()) / (pbrt.AbsDot(n, -wi) / pbrt.DistanceSquared(ctx.p(), pHit));
-                return pbrt.IsInf(areaPdf) ? 0 : areaPdf;
+                return PolygonSampling.AreaPdfToSolidAngle(ctx, Area(), n, wi, pHit);
             }
 
             Point3f reference = ctx.p();

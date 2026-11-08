@@ -14,7 +14,7 @@ namespace pbrt
     public static unsafe class NgonTests
     {
         // A convex polygon of n corners in a plane with coordinates (x, y), counterclockwise, the first edge along +x from corner 0
-        private static double[][] ConvexPolygon2D(Random random, int n, double size)
+        internal static double[][] ConvexPolygon2D(Random random, int n, double size)
         {
             while (true)
             {
@@ -72,7 +72,7 @@ namespace pbrt
             return new Vector3f((Float)(r * Math.Cos(phi)), (Float)(r * Math.Sin(phi)), (Float)z);
         }
 
-        private static void RandomPlane(Random random, out Vector3f ex, out Vector3f ey, out Vector3f ez)
+        internal static void RandomPlane(Random random, out Vector3f ex, out Vector3f ey, out Vector3f ez)
         {
             ez = RandomDirection(random);
             Vector3f helper = Math.Abs(ez.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
@@ -80,7 +80,7 @@ namespace pbrt
             ey = pbrt.Cross(ez, ex);
         }
 
-        private static Point3f Embed(double[] q, Point3f origin, Vector3f ex, Vector3f ey)
+        internal static Point3f Embed(double[] q, Point3f origin, Vector3f ex, Vector3f ey)
         {
             return origin + (Float)q[0] * ex + (Float)q[1] * ey;
         }
