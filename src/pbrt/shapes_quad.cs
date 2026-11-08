@@ -16,6 +16,9 @@
 //  * Sampling. By area: one of the two triangles, chosen by area, then a uniform point of it (density 1 / Area). By solid angle, from a point:
 //    for a rectangle the spherical rectangle of Urena et al. (as BilinearPatch does), otherwise one of the two spherical triangles of Arvo,
 //    chosen by solid angle, so the density is 1 / (solid angle of the quad). Both are warped for the cosine at the reference point.
+//    With "string sampling" "projected" the quad is instead sampled proportional to its projected solid angle (the density is |cos| / A, with the cosine
+//    of the angle to the shading normal and A the integral of |cos| over the quad: exact, no warp), see polygon_sampling.cs (Peters 2021). It is used
+//    for the reference points with a shading normal; the other points are sampled as above.
 //  * Quads that are not planar and convex (within a tolerance relative to their size), or that are degenerate, are not made into Quad shapes:
 //    each is two ordinary Triangle shapes, split along the shorter diagonal, as LuxRender splits every quad.
 //
@@ -52,6 +55,43 @@ namespace pbrt
         private Float areaA;
         private Float areaB;
         private bool rectangle;
+        private bool projectedSampling;
+
+        // The sampling by projected solid angle falls back to the sampling by area when the projected solid angle of the quad is smaller than this
+        private const double MinProjectedSampleArea = 1e-8;
+
+        [ThreadStatic]
+        private static ProjectedSolidAnglePolygon upperPolygon;
+        [ThreadStatic]
+        private static ProjectedSolidAnglePolygon lowerPolygon;
+
+        // An orthonormal basis (double precision) whose z-axis is the shading normal
+        private struct Basis
+        {
+            public double xx, xy, xz;
+            public double yx, yy, yz;
+            public double zx, zy, zz;
+
+            public Basis(Normal3f normal)
+            {
+                double length = Math.Sqrt((double)normal.x * normal.x + (double)normal.y * normal.y + (double)normal.z * normal.z);
+                zx = normal.x / length;
+                zy = normal.y / length;
+                zz = normal.z / length;
+                double hx = Math.Abs(zx) < 0.9 ? 1.0 : 0.0;
+                double hy = Math.Abs(zx) < 0.9 ? 0.0 : 1.0;
+                xx = hy * zz;
+                xy = -hx * zz;
+                xz = hx * zy - hy * zx;
+                double xLength = Math.Sqrt(xx * xx + xy * xy + xz * xz);
+                xx /= xLength;
+                xy /= xLength;
+                xz /= xLength;
+                yx = zy * xz - zz * xy;
+                yy = zz * xx - zx * xz;
+                yz = zx * xy - zy * xx;
+            }
+        }
 
         // The hit of one of the two triangles: second tells which one; the weights are those of the corners of the triangle in the order
         // (q0, q1, q3) for the first and (q2, q3, q1) for the second
@@ -104,8 +144,9 @@ namespace pbrt
             }
         }
 
-        public Quad(BilinearPatchMesh mesh, int meshIndex, int quadIndex, int rotation)
+        public Quad(BilinearPatchMesh mesh, int meshIndex, int quadIndex, int rotation, bool projectedSampling)
         {
+            this.projectedSampling = projectedSampling;
             this.meshIndex = meshIndex;
             this.quadIndex = quadIndex;
             this.rotation = rotation;
@@ -652,9 +693,125 @@ namespace pbrt
                                                       std.max<Float>(0.01f, pbrt.AbsDot(ns, c)), std.max<Float>(0.01f, pbrt.AbsDot(ns, d)) });
         }
 
+        // The parts of the quad above and below the horizon of the reference point (the plane through it with the shading normal), as polygons for the sampling
+        // by projected solid angle, and their projected solid angles. False if the quad is not sampled this way from the reference point.
+        private bool PrepareProjected(BilinearPatchMesh mesh, ShapeSampleContext ctx, out Basis basis, out ProjectedSolidAnglePolygon upper,
+                                      out ProjectedSolidAnglePolygon lower, out double upperArea, out double lowerArea)
+        {
+            basis = default;
+            upper = null;
+            lower = null;
+            upperArea = 0;
+            lowerArea = 0;
+            if (!projectedSampling || ctx.ns == new Normal3f(0, 0, 0))
+            {
+                return false;
+            }
+            if (BilinearPatch.ReferencePointOnPlane(ctx, Corner(mesh, 0), Corner(mesh, 1), Corner(mesh, 3)))
+            {
+                return false;
+            }
+            basis = new Basis(ctx.ns);
+            Point3f reference = ctx.p();
+            double[] x = new double[4];
+            double[] y = new double[4];
+            double[] z = new double[4];
+            for (int k = 0; k < 4; ++k)
+            {
+                Point3f c = Corner(mesh, k);
+                double ox = (double)c.x - reference.x;
+                double oy = (double)c.y - reference.y;
+                double oz = (double)c.z - reference.z;
+                x[k] = ox * basis.xx + oy * basis.xy + oz * basis.xz;
+                y[k] = ox * basis.yx + oy * basis.yy + oz * basis.yz;
+                z[k] = ox * basis.zx + oy * basis.zy + oz * basis.zz;
+            }
+            if (upperPolygon == null)
+            {
+                upperPolygon = new ProjectedSolidAnglePolygon();
+                lowerPolygon = new ProjectedSolidAnglePolygon();
+            }
+            upper = upperPolygon;
+            lower = lowerPolygon;
+            if (upper.Prepare(4, x, y, z, 1))
+            {
+                upperArea = upper.ProjectedSolidAngle;
+            }
+            if (lower.Prepare(4, x, y, z, -1))
+            {
+                lowerArea = lower.ProjectedSolidAngle;
+            }
+            return upperArea + lowerArea > MinProjectedSampleArea;
+        }
+
+        // The sample of the direction w from the reference point: the point of the quad in that direction, with the density in solid angle
+        private pstd.optional<ShapeSample> SampleProjected(BilinearPatchMesh mesh, ShapeSampleContext ctx, Point2f u, Basis basis, ProjectedSolidAnglePolygon upper,
+                                                           ProjectedSolidAnglePolygon lower, double upperArea, double lowerArea)
+        {
+            double total = upperArea + lowerArea;
+            double pUpper = upperArea / total;
+            double u0 = u[0];
+            ProjectedSolidAnglePolygon chosen;
+            double sign;
+            if (u0 < pUpper)
+            {
+                chosen = upper;
+                sign = 1;
+                u0 = u0 / pUpper;
+            }
+            else
+            {
+                chosen = lower;
+                sign = -1;
+                u0 = (u0 - pUpper) / (1 - pUpper);
+            }
+            u0 = Math.Min(u0, 1 - 1.1102230246251565e-16);
+            double lx, ly, lz;
+            chosen.Sample(u0, Math.Min((double)u[1], 1 - 1.1102230246251565e-16), out lx, out ly, out lz);
+            lz *= sign;
+            double wx = lx * basis.xx + ly * basis.yx + lz * basis.zx;
+            double wy = lx * basis.xy + ly * basis.yy + lz * basis.zy;
+            double wz = lx * basis.xz + ly * basis.yz + lz * basis.zz;
+
+            // The point of the plane of the quad in that direction, and its coordinates (alpha, beta) in the frame (q0; q1 - q0, q3 - q0)
+            Point3f reference = ctx.p();
+            Point3f q0 = Corner(mesh, 0), q1 = Corner(mesh, 1), q2 = Corner(mesh, 2), q3 = Corner(mesh, 3);
+            double e1x = (double)q1.x - q0.x, e1y = (double)q1.y - q0.y, e1z = (double)q1.z - q0.z;
+            double e3x = (double)q3.x - q0.x, e3y = (double)q3.y - q0.y, e3z = (double)q3.z - q0.z;
+            double nx = e1y * e3z - e1z * e3y, ny = e1z * e3x - e1x * e3z, nz = e1x * e3y - e1y * e3x;
+            double denominator = wx * nx + wy * ny + wz * nz;
+            if (denominator == 0)
+            {
+                return default;
+            }
+            double rx = (double)q0.x - reference.x, ry = (double)q0.y - reference.y, rz = (double)q0.z - reference.z;
+            double t = (rx * nx + ry * ny + rz * nz) / denominator;
+            if (!(t > 0))
+            {
+                return default;
+            }
+            double dx = t * wx - rx, dy = t * wy - ry, dz = t * wz - rz;
+            double nn = nx * nx + ny * ny + nz * nz;
+            double alpha = ((dy * e3z - dz * e3y) * nx + (dz * e3x - dx * e3z) * ny + (dx * e3y - dy * e3x) * nz) / nn;
+            double beta = ((e1y * dz - e1z * dy) * nx + (e1z * dx - e1x * dz) * ny + (e1x * dy - e1y * dx) * nz) / nn;
+            double u1, v1;
+            SolveBilinear(a11, b11, alpha, beta, out u1, out v1);
+            Point2f uv = ToGivenFrame(rotation, u1, v1);
+            Point3f point = new Point3f((Float)(reference.x + t * wx), (Float)(reference.y + t * wy), (Float)(reference.z + t * wz));
+            Vector3f pError = pbrt.gamma(6) * (Vector3f)(pbrt.Abs(q0) + pbrt.Abs(q1) + pbrt.Abs(q2) + pbrt.Abs(q3));
+            return SampleAt(mesh, point, pError, uv, ctx.time, true, (Float)(Math.Abs(lz) / total));
+        }
+
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
             BilinearPatchMesh mesh = GetMesh();
+            Basis projectedBasis;
+            ProjectedSolidAnglePolygon upperPart, lowerPart;
+            double upperArea, lowerArea;
+            if (PrepareProjected(mesh, ctx, out projectedBasis, out upperPart, out lowerPart, out upperArea, out lowerArea))
+            {
+                return SampleProjected(mesh, ctx, u, projectedBasis, upperPart, lowerPart, upperArea, lowerArea);
+            }
             Float omegaA, omegaB;
             if (!SamplesBySolidAngle(mesh, ctx, out omegaA, out omegaB))
             {
@@ -750,6 +907,14 @@ namespace pbrt
             {
                 return 0;
             }
+            Basis projectedBasis;
+            ProjectedSolidAnglePolygon upperPart, lowerPart;
+            double upperArea, lowerArea;
+            if (PrepareProjected(mesh, ctx, out projectedBasis, out upperPart, out lowerPart, out upperArea, out lowerArea))
+            {
+                double cosine = Math.Abs((double)wi.x * projectedBasis.zx + (double)wi.y * projectedBasis.zy + (double)wi.z * projectedBasis.zz);
+                return (Float)(cosine / (upperArea + lowerArea));
+            }
             Float omegaA, omegaB;
             Vector3f pError;
             Point3f pHit = PointOfHit(mesh, hit.second, hit.w0, hit.w1, hit.w2, out pError);
@@ -791,7 +956,7 @@ namespace pbrt
         // The Quad shapes (and the Triangle shapes of the quads that are not planar and convex) of a mesh of quadrilaterals. indices holds four per quad,
         // in order around the quad. P is in object space.
         public static pstd.vector<Shape> CreateShapes(Transform renderFromObject, bool reverseOrientation, List<int> indices, List<Point3f> P,
-                                                      List<Normal3f> N, List<Point2f> uv, List<int> faceIndices, Allocator alloc)
+                                                      List<Normal3f> N, List<Point2f> uv, List<int> faceIndices, bool projectedSampling, Allocator alloc)
         {
             int nQuads = indices.Count / 4;
             List<int> goodIndices = new List<int>();
@@ -856,14 +1021,25 @@ namespace pbrt
                 }
                 for (int i = 0; i < goodRotation.Count; ++i)
                 {
-                    shapes.push_back(new Quad(mesh, meshIndex, i, goodRotation[i]));
+                    shapes.push_back(new Quad(mesh, meshIndex, i, goodRotation[i], projectedSampling));
                 }
             }
             return shapes;
         }
 
+        // The sampling of the quads from a point: "solidangle" (the default; the spherical rectangle or two spherical triangles, warped for the cosine) or
+        // "projected" (proportional to the projected solid angle, see polygon_sampling.cs)
+        public static bool ParseSampling(string sampling, FileLoc loc)
+        {
+            if (sampling != "solidangle" && sampling != "projected")
+            {
+                pbrt.ErrorExit(loc, "\"sampling\" must be \"solidangle\" or \"projected\".");
+            }
+            return sampling == "projected";
+        }
+
         // Shape "quadmesh": "integer indices" (four per quad, in order around it; none for a single quad), "point3 P", "point2 uv", "normal N",
-        // "integer faceIndices"
+        // "integer faceIndices", "string sampling"
         public static pstd.vector<Shape> Create(Transform renderFromObject, bool reverseOrientation, ParameterDictionary parameters, FileLoc loc,
                                                 Allocator alloc)
         {
@@ -915,7 +1091,7 @@ namespace pbrt
                                                   faceIndices.Count, indices.Count / 4));
                 faceIndices = new List<int>();
             }
-            return CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, alloc);
+            return CreateShapes(renderFromObject, reverseOrientation, indices, P, N, uv, faceIndices, ParseSampling(parameters.GetOneString("sampling", "solidangle"), loc), alloc);
         }
     }
 }  // namespace pbrt

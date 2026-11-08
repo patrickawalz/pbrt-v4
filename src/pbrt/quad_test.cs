@@ -54,10 +54,10 @@ namespace pbrt
             }
         }
 
-        private static Quad MakeQuad(Point3f[] p, Point2f[] uv)
+        private static Quad MakeQuad(Point3f[] p, Point2f[] uv, bool projected = false)
         {
             pstd.vector<Shape> shapes = Quad.CreateShapes(new Transform(), false, new List<int> { 0, 1, 2, 3 }, new List<Point3f>(p), new List<Normal3f>(),
-                                                          uv != null ? new List<Point2f>(uv) : new List<Point2f>(), new List<int>(), new Allocator());
+                                                          uv != null ? new List<Point2f>(uv) : new List<Point2f>(), new List<int>(), projected, new Allocator());
             EXPECT_EQ(1, (int)shapes.size());
             return shapes[0] as Quad;
         }
@@ -145,7 +145,7 @@ namespace pbrt
             List<Point3f> points = new List<Point3f> { new Point3f(0, 0, 0), new Point3f(1, 0, 0), new Point3f(1, 1, 0), new Point3f(0, 1, 0), new Point3f(2, 0, 0),
                                                        new Point3f(2, 1, 0.3f) };
             pstd.vector<Shape> shapes = Quad.CreateShapes(new Transform(), false, new List<int> { 0, 1, 2, 3, 1, 4, 5, 2 }, points, new List<Normal3f>(),
-                                                          new List<Point2f>(), new List<int>(), new Allocator());
+                                                          new List<Point2f>(), new List<int>(), false, new Allocator());
             int quads = 0, triangles = 0;
             for (int i = 0; i < (int)shapes.size(); ++i)
             {
@@ -295,7 +295,7 @@ namespace pbrt
                     }
                 }
                 pstd.vector<Shape> quads = Quad.CreateShapes(new Transform(), false, around, new List<Point3f>(vertex), new List<Normal3f>(), new List<Point2f>(), new List<int>(),
-                                                             new Allocator());
+                                                             false, new Allocator());
                 int quadCount = 0;
                 for (int i = 0; i < (int)quads.size(); ++i)
                 {
@@ -404,7 +404,7 @@ namespace pbrt
                     }
                 }
                 pstd.vector<Shape> quads = Quad.CreateShapes(new Transform(), false, around, new List<Point3f>(vertex), new List<Normal3f>(), new List<Point2f>(), new List<int>(),
-                                                             new Allocator());
+                                                             false, new Allocator());
                 TriangleMesh mesh = new TriangleMesh(new Transform(), false, new pstd.vector<int>(triangleIndices), new pstd.vector<Point3f>(vertex),
                                                      new pstd.vector<Vector3f>(), new pstd.vector<Normal3f>(), new pstd.vector<Point2f>(), new pstd.vector<int>(), new Allocator());
                 pstd.vector<Shape> triangles = Triangle.CreateTriangles(mesh, new Allocator());
@@ -567,9 +567,9 @@ namespace pbrt
             return m;
         }
 
-        private static void CheckReceivers(Point3f[] corners, string what, Point3f[] receivers, double tolerance)
+        private static void CheckReceivers(Point3f[] corners, string what, Point3f[] receivers, double tolerance, bool projected)
         {
-            Quad quad = MakeQuad(corners, null);
+            Quad quad = MakeQuad(corners, null, projected);
             int seed = 0;
             foreach (Point3f p in receivers)
             {
@@ -587,7 +587,7 @@ namespace pbrt
                     EXPECT_EQ(0.0, m.badPoints);
                     if (!ok)
                     {
-                        Console.WriteLine("[Quad] failing receiver (" + what + ") p=" + p + " warp=" + warp + " s/q=" + m.sampledOverQuadrature.ToString("F4", CultureInfo.InvariantCulture) +
+                        Console.WriteLine("[Quad] failing receiver (" + what + ") p=" + p + " warp=" + warp + " projected=" + projected + " s/q=" + m.sampledOverQuadrature.ToString("F4", CultureInfo.InvariantCulture) +
                                           " pdfInt=" + m.pdfIntegral.ToString("F4", CultureInfo.InvariantCulture) + " mismatch=" + m.mismatchFraction.ToString("E2", CultureInfo.InvariantCulture) +
                                           " badPoints=" + m.badPoints);
                     }
@@ -614,30 +614,293 @@ namespace pbrt
         [TEST("Quad", "SamplingMatchesQuadratureAndPDF")]
         public static void Quad_SamplingMatchesQuadratureAndPDF()
         {
+            CheckAllKinds(false);
+        }
+
+        // The same with the quads sampled proportional to their projected solid angle (sampling "projected"): without a shading normal they are sampled as above
+        [TEST("Quad", "ProjectedSamplingMatchesQuadratureAndPDF")]
+        public static void Quad_ProjectedSamplingMatchesQuadratureAndPDF()
+        {
+            CheckAllKinds(true);
+        }
+
+        private static void CheckAllKinds(bool projected)
+        {
             Point3f centre = new Point3f(-2.0f, 2.5f, 0.1f);
             Vector3f ax = pbrt.Normalize(new Vector3f(0.999128209f, 0.00290597103f, -0.0416458633f));
             Vector3f ay = pbrt.Normalize(new Vector3f(0.00290597103f, 0.99031343f, 0.138819544f));
             Point3f[] receivers = FloorReceivers();
             // a general convex quadrilateral
             CheckReceivers(new Point3f[] { centre - 0.9f * ax - 0.5f * ay, centre + 0.7f * ax - 0.7f * ay, centre + 0.5f * ax + 0.8f * ay, centre - 0.6f * ax + 0.6f * ay },
-                           "general", receivers, 0.015);
+                           "general", receivers, 0.015, projected);
             // a trapezoid, then the same corners starting from each of the other corners
             Point3f[] trapezoid = { centre - 0.9f * ax - 0.5f * ay, centre + 0.9f * ax - 0.5f * ay, centre + 0.4f * ax + 0.6f * ay, centre - 0.4f * ax + 0.6f * ay };
             for (int k = 0; k < 4; ++k)
             {
                 Point3f[] rotated = { trapezoid[k], trapezoid[(k + 1) & 3], trapezoid[(k + 2) & 3], trapezoid[(k + 3) & 3] };
-                CheckReceivers(rotated, "trapezoid from corner " + k, new Point3f[] { receivers[0], receivers[7], receivers[13] }, 0.015);
+                CheckReceivers(rotated, "trapezoid from corner " + k, new Point3f[] { receivers[0], receivers[7], receivers[13] }, 0.015, projected);
             }
             // a parallelogram
             CheckReceivers(new Point3f[] { centre - 0.8f * ax - 0.5f * ay, centre + 0.4f * ax - 0.5f * ay, centre + 0.8f * ax + 0.5f * ay, centre - 0.4f * ax + 0.5f * ay },
-                           "parallelogram", receivers, 0.015);
+                           "parallelogram", receivers, 0.015, projected);
             // a rectangle, in each of the four frames of the corners
             Point3f[] rectangle = { centre - 0.8f * ax - 0.5f * ay, centre + 0.8f * ax - 0.5f * ay, centre + 0.8f * ax + 0.5f * ay, centre - 0.8f * ax + 0.5f * ay };
             for (int k = 0; k < 4; ++k)
             {
                 Point3f[] rotated = { rectangle[k], rectangle[(k + 1) & 3], rectangle[(k + 2) & 3], rectangle[(k + 3) & 3] };
-                CheckReceivers(rotated, "rectangle from corner " + k, receivers, 0.015);
+                CheckReceivers(rotated, "rectangle from corner " + k, receivers, 0.015, projected);
             }
+        }
+
+        // The integral of |dot(n, wi)| over the solid angle of the quad (cells x cells cells of the (u,v) of the bilinear patch, sub x sub points in each): the
+        // projected solid angle of the quad seen from p, in total and per cell
+        private static double[] ProjectedSolidAngleCells(Point3f[] corners, Point3f p, Vector3f n, int cells, int sub)
+        {
+            double[] result = new double[cells * cells];
+            int fine = cells * sub;
+            for (int i = 0; i < fine; ++i)
+            {
+                for (int j = 0; j < fine; ++j)
+                {
+                    double u = (i + 0.5) / fine, v = (j + 0.5) / fine;
+                    double[] q = Bilinear(corners, u, v);
+                    Vector3f dpdu = (Float)(1 - v) * (corners[1] - corners[0]) + (Float)v * (corners[2] - corners[3]);
+                    Vector3f dpdv = (Float)(1 - u) * (corners[3] - corners[0]) + (Float)u * (corners[2] - corners[1]);
+                    Vector3f cross = pbrt.Cross(dpdu, dpdv);
+                    double areaElement = pbrt.Length(cross) / ((double)fine * fine);
+                    Vector3f planeNormal = pbrt.Normalize(cross);
+                    Vector3f d = new Vector3f((Float)(q[0] - p.x), (Float)(q[1] - p.y), (Float)(q[2] - p.z));
+                    Vector3f wi = pbrt.Normalize(d);
+                    result[(i / sub) * cells + (j / sub)] += pbrt.AbsDot(n, wi) * pbrt.AbsDot(planeNormal, wi) / pbrt.LengthSquared(d) * areaElement;
+                }
+            }
+            return result;
+        }
+
+        private static double Sum(double[] values)
+        {
+            double sum = 0;
+            for (int i = 0; i < values.Length; ++i)
+            {
+                sum += values[i];
+            }
+            return sum;
+        }
+
+        // The corners relative to p in the coordinates of a frame whose z-axis is n, for ProjectedSolidAnglePolygon
+        private static void LocalCorners(Point3f[] corners, Point3f p, Vector3f ex, Vector3f ey, Vector3f ez, double[] x, double[] y, double[] z)
+        {
+            for (int k = 0; k < corners.Length; ++k)
+            {
+                Vector3f d = corners[k] - p;
+                x[k] = (double)d.x * ex.x + (double)d.y * ex.y + (double)d.z * ex.z;
+                y[k] = (double)d.x * ey.x + (double)d.y * ey.y + (double)d.z * ey.z;
+                z[k] = (double)d.x * ez.x + (double)d.y * ez.y + (double)d.z * ez.z;
+            }
+        }
+
+        // The projected solid angle of the polygon (above and below the horizon) against the quadrature, for random quads and receivers: the sum of the
+        // sectors of the central and the decentral case, the clipping, both windings
+        [TEST("Quad", "ProjectedSolidAngleMatchesQuadrature")]
+        public static void Quad_ProjectedSolidAngleMatchesQuadrature()
+        {
+            Random random = new Random(21);
+            ProjectedSolidAnglePolygon upper = new ProjectedSolidAnglePolygon();
+            ProjectedSolidAnglePolygon lower = new ProjectedSolidAnglePolygon();
+            int central = 0, decentral = 0, straddling = 0, skipped = 0;
+            double worst = 0;
+            for (int trial = 0; trial < 300; ++trial)
+            {
+                Vector3f ez;
+                Point3f center = new Point3f((Float)(4 * random.NextDouble() - 2), (Float)(4 * random.NextDouble() - 2), (Float)(4 * random.NextDouble() - 2));
+                Point3f[] corners = RandomQuad(random, center, (Float)(0.3 + 2 * random.NextDouble()), out ez);
+                Vector3f nx, ny, nz;
+                RandomFrame(random, out nx, out ny, out nz);
+                Point3f p = new Point3f(0, 0, 0);
+                double[] x = new double[4], y = new double[4], z = new double[4];
+                LocalCorners(corners, p, nx, ny, nz, x, y, z);
+                double areaUpper = upper.Prepare(4, x, y, z, 1) ? upper.ProjectedSolidAngle : 0;
+                double areaLower = lower.Prepare(4, x, y, z, -1) ? lower.ProjectedSolidAngle : 0;
+                if (areaUpper > 0)
+                {
+                    if (upper.IsCentral)
+                    {
+                        ++central;
+                    }
+                    else
+                    {
+                        ++decentral;
+                    }
+                }
+                if (areaUpper > 0 && areaLower > 0)
+                {
+                    ++straddling;
+                }
+                // The quadrature is the reference: skip the quads so near the receiver that it is not converged (the integrand is sharply peaked there)
+                double expected = Sum(ProjectedSolidAngleCells(corners, p, nz, 1, 300));
+                double refined = Sum(ProjectedSolidAngleCells(corners, p, nz, 1, 600));
+                if (Math.Abs(expected - refined) > 5e-4 * refined)
+                {
+                    ++skipped;
+                    continue;
+                }
+                expected = refined;
+                double relative = Math.Abs(areaUpper + areaLower - expected) / Math.Max(expected, 1e-9);
+                worst = Math.Max(worst, relative);
+                EXPECT_LT(relative, 2e-3);
+            }
+            Console.WriteLine("[Quad] projected solid angle vs quadrature over 300 random quads: worst relative difference " + worst.ToString("E2", CultureInfo.InvariantCulture) +
+                              ", skipped " + skipped + " unconverged references, upper polygons: " + central + " central, " + decentral + " decentral, " + straddling + " quads straddling the horizon");
+            EXPECT_GT(central, 10);
+            EXPECT_GT(decentral, 10);
+            EXPECT_GT(straddling, 10);
+        }
+
+        // The distribution of the samples: the fraction of the samples in each of 8 x 8 cells of the (u,v) of the quad against the integral of |cos| over the
+        // cell by quadrature, divided by the total. The z-score of every cell must be small. This is what the pdf alone cannot show (f / pdf is constant).
+        private static void CheckDistribution(Point3f[] corners, string what, Point3f p, Vector3f n, int count, int seed)
+        {
+            const int cells = 8;
+            Quad quad = MakeQuad(corners, null, true);
+            double[] expected = ProjectedSolidAngleCells(corners, p, n, cells, 25);
+            double total = Sum(expected);
+            Normal3f ns = new Normal3f(n.x, n.y, n.z);
+            ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(p, new Vector3f(0, 0, 0)), ns, ns, 0);
+            int[] counts = new int[cells * cells];
+            int accepted = 0;
+            Random random = new Random(seed);
+            for (int i = 0; i < count; ++i)
+            {
+                pstd.optional<ShapeSample> ss = quad.Sample(ctx, new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                if (!ss.has_value() || ss.value().pdf == 0)
+                {
+                    continue;
+                }
+                Point2f st = ss.value().intr.uv;
+                int cu = Math.Min(cells - 1, Math.Max(0, (int)(st[0] * cells)));
+                int cv = Math.Min(cells - 1, Math.Max(0, (int)(st[1] * cells)));
+                ++counts[cu * cells + cv];
+                ++accepted;
+            }
+            EXPECT_GT(accepted, count * 99 / 100);
+            double worstZ = 0;
+            double chiSquare = 0;
+            int degrees = 0;
+            for (int c = 0; c < cells * cells; ++c)
+            {
+                double probability = expected[c] / total;
+                double mean = accepted * probability;
+                double sigma = Math.Sqrt(Math.Max(accepted * probability * (1 - probability), 1.0));
+                double z = (counts[c] - mean) / sigma;
+                worstZ = Math.Max(worstZ, Math.Abs(z));
+                if (mean >= 5)
+                {
+                    chiSquare += z * z;
+                    ++degrees;
+                }
+            }
+            Console.WriteLine("[Quad] projected distribution (" + what + "): worst |z| " + worstZ.ToString("F2", CultureInfo.InvariantCulture) + ", chi2/dof " +
+                              (chiSquare / Math.Max(degrees, 1)).ToString("F2", CultureInfo.InvariantCulture));
+            EXPECT_LT(worstZ, 5.0);
+            EXPECT_LT(chiSquare / Math.Max(degrees, 1), 1.6);
+        }
+
+        // Central (the polygon contains the zenith), decentral, straddling the horizon, behind the receiver (the lower part), almost in its plane, and the quads
+        // whose edges lie in planes through the zenith (degenerate ellipses), exactly and slightly rotated
+        [TEST("Quad", "ProjectedSamplingDistributionMatchesQuadrature")]
+        public static void Quad_ProjectedSamplingDistributionMatchesQuadrature()
+        {
+            Vector3f up = new Vector3f(0, 1, 0);
+            Point3f[] general = { new Point3f(-1.2f, 2.0f, -0.9f), new Point3f(1.1f, 2.0f, -1.1f), new Point3f(0.8f, 2.0f, 1.3f), new Point3f(-0.9f, 2.0f, 0.7f) };
+            CheckDistribution(general, "central", new Point3f(0, 0, 0), up, 400000, 1);
+            CheckDistribution(general, "decentral", new Point3f(3.0f, 0, 0.5f), up, 400000, 2);
+            CheckDistribution(general, "decentral, far to the side", new Point3f(9.0f, 0.5f, -3f), up, 400000, 3);
+            CheckDistribution(general, "straddling the horizon", new Point3f(2.5f, 2.0f - 0.0f + 0.3f, 0.2f), up, 400000, 4);
+            CheckDistribution(general, "behind the receiver", new Point3f(0.3f, 5.0f, 0.1f), up, 400000, 5);
+            CheckDistribution(general, "almost in the plane", new Point3f(0.3f, 1.98f, 0.1f), up, 400000, 6);
+            // a tilted quad, a tilted normal
+            Vector3f tilted = pbrt.Normalize(new Vector3f(0.3f, 0.8f, -0.4f));
+            Vector3f planeX = pbrt.Normalize(new Vector3f(1, 0.2f, 0.1f));
+            Vector3f planeY = pbrt.Normalize(new Vector3f(-0.1f, 0.7f, 0.9f));
+            Point3f planeCenter = new Point3f(0.4f, 2.2f, 0.3f);
+            Point3f[] slanted = { planeCenter - 1.4f * planeX - 0.9f * planeY, planeCenter + 1.6f * planeX - 1.0f * planeY, planeCenter + 1.1f * planeX + 1.2f * planeY,
+                                  planeCenter - 0.8f * planeX + 0.8f * planeY };
+            CheckDistribution(slanted, "tilted quad and normal", new Point3f(0.2f, 0, 0), tilted, 400000, 7);
+
+            // Edges in planes through the zenith: a quad in the plane z = 2 with vertical edges, seen from the origin with the normal along y
+            Point3f[] axisAligned = { new Point3f(-1, 1, 2), new Point3f(1, 1, 2), new Point3f(1, 3, 2), new Point3f(-1, 3, 2) };
+            CheckDistribution(axisAligned, "degenerate ellipses", new Point3f(0, 0, 0), up, 400000, 8);
+            CheckDistribution(axisAligned, "degenerate ellipses, decentral", new Point3f(3, 0, 0), up, 400000, 9);
+            CheckDistribution(axisAligned, "degenerate ellipses, straddling", new Point3f(0, 2, 0), up, 400000, 10);
+            // The same turned around the normal (the edges stay in planes through the zenith) and around another axis (they do not, nearly)
+            foreach (double angle in new double[] { 0.3, 1.1, 2.7 })
+            {
+                Point3f[] turned = new Point3f[4];
+                for (int k = 0; k < 4; ++k)
+                {
+                    turned[k] = new Point3f((Float)(Math.Cos(angle) * axisAligned[k].x + Math.Sin(angle) * axisAligned[k].z), axisAligned[k].y,
+                                            (Float)(-Math.Sin(angle) * axisAligned[k].x + Math.Cos(angle) * axisAligned[k].z));
+                }
+                CheckDistribution(turned, "degenerate ellipses turned by " + angle.ToString("F1", CultureInfo.InvariantCulture), new Point3f(0, 0, 0), up, 400000, 11);
+                Point3f[] nearly = new Point3f[4];
+                for (int k = 0; k < 4; ++k)
+                {
+                    nearly[k] = new Point3f(turned[k].x, (Float)(Math.Cos(1e-6) * turned[k].y - Math.Sin(1e-6) * turned[k].z),
+                                            (Float)(Math.Sin(1e-6) * turned[k].y + Math.Cos(1e-6) * turned[k].z));
+                }
+                CheckDistribution(nearly, "nearly degenerate ellipses, turned by " + angle.ToString("F1", CultureInfo.InvariantCulture), new Point3f(0, 0, 0), up, 400000, 12);
+            }
+        }
+
+        // The iteration of the decentral case converges: the residual area of the sampled direction over random polygons (including slivers at the horizon) and
+        // random numbers
+        [TEST("Quad", "ProjectedSamplingIterationConverges")]
+        public static void Quad_ProjectedSamplingIterationConverges()
+        {
+            Random random = new Random(33);
+            ProjectedSolidAnglePolygon polygon = new ProjectedSolidAnglePolygon();
+            polygon.recordResidual = true;
+            double worst = 0;
+            int samples = 0;
+            int decentral = 0;
+            double worstRelative = 0;
+            for (int trial = 0; trial < 6000; ++trial)
+            {
+                Vector3f ez;
+                double distance = 0.2 + 6 * random.NextDouble();
+                Vector3f direction = RandomDirection(random);
+                Point3f center = new Point3f((Float)(distance * direction.x), (Float)(distance * direction.y), (Float)(distance * direction.z));
+                Point3f[] corners = RandomQuad(random, center, (Float)(0.1 + 3 * random.NextDouble()), out ez);
+                double[] x = new double[4], y = new double[4], z = new double[4];
+                for (int k = 0; k < 4; ++k)
+                {
+                    x[k] = corners[k].x;
+                    y[k] = corners[k].y;
+                    z[k] = corners[k].z;
+                }
+                foreach (double sign in new double[] { 1, -1 })
+                {
+                    if (!polygon.Prepare(4, x, y, z, sign) || polygon.IsCentral)
+                    {
+                        continue;
+                    }
+                    ++decentral;
+                    for (int s = 0; s < 40; ++s)
+                    {
+                        double dx, dy, dz;
+                        double saveU0 = random.NextDouble(), saveU1 = random.NextDouble();
+                        polygon.Sample(saveU0, saveU1, out dx, out dy, out dz);
+                        EXPECT_NEAR(1.0, Math.Sqrt(dx * dx + dy * dy + dz * dz), 1e-9);
+                        EXPECT_GE(dz, 0.0);
+                        worst = Math.Max(worst, polygon.lastAbsoluteResidual);
+                        worstRelative = Math.Max(worstRelative, polygon.lastRelativeResidual);
+                        ++samples;
+                    }
+                }
+            }
+            Console.WriteLine("[Quad] projected sampling iteration: worst residual area " + worst.ToString("E2", CultureInfo.InvariantCulture) + " (unit disk: pi), relative to its sector " +
+                              worstRelative.ToString("E2", CultureInfo.InvariantCulture) + ", over " + samples + " samples of " + decentral + " decentral polygons");
+            EXPECT_LT(worst, 2e-14);
         }
 
         // From a distance (the solid angle is under the threshold of spherical sampling) and from a point on the plane of the quad, the sampling is by area

@@ -2824,7 +2824,7 @@ namespace pbrt
                 pstd.vector<Shape> quads = Quad.CreateShapes(renderFromObject, reverseOrientation, around, new List<Point3f>(plyMesh.p.ToArray()),
                                                              new List<Normal3f>(plyMesh.n.ToArray()), new List<Point2f>(plyMesh.uv.ToArray()),
                                                              plyMesh.faceIndices.size() == plyMesh.quadIndices.size() / 4 ? new List<int>(plyMesh.faceIndices.ToArray()) : new List<int>(),
-                                                             alloc);
+                                                             Quad.ParseSampling(parameters.GetOneString("sampling", "solidangle"), loc), alloc);
                 for (int i = 0; i < (int)quads.size(); ++i)
                     shapes.push_back(quads[i]);
             }
