@@ -66,7 +66,7 @@ namespace pbrt
         private static ProjectedSolidAnglePolygon lowerPolygon;
 
         // An orthonormal basis (double precision) whose z-axis is the shading normal
-        private struct Basis
+        internal struct Basis
         {
             public double xx, xy, xz;
             public double yx, yy, yz;
@@ -105,7 +105,7 @@ namespace pbrt
         }
 
         // The ray coordinate system of the watertight triangle test
-        private struct RayFrame
+        internal struct RayFrame
         {
             public int kx;
             public int ky;
@@ -420,14 +420,14 @@ namespace pbrt
 
         // Edge function of the watertight test, in double precision: the products of single precision numbers are exact in double precision, so the
         // sign of the difference is exact, and the function of (b, a) is exactly the negative of the function of (a, b)
-        private static double EdgeFunction(Float ax, Float ay, Float bx, Float by)
+        internal static double EdgeFunction(Float ax, Float ay, Float bx, Float by)
         {
             return (double)ax * (double)by - (double)ay * (double)bx;
         }
 
         // The edge and distance tests of the watertight ray-triangle intersection for the edge functions e0, e1, e2 of a triangle whose vertices
         // (ray coordinate system, z scaled) are given; the bounds of the conservative t are those of pbrt::IntersectTriangle
-        private static bool TestTriangle(double e0, double e1, double e2, Float x0, Float y0, Float z0, Float x1, Float y1, Float z1,
+        internal static bool TestTriangle(double e0, double e1, double e2, Float x0, Float y0, Float z0, Float x1, Float y1, Float z1,
                                          Float x2, Float y2, Float z2, Float tMax, out double w0, out double w1, out double w2, out Float t)
         {
             w0 = 0;

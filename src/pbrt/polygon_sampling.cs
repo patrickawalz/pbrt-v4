@@ -42,7 +42,8 @@ namespace pbrt
 {
     public sealed class ProjectedSolidAnglePolygon
     {
-        public const int MaxVertexCount = 8;
+        // A polygon of at most MaxVertexCount - 1 vertices (the clipping against the horizon adds one)
+        public const int MaxVertexCount = 12;
 
         // The iteration of the decentral case: it stops when the residual area is at rounding level relative to the area of the sector
         private const int MaxIterations = 4;

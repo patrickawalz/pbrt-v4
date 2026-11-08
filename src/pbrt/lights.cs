@@ -1202,7 +1202,7 @@ namespace pbrt
 
             // Warn if light has transformation with non-uniform scale, though not
             // for Triangles or bilinear patches, since this doesn't matter for them.
-            if (renderFromLight.HasScale() && !(shape is Triangle) && !(shape is BilinearPatch) && !(shape is Quad))
+            if (renderFromLight.HasScale() && !(shape is Triangle) && !(shape is BilinearPatch) && !(shape is Quad) && !(shape is Ngon))
                 pbrt.Warning("Scaling detected in rendering to light space transformation! " +
                                 "The system has numerous assumptions, implicit and explicit, " +
                                 "that this transform will have no scale factors in it. " +
@@ -1353,7 +1353,7 @@ namespace pbrt
                 return false;
             if (shape is BilinearPatch patch)
                 return patch.SamplesUniformArea();
-            return shape is Triangle || shape is Quad || shape is QuadricBase;
+            return shape is Triangle || shape is Quad || shape is Ngon || shape is QuadricBase;
         }
 
         // A point on the light, with the density per unit area; false if there is none
