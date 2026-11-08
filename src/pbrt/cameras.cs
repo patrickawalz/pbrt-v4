@@ -1223,9 +1223,9 @@ namespace pbrt
         bool dispersive;
 
         // The wavelengths that the density of the rays tries, and the wavelengths that bound the exit pupil: the nominal one
-        // (0) and the ends of the visible range
+        // (0) and the ends of the range of wavelengths that the renderer samples (the spectrum's own, 360 to 830 nm)
         static readonly Float[] nominalWavelengths = { 0 };
-        static readonly Float[] dispersiveWavelengths = { 0, 400, 700 };
+        static readonly Float[] dispersiveWavelengths = { 0, pbrt.Lambda_min, pbrt.Lambda_max };
         Float[] ProbeWavelengths()
         {
             return dispersive ? dispersiveWavelengths : nominalWavelengths;
