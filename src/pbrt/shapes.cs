@@ -572,13 +572,89 @@ namespace pbrt
     {
         // Disk Public Methods
         public Disk(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, Float height,
-                    Float radius, Float innerRadius, Float phiMax)
+                    Float radius, Float innerRadius, Float phiMax, string sampling = "polar")
             : base(renderFromObject, objectFromRender, reverseOrientation)
         {
+            this.solidAngleMapping = ParseSampling(sampling);
             this.height = height;
             this.radius = radius;
             this.innerRadius = Clamp(innerRadius, 0, radius);
             this.phiMax = QuadricUtil.SweepRadians(phiMax);
+        }
+
+        // "area" samples the disk uniformly by area; "polar", "concentric" and "cylindrical" are the solid angle mappings of the spherical ellipse that a
+        // whole disk subtends (Guillen et al. 2017, shapes_disk_sampling.cs). Returns -1 for area sampling.
+        static int ParseSampling(string sampling)
+        {
+            switch (sampling)
+            {
+                case "area":
+                    return -1;
+                case "polar":
+                    return (int)DiskSolidAngleMapping.Polar;
+                case "concentric":
+                    return (int)DiskSolidAngleMapping.Concentric;
+                case "cylindrical":
+                    return (int)DiskSolidAngleMapping.Cylindrical;
+                default:
+                    throw new ArgumentException("Disk: unknown \"sampling\" \"" + sampling + "\", expected \"area\", \"polar\", \"concentric\" or \"cylindrical\"");
+            }
+        }
+
+        // Sets up the solid angle sampling of a whole disk from pRef. False where the disk is sampled by area: the sampling "area", an annulus or a sector, a
+        // transform that is not a similarity, a point in the plane of the disk, a disk that subtends a vanishing solid angle.
+        public bool PrepareSolidAngleSampler(Point3f pRef, out DiskSolidAngleSampler sampler)
+        {
+            sampler = default(DiskSolidAngleSampler);
+            if (solidAngleMapping < 0 || innerRadius != 0 || phiMax < 2 * Pi || !xform.isUniform)
+            {
+                return false;
+            }
+            Point3f center = renderFromObject.Apply(new Point3f(0, 0, height));
+            Normal3f n = Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
+            return sampler.Prepare((DiskSolidAngleMapping)solidAngleMapping, pRef.x, pRef.y, pRef.z, center.x, center.y, center.z, n.x, n.y, n.z,
+                                   xform.scale * radius);
+        }
+
+        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
+        {
+            DiskSolidAngleSampler sampler;
+            if (!PrepareSolidAngleSampler(ctx.p(), out sampler))
+            {
+                return QuadricUtil.ToSolidAngle(ctx, Sample(u));
+            }
+            double x, y, z;
+            int iterations;
+            sampler.Sample(u[0], u[1], out x, out y, out z, out iterations);
+            if (double.IsNaN(x + y + z))
+            {
+                return default;
+            }
+            // The point is put exactly on the plane of the disk, in object space
+            Point3f pObj = objectFromRender.Apply(new Point3f((Float)x, (Float)y, (Float)z));
+            pObj.z = height;
+            Point3fi pi = renderFromObject.Apply(new Point3fi(pObj, ObjectPError(pObj)));
+            Normal3f n = Normalize(renderFromObject.Apply(new Normal3f(0, 0, 1)));
+            if (reverseOrientation ^ transformSwapsHandedness)
+            {
+                n = -n;
+            }
+            Float phi = QuadricUtil.PhiOf(pObj.x, pObj.y);
+            Float rSample = std.sqrt(Sqr(pObj.x) + Sqr(pObj.y));
+            Point2f uv = new Point2f(phi / phiMax, (radius - rSample) / (radius - innerRadius));
+            return new ShapeSample(new Interaction(pi, n, ctx.time, uv), (Float)(1.0 / sampler.SolidAngle));
+        }
+
+        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
+        {
+            DiskSolidAngleSampler sampler;
+            if (!PrepareSolidAngleSampler(ctx.p(), out sampler))
+            {
+                return base.PDF(ctx, wi);
+            }
+            // The density is uniform over the solid angle of the disk, and zero for the directions that miss it
+            pstd.optional<ShapeIntersection> isect = Intersect(ctx.SpawnRay(wi));
+            return isect ? (Float)(1.0 / sampler.SolidAngle) : 0;
         }
 
         protected override Float ComputeObjectArea() { return phiMax * 0.5f * (Sqr(radius) - Sqr(innerRadius)); }
@@ -704,16 +780,85 @@ namespace pbrt
             Float innerRadius = parameters.GetOneFloat("innerradius", 0);
             Float thetamax = parameters.GetOneFloat("thetamax", 360);
             Float phimax = parameters.GetOneFloat("phimax", thetamax);
-            return new Disk(renderFromObject, objectFromRender, reverseOrientation, height, radius, innerRadius, phimax);
+            return new Disk(renderFromObject, objectFromRender, reverseOrientation, height, radius, innerRadius, phimax,
+                            parameters.GetOneString("sampling", "polar"));
         }
 
         // Disk Private Members
         Float height, radius, innerRadius, phiMax;
+        int solidAngleMapping;
     }
 
     // Cylinder Definition: RenderMan's Cylinder radius zmin zmax thetamax; v runs from zmin to zmax
     public sealed unsafe class Cylinder : QuadricBase
     {
+        // Sets up the solid angle sampling of a whole cylinder from pRef (shapes_cylinder_sampling.cs). False where the cylinder is sampled by area: the sampling
+        // "area", a partial cylinder, a transform that is not a similarity, a point inside of (or too close to) the infinite cylinder.
+        // With "sampling" "projected" and a shading normal within about 3 degrees of the axis of the cylinder (the check), the density is that of the projected solid angle.
+        public bool PrepareSolidAngleSampler(Point3f pRef, Normal3f ns, out CylinderSolidAngleSampler sampler)
+        {
+            sampler = default(CylinderSolidAngleSampler);
+            if (!solidAngleSampling || phiMax < 2 * Pi || !xform.isUniform)
+            {
+                return false;
+            }
+            Point3f pObjRef = objectFromRender.Apply(pRef);
+            bool projected = false;
+            double tiltSine = 0;
+            if (projectedSampling)
+            {
+                double normalLength2 = (double)ns.x * ns.x + (double)ns.y * ns.y + (double)ns.z * ns.z;
+                if (normalLength2 > 0)
+                {
+                    Vector3f axis = Normalize(renderFromObject.Apply(new Vector3f(0, 0, 1)));
+                    double cosine = Math.Abs((double)ns.x * axis.x + (double)ns.y * axis.y + (double)ns.z * axis.z) / Math.Sqrt(normalLength2);
+                    tiltSine = Math.Sqrt(Math.Max(0.0, 1.0 - Math.Min(1.0, cosine) * Math.Min(1.0, cosine)));
+                    projected = tiltSine <= 0.05;
+                }
+            }
+            return sampler.Prepare(pObjRef.x, pObjRef.y, pObjRef.z, radius, zMin, zMax, projected, projected ? tiltSine : 0.0);
+        }
+
+        public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
+        {
+            CylinderSolidAngleSampler sampler;
+            if (!PrepareSolidAngleSampler(ctx.p(), ctx.ns, out sampler))
+            {
+                return QuadricUtil.ToSolidAngle(ctx, Sample(u));
+            }
+            double x, y, z, pdf;
+            sampler.Sample(u[0], u[1], out x, out y, out z, out pdf);
+            if (!(pdf > 0) || double.IsNaN(x + y + z) || double.IsInfinity(pdf))
+            {
+                return default;
+            }
+            Point3f pObj = new Point3f((Float)x, (Float)y, (Float)z);
+            Point3fi pi = renderFromObject.Apply(new Point3fi(pObj, ObjectPError(pObj)));
+            Normal3f n = Normalize(renderFromObject.Apply(new Normal3f(pObj.x, pObj.y, 0)));
+            if (reverseOrientation ^ transformSwapsHandedness)
+            {
+                n = -n;
+            }
+            Float phi = std.atan2(pObj.y, pObj.x);
+            if (phi < 0)
+            {
+                phi += 2 * Pi;
+            }
+            Point2f uv = new Point2f(phi / phiMax, (pObj.z - zMin) / (zMax - zMin));
+            return new ShapeSample(new Interaction(pi, n, ctx.time, uv), (Float)pdf);
+        }
+
+        public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
+        {
+            CylinderSolidAngleSampler sampler;
+            if (!PrepareSolidAngleSampler(ctx.p(), ctx.ns, out sampler))
+            {
+                return base.PDF(ctx, wi);
+            }
+            Vector3f wObj = Normalize(objectFromRender.Apply(wi));
+            return (Float)sampler.Pdf(wObj.x, wObj.y, wObj.z);
+        }
+
         protected override Float ComputeObjectArea() { return (zMax - zMin) * radius * phiMax; }
 
         public override pstd.optional<QuadricIntersection> BasicIntersect(Ray r, Float tMax)
@@ -849,9 +994,15 @@ namespace pbrt
 
         // Cylinder Public Methods
         public Cylinder(Transform renderFromObj, Transform objFromRender, bool reverseOrientation, Float radius,
-                        Float zMin, Float zMax, Float phiMax)
+                        Float zMin, Float zMax, Float phiMax, string sampling = "projected")
             : base(renderFromObj, objFromRender, reverseOrientation)
         {
+            if (sampling != "projected" && sampling != "solidangle" && sampling != "area")
+            {
+                throw new ArgumentException("Cylinder: unknown \"sampling\" \"" + sampling + "\", expected \"projected\", \"solidangle\" or \"area\"");
+            }
+            this.solidAngleSampling = sampling != "area";
+            this.projectedSampling = sampling == "projected";
             this.radius = radius;
             this.zMin = std.min(zMin, zMax);
             this.zMax = std.max(zMin, zMax);
@@ -899,11 +1050,13 @@ namespace pbrt
             Float zmax = parameters.GetOneFloat("zmax", 1);
             Float thetamax = parameters.GetOneFloat("thetamax", 360);
             Float phimax = parameters.GetOneFloat("phimax", thetamax);
-            return new Cylinder(renderFromObject, objectFromRender, reverseOrientation, radius, zmin, zmax, phimax);
+            return new Cylinder(renderFromObject, objectFromRender, reverseOrientation, radius, zmin, zmax, phimax,
+                                parameters.GetOneString("sampling", "projected"));
         }
 
         // Cylinder Private Members
         Float radius, zMin, zMax, phiMax;
+        bool solidAngleSampling, projectedSampling;
     }
 
     // TriangleIntersection Definition
