@@ -67,6 +67,7 @@ namespace pbrt
                 RGBColorSpace.Init(new Allocator());
                 Triangle.Init(new Allocator());
                 BilinearPatch.Init(new Allocator());
+                Quad.Init(new Allocator());
             }
 
             InitBufferCaches();

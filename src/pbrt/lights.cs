@@ -1202,7 +1202,7 @@ namespace pbrt
 
             // Warn if light has transformation with non-uniform scale, though not
             // for Triangles or bilinear patches, since this doesn't matter for them.
-            if (renderFromLight.HasScale() && !(shape is Triangle) && !(shape is BilinearPatch))
+            if (renderFromLight.HasScale() && !(shape is Triangle) && !(shape is BilinearPatch) && !(shape is Quad))
                 pbrt.Warning("Scaling detected in rendering to light space transformation! " +
                                 "The system has numerous assumptions, implicit and explicit, " +
                                 "that this transform will have no scale factors in it. " +
@@ -1345,7 +1345,7 @@ namespace pbrt
         // (not in pbrt-v4) Equiangular sampling of the scattering point toward an area light (Fong et al., section 4.2.3; Kulla and Fajardo
         // 2012) chooses a point on the light first, uniformly by area, and then the distance from that point. The density of the point
         // is 1 / area wherever the ray starts, so the other strategies find it without knowing how it was sampled. A rectangular patch
-        // is sampled uniformly; the shapes that sample by area (a triangle, a disk, a sphere, a cylinder) always are.
+        // is sampled uniformly; the shapes that sample by area (a triangle, a quad, a disk, a sphere, a cylinder) always are.
         public bool SupportsEquiangular()
         {
             // (a light that moves is not sampled by area for the distance: the sample of the point has no time)
@@ -1353,7 +1353,7 @@ namespace pbrt
                 return false;
             if (shape is BilinearPatch patch)
                 return patch.SamplesUniformArea();
-            return shape is Triangle || shape is QuadricBase;
+            return shape is Triangle || shape is Quad || shape is QuadricBase;
         }
 
         // A point on the light, with the density per unit area; false if there is none

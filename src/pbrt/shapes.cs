@@ -49,26 +49,17 @@ namespace pbrt
             p2t.y += Sy * p2t.z;
 
             // Compute edge function coefficients _e0_, _e1_, and _e2_
-            Float e0 = DifferenceOfProducts(p1t.x, p2t.y, p1t.y, p2t.x);
-            Float e1 = DifferenceOfProducts(p2t.x, p0t.y, p2t.y, p0t.x);
-            Float e2 = DifferenceOfProducts(p0t.x, p1t.y, p0t.y, p1t.x);
-
-            // Fall back to double-precision test at triangle edges
-            if (sizeof(Float) == sizeof(float) && (e0 == 0.0f || e1 == 0.0f || e2 == 0.0f))
-            {
-                double p2txp1ty = (double)p2t.x * (double)p1t.y;
-                double p2typ1tx = (double)p2t.y * (double)p1t.x;
-                e0 = (float)(p2typ1tx - p2txp1ty);
-                double p0txp2ty = (double)p0t.x * (double)p2t.y;
-                double p0typ2tx = (double)p0t.y * (double)p2t.x;
-                e1 = (float)(p0typ2tx - p0txp2ty);
-                double p1txp0ty = (double)p1t.x * (double)p0t.y;
-                double p1typ0tx = (double)p1t.y * (double)p0t.x;
-                e2 = (float)(p1typ0tx - p1txp0ty);
-            }
+            // (not in pbrt-v4) The edge functions are evaluated in double precision: the product of two single precision numbers is exact in double precision,
+            // so the sign of each difference is exact, and the function of an edge is exactly the negative of the function of the same edge in the other
+            // direction. A ray cannot pass between two triangles (or a triangle and a Quad, see shapes_quad.cs) that share an edge. pbrt-v4 evaluates them in
+            // single precision and falls back to double precision only when one is exactly zero.
+            double e0Exact = (double)p1t.x * (double)p2t.y - (double)p1t.y * (double)p2t.x;
+            double e1Exact = (double)p2t.x * (double)p0t.y - (double)p2t.y * (double)p0t.x;
+            double e2Exact = (double)p0t.x * (double)p1t.y - (double)p0t.y * (double)p1t.x;
+            Float e0 = (Float)e0Exact, e1 = (Float)e1Exact, e2 = (Float)e2Exact;
 
             // Perform triangle edge and determinant tests
-            if ((e0 < 0 || e1 < 0 || e2 < 0) && (e0 > 0 || e1 > 0 || e2 > 0))
+            if ((e0Exact < 0 || e1Exact < 0 || e2Exact < 0) && (e0Exact > 0 || e1Exact > 0 || e2Exact > 0))
                 return default;
             Float det = e0 + e1 + e2;
             if (det == 0)
@@ -2517,7 +2508,7 @@ namespace pbrt
         // patch itself (where a ray hit an emitter that has a BSDF: that surface sees no light from its own plane), and the estimate of the light that the patch
         // sends to itself is then the one of the hemisphere (pi times the radiance) instead of 0. Such a point is sampled by area, as for the triangle
         // (whose solid angle from a point on its plane is 0): the cosine at the sampled point on the patch makes the density infinite, and the sample is dropped.
-        private static bool ReferencePointOnPlane(ShapeSampleContext ctx, Point3f p00, Point3f p10, Point3f p01)
+        internal static bool ReferencePointOnPlane(ShapeSampleContext ctx, Point3f p00, Point3f p10, Point3f p01)
         {
             const Float rounding = 4 * pbrt.MachineEpsilon;
             Vector3f planeNormal = pbrt.Cross(p10 - p00, p01 - p00);
@@ -2815,7 +2806,41 @@ namespace pbrt
                 shapes = Triangle.CreateTriangles(mesh, alloc);
             }
 
-            if (!plyMesh.quadIndices.empty())
+            // (not in pbrt-v4) "string quads": "bilinear" (the default, as pbrt-v4), "quad" (Quad shapes, see shapes_quad.cs) or "triangles"
+            string quadMode = parameters.GetOneString("quads", "bilinear");
+            if (quadMode != "bilinear" && quadMode != "quad" && quadMode != "triangles")
+                pbrt.ErrorExit(loc, "\"quads\" must be \"bilinear\", \"quad\" or \"triangles\".");
+            if (!plyMesh.quadIndices.empty() && quadMode == "quad")
+            {
+                // The quads of a TriQuadMesh are in the order of a bilinear patch (p00, p10, p01, p11); a Quad takes them in order around the quad
+                List<int> around = new List<int>();
+                for (int i = 0; i < (int)plyMesh.quadIndices.size(); i += 4)
+                {
+                    around.Add(plyMesh.quadIndices[i]);
+                    around.Add(plyMesh.quadIndices[i + 1]);
+                    around.Add(plyMesh.quadIndices[i + 3]);
+                    around.Add(plyMesh.quadIndices[i + 2]);
+                }
+                pstd.vector<Shape> quads = Quad.CreateShapes(renderFromObject, reverseOrientation, around, new List<Point3f>(plyMesh.p.ToArray()),
+                                                             new List<Normal3f>(plyMesh.n.ToArray()), new List<Point2f>(plyMesh.uv.ToArray()),
+                                                             plyMesh.faceIndices.size() == plyMesh.quadIndices.size() / 4 ? new List<int>(plyMesh.faceIndices.ToArray()) : new List<int>(),
+                                                             alloc);
+                for (int i = 0; i < (int)quads.size(); ++i)
+                    shapes.push_back(quads[i]);
+            }
+            else if (!plyMesh.quadIndices.empty() && quadMode == "triangles")
+            {
+                TriQuadMesh converted = plyMesh.Clone();
+                converted.triIndices = new pstd.vector<int>();
+                converted.faceIndices = new pstd.vector<int>();
+                converted.ConvertToOnlyTriangles();
+                TriangleMesh quadTriangles = new TriangleMesh(renderFromObject, reverseOrientation, converted.triIndices, converted.p,
+                                                              new pstd.vector<Vector3f>(), converted.n, converted.uv, converted.faceIndices, alloc);
+                pstd.vector<Shape> quadTris = Triangle.CreateTriangles(quadTriangles, alloc);
+                for (int i = 0; i < (int)quadTris.size(); ++i)
+                    shapes.push_back(quadTris[i]);
+            }
+            else if (!plyMesh.quadIndices.empty())
             {
                 BilinearPatchMesh mesh = new BilinearPatchMesh(renderFromObject, reverseOrientation,
                                                                plyMesh.quadIndices, plyMesh.p, plyMesh.n,
@@ -2957,6 +2982,10 @@ namespace pbrt
                 BilinearPatchMesh mesh = BilinearPatch.CreateMesh(renderFromObject, reverseOrientation, parameters, loc, alloc);
                 if (mesh != null)
                     shapes = BilinearPatch.CreatePatches(mesh, alloc);
+            }
+            else if (name == "quadmesh")
+            {
+                shapes = Quad.Create(renderFromObject, reverseOrientation, parameters, loc, alloc);
             }
             // Create multiple-_Shape_ types
             else if (name == "curve")
