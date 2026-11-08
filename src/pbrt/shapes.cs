@@ -1469,11 +1469,31 @@ namespace pbrt
             return pdf;
         }
 
+        // (not in pbrt-v4) A triangle of a mesh that is not in the list of the meshes (the triangle that a deforming triangle is at a time,
+        // see DeformingTriangle)
+        public Triangle(TriangleMesh own, int triIndex)
+        {
+            this.own = own;
+            this.triIndex = triIndex;
+        }
+
+        // (not in pbrt-v4) The mesh and the index of the triangle in it, for the meshes that deform
+        public TriangleMesh Mesh()
+        {
+            return GetMesh();
+        }
+
+        public int TriangleIndex()
+        {
+            return triIndex;
+        }
+
         // Triangle Private Methods
-        TriangleMesh GetMesh() { return allMeshes[meshIndex]; }
+        TriangleMesh GetMesh() { return own != null ? own : allMeshes[meshIndex]; }
 
         // Triangle Private Members
         int meshIndex = -1, triIndex = -1;
+        TriangleMesh own;
     }
 
     // CurveType Definition
@@ -1579,6 +1599,11 @@ namespace pbrt
             curveBytes += 144 + nSegments * 24;  // sizeof(CurveCommon) + nSegments * sizeof(Curve) in pbrt-v4
             return segments;
         }
+
+        // (not in pbrt-v4) The data of the curve, for the curves that deform (ExactMotion)
+        public CurveCommon Common() { return common; }
+        public Float UMin() { return uMin; }
+        public Float UMax() { return uMax; }
 
         public override DirectionCone NormalBounds() { return DirectionCone.EntireSphere(); }
 
@@ -2673,8 +2698,26 @@ namespace pbrt
             faceIndex = mesh.faceIndices != null ? mesh.faceIndices[blpIndex] : 0;
         }
 
+        // (not in pbrt-v4) A patch of a mesh that is not in the list of the meshes (the patch that a deforming patch is at a time)
+        public BilinearPatch(BilinearPatchMesh own, int blpIndex)
+            : this(own, -1, blpIndex)
+        {
+            this.own = own;
+        }
+
+        // (not in pbrt-v4) The mesh and the index of the patch in it, for the meshes that deform
+        public BilinearPatchMesh Mesh()
+        {
+            return GetMesh();
+        }
+
+        public int PatchIndex()
+        {
+            return blpIndex;
+        }
+
         // BilinearPatch Private Methods
-        BilinearPatchMesh GetMesh() { return allMeshes[meshIndex]; }
+        BilinearPatchMesh GetMesh() { return own != null ? own : allMeshes[meshIndex]; }
 
         public override string ToString()
         {
@@ -2685,6 +2728,7 @@ namespace pbrt
         // BilinearPatch Private Members
         int meshIndex, blpIndex;
         Float area;
+        BilinearPatchMesh own;
     }
 
     // Shape factory (Shape::Create from shapes.cpp)

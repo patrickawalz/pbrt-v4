@@ -115,6 +115,9 @@ namespace pbrt
         });
 
         // TriangleMesh Public Methods
+        // (not in pbrt-v4) An empty mesh whose members the code of the deforming meshes fills in (motionblur.cs)
+        internal TriangleMesh() { }
+
         public TriangleMesh(Transform renderFromObject, bool reverseOrientation, pstd.vector<int> indices,
                             pstd.vector<Point3f> p, pstd.vector<Vector3f> s, pstd.vector<Normal3f> n,
                             pstd.vector<Point2f> uv, pstd.vector<int> faceIndices, Allocator alloc)
@@ -242,6 +245,9 @@ namespace pbrt
         });
 
         // BilinearPatchMesh Public Methods
+        // (not in pbrt-v4) An empty mesh whose members the code of the deforming meshes fills in (motionblur.cs)
+        internal BilinearPatchMesh() { }
+
         public BilinearPatchMesh(Transform renderFromObject, bool reverseOrientation, pstd.vector<int> indices,
                                  pstd.vector<Point3f> P, pstd.vector<Normal3f> N, pstd.vector<Point2f> UV,
                                  pstd.vector<int> fIndices, PiecewiseConstant2D imageDist, Allocator alloc)

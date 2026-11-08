@@ -336,7 +336,8 @@ namespace pbrt
         static bool IsMotionBlockDirective(string token)
         {
             return token == "MotionEnd" || token == "Identity" || token == "Translate" || token == "Rotate" ||
-                   token == "Scale" || token == "LookAt" || token == "Transform" || token == "ConcatTransform";
+                   token == "Scale" || token == "LookAt" || token == "Transform" || token == "ConcatTransform" ||
+                   token == "Shape";
         }
 
         public static void parse(ParserTarget target, Tokenizer t)
@@ -444,7 +445,8 @@ namespace pbrt
                 if (target.InMotionBlock() && !IsMotionBlockDirective(tok2.token))
                     ErrorExit(tok2.loc, StringPrintf("\"%s\" is not allowed between MotionBegin and MotionEnd; " +
                                                      "only Identity, Translate, Rotate, Scale, LookAt, Transform and " +
-                                                     "ConcatTransform are (MotionEnd closes the block).", tok2.token));
+                                                     "ConcatTransform (the keys of a transformation) or Shape (the keys of a deforming shape) are " +
+                                                     "(MotionEnd closes the block).", tok2.token));
 
                 switch (tok2.token[0])
                 {

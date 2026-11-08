@@ -97,6 +97,10 @@ namespace pbrt
         public string materialName = "";
         public int lightIndex = -1;
         public string insideMedium = "", outsideMedium = "";
+        // (not in pbrt-v4) The keys of a deforming shape (MotionBegin ... Shape ... Shape ... MotionEnd): the parameters of every key, the first
+        // being "parameters", and the times of the keys. null for a shape that does not deform.
+        public ParameterDictionary[] motionKeys;
+        public Float[] motionTimes;
     }
 
     public unsafe class AnimatedShapeSceneEntity : TransformedSceneEntity
@@ -123,6 +127,9 @@ namespace pbrt
         public string materialName = "";
         public int lightIndex = -1;
         public string insideMedium = "", outsideMedium = "";
+        // (not in pbrt-v4) see ShapeSceneEntity
+        public ParameterDictionary[] motionKeys;
+        public Float[] motionTimes;
     }
 
     public unsafe class InstanceDefinitionSceneEntity
@@ -861,11 +868,11 @@ namespace pbrt
             List<Light> lights = new List<Light>();
             // (not in pbrt-v4) The area lights of one shape entity, static or animated: the shape of an animated entity is made in its own
             // space (with the identity) and the lights know the AnimatedTransform (see DiffuseAreaLight.SetMotion)
-            Func<string, FileLoc, int, string, int, ParameterDictionary, string, string, Transform, Transform, bool, AnimatedTransform, List<Light>>
+            Func<string, FileLoc, int, string, int, ParameterDictionary, string, string, Transform, Transform, bool, AnimatedTransform, ParameterDictionary[], Float[], List<Light>>
                 createAreaLights = (string shapeName, FileLoc shapeLoc, int lightIndex, string shapeMaterialName, int materialIndex,
                                     ParameterDictionary shapeParameters, string insideMedium, string outsideMedium,
                                     Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
-                                    AnimatedTransform renderFromObjectAnimated) =>
+                                    AnimatedTransform renderFromObjectAnimated, ParameterDictionary[] motionKeys, Float[] motionTimes) =>
                 {
                     string materialName;
                     if (shapeMaterialName.Length != 0)
@@ -888,9 +895,9 @@ namespace pbrt
                         return null;
                     }
 
-                    pstd.vector<Shape> shapeObjects = Shape.Create(
+                    pstd.vector<Shape> shapeObjects = CreateShapes(
                         shapeName, renderFromObject, objectFromRender, reverseOrientation,
-                        shapeParameters, textures.floatTextures, shapeLoc, alloc);
+                        shapeParameters, motionKeys, motionTimes, textures.floatTextures, shapeLoc, alloc);
 
                     FloatTexture alphaTex = getAlphaTexture(shapeParameters, shapeLoc);
 
@@ -927,7 +934,7 @@ namespace pbrt
 
                 List<Light> shapeLights = createAreaLights(sh.name, sh.loc, sh.lightIndex, sh.materialName, sh.materialIndex,
                                                            sh.parameters, sh.insideMedium, sh.outsideMedium, sh.renderFromObject,
-                                                           sh.objectFromRender, sh.reverseOrientation, null);
+                                                           sh.objectFromRender, sh.reverseOrientation, null, sh.motionKeys, sh.motionTimes);
                 if (shapeLights == null)
                     continue;
                 shapeIndexToAreaLights[i] = shapeLights;
@@ -943,7 +950,7 @@ namespace pbrt
 
                 List<Light> shapeLights = createAreaLights(sh.name, sh.loc, sh.lightIndex, sh.materialName, sh.materialIndex,
                                                            sh.parameters, sh.insideMedium, sh.outsideMedium, sh.identity,
-                                                           sh.identity, sh.reverseOrientation, sh.renderFromObject);
+                                                           sh.identity, sh.reverseOrientation, sh.renderFromObject, sh.motionKeys, sh.motionTimes);
                 if (shapeLights == null)
                     continue;
                 shapeIndexToAreaLights[-1 - i] = shapeLights;
@@ -1009,9 +1016,9 @@ namespace pbrt
                     ParallelFor(0, shapesIn.Count, (long i) =>
                     {
                         ShapeSceneEntity sh = shapesIn[(int)i];
-                        shapeVectors[i] = Shape.Create(
+                        shapeVectors[i] = CreateShapes(
                             sh.name, sh.renderFromObject, sh.objectFromRender, sh.reverseOrientation,
-                            sh.parameters, textures.floatTextures, sh.loc, alloc);
+                            sh.parameters, sh.motionKeys, sh.motionTimes, textures.floatTextures, sh.loc, alloc);
                     });
 
                     List<Primitive> prims = new List<Primitive>();
@@ -1099,8 +1106,8 @@ namespace pbrt
                     {
                         AnimatedShapeSceneEntity sh = shapesIn[shapeIndex];
                         pstd.vector<Shape> shapeObjs =
-                            Shape.Create(sh.name, sh.identity, sh.identity, sh.reverseOrientation,
-                                         sh.parameters, textures.floatTextures, sh.loc, alloc);
+                            CreateShapes(sh.name, sh.identity, sh.identity, sh.reverseOrientation,
+                                         sh.parameters, sh.motionKeys, sh.motionTimes, textures.floatTextures, sh.loc, alloc);
                         if (shapeObjs.empty())
                             continue;
 
@@ -1144,10 +1151,16 @@ namespace pbrt
                             if (areaList != null)
                                 area = areaList[(int)k];
 
+                            // (not in pbrt-v4) the object number of the shape is that of the static shapes (the texture variation of an object); the alpha
+                            // texture is evaluated in render space, at the time of the ray (GeometricPrimitive.renderFromShape)
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
-                                prims.Add(new SimplePrimitive(s, mtl));
+                                prims.Add(new SimplePrimitive(s, mtl, ObjectIds.Hash(sh.loc)));
                             else
-                                prims.Add(new GeometricPrimitive(s, mtl, area, mi, alphaTex));
+                            {
+                                GeometricPrimitive animatedPrimitive = new GeometricPrimitive(s, mtl, area, mi, alphaTex, ObjectIds.Hash(sh.loc));
+                                animatedPrimitive.renderFromShape = sh.renderFromObject;
+                                prims.Add(animatedPrimitive);
+                            }
                         }
 
                         // TODO: could try to be greedy or even segment them according
@@ -1232,6 +1245,16 @@ namespace pbrt
             OSLScene.aggregate = aggregate;  // (not in pbrt-v4) for the trace() of OSL shaders
             LOG_VERBOSE("Finished top-level accelerator");
             return aggregate;
+        }
+
+        // (not in pbrt-v4) The shapes of a scene entity: Shape.Create, or the deforming shape of the keys of a MotionBegin block of shapes
+        static pstd.vector<Shape> CreateShapes(string name, Transform renderFromObject, Transform objectFromRender, bool reverseOrientation,
+                                               ParameterDictionary parameters, ParameterDictionary[] motionKeys, Float[] motionTimes,
+                                               IDictionary<string, FloatTexture> floatTextures, FileLoc loc, Allocator alloc)
+        {
+            if (motionKeys == null)
+                return Shape.Create(name, renderFromObject, objectFromRender, reverseOrientation, parameters, floatTextures, loc, alloc);
+            return ShapeMotion.Create(name, renderFromObject, objectFromRender, reverseOrientation, motionKeys, motionTimes, floatTextures, loc, alloc);
         }
 
         // BasicScene Public Members
@@ -1464,6 +1487,8 @@ namespace pbrt
                 graphicsState.ForActiveTransforms(op);
                 return;
             }
+            if (motionBlock.shapeDictionaries.Count > 0)
+                ErrorExit(loc, StringPrintf("MotionBegin at %s holds shapes, a transformation call cannot be in the same block.", motionBlock.loc));
             if (motionBlock.ops.Count > 0 && motionBlock.kind != kind)
                 ErrorExit(loc, StringPrintf("MotionBegin at %s: all the transformation calls of a block must be of the " +
                                             "same kind, the first was %s and this one is %s.",
@@ -1496,6 +1521,15 @@ namespace pbrt
                 ErrorExit(loc, "MotionEnd without a MotionBegin.");
             MotionBlock block = motionBlock;
             motionBlock = null;
+            if (block.shapeDictionaries.Count > 0)
+            {
+                // (not in pbrt-v4) A block of shapes: one deforming shape with a key for every time
+                if (block.shapeDictionaries.Count != block.times.Length)
+                    ErrorExit(loc, StringPrintf("MotionBegin at %s has %d times but the block has %d shapes.", block.loc, block.times.Length,
+                                                block.shapeDictionaries.Count));
+                AddShape(block.shapeName, block.shapeDictionaries[0], block.shapeDictionaries.ToArray(), block.times, block.shapeLocs[0]);
+                return;
+            }
             if (block.ops.Count != block.times.Length)
                 ErrorExit(loc, StringPrintf("MotionBegin at %s has %d times but the block has %d transformation calls.",
                                             block.loc, block.times.Length, block.ops.Count));
@@ -1529,6 +1563,10 @@ namespace pbrt
             public FileLoc loc;
             public string kind = "";
             public List<Func<Transform, Transform>> ops = new List<Func<Transform, Transform>>();
+            // (not in pbrt-v4) the shapes of a block of shapes
+            public string shapeName = "";
+            public List<ParameterDictionary> shapeDictionaries = new List<ParameterDictionary>();
+            public List<FileLoc> shapeLocs = new List<FileLoc>();
         }
 
         MotionBlock motionBlock = null;
@@ -1690,6 +1728,28 @@ namespace pbrt
 
             ParameterDictionary dict = new ParameterDictionary(parms, graphicsState.shapeAttributes,
                                                                graphicsState.colorSpace);
+            if (motionBlock != null)
+            {
+                // (not in pbrt-v4) A key of a deforming shape: the shape is made at the MotionEnd
+                if (motionBlock.ops.Count > 0)
+                    ErrorExit(loc, StringPrintf("MotionBegin at %s holds transformation calls, a Shape cannot be in the same block.", motionBlock.loc));
+                if (motionBlock.shapeDictionaries.Count == motionBlock.times.Length)
+                    ErrorExit(loc, StringPrintf("MotionBegin at %s has %d times but this is shape number %d.", motionBlock.loc, motionBlock.times.Length,
+                                                motionBlock.shapeDictionaries.Count + 1));
+                if (motionBlock.shapeDictionaries.Count > 0 && motionBlock.shapeName != name)
+                    ErrorExit(loc, StringPrintf("MotionBegin at %s: all the shapes of a block must be of the same type, the first was \"%s\" and this one is \"%s\".",
+                                                motionBlock.loc, motionBlock.shapeName, name));
+                motionBlock.shapeName = name;
+                motionBlock.shapeDictionaries.Add(dict);
+                motionBlock.shapeLocs.Add(loc);
+                return;
+            }
+            AddShape(name, dict, null, null, loc);
+        }
+
+        // The shape (or the deforming shape with the keys motionKeys at motionTimes) of the current graphics state
+        void AddShape(string name, ParameterDictionary dict, ParameterDictionary[] motionKeys, Float[] motionTimes, FileLoc loc)
+        {
 
             int areaLightIndex = -1;
             if (graphicsState.areaLightName.Length != 0)
@@ -1712,6 +1772,8 @@ namespace pbrt
                     graphicsState.currentMaterialName, areaLightIndex,
                     graphicsState.currentInsideMedium, graphicsState.currentOutsideMedium);
 
+                entity.motionKeys = motionKeys;
+                entity.motionTimes = motionTimes;
                 if (activeInstanceDefinition != null)
                     activeInstanceDefinition.entity.animatedShapes.Add(entity);
                 else
@@ -1727,6 +1789,8 @@ namespace pbrt
                     graphicsState.reverseOrientation, graphicsState.currentMaterialIndex,
                     graphicsState.currentMaterialName, areaLightIndex,
                     graphicsState.currentInsideMedium, graphicsState.currentOutsideMedium);
+                entity.motionKeys = motionKeys;
+                entity.motionTimes = motionTimes;
                 if (activeInstanceDefinition != null)
                     activeInstanceDefinition.entity.shapes.Add(entity);
                 else
