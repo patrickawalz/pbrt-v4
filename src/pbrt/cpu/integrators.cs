@@ -3366,9 +3366,20 @@ namespace pbrt
         public MLTIntegrator(Camera camera, Primitive aggregate, List<Light> lights, int maxDepth,
                              int nBootstrap, int nChains, int mutationsPerPixel, Float sigma,
                              Float largeStepProbability, bool regularize, VolPathIntegrator volpath = null,
-                             PolarisedPathIntegrator.Sensor sensor = null, bool gatherMediumEmission = true)
+                             PolarisedPathIntegrator.Sensor sensor = null, bool gatherMediumEmission = true,
+                             bool noiseImportance = false, int stages = 4, Float noiseExponent = 1, Float noiseEpsilon = 0.05f,
+                             int noiseBlurRadius = 3, Float importanceRange = 16, bool writeImportance = false,
+                             int noiseGroups = 4, bool noiseRobust = true, Float stageGrowth = 2,
+                             MLTStageKind[] schedule = null, Float tailExponent = 0.75f, Float tailStepProbability = 0.5f,
+                             Float mixturePilot = 0.2f, Float mixtureNoise = 0.5f, Float mixtureTail = 0.3f)
             : base(aggregate, volpath == null ? BDPTIntegrator.EmissionLightsForBDPT(lights) : lights)
         {
+            this.noiseImportance = noiseImportance; this.stages = stages; this.noiseExponent = noiseExponent;
+            this.noiseEpsilon = noiseEpsilon; this.noiseBlurRadius = noiseBlurRadius; this.importanceRange = importanceRange;
+            this.writeImportance = writeImportance;
+            this.noiseGroups = Math.Max(2, noiseGroups); this.noiseRobust = noiseRobust; this.stageGrowth = stageGrowth;
+            this.mixturePilot = mixturePilot; this.mixtureNoise = mixtureNoise; this.mixtureTail = mixtureTail;
+            this.schedule = schedule; this.tailExponent = tailExponent; this.tailStepProbability = tailStepProbability;
             // (not in pbrt-v4) With bdpt the emissive media are lights too, and the camera subpaths gather their emission
             this.gatherMediumEmission = gatherMediumEmission;
             this.lightSampler = new PowerLightSampler(this.lights.ToArray(), new Allocator());
@@ -3385,6 +3396,21 @@ namespace pbrt
                 this.evaluator = new VolPathPathEvaluator(volpath, camera);
             else
                 this.evaluator = new BDPTPathEvaluator(this, camera, lightSampler, maxDepth, regularize, sensor);
+        }
+
+        // (not in pbrt-v4) The mutations per pixel of a stage: the stages are in the ratio stageGrowth^stage, and the last one takes
+        // what the rounding leaves, so that they add up to mutationsPerPixel
+        int StageMutations(int stage, int stageCount)
+        {
+            double total = 0;
+            for (int i = 0; i < stageCount; ++i)
+                total += Math.Pow(stageGrowth, i);
+            int before = 0;
+            for (int i = 0; i < stage; ++i)
+                before += Math.Max(1, (int)Math.Round(mutationsPerPixel * Math.Pow(stageGrowth, i) / total));
+            if (stage == stageCount - 1)
+                return mutationsPerPixel - before;
+            return Math.Max(1, (int)Math.Round(mutationsPerPixel * Math.Pow(stageGrowth, stage) / total));
         }
 
         // MLTIntegrator Method Definitions
@@ -3430,10 +3456,11 @@ namespace pbrt
                 return;
             }
 
-            // Generate bootstrap samples and compute normalization constant $b$
+            // Generate bootstrap samples; their luminances and positions are kept, since the importance of a stage only weights them
             Timer timer = new Timer();
             int nBootstrapSamples = nBootstrap * nDepths;
-            Float[] bootstrapWeights = new Float[nBootstrapSamples];
+            Float[] bootstrapLuminance = new Float[nBootstrapSamples];
+            Point2f[] bootstrapRaster = new Point2f[nBootstrapSamples];
             // Allocate scratch buffers for MLT samples
             ThreadLocal<ScratchBuffer> threadScratchBuffers = new ThreadLocal<ScratchBuffer>(() => new ScratchBuffer());
 
@@ -3450,11 +3477,12 @@ namespace pbrt
                         int rngIndex = (int)(i * nDepths + depth);
                         MLTSampler sampler = new MLTSampler(mutationsPerPixel, rngIndex, sigma,
                                                             largeStepProbability, MLTPathEvaluator.nSampleStreams);
-                        // Evaluate path radiance using _sampler_ and update _bootstrapWeights_
+                        // Evaluate path radiance using _sampler_ and update the bootstrap arrays
                         Point2f pRaster;
                         SampledWavelengths lambda;
                         SampledSpectrum L_i = L(buf, sampler, depth, out pRaster, out lambda);
-                        bootstrapWeights[rngIndex] = c(L_i, lambda);
+                        bootstrapLuminance[rngIndex] = c(L_i, lambda);
+                        bootstrapRaster[rngIndex] = pRaster;
 
                         buf.Reset();
                     }
@@ -3463,92 +3491,166 @@ namespace pbrt
             });
             progress.Done();
 
-            double bootstrapSum = 0;
-            for (int i = 0; i < bootstrapWeights.Length; ++i)
-                bootstrapSum += bootstrapWeights[i];
-            if (bootstrapSum == 0.0)
-                ErrorExit("No light carrying paths found during bootstrap sampling! " +
-                          "Are you trying to render a black image?");
-            AliasTable bootstrapTable = new AliasTable(new pstd.span<Float>(bootstrapWeights));
-            Float b = (Float)nDepths / bootstrapWeights.Length * (Float)bootstrapSum;
-
             // Set up connection to display server, if enabled
             if (Options.displayServer.Length != 0)
                 ErrorExit("--display-server is not supported by Magi.");
 
-            // Follow _nChains_ Markov chains to render image
+            // (not in pbrt-v4) The chains follow the importance I(x) = c(x) w(pixel of x); w is one in the first stage (the luminance), and
+            // with the noise importance the following stages use the noise of the stage before (see mltimportance.cs). Every stage
+            // adds its samples with the integral b of its importance in them, so the image is the average of the stages, by their mutations.
             Film film = camera.GetFilm();
-            int64_t nTotalMutations = (int64_t)film.SampleBounds().Area() * (int64_t)mutationsPerPixel;
-            ProgressReporter progressRender = new ProgressReporter(nChains, "Rendering", Options.quiet);
-            // Run _nChains_ Markov chains in parallel
-            ParallelFor(0, nChains, (int i) =>
+            MLTImportanceMap importance = new MLTImportanceMap(film.PixelBounds(), importanceRange);
+            Point2i boundsMin = film.PixelBounds().pMin;
+            int stageCount = noiseImportance ? Math.Max(1, Math.Min(schedule != null ? schedule.Length : stages, mutationsPerPixel)) : 1;
+            for (int stage = 0; stage < stageCount; ++stage)
             {
-                ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
-                // Compute number of mutations to apply in current Markov chain
-                int64_t nChainMutations = std.min((i + 1) * nTotalMutations / nChains, nTotalMutations) -
-                                          i * nTotalMutations / nChains;
-
-                // Select initial state from the set of bootstrap samples
-                RNG rng = new RNG((uint64_t)i);
-                int bootstrapIndex = bootstrapTable.Sample(rng.Uniform<Float>());
-                int depth = bootstrapIndex % nDepths;
-
-                // Initialize local variables for selected state
-                MLTSampler sampler = new MLTSampler(mutationsPerPixel, bootstrapIndex, sigma, largeStepProbability,
-                                                    MLTPathEvaluator.nSampleStreams);
-                Point2f pCurrent;
-                SampledWavelengths lambdaCurrent;
-                SampledSpectrum LCurrent = L(scratchBuffer, sampler, depth, out pCurrent, out lambdaCurrent);
-
-                // Run the Markov chain for _nChainMutations_ steps
-                for (int64_t j = 0; j < nChainMutations; ++j)
+                // The stages grow (the first one is a pilot that sets the first weights): their sizes are in the ratio stageGrowth
+                int stageMutationsPerPixel = StageMutations(stage, stageCount);
+                if (stageMutationsPerPixel <= 0)
+                    continue;
+                // What the stage tackles: the pilot follows the luminance, a noise stage c w(robust variance), a tail stage
+                // c^beta w(plain variance) with more large steps; the importance of a state is c^beta w
+                MLTStageKind kind = !noiseImportance || stage == 0 ? MLTStageKind.Pilot :
+                                    (schedule != null ? schedule[stage] : MLTStageKind.Noise);
+                importance.Select(kind);
+                Float beta = kind == MLTStageKind.Tail ? tailExponent : 1;
+                Float stageLargeStepProbability = kind == MLTStageKind.Tail ? tailStepProbability : largeStepProbability;
+                bool mixture = kind == MLTStageKind.Mixture;
+                // The mixture follows I = alphaPilot c / bPilot + alphaNoise c wNoise / bNoise + alphaTail c^beta wTail / bTail, where
+                // every b is the integral of its function (from the bootstrap): the chain has one target for the whole stage, so the
+                // image is unbiased, and it visits what any of the importance functions favors, with the probabilities alpha.
+                Float alphaPilot = 0, alphaNoise = 0, alphaTail = 0, integralPilot = 1, integralNoise = 1, integralTail = 1;
+                if (mixture)
                 {
-                    StatsReportPixelStart(PI2(pCurrent));
-                    sampler.StartIteration();
-                    // Generate proposed sample and compute its radiance
-                    Point2f pProposed;
-                    SampledWavelengths lambdaProposed;
-                    SampledSpectrum LProposed = L(scratchBuffer, sampler, depth, out pProposed, out lambdaProposed);
-
-                    // Compute acceptance probability for proposed sample
-                    Float cProposed = c(LProposed, lambdaProposed);
-                    Float cCurrent = c(LCurrent, lambdaCurrent);
-                    Float accept = std.min<Float>(1, cProposed / cCurrent);
-
-                    // Splat both current and proposed samples to _film_
-                    if (accept > 0)
-                        film.AddSplat(pProposed, LProposed * accept / cProposed, lambdaProposed);
-                    film.AddSplat(pCurrent, LCurrent * (1 - accept) / cCurrent, lambdaCurrent);
-
-                    // Accept or reject the proposal
-                    if (rng.Uniform<Float>() < accept)
+                    Float alphaSum = mixturePilot + mixtureNoise + mixtureTail;
+                    alphaPilot = mixturePilot / alphaSum;
+                    alphaNoise = mixtureNoise / alphaSum;
+                    alphaTail = mixtureTail / alphaSum;
+                    double sumPilot = 0, sumNoise = 0, sumTail = 0;
+                    for (int i = 0; i < nBootstrapSamples; ++i)
                     {
-                        StatsReportPixelEnd(PI2(pCurrent));
-                        StatsReportPixelStart(PI2(pProposed));
-                        pCurrent = pProposed;
-                        LCurrent = LProposed;
-                        lambdaCurrent = lambdaProposed;
-                        sampler.Accept();
-                        ++acceptedMutations;
+                        importance.PixelWeights(bootstrapRaster[i], out Float bootNoiseWeight, out Float bootTailWeight);
+                        sumPilot += bootstrapLuminance[i];
+                        sumNoise += bootstrapLuminance[i] * bootNoiseWeight;
+                        sumTail += MathF.Pow(bootstrapLuminance[i], tailExponent) * bootTailWeight;
                     }
-                    else
-                        sampler.Reject();
-
-                    ++totalMutations;
-                    scratchBuffer.Reset();
-                    StatsReportPixelEnd(PI2(pCurrent));
+                    integralPilot = (Float)(sumPilot / nBootstrapSamples);
+                    integralNoise = (Float)(sumNoise / nBootstrapSamples);
+                    integralTail = (Float)(sumTail / nBootstrapSamples);
+                    stageLargeStepProbability = (1 - alphaTail) * largeStepProbability + alphaTail * tailStepProbability;
                 }
+                // The importance of a state with luminance cValue at the raster position p
+                Func<Float, Point2f, Float> importanceOf = (Float cValue, Point2f p) =>
+                {
+                    if (mixture)
+                    {
+                        importance.PixelWeights(p, out Float noiseWeight, out Float tailWeight);
+                        return alphaPilot * cValue / integralPilot + alphaNoise * cValue * noiseWeight / integralNoise +
+                               alphaTail * MathF.Pow(cValue, tailExponent) * tailWeight / integralTail;
+                    }
+                    return (beta == 1 ? cValue : MathF.Pow(cValue, beta)) * importance.Weight(p);
+                };
 
-                progressRender.Update(1);
-            });
+                // The weights of the bootstrap samples under the importance of the stage, and the integral b of the importance
+                Float[] bootstrapWeights = new Float[nBootstrapSamples];
+                double bootstrapSum = 0;
+                for (int i = 0; i < nBootstrapSamples; ++i)
+                {
+                    bootstrapWeights[i] = importanceOf(bootstrapLuminance[i], bootstrapRaster[i]);
+                    bootstrapSum += bootstrapWeights[i];
+                }
+                if (bootstrapSum == 0.0)
+                    ErrorExit("No light carrying paths found during bootstrap sampling! " +
+                              "Are you trying to render a black image?");
+                AliasTable bootstrapTable = new AliasTable(new pstd.span<Float>(bootstrapWeights));
+                Float b = (Float)nDepths / bootstrapWeights.Length * (Float)bootstrapSum;
+                MLTNoiseEstimate noise = stage < stageCount - 1 ? new MLTNoiseEstimate(importance, noiseGroups) : null;
 
-            progressRender.Done();
+                // Follow _nChains_ Markov chains to render image
+                int64_t nTotalMutations = (int64_t)film.SampleBounds().Area() * (int64_t)stageMutationsPerPixel;
+                ProgressReporter progressRender = new ProgressReporter(nChains, stageCount > 1 ? "Rendering stage " + (stage + 1) + " of " + stageCount : "Rendering", Options.quiet);
+                // Run _nChains_ Markov chains in parallel
+                ParallelFor(0, nChains, (int i) =>
+                {
+                    ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                    // Compute number of mutations to apply in current Markov chain
+                    int64_t nChainMutations = std.min((i + 1) * nTotalMutations / nChains, nTotalMutations) -
+                                              i * nTotalMutations / nChains;
+
+                    // Select initial state from the set of bootstrap samples
+                    RNG rng = new RNG((uint64_t)(i + (int64_t)stage * nChains));
+                    int bootstrapIndex = bootstrapTable.Sample(rng.Uniform<Float>());
+                    int depth = bootstrapIndex % nDepths;
+                    int half = i % noiseGroups;
+
+                    // Initialize local variables for selected state
+                    MLTSampler sampler = new MLTSampler(mutationsPerPixel, bootstrapIndex, sigma, stageLargeStepProbability,
+                                                        MLTPathEvaluator.nSampleStreams);
+                    Point2f pCurrent;
+                    SampledWavelengths lambdaCurrent;
+                    SampledSpectrum LCurrent = L(scratchBuffer, sampler, depth, out pCurrent, out lambdaCurrent);
+
+                    // Run the Markov chain for _nChainMutations_ steps
+                    for (int64_t j = 0; j < nChainMutations; ++j)
+                    {
+                        StatsReportPixelStart(PI2(pCurrent));
+                        sampler.StartIteration();
+                        // Generate proposed sample and compute its radiance
+                        Point2f pProposed;
+                        SampledWavelengths lambdaProposed;
+                        SampledSpectrum LProposed = L(scratchBuffer, sampler, depth, out pProposed, out lambdaProposed);
+
+                        // Compute acceptance probability for proposed sample from the importance
+                        Float cProposed = c(LProposed, lambdaProposed);
+                        Float cCurrent = c(LCurrent, lambdaCurrent);
+                        Float iProposed = importanceOf(cProposed, pProposed);
+                        Float iCurrent = importanceOf(cCurrent, pCurrent);
+                        Float accept = std.min<Float>(1, iProposed / iCurrent);
+
+                        // Splat both current and proposed samples to _film_ (f / I, times b)
+                        if (accept > 0)
+                        {
+                            film.AddSplat(pProposed, LProposed * (accept * b / iProposed), lambdaProposed);
+                            noise?.Add((int)pProposed.x - boundsMin.x, (int)pProposed.y - boundsMin.y, half, accept, accept * b * cProposed / iProposed);
+                        }
+                        film.AddSplat(pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent);
+                        noise?.Add((int)pCurrent.x - boundsMin.x, (int)pCurrent.y - boundsMin.y, half, 1 - accept, (1 - accept) * b * cCurrent / iCurrent);
+
+                        // Accept or reject the proposal
+                        if (rng.Uniform<Float>() < accept)
+                        {
+                            StatsReportPixelEnd(PI2(pCurrent));
+                            StatsReportPixelStart(PI2(pProposed));
+                            pCurrent = pProposed;
+                            LCurrent = LProposed;
+                            lambdaCurrent = lambdaProposed;
+                            sampler.Accept();
+                            ++acceptedMutations;
+                        }
+                        else
+                            sampler.Reject();
+
+                        ++totalMutations;
+                        scratchBuffer.Reset();
+                        StatsReportPixelEnd(PI2(pCurrent));
+                    }
+
+                    progressRender.Update(1);
+                });
+
+                progressRender.Done();
+                if (noise != null)
+                    importance.UpdateFromStage(noise, stageMutationsPerPixel, noiseExponent, noiseEpsilon, noiseBlurRadius, noiseRobust, tailExponent);
+            }
+            if (writeImportance)
+                importance.WritePFM(RemoveExtension(film.GetFilename()) + ".importance.pfm", MLTStageKind.Noise);
+                importance.WritePFM(RemoveExtension(film.GetFilename()) + ".tail.pfm", MLTStageKind.Tail);
 
             // Store final image computed with MLT
             ImageMetadata metadata = new ImageMetadata();
             metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
             camera.InitMetadata(metadata);
-            camera.GetFilm().WriteImage(metadata, b / mutationsPerPixel);
+            camera.GetFilm().WriteImage(metadata, (Float)1 / mutationsPerPixel);
         }
 
         public override string ToString()
@@ -3600,9 +3702,46 @@ namespace pbrt
             else if (pathEstimator != "bdpt")
                 ErrorExit(loc, StringPrintf("%s: unknown \"pathestimator\" for \"mlt\"; use \"bdpt\" or \"volpath\".", pathEstimator));
             bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
+            // (not in pbrt-v4) "importance" "noise" follows Hoberock and Hart (2010): the chains visit the pixels in proportion to the
+            // relative noise that the stages before measured, from "noisegroups" groups of chains, robust to fireflies ("noiserobust") and
+            // denoised by a filter of radius "noiseblur" ("stages", "stagegrowth", "noiseexponent", "noiseepsilon", "importancerange");
+            // "luminance" is the importance of pbrt. "writeimportance" saves the weights of the last stage next to the image.
+            string importanceName = parameters.GetOneString("importance", "luminance");
+            if (importanceName != "luminance" && importanceName != "noise" && importanceName != "multistage" && importanceName != "mixture")
+                ErrorExit(loc, StringPrintf("%s: unknown \"importance\" for \"mlt\"; use \"luminance\", \"noise\", \"multistage\" or \"mixture\".", importanceName));
+            // "multistage" combines the stages: a pilot, then tail stages (c^"tailexponent" w from the plain variance, with the large
+            // steps at "tailstepprobability") and noise stages alternate, the last one a noise stage. "stageschedule" gives the
+            // stages by letters instead: p pilot, n noise, t tail, m mixture of the three with the probabilities "mixturepilot", "mixturenoise"
+            // and "mixturetail" (the first is always the pilot), e.g. "pntn" or "pmm"; "importance" "mixture" is "pmmm".
+            string scheduleText = parameters.GetOneString("stageschedule", "");
+            int stageTotal = parameters.GetOneInt("stages", 4);
+            if (scheduleText.Length == 0)
+            {
+                System.Text.StringBuilder built = new System.Text.StringBuilder("p");
+                for (int k = 1; k < stageTotal; ++k)
+                {
+                    built.Append(importanceName == "mixture" ? 'm' : (importanceName == "multistage" && (stageTotal - 1 - k) % 2 == 1 ? 't' : 'n'));
+                }
+                scheduleText = built.ToString();
+            }
+            MLTStageKind[] schedule = new MLTStageKind[scheduleText.Length];
+            for (int k = 0; k < scheduleText.Length; ++k)
+            {
+                char letter = scheduleText[k];
+                if (letter != 'p' && letter != 'n' && letter != 't' && letter != 'm')
+                    ErrorExit(loc, StringPrintf("%s: \"stageschedule\" has letters p, n, t and m only.", scheduleText));
+                schedule[k] = k == 0 ? MLTStageKind.Pilot : (letter == 't' ? MLTStageKind.Tail : (letter == 'm' ? MLTStageKind.Mixture : MLTStageKind.Noise));
+            }
             return new MLTIntegrator(camera, aggregate, lights, maxDepth, nBootstrap, (int)nChains,
                                      mutationsPerPixel, sigma, largeStepProbability, regularize, volpath, sensor,
-                                     gatherMediumEmission);
+                                     gatherMediumEmission, importanceName != "luminance", schedule.Length,
+                                     parameters.GetOneFloat("noiseexponent", 1), parameters.GetOneFloat("noiseepsilon", 0.05f),
+                                     parameters.GetOneInt("noiseblur", 3), parameters.GetOneFloat("importancerange", 16),
+                                     parameters.GetOneBool("writeimportance", false), parameters.GetOneInt("noisegroups", 4),
+                                     parameters.GetOneBool("noiserobust", true), parameters.GetOneFloat("stagegrowth", 2), schedule,
+                                     parameters.GetOneFloat("tailexponent", 0.75f), parameters.GetOneFloat("tailstepprobability", 0.5f),
+                                     parameters.GetOneFloat("mixturepilot", 0.2f), parameters.GetOneFloat("mixturenoise", 0.5f),
+                                     parameters.GetOneFloat("mixturetail", 0.3f));
         }
 
         // MLTIntegrator Private Members
@@ -3616,6 +3755,11 @@ namespace pbrt
         int mutationsPerPixel;
         Float sigma, largeStepProbability;
         int nChains;
+        bool noiseImportance, writeImportance, noiseRobust;
+        int stages, noiseBlurRadius, noiseGroups;
+        Float noiseExponent, noiseEpsilon, importanceRange, stageGrowth, tailExponent, tailStepProbability;
+        MLTStageKind[] schedule;
+        Float mixturePilot = 0.2f, mixtureNoise = 0.5f, mixtureTail = 0.3f;
     }
 
     // SPPMPixel Definition
@@ -5076,8 +5220,14 @@ namespace pbrt
                 if (IsNonSpecular(bsdf.Flags()))
                 {
                     if (polarised)
-                        pL += ctx.st.pa * new PLight(vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
-                                                                 ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f _));
+                    {
+                        PLight Lp = new PLight(vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
+                                                           ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f wiLight));
+                        if (PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, isect.wo, wiLight, new SampledSpectrum(1.0f),
+                                                                     TransportMode.Radiance, out PAttenuation Mr))
+                            Lp = Mr * Lp;
+                        pL += ctx.st.pa * Lp;
+                    }
                     else
                         L += vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack,
                                          depth < maxDepth, out Vector3f _);

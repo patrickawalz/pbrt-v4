@@ -512,5 +512,171 @@ namespace pbrt
             EXPECT_EQ(0.0f, (PolarisedLightSystem.Attenuation.Zero() * light).GetIntensity()[0]);
             EXPECT_EQ(0.0f, (PolarisedLightSystem.Attenuation.Identity() * PolarisedLightSystem.Light.Zero()).GetIntensity()[0]);
         }
+
+        static PolarisedLightSystem.Light Unpolarised(Vector3f direction)
+        {
+            Vector3f other = std.abs(direction.z) < 0.9f ? new Vector3f(0, 0, 1) : new Vector3f(1, 0, 0);
+            return new PolarisedLightSystem.Light(new StokesVector(S(1), S(0), S(0), S(0)))
+                .InDirection(direction, pbrt.Normalize(pbrt.Cross(direction, other)));
+        }
+
+        [TEST("Polarised", "RoughSurfaces")]
+        public static void Polarised_RoughSurfaces()
+        {
+            Normal3f ns = new Normal3f(0, 0, 1);
+            Vector3f n = new Vector3f(0, 0, 1);
+            Vector3f incoming = pbrt.Normalize(new Vector3f(0.6f, 0.2f, -0.7f));
+            Vector3f wo = -incoming, mirror = new Vector3f(incoming.x, incoming.y, -incoming.z);
+            PolarisedLightSystem.Light light =
+                new PolarisedLightSystem.Light(new StokesVector(S(1), S(0.3f), S(0.4f), S(0.2f))).InDirection(incoming, pbrt.Normalize(pbrt.Cross(new Vector3f(0, 0, 1), incoming)));
+
+            // At the mirror direction the microfacet normal is the surface normal: the matrix is the smooth one, for a
+            // conductor and for the reflection of a dielectric
+            TrowbridgeReitzDistribution rough = new TrowbridgeReitzDistribution(0.05f, 0.05f);
+            SampledSpectrum eta = S(0.2f), k = S(3.0f);
+            BSDF conductor = new BSDF(ns, new Vector3f(1, 0, 0), new ConductorBxDF(rough, eta, k));
+            SampledSpectrum Fs = S(0), Fp = S(0), Ds = S(0), Dp = S(0);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                pbrt.FrComplexPolarised(std.abs(wo.z), new pstd.complex(eta[i], k[i]), out Fs[i], out Fp[i], out Ds[i], out Dp[i]);
+            SampledSpectrum F = (Fs + Fp) * 0.5f;
+            PolarisedLightSystem.Attenuation smooth = PolarisedLightSystem.Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp).Scattered(wo, mirror, n, false);
+            EXPECT_TRUE(PolarisedPathIntegrator.RoughAttenuation(conductor, default, wo, mirror, F, TransportMode.Importance, out PolarisedLightSystem.Attenuation A));
+            StokesVector a = (A * light).ToStokesVector(), b = (smooth * light).ToStokesVector();
+            EXPECT_LT(std.abs(a.s0[0] - b.s0[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s1[0] - b.s1[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s2[0] - b.s2[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s3[0] - b.s3[0]), (Float)1e-4);
+
+            BSDF glass = new BSDF(ns, new Vector3f(1, 0, 0), new DielectricBxDF(1.5f, rough));
+            pbrt.FrDielectricPolarised(std.abs(wo.z), 1.5f, out Float fs, out Float fp, out Float ds, out Float dp);
+            smooth = PolarisedLightSystem.Attenuation.Fresnel(S(1), fs, fp, ds, dp).Scattered(wo, mirror, n, false);
+            EXPECT_TRUE(PolarisedPathIntegrator.RoughAttenuation(glass, default, wo, mirror, S(0.5f * (fs + fp)), TransportMode.Importance, out A));
+            a = (A * light).ToStokesVector(); b = (smooth * light).ToStokesVector();
+            EXPECT_LT(std.abs(a.s0[0] - b.s0[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s1[0] - b.s1[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s2[0] - b.s2[0]), (Float)1e-4);
+            EXPECT_LT(std.abs(a.s3[0] - b.s3[0]), (Float)1e-4);
+
+            // The first element is the scalar weight of every sampled direction (reflection and transmission), and the
+            // polarisation never exceeds the intensity
+            RNG rng = new RNG(7);
+            int checkedReflection = 0, checkedTransmission = 0;
+            for (int iter = 0; iter < 400; ++iter)
+            {
+                Vector3f o = pbrt.Normalize(new Vector3f(rng.Uniform<Float>() - 0.5f, rng.Uniform<Float>() - 0.5f, 0.2f + rng.Uniform<Float>()));
+                if ((iter & 1) == 1)
+                    o = -o;
+                pstd.optional<BSDFSample> bs = glass.Sample_f(o, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                if (!bs || bs.value().pdf == 0)
+                    continue;
+                SampledSpectrum w = bs.value().f * std.abs(bs.value().wi.z) / bs.value().pdf;
+                if (!PolarisedPathIntegrator.RoughAttenuation(glass, default, o, bs.value().wi, w, TransportMode.Radiance, out A))
+                    continue;
+                EXPECT_LT(std.abs(A.GetIntensity()[0] - w[0]), (Float)1e-3 * (1 + w[0]));
+                StokesVector r = (A * Unpolarised(-bs.value().wi)).ToStokesVector();
+                EXPECT_LT(std.sqrt(r.s1[0] * r.s1[0] + r.s2[0] * r.s2[0] + r.s3[0] * r.s3[0]), r.s0[0] * (1 + (Float)1e-3) + (Float)1e-6);
+                if (bs.value().IsReflection()) ++checkedReflection; else ++checkedTransmission;
+            }
+            EXPECT_GT(checkedReflection, 20);
+            EXPECT_GT(checkedTransmission, 20);
+
+            // Near Brewster's angle the light that a rough dielectric reflects from unpolarised light is nearly all polarised
+            // perpendicular to the plane of incidence
+            Float brewster = std.atan(1.5f);
+            Vector3f ob = new Vector3f(std.sin(brewster), 0, std.cos(brewster));
+            Vector3f mb = new Vector3f(-ob.x, 0, ob.z);
+            EXPECT_TRUE(PolarisedPathIntegrator.RoughAttenuation(glass, default, ob, mb, S(1), TransportMode.Radiance, out A));
+            StokesVector u = (A * Unpolarised(-mb)).ToStokesVector();
+            EXPECT_GT(std.abs(u.s1[0]) / u.s0[0], 0.95f);
+        }
+
+        // The characteristic matrix method (Born and Wolf) for layers with real indices: the reflection amplitude
+        static Complex CharacteristicReflection(double ambient, double[] n, double[] d, double substrate, double wavelength,
+                                                double cosI, bool perpendicular)
+        {
+            double sinI = Math.Sqrt(1 - cosI * cosI);
+            Complex Eta(double index)
+            {
+                double cos = Math.Sqrt(1 - Math.Pow(ambient * sinI / index, 2));
+                return perpendicular ? index * cos : index / cos;
+            }
+            Complex m11 = 1, m12 = 0, m21 = 0, m22 = 1;
+            for (int i = 0; i < n.Length; ++i)
+            {
+                double cos = Math.Sqrt(1 - Math.Pow(ambient * sinI / n[i], 2));
+                double delta = 2 * Math.PI * n[i] * d[i] * cos / wavelength;
+                Complex eta = Eta(n[i]);
+                Complex a11 = Math.Cos(delta), a12 = new Complex(0, Math.Sin(delta)) / eta;
+                Complex a21 = new Complex(0, Math.Sin(delta)) * eta, a22 = Math.Cos(delta);
+                Complex b11 = m11 * a11 + m12 * a21, b12 = m11 * a12 + m12 * a22;
+                Complex b21 = m21 * a11 + m22 * a21, b22 = m21 * a12 + m22 * a22;
+                m11 = b11; m12 = b12; m21 = b21; m22 = b22;
+            }
+            Complex e0 = Eta(ambient), es = Eta(substrate);
+            Complex numerator = e0 * (m11 + m12 * es) - (m21 + m22 * es);
+            Complex denominator = e0 * (m11 + m12 * es) + (m21 + m22 * es);
+            return numerator / denominator;
+        }
+
+        [TEST("Polarised", "ThinFilm")]
+        public static void Polarised_ThinFilm()
+        {
+            // A quarter-wave film of MgF2 on glass at normal incidence: R = ((n_s - n_f^2) / (n_s + n_f^2))^2
+            Float wavelength = 550;
+            Float nf = 1.38f, ns = 1.52f;
+            Float[] eta = { nf }, thickness = { wavelength / (4 * nf) };
+            pbrt.FrThinFilmPolarised(1, 1, eta, thickness, wavelength, new pstd.complex(ns), out Float Fs, out Float Fp, out Float Ds, out Float Dp);
+            Float expected = Sqr((ns - nf * nf) / (ns + nf * nf));
+            EXPECT_LT(std.abs(Fs - expected), (Float)1e-5);
+            EXPECT_LT(std.abs(Fp - expected), (Float)1e-5);
+
+            // No layer, a zero-thickness layer and a half-wave layer are the bare substrate
+            pbrt.FrComplexPolarised(0.6f, new pstd.complex(ns), out Float bs, out Float bp, out Float bds, out Float bdp);
+            pbrt.FrThinFilmPolarised(0.6f, 1, new Float[0], new Float[0], wavelength, new pstd.complex(ns), out Fs, out Fp, out Ds, out Dp);
+            EXPECT_LT(std.abs(Fs - bs) + std.abs(Fp - bp) + std.abs(Ds - bds) + std.abs(Dp - bdp), (Float)1e-5);
+            pbrt.FrThinFilmPolarised(0.6f, 1, eta, new Float[] { 0 }, wavelength, new pstd.complex(ns), out Fs, out Fp, out Ds, out Dp);
+            EXPECT_LT(std.abs(Fs - bs) + std.abs(Fp - bp) + std.abs(Ds - bds) + std.abs(Dp - bdp), (Float)1e-5);
+            // At normal incidence (cos = 1), a half-wave layer: thickness lambda / (2 n)
+            pbrt.FrComplexPolarised(1, new pstd.complex(ns), out bs, out bp, out bds, out bdp);
+            pbrt.FrThinFilmPolarised(1, 1, eta, new Float[] { wavelength / (2 * nf) }, wavelength, new pstd.complex(ns), out Fs, out Fp, out Ds, out Dp);
+            EXPECT_LT(std.abs(Fs - bs), (Float)1e-5);
+
+            // Two layers at oblique incidence against the characteristic matrix method, both polarisations, a few wavelengths
+            double[] layers = { 1.38, 2.1 }, widths = { 95, 60 };
+            foreach (double w in new double[] { 450, 520, 600, 680 })
+            {
+                foreach (double cosI in new double[] { 1.0, 0.8, 0.5, 0.2 })
+                {
+                    pbrt.FrThinFilmPolarised((Float)cosI, 1, new Float[] { 1.38f, 2.1f }, new Float[] { 95, 60 }, (Float)w,
+                                             new pstd.complex(1.52f), out Fs, out Fp, out Ds, out Dp);
+                    Complex rs = CharacteristicReflection(1, layers, widths, 1.52, w, cosI, true);
+                    Complex rp = CharacteristicReflection(1, layers, widths, 1.52, w, cosI, false);
+                    EXPECT_LT(std.abs(Fs - (Float)(rs.Magnitude * rs.Magnitude)), (Float)1e-4);
+                    EXPECT_LT(std.abs(Fp - (Float)(rp.Magnitude * rp.Magnitude)), (Float)1e-4);
+                    // The phase difference of the two polarisations (the characteristic matrix here has the time dependence of
+                    // this code; the sign of the parallel coefficient of the Fresnel equations of this code is the opposite)
+                    double expectedDelta = Math.PI + rp.Phase - rs.Phase;
+                    double deltaCode = Dp - Ds;
+                    EXPECT_LT(std.abs((Float)Math.Atan2(Math.Sin(deltaCode - expectedDelta), Math.Cos(deltaCode - expectedDelta))), (Float)1e-3);
+                }
+            }
+
+            // A dielectric substrate: the sampled weights of reflection and transmission add up to one for every wavelength
+            // (energy is conserved), and a conductor substrate only reflects
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            ThinFilmBxDF film = new ThinFilmBxDF(lambda, new Float[] { 1.38f }, new Float[] { 100 }, 1.52f, new SampledSpectrum(1.0f),
+                                                 new SampledSpectrum(0.0f), false);
+            Vector3f wo = pbrt.Normalize(new Vector3f(0.4f, 0.1f, 0.8f));
+            SampledSpectrum total = new SampledSpectrum(0.0f);
+            int count = 20000;
+            for (int i = 0; i < count; ++i)
+            {
+                pstd.optional<BSDFSample> sample = film.Sample_f(wo, (i + 0.5f) / count, new Point2f(0.5f, 0.5f), TransportMode.Importance, BxDFReflTransFlags.All);
+                EXPECT_TRUE((bool)sample);
+                total += sample.value().f * std.abs(sample.value().wi.z) / sample.value().pdf / count;
+            }
+            for (int i = 0; i < NSpectrumSamples; ++i)
+                EXPECT_LT(std.abs(total[i] - 1), (Float)2e-3);
+        }
     }
 }

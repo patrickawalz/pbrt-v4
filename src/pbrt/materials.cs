@@ -375,6 +375,76 @@ namespace pbrt
         private Image normalMap;
     }
 
+    // (not in pbrt-v4) ThinFilmMaterial Definition: thin films on a smooth substrate, a dielectric ("float substrateeta") or a
+    // conductor ("spectrum substrateeta" and "spectrum substratek"), with layers from the surface inward listed in "float layereta"
+    // (real indices) and "float layerthickness" (nanometres)
+    public sealed unsafe class ThinFilmMaterial : Material
+    {
+        public ThinFilmMaterial(Float[] layerEta, Float[] layerThickness, Float substrateEta, SpectrumTexture conductorEta,
+                                SpectrumTexture conductorK, FloatTexture displacement, Image normalMap)
+        {
+            this.layerEta = layerEta; this.layerThickness = layerThickness; this.substrateEta = substrateEta;
+            this.conductorEta = conductorEta; this.conductorK = conductorK;
+            this.displacement = displacement; this.normalMap = normalMap;
+        }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
+        {
+            return texEval.CanEvaluate(new FloatTexture[] { }, new SpectrumTexture[] { conductorEta, conductorK });
+        }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            bool conductor = conductorK != null;
+            SampledSpectrum etas = conductor ? texEval.Apply(conductorEta, ctx, lambda) : new SampledSpectrum(1.0f);
+            SampledSpectrum ks = conductor ? texEval.Apply(conductorK, ctx, lambda) : new SampledSpectrum(0.0f);
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(new ThinFilmBxDF(lambda, layerEta, layerThickness, substrateEta, etas, ks, conductor)));
+        }
+
+        public static string Name() { return "ThinFilmMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return displacement; }
+        public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ ThinFilmMaterial layers: %d ]", layerEta.Length);
+        }
+
+        public static ThinFilmMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
+        {
+            Float[] layerEta = parameters.GetFloatArray("layereta").ToArray();
+            Float[] layerThickness = parameters.GetFloatArray("layerthickness").ToArray();
+            if (layerEta.Length != layerThickness.Length)
+                pbrt.ErrorExit(loc, "thinfilm: \"layereta\" and \"layerthickness\" need the same number of values.");
+            SpectrumTexture conductorK = parameters.GetSpectrumTextureOrNull("substratek", SpectrumType.Unbounded, alloc);
+            SpectrumTexture conductorEta = null;
+            if (conductorK != null)
+            {
+                conductorEta = parameters.GetSpectrumTextureOrNull("substrateeta", SpectrumType.Unbounded, alloc);
+                if (conductorEta == null)
+                    pbrt.ErrorExit(loc, "thinfilm: a conductor substrate needs \"spectrum substrateeta\" next to \"substratek\".");
+            }
+            Float substrateEta = parameters.GetOneFloat("substrateeta", 1.5f);
+            FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+            return new ThinFilmMaterial(layerEta, layerThickness, substrateEta, conductorEta, conductorK, displacement, normalMap);
+        }
+
+        private Float[] layerEta, layerThickness;
+        private Float substrateEta;
+        private SpectrumTexture conductorEta, conductorK;
+        private FloatTexture displacement;
+        private Image normalMap;
+    }
+
     // (not in pbrt-v4) InterfaceMaterial Definition: the material of a surface that only separates media. pbrt-v4 has no object for
     // it (the primitive's material is null); this one carries the volume of the material while the scene is built, and the
     // primitives get a null material again (see BasicScene.CreateAggregate()).
@@ -1550,6 +1620,8 @@ namespace pbrt
                 material = DielectricMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "thincoat")
                 material = ThinCoatMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "thinfilm")
+                material = ThinFilmMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "thindielectric")
                 material = ThinDielectricMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "hair")

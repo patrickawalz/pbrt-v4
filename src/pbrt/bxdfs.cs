@@ -493,6 +493,124 @@ namespace pbrt
         private Float eta = 1.5f;
     }
 
+    // (not in pbrt-v4) ThinFilmBxDF Definition: a smooth interface coated with thin films (an anti-reflection coating of a lens, the
+    // interference colours of an oxide on a metal). The reflectance is that of the stack of layers (see FrThinFilmPolarised()):
+    // it depends on the wavelength, on the angle and on the polarisation. The substrate is a conductor (the film only reflects) or
+    // a dielectric (the light that is not reflected goes through, as at a DielectricBxDF; the layers are lossless).
+    public sealed unsafe class ThinFilmBxDF : BxDF
+    {
+        // ThinFilmBxDF Public Methods
+        public ThinFilmBxDF() { }
+        public ThinFilmBxDF(SampledWavelengths lambda, Float[] layerEta, Float[] layerThickness, Float substrateEta,
+                            SampledSpectrum conductorEta, SampledSpectrum conductorK, bool conductor)
+        {
+            this.wavelengths = new SampledSpectrum(0.0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                wavelengths[i] = lambda[i];
+            }
+            this.layerEta = layerEta; this.layerThickness = layerThickness; this.substrateEta = substrateEta;
+            this.conductorEta = conductorEta; this.conductorK = conductorK; this.conductor = conductor;
+        }
+
+        public bool IsSpecular() { return true; }
+
+        public Float SubstrateEta() { return substrateEta; }
+
+        public bool IsConductor() { return conductor; }
+
+        // The reflectance of the stack for light that arrives with the (signed) cosine cosTheta. False when the light cannot
+        // arrive from that side (the substrate of a conductor is opaque)
+        public bool Fresnel(Float cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
+                            out SampledSpectrum Dp)
+        {
+            Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
+            Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
+            bool inside = cosTheta < 0;
+            if (inside && conductor)
+                return false;
+            Float cosine = std.abs(cosTheta);
+            Float[] eta = layerEta, thickness = layerThickness;
+            if (inside)
+            {
+                // From the substrate: the layers in the other order, the ambient medium in the place of the substrate
+                eta = (Float[])layerEta.Clone(); thickness = (Float[])layerThickness.Clone();
+                Array.Reverse(eta); Array.Reverse(thickness);
+            }
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                pstd.complex substrate = inside ? new pstd.complex(1) :
+                                         conductor ? new pstd.complex(conductorEta[i], conductorK[i]) : new pstd.complex(substrateEta);
+                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, eta, thickness, wavelengths[i], substrate,
+                                         out Fs[i], out Fp[i], out Ds[i], out Dp[i]);
+            }
+            return true;
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            return new SampledSpectrum(0);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags)
+        {
+            if (wo.z == 0 || !Fresnel(CosTheta(wo), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _,
+                                      out SampledSpectrum _))
+                return default;
+            SampledSpectrum R = (Fs + Fp) * 0.5f;
+            Float pr = Clamp(R[0], 0, 1), pt = 1 - pr;
+            if (conductor)
+            {
+                pt = 0;
+            }
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                pr = 0;
+            if ((sampleFlags & BxDFReflTransFlags.Transmission) == 0)
+                pt = 0;
+            if (pr == 0 && pt == 0)
+                return default;
+            if (uc < pr / (pr + pt))
+            {
+                Vector3f wi = new Vector3f(-wo.x, -wo.y, wo.z);
+                return new BSDFSample(R / AbsCosTheta(wi), wi, pr / (pr + pt), BxDFFlags.SpecularReflection);
+            }
+
+            Vector3f wt;
+            Float etap;
+            if (!Refract(wo, new Normal3f(0, 0, 1), substrateEta, &etap, &wt))
+                return default;
+            SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) / AbsCosTheta(wt);
+            if (mode == TransportMode.Radiance)
+                ft /= Sqr(etap);
+            return new BSDFSample(ft, wt, pt / (pr + pt), BxDFFlags.SpecularTransmission, etap);
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            return 0;
+        }
+
+        public static string Name() { return "ThinFilmBxDF"; }
+
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags()
+        {
+            return conductor ? BxDFFlags.SpecularReflection : BxDFFlags.SpecularReflection | BxDFFlags.SpecularTransmission;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ ThinFilmBxDF layers: %d substrate: %s ]", layerEta.Length, conductor ? "conductor" : "dielectric");
+        }
+
+        private SampledSpectrum wavelengths, conductorEta, conductorK;
+        private Float[] layerEta, layerThickness;
+        private Float substrateEta = 1.5f;
+        private bool conductor;
+    }
+
     // ConductorBxDF Definition
     public sealed unsafe class ConductorBxDF : BxDF
     {

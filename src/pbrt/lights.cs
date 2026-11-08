@@ -483,6 +483,178 @@ namespace pbrt
         Float sceneRadius;
     }
 
+    // SunLight: a distant disk of finite angular size with (optional) limb darkening. It is an
+    // infinite light, so it is visible to camera rays and found by BSDF/phase sampling with MIS.
+    // "scale"*L (and "illuminance") give the irradiance on a surface facing the sun, exactly as for
+    // the distant light, so replacing a distant light by a sun with the same parameters keeps the
+    // delivered irradiance.
+    public sealed unsafe class SunLight : LightBase
+    {
+        // Linear limb-darkening coefficient u(lambda) in I(mu) = I0 (1 - u (1 - mu)). Approximate
+        // (solar continuum, about 0.93 at 400 nm to 0.43 at 900 nm); wavelength dependent so the
+        // limb is redder than the centre.
+        static readonly Float[] limbWavelength = { 300, 400, 450, 500, 550, 600, 700, 800, 900, 1100 };
+        static readonly Float[] limbU = { 1.00f, 0.93f, 0.80f, 0.72f, 0.65f, 0.60f, 0.53f, 0.47f, 0.43f, 0.36f };
+
+        static Float LimbU(Float lambdaNm)
+        {
+            int n = limbWavelength.Length;
+            if (lambdaNm <= limbWavelength[0]) return limbU[0];
+            if (lambdaNm >= limbWavelength[n - 1]) return limbU[n - 1];
+            int i = 0;
+            while (lambdaNm > limbWavelength[i + 1]) ++i;
+            Float t = (lambdaNm - limbWavelength[i]) / (limbWavelength[i + 1] - limbWavelength[i]);
+            return (1 - t) * limbU[i] + t * limbU[i + 1];
+        }
+
+        public SunLight(Transform renderFromLight, Spectrum Lemit, Float scale, Float angularDiameterDegrees,
+                        bool limbDarkening)
+            : base(LightType.Infinite, renderFromLight, new MediumInterface())
+        {
+            this.Lemit = LookupSpectrum(Lemit);
+            this.scale = scale;
+            this.limbDarkening = limbDarkening;
+            double alpha = 0.5 * angularDiameterDegrees * Math.PI / 180.0;
+            sinHalfAlpha2 = (Float)Math.Pow(Math.Sin(0.5 * alpha), 2);
+            solidAngle = (Float)(2 * Math.PI * 2 * Math.Pow(Math.Sin(0.5 * alpha), 2));
+            sunDirection = pbrt.Normalize(renderFromLight.Apply(new Vector3f(0, 0, 1)));
+            Vector3f t1, t2;
+            pbrt.CoordinateSystem(sunDirection, &t1, &t2);
+            tangent1 = t1;
+            tangent2 = t2;
+        }
+
+        // Radiance for a point at normalised radius^2 q (0 centre, 1 limb).
+        SampledSpectrum Radiance(Float q, SampledWavelengths lambda)
+        {
+            SampledSpectrum L = scale * Lemit.Sample(lambda);
+            SampledSpectrum f = new SampledSpectrum(1);
+            if (limbDarkening)
+            {
+                Float mu = (Float)Math.Sqrt(Math.Max(0, 1 - q));
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    Float u = LimbU(lambda[i]);
+                    // Normalised so that the disk irradiance equals scale*L: mean of (1-u(1-mu)) is 1-u/3.
+                    f[i] = (1 - u * (1 - mu)) / (1 - u / 3);
+                }
+            }
+            return L * f / solidAngle;
+        }
+
+        // sin^2(theta/2) of the angle between a direction and the sun centre, accurate for tiny angles.
+        Float HalfSine2(Vector3f d)
+        {
+            d = pbrt.Normalize(d);
+            Vector3f e = d - sunDirection;
+            return (e.x * e.x + e.y * e.y + e.z * e.z) * 0.25f;
+        }
+
+        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
+        {
+            Float s2 = HalfSine2(ray.d);
+            if (s2 >= sinHalfAlpha2) return new SampledSpectrum(0);
+            return Radiance(s2 / sinHalfAlpha2, lambda);
+        }
+
+        Vector3f SampleDirection(Point2f u, out Float q)
+        {
+            q = u.x;
+            Float s2 = q * sinHalfAlpha2;
+            Float sinTheta = 2 * (Float)Math.Sqrt(s2 * (1 - s2));
+            Float cosTheta = 1 - 2 * s2;
+            Float phi = 2 * Pi * u.y;
+            return sunDirection * cosTheta +
+                   (tangent1 * (Float)Math.Cos(phi) + tangent2 * (Float)Math.Sin(phi)) * sinTheta;
+        }
+
+        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u,
+                                                              SampledWavelengths lambda,
+                                                              bool allowIncompletePDF = false)
+        {
+            Float q;
+            Vector3f wi = SampleDirection(u, out q);
+            Point3f pOutside = ctx.p() + wi * (2 * sceneRadius);
+            return new LightLiSample(Radiance(q, lambda), wi, 1 / solidAngle,
+                                     new Interaction(pOutside, (MediumInterface)null));
+        }
+
+        public override Float PDF_Li(LightSampleContext ctx, Vector3f w, bool allowIncompletePDF = false)
+        {
+            return HalfSine2(w) < sinHalfAlpha2 ? 1 / solidAngle : 0;
+        }
+
+        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
+        {
+            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
+            *pdfDir = HalfSine2(-ray.d) < sinHalfAlpha2 ? 1 / solidAngle : 0;
+        }
+
+        public override pstd.optional<LightBounds> Bounds() { return default; }
+
+        public override void Preprocess(Bounds3f sceneBounds)
+        {
+            Point3f c; Float r;
+            sceneBounds.BoundingSphere(&c, &r);
+            sceneCenter = c;
+            sceneRadius = r;
+        }
+
+        public override SampledSpectrum Phi(SampledWavelengths lambda)
+        {
+            return scale * Lemit.Sample(lambda) * Pi * pbrt.Sqr(sceneRadius);
+        }
+
+        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda,
+                                                              Float time)
+        {
+            Float q;
+            Vector3f toSun = SampleDirection(u1, out q);
+            Frame wFrame = Frame.FromZ(toSun);
+            Point2f cd = pbrt.SampleUniformDiskConcentric(u2);
+            Point3f pDisk = sceneCenter + sceneRadius * wFrame.FromLocal(new Vector3f(cd.x, cd.y, 0));
+            Ray ray = new Ray(pDisk + sceneRadius * toSun, -toSun, time);
+            return new LightLeSample(Radiance(q, lambda), ray, 1 / (Pi * pbrt.Sqr(sceneRadius)), 1 / solidAngle);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ SunLight %s Lemit: %s scale: %f solid angle: %f ]", BaseToString(), Lemit,
+                                     scale, solidAngle);
+        }
+
+        public static SunLight Create(Transform renderFromLight, ParameterDictionary parameters,
+                                      RGBColorSpace colorSpace, FileLoc loc, Allocator alloc)
+        {
+            Spectrum L = parameters.GetOneSpectrum("L", colorSpace.illuminant, SpectrumType.Illuminant, alloc);
+            Float sc = parameters.GetOneFloat("scale", 1);
+            Point3f from = parameters.GetOnePoint3f("from", new Point3f(0, 0, 0));
+            Point3f to = parameters.GetOnePoint3f("to", new Point3f(0, 0, 1));
+            Float angle = parameters.GetOneFloat("angle", 0.5334f);
+            bool limb = parameters.GetOneBool("limbdarkening", true);
+
+            Vector3f w = pbrt.Normalize(from - to);
+            Vector3f v1, v2;
+            pbrt.CoordinateSystem(w, &v1, &v2);
+            SquareMatrix4 m = new SquareMatrix4(v1.x, v2.x, w.x, 0, v1.y, v2.y, w.y, 0, v1.z, v2.z, w.z, 0, 0, 0, 0, 1);
+            Transform finalRenderFromLight = renderFromLight * new Transform(m);
+
+            sc /= pbrt.SpectrumToPhotometric(L);
+            Float E_v = parameters.GetOneFloat("illuminance", -1);
+            if (E_v > 0)
+                sc *= E_v;
+            return new SunLight(finalRenderFromLight, L, sc, angle, limb);
+        }
+
+        DenselySampledSpectrum Lemit;
+        Float scale;
+        bool limbDarkening;
+        Float sinHalfAlpha2, solidAngle;
+        Vector3f sunDirection, tangent1, tangent2;
+        Point3f sceneCenter;
+        Float sceneRadius;
+    }
+
     // ProjectionLight Definition
     public sealed unsafe class ProjectionLight : LightBase
     {
@@ -2195,6 +2367,8 @@ namespace pbrt
                 light = ProjectionLight.Create(renderFromLight, outsideMedium, parameters, loc, alloc);
             else if (name == "distant")
                 light = DistantLight.Create(renderFromLight, parameters, parameters.ColorSpace(), loc, alloc);
+            else if (name == "sun")
+                light = SunLight.Create(renderFromLight, parameters, parameters.ColorSpace(), loc, alloc);
             else if (name == "infinite")
             {
                 RGBColorSpace colorSpace = parameters.ColorSpace();

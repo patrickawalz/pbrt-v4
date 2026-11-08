@@ -33,6 +33,17 @@ namespace pbrt
                                               out Attenuation attenuation)
         {
             attenuation = default;
+            AtmospherePhase atmosphere = phase as AtmospherePhase;
+            if (atmosphere != null)
+            {
+                // The Mueller matrix of the mixture of the air and the aerosol species, divided by its first element. MieSolver measures Q as
+                // I_parallel - I_perpendicular to the scattering plane, the Stokes vectors of this system the other way round: S12 changes sign
+                SampledSpectrum s12, s33, s34;
+                atmosphere.MuellerRatios(-(double)Dot(wo, wi), out s12, out s33, out s34);
+                attenuation = Attenuation.Spherical(-1f * s12, s33, s34);
+                attenuation = attenuation.Scattered(wo, wi, fromCamera);
+                return true;
+            }
             HGPhaseFunction hg = phase as HGPhaseFunction;
             if (hg == null || hg.Rayleigh() == 0)
                 return false;
@@ -48,7 +59,7 @@ namespace pbrt
 
         public PolarisedPathIntegrator(int maxDepth, Camera camera, Sampler sampler, Primitive aggregate,
                                        List<Light> lights, string lightSampleStrategy, bool analyser, Float analyserAngle,
-                                       Measurement measurement)
+                                       Measurement measurement, bool roughPolarisation = true)
             : base(camera, sampler, aggregate, lights)
         {
             this.maxDepth = maxDepth;
@@ -56,6 +67,7 @@ namespace pbrt
             this.analyser = analyser;
             this.analyserAngle = analyserAngle;
             this.measurement = measurement;
+            this.roughPolarisation = roughPolarisation;
             // The x axis of the Stokes frame of the sensor is the up of the image
             this.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
         }
@@ -132,6 +144,30 @@ namespace pbrt
                     A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T / Sqr(bs.eta) : 1 / T), 1 - Fs, 1 - Fp, 0, 0);
                 }
             }
+            else if (bxdf is ThinFilmBxDF film)
+            {
+                if (!film.Fresnel(cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
+                                  out SampledSpectrum Dp))
+                    return false;
+                // The first element is the ratio of the spectral reflectance to the one of the hero wavelength, which chose
+                // between reflection and transmission
+                Float R0 = 0.5f * (Fs[0] + Fp[0]);
+                if (bs.IsReflection())
+                {
+                    if (R0 <= 0)
+                        return false;
+                    A = Attenuation.Fresnel(new SampledSpectrum(1 / R0), Fs, Fp, Ds, Dp);
+                }
+                else
+                {
+                    Float T0 = 1 - R0;
+                    if (T0 <= 0)
+                        return false;
+                    A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T0 / Sqr(bs.eta) : 1 / T0),
+                                            new SampledSpectrum(1.0f) - Fs, new SampledSpectrum(1.0f) - Fp, new SampledSpectrum(0.0f),
+                                            new SampledSpectrum(0.0f));
+                }
+            }
             else if (bxdf is ThinCoatBxDF coat)
             {
                 return CoatReflection(coat, wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z),
@@ -154,6 +190,70 @@ namespace pbrt
                 return false;
 
             A = A.Scattered(wo, bs.wi, new Vector3f(isect.shading.n.x, isect.shading.n.y, isect.shading.n.z), mode == TransportMode.Radiance);
+            return true;
+        }
+
+        // (not in pbrt-v4) The Mueller matrix of a rough (microfacet) conductor or dielectric for the directions wo and wi. The
+        // facets are mirrors: the light is polarised by the Fresnel equations at the microfacet normal wm, and the Stokes frames
+        // of both directions are those of the plane of that normal (as the rough BSDFs of Mitsuba 3). The first element is
+        // weight (the scalar weight of the scattering: f cos / pdf for a sampled direction, one for a connection to a light whose
+        // radiance has been multiplied by f cos already). False when the scattering depolarises instead.
+        public static bool RoughAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, Vector3f wi, SampledSpectrum weight,
+                                              TransportMode mode, out Attenuation A)
+        {
+            A = default;
+            BxDF bxdf = bsdf.GetBxDF();
+            Vector3f woL = bsdf.RenderToLocal(wo), wiL = bsdf.RenderToLocal(wi);
+            Float cosTheta_o = CosTheta(woL), cosTheta_i = CosTheta(wiL);
+            if (cosTheta_o == 0 || cosTheta_i == 0)
+                return false;
+            Vector3f wm;
+            SampledSpectrum Fs = new SampledSpectrum(0.0f), Fp = new SampledSpectrum(0.0f);
+            SampledSpectrum Ds = new SampledSpectrum(0.0f), Dp = new SampledSpectrum(0.0f);
+            SampledSpectrum scale = new SampledSpectrum(0.0f);
+            if (bxdf is ConductorBxDF conductor)
+            {
+                if (conductor.IsSpecular() || !SameHemisphere(woL, wiL))
+                    return false;
+                wm = woL + wiL;
+                if (LengthSquared(wm) == 0)
+                    return false;
+                wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+                SampledSpectrum eta = conductor.Eta(), k = conductor.K();
+                Float cosWm = AbsDot(woL, wm);
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    pbrt.FrComplexPolarised(cosWm, new pstd.complex(eta[i], k[i]), out Fs[i], out Fp[i], out Ds[i], out Dp[i]);
+                    Float F = 0.5f * (Fs[i] + Fp[i]);
+                    scale[i] = F > 0 ? weight[i] / F : 0;
+                }
+                A = Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp);
+            }
+            else if (bxdf is DielectricBxDF dielectric)
+            {
+                if (dielectric.IsSpecular())
+                    return false;
+                Float eta = dielectric.Eta();
+                bool reflect = SameHemisphere(woL, wiL);
+                Float etap = reflect ? 1 : (cosTheta_o > 0 ? eta : 1 / eta);
+                wm = wiL * etap + woL;
+                if (LengthSquared(wm) == 0)
+                    return false;
+                wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+                if (Dot(wm, wiL) * cosTheta_i < 0 || Dot(wm, woL) * cosTheta_o < 0)
+                    return false;
+                pbrt.FrDielectricPolarised(Dot(woL, wm), eta, out Float fs, out Float fp, out Float ds, out Float dp);
+                Float R = 0.5f * (fs + fp);
+                Float norm = reflect ? R : 1 - R;
+                if (norm <= 0)
+                    return false;
+                scale = weight / norm;
+                A = reflect ? Attenuation.Fresnel(scale, fs, fp, ds, dp) : Attenuation.Fresnel(scale, 1 - fs, 1 - fp, 0, 0);
+            }
+            else
+                return false;
+
+            A = A.Scattered(wo, wi, bsdf.LocalToRender(wm), mode == TransportMode.Radiance);
             return true;
         }
 
@@ -229,9 +329,15 @@ namespace pbrt
 
                 if (IsNonSpecular(bsdf.Flags()))
                 {
-                    SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler);
+                    SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler, out Vector3f wiLight);
                     if ((bool)Ld)
-                        L += beta * new PLight(Ld);
+                    {
+                        PLight Lp = new PLight(Ld);
+                        if (roughPolarisation && RoughAttenuation(bsdf, isect, -ray.d, wiLight, new SampledSpectrum(1.0f), TransportMode.Radiance,
+                                             out Attenuation M))
+                            Lp = M * Lp;
+                        L += beta * Lp;
+                    }
                 }
 
                 Vector3f wo = -ray.d;
@@ -240,7 +346,8 @@ namespace pbrt
                 if (!bs)
                     break;
                 SampledSpectrum scalar = bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
-                if (SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out Attenuation A))
+                if (SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out Attenuation A) ||
+                    (roughPolarisation && RoughAttenuation(bsdf, isect, wo, bs.value().wi, scalar, TransportMode.Radiance, out A)))
                     beta *= A;
                 else
                     beta *= Attenuation.Lambert(scalar);
@@ -322,8 +429,10 @@ namespace pbrt
             analyserAngle = Radians(analyser ? angle : 0);
         }
 
-        SampledSpectrum SampleLd(SurfaceInteraction intr, BSDF bsdf, ref SampledWavelengths lambda, Sampler sampler)
+        SampledSpectrum SampleLd(SurfaceInteraction intr, BSDF bsdf, ref SampledWavelengths lambda, Sampler sampler,
+                                 out Vector3f wiLight)
         {
+            wiLight = default;
             LightSampleContext ctx = new LightSampleContext(intr);
             BxDFFlags flags = bsdf.Flags();
             if (IsReflective(flags) && !IsTransmissive(flags))
@@ -346,6 +455,7 @@ namespace pbrt
             SampledSpectrum f = bsdf.f(wo, wi) * AbsDot(wi, intr.shading.n);
             if (!f || !Unoccluded(intr, ls.value().pLight))
                 return new SampledSpectrum(0.0f);
+            wiLight = wi;
 
             Float p_l = sampledLight.value().p * ls.value().pdf;
             if (IsDeltaLight(light.Type()))
@@ -366,8 +476,9 @@ namespace pbrt
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
             ParseSensor(parameters, loc, out bool analyser, out Float analyserAngle, out Measurement measurement);
+            // (not in pbrt-v4) "roughpolarisation" false depolarises the rough conductors and dielectrics, as before they were polarised
             return new PolarisedPathIntegrator(maxDepth, camera, sampler, aggregate, lights, lightStrategy, analyser,
-                                               analyserAngle, measurement);
+                                               analyserAngle, measurement, parameters.GetOneBool("roughpolarisation", true));
         }
 
         int maxDepth;
@@ -375,6 +486,7 @@ namespace pbrt
         bool analyser;
         Float analyserAngle;
         Measurement measurement;
+        bool roughPolarisation = true;
         Vector3f cameraUp;
     }
 }

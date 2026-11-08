@@ -184,7 +184,8 @@ namespace pbrt
             beta *= w;
             if (polarised)
             {
-                if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs, mode, out PAttenuation A))
+                if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs, mode, out PAttenuation A) &&
+                    !PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, wo, bs.wi, w, mode, out A))
                 {
                     A = PAttenuation.Lambert(w);
                 }

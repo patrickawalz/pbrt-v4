@@ -28,6 +28,12 @@ namespace pbrt
         public abstract Float p(Vector3f wo, Vector3f wi);
         public abstract pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u);
         public abstract Float PDF(Vector3f wo, Vector3f wi);
+
+        // (not in pbrt-v4) A phase function that is not the same at every wavelength (the atmosphere mixes the phase functions of the air and of
+        // the aerosols with weights that depend on the wavelength). p() and PDF() are then those of the hero wavelength, which sample the
+        // direction, and pSpectral() is the value at each wavelength of the sample; the weight of a path is pSpectral() / PDF().
+        public virtual bool WavelengthDependent() { return false; }
+        public virtual SampledSpectrum pSpectral(Vector3f wo, Vector3f wi) { return new SampledSpectrum(p(wo, wi)); }
     }
 
     // RayMajorantSegment Definition

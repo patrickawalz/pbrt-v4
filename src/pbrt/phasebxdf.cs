@@ -23,6 +23,8 @@ namespace pbrt
 
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
+            if (phase.WavelengthDependent())
+                return phase.pSpectral(wo, wi);
             return new SampledSpectrum(phase.p(wo, wi));
         }
 
@@ -32,6 +34,8 @@ namespace pbrt
             pstd.optional<PhaseFunctionSample> ps = phase.Sample_p(wo, u);
             if (!ps)
                 return default;
+            if (phase.WavelengthDependent())
+                return new BSDFSample(phase.pSpectral(wo, ps.value().wi), ps.value().wi, ps.value().pdf, Flags());
             return new BSDFSample(new SampledSpectrum(ps.value().p), ps.value().wi, ps.value().pdf, Flags());
         }
 

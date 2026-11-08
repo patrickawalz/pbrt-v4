@@ -387,6 +387,19 @@ namespace pbrt
                     zero, zero, zero, f01));
             }
 
+            // The scattering of spheres (a cloud of them): the Mueller matrix with the first element one and the elements m01 = m10, m22 = m33 and
+            // m23 = -m32 given as ratios to it
+            public static Attenuation Spherical(SampledSpectrum m01, SampledSpectrum m22, SampledSpectrum m23)
+            {
+                SampledSpectrum one = new SampledSpectrum(1.0f);
+                SampledSpectrum zero = new SampledSpectrum(0.0f);
+                return new Attenuation(new MuellerMatrix(
+                    one, m01, zero, zero,
+                    m01, one, zero, zero,
+                    zero, zero, m22, m23,
+                    zero, zero, -m23, m22));
+            }
+
             // Rayleigh scattering next to a part that scatters all polarisations the same, as the sum of Rayleigh() and Lambert()
             // of PolarisedUPBP's phase functions: the depolarised part only adds to the first element
             public static Attenuation Rayleigh(SampledSpectrum d0, SampledSpectrum depolarised, Float cosPhi)

@@ -217,6 +217,8 @@ namespace pbrt
                 return SampleT_maj<ScaledMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CompositeMedium)
                 return SampleT_maj<CompositeMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is AtmosphereMedium)
+                return SampleT_maj<AtmosphereMedium, AtmosphereMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }
@@ -1018,12 +1020,33 @@ namespace pbrt
         }
 
         public CloudMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float g,
-                           Float density, Float wispiness, Float frequency, Allocator alloc)
+                           Float density, Float wispiness, Float frequency, Allocator alloc, MieSpecies droplets = null,
+                           Float liquidWaterContent = 0, Float metersPerUnit = 1, Float edgeFalloff = 0, bool uniform = false)
         {
+            this.edgeFalloff = edgeFalloff;
+            this.uniform = uniform;
             this.bounds = bounds;
             this.renderFromMedium = renderFromMedium;
-            sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
-            sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
+            this.droplets = droplets;
+            if (droplets != null)
+            {
+                // Coefficients per scene unit from the Mie extinction of the droplets (m^2/g) and the liquid water content (g/m^3) at density one
+                double unit = liquidWaterContent * metersPerUnit;
+                sigma_a_spec = DenselySampledSpectrum.SampleFunction((Float lambdaNm) =>
+                {
+                    return (Float)(unit * droplets.At(droplets.MassExtinction, lambdaNm) * (1.0 - droplets.At(droplets.Albedo, lambdaNm)));
+                }, (int)Lambda_min, (int)Lambda_max, alloc);
+                sigma_s_spec = DenselySampledSpectrum.SampleFunction((Float lambdaNm) =>
+                {
+                    return (Float)(unit * droplets.At(droplets.MassExtinction, lambdaNm) * droplets.At(droplets.Albedo, lambdaNm));
+                }, (int)Lambda_min, (int)Lambda_max, alloc);
+                dropletZero = new DenselySampledSpectrum(new ConstantSpectrum(0f), alloc);
+            }
+            else
+            {
+                sigma_a_spec = new DenselySampledSpectrum(sigma_a, alloc);
+                sigma_s_spec = new DenselySampledSpectrum(sigma_s, alloc);
+            }
             phase = new HGPhaseFunction(g, HGPhaseFunction.creationRayleigh);
             this.density = density;
             this.wispiness = wispiness;
@@ -1039,6 +1062,14 @@ namespace pbrt
             SampledSpectrum sigma_a = density * sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = density * sigma_s_spec.Sample(lambda);
 
+            if (droplets != null)
+            {
+                SampledSpectrum zero = dropletZero.Sample(lambda);
+                return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s,
+                                              phase = new AtmospherePhase(new MieSpecies[] { droplets }, lambda, zero, zero,
+                                                                          new SampledSpectrum[] { new SampledSpectrum(1f) }),
+                                              Le = new SampledSpectrum(0f) };
+            }
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = new SampledSpectrum(0f) };
         }
 
@@ -1066,6 +1097,10 @@ namespace pbrt
         // CloudMedium Private Methods
         private Float Density(Point3f p)
         {
+            if (uniform)
+            {
+                return Clamp(density, 0, 1) * EdgeFactor(p);
+            }
             Point3f pp = frequency * p;
             if (wispiness > 0)
             {
@@ -1091,15 +1126,42 @@ namespace pbrt
             // Model decrease in density with altitude and return final cloud density
             d = Clamp((1 - p.y) * 4.5f * density * d, 0, 1);
             d += 2 * std.max<Float>(0, 0.5f - p.y);
-            return Clamp(d, 0, 1);
+            d = Clamp(d, 0, 1);
+            d *= EdgeFactor(p);
+            return d;
         }
 
         // CloudMedium Private Members
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private HGPhaseFunction phase;
-        private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
+        private DenselySampledSpectrum sigma_a_spec, sigma_s_spec, dropletZero;
         private Float density, wispiness, frequency;
+        private MieSpecies droplets;
+        private Float edgeFalloff;
+        private bool uniform;
+
+        // Fades out toward the sides of the box (and the bottom) so that the cloud has no flat faces; one when the falloff is off
+        private Float EdgeFactor(Point3f p)
+        {
+            if (edgeFalloff <= 0)
+            {
+                return 1;
+            }
+            Float edge = std.min(std.min(p.x, 1 - p.x), std.min(p.z, 1 - p.z)) / edgeFalloff;
+            edge = std.min(edge, p.y / (0.5f * edgeFalloff));
+            edge = Clamp(edge, 0, 1);
+            return edge * edge * (3 - 2 * edge);
+        }
+
+        // Cloud droplets: gamma size distribution with effective radius (micrometres) and effective variance
+        public static MieSpecies BuildDroplets(double effectiveRadius, double effectiveVariance)
+        {
+            int radiusCount = 300;
+            double[] radii = MieSpecies.LogarithmicRadii(0.2 * effectiveRadius, 5.0 * effectiveRadius, radiusCount);
+            double[] weights = MieSpecies.GammaWeights(0.2 * effectiveRadius, 5.0 * effectiveRadius, effectiveRadius, effectiveVariance, radiusCount);
+            return new MieSpecies(WaterData.Wavelength, WaterData.Real, WaterData.Imaginary, radii, weights, 1.0, 360.0, 20.0, 24);
+        }
     
         public static CloudMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                          Allocator alloc)
@@ -1118,6 +1180,14 @@ namespace pbrt
             Point3f p0 = parameters.GetOnePoint3f("p0", new Point3f(0f, 0f, 0f));
             Point3f p1 = parameters.GetOnePoint3f("p1", new Point3f(1f, 1f, 1f));
 
+            if (parameters.GetOneBool("mie", false))
+            {
+                // Droplets of effective radius "reff" (micrometres) and effective variance "veff"; "lwc" is the liquid water content in g/m^3 where the
+                // density is one and "scale" the metres per scene unit
+                MieSpecies droplets = BuildDroplets(parameters.GetOneFloat("reff", 10), parameters.GetOneFloat("veff", 0.1f));
+                return new CloudMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, density, wispiness, frequency, alloc, droplets,
+                                       parameters.GetOneFloat("lwc", 0.3f), parameters.GetOneFloat("scale", 1), parameters.GetOneFloat("edgefalloff", 0), parameters.GetOneBool("uniform", false));
+            }
             return new CloudMedium(new Bounds3f(p0, p1), renderFromMedium, sigma_a, sigma_s, g, density, wispiness, frequency, alloc);
         }
     }
@@ -1437,6 +1507,10 @@ namespace pbrt
             else if (name == "cloud")
             {
                 m = CloudMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "atmosphere")
+            {
+                m = AtmosphereMedium.Create(parameters, loc, alloc);
             }
             else if (name == "nanovdb")
             {

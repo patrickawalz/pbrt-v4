@@ -2852,7 +2852,11 @@ namespace pbrt
                                                      Allocator alloc)
         {
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
-            if (name == "sphere")
+            if (name == "planet")
+            {
+                shapes.push_back(PlanetShape.Create(renderFromObject, reverseOrientation, parameters, loc));
+            }
+            else if (name == "sphere")
             {
                 shapes.push_back(Sphere.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc));
                 ++nSpheres;
