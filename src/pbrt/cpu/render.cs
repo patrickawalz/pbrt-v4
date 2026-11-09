@@ -70,7 +70,7 @@ namespace pbrt
 
             // Helpful warnings
             if (haveScatteringMedia && parsedScene.integrator.name != "volpath" &&
-                parsedScene.integrator.name != "simplevolpath" &&
+                parsedScene.integrator.name != "simplevolpath" && parsedScene.integrator.name != "tracervolpath" && parsedScene.integrator.name != "tracerbdpt" && parsedScene.integrator.name != "tracerbdptonline" &&
                 parsedScene.integrator.name != "bdpt" && parsedScene.integrator.name != "mlt" &&
                 parsedScene.integrator.name != "erpt" && parsedScene.integrator.name != "pmcer" &&
                 parsedScene.integrator.name != "jrlt" && parsedScene.integrator.name != "smmc" && parsedScene.integrator.name != "jrsmmc")

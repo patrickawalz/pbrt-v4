@@ -1482,6 +1482,9 @@ namespace pbrt
         // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
 
+        // (not in pbrt-v4) Whether a path scatters once or any number of times in the medium: "string scattering" "single" | "multiple"
+        public ScatteringMode scattering = ScatteringMode.Multiple;
+
         // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
         public virtual SampledSpectrum ControlExtinction(SampledWavelengths lambda)
         {
@@ -1520,6 +1523,10 @@ namespace pbrt
             {
                 m = TextureMedium.Create(parameters, renderFromMedium, loc, alloc, renderFromMediumAnimated);
             }
+            else if (name == "refractive")
+            {
+                m = RefractiveMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
             else if (name == "osl")
             {
                 m = OSLMedium.Create(parameters, renderFromMedium, loc, alloc, renderFromMediumAnimated);
@@ -1532,6 +1539,10 @@ namespace pbrt
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
             m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
+            string scattering = parameters.GetOneString("scattering", "multiple");
+            if (scattering != "single" && scattering != "multiple")
+                ErrorExit(loc, $"\"{scattering}\": unknown \"scattering\"; expected \"single\" or \"multiple\".");
+            m.scattering = scattering == "single" ? ScatteringMode.Single : ScatteringMode.Multiple;
 
             parameters.ReportUnused();
             return m;

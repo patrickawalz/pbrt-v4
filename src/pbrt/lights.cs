@@ -2238,6 +2238,12 @@ namespace pbrt
             return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
         }
 
+        // The intensity towards a point along a direction (in render space) that leaves the light
+        public SampledSpectrum IAlong(Vector3f renderDirectionFromLight, SampledWavelengths lambda)
+        {
+            return I(pbrt.Normalize(renderFromLight.ApplyInverse(renderDirectionFromLight)), lambda);
+        }
+
         public SampledSpectrum I(Vector3f w, SampledWavelengths lambda)
         {
             return pbrt.SmoothStep(pbrt.CosTheta(w), cosFalloffEnd, cosFalloffStart) * scale * Iemit.Sample(lambda);

@@ -150,6 +150,26 @@ namespace pbrt
             return false;
         }
 
+        // Removes the topmost entry of the medium, whatever the priority and owner of the entry
+        public bool RemoveMedium(Medium medium)
+        {
+            for (int i = size - 1; i >= 0; --i)
+            {
+                if (elements[i].medium == medium)
+                {
+                    for (int j = i; j < size - 1; ++j)
+                    {
+                        elements[j] = elements[j + 1];
+                        priorities[j] = priorities[j + 1];
+                    }
+                    --size;
+                    elements[size] = default;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Whether the element with the priority is on the stack
         public bool Contains(BoundaryStackElement element, int priority)
         {
@@ -207,6 +227,16 @@ namespace pbrt
         // volume then depends on where a segment entered, so the strategies that build paths in both directions or reconnect
         // them see different volumes in the same place; only the forward path tracers define it.
         public static bool perEntryVolumes;
+
+        // (not in pbrt-v4) Whether the scene has a RefractiveMedium: the paths in it are curved
+        public static bool hasRefractive;
+
+        public static void RequireNoRefractive(string integrator)
+        {
+            if (hasRefractive)
+                pbrt.ErrorExit("The \"" + integrator + "\" integrator does not support refractive media: their light paths are " +
+                               "curved, and connections between points of a path are not straight lines. Use \"volpath\".");
+        }
 
         public static void RequireNoPerEntryVolumes(string integrator)
         {

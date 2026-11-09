@@ -34,6 +34,13 @@ namespace pbrt
         // scatterings in media at the vertex (the extinction of each wavelength over the hero's).
         public bool trackSegment;
         public SampledSpectrum segU, segL, vtx;
+        // (UnifiedTracer) The scattering vertices of the path so far, and the scatterings in media among them (a single scattering
+        // volume stops scattering after the first)
+        public int depth;
+        // The single scattering volumes the path has scattered in (the bits of Volume.scatterBit)
+        public ulong scatteredIn;
+        // The number of scattering events after which a walk ends; 0 uses the limit of the tracer (a bdpt subpath has its own)
+        public int depthLimit;
 
         public PathState(SampledSpectrum beta, PAttenuation pa, PLight pl, bool fromCamera, bool polarised, bool rescaled)
         {
