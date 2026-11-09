@@ -105,6 +105,12 @@ namespace pbrt
             // Correct subpath sampling densities for infinite area lights
             if (path[0].IsInfiniteLight())
             {
+                // (not in pbrt-v4) A light at infinity that enters a refractive medium along a curved edge is only reached by the
+                // light sampled from the camera subpath (CurvedLightSample), so this subpath stops at the light
+                if (nVertices > 0 && path[1].curvedEdge)
+                {
+                    nVertices = 0;
+                }
                 if (nVertices > 0)
                 {
                     path[1].pdfFwd = les.value().pdfPos;
@@ -167,8 +173,9 @@ namespace pbrt
                 }
                 if (scatter.kind == EventKind.Escaped)
                 {
-                    // Capture escaped rays when tracing from the camera
-                    if (mode == TransportMode.Radiance)
+                    // Capture escaped rays when tracing from the camera. (not in pbrt-v4) A ray that escapes along a curved edge is not
+                    // used: the connection to the light sampled from the vertex in the refractive medium is the only strategy for it.
+                    if (mode == TransportMode.Radiance && !(scatter.curved && BDPT.RefractiveOf(path[vIdx - 1]) != null))
                     {
                         path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ray)), state.beta, pdfFwd);
                         StoreSegment(path, vIdx, ref state);

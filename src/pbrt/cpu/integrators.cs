@@ -2218,6 +2218,12 @@ namespace pbrt
             // Correct subpath sampling densities for infinite area lights
             if (path[0].IsInfiniteLight())
             {
+                // (not in pbrt-v4) A light at infinity that enters a refractive medium along a curved edge is only reached by the
+                // light sampled from the camera subpath (CurvedLightSample), so this subpath stops at the light
+                if (nVertices > 0 && path[1].curvedEdge)
+                {
+                    nVertices = 0;
+                }
                 // Set spatial density of _path[1]_ for infinite area light
                 if (nVertices > 0)
                 {
@@ -2639,8 +2645,10 @@ namespace pbrt
 
             public override void OnEscape(WalkContext ctx)
             {
-                // Capture escaped rays when tracing from the camera
-                if (ctx.mode == TransportMode.Radiance)
+                // Capture escaped rays when tracing from the camera. (not in pbrt-v4) A ray that escapes along a curved edge from a
+                // vertex in the refractive medium is not used: the connection to the light sampled from that vertex is the only
+                // strategy for it (CurvedLightSample).
+                if (ctx.mode == TransportMode.Radiance && !(edgeMedium != null && BDPT.RefractiveOf(path[vIdx - 1]) != null))
                 {
                     path[vIdx] = Vertex.CreateLight(new EndpointInteraction(new Ray(ctx.ray)), ctx.st.beta, pdfFwd);
                     StoreSegment(ctx, vIdx);
@@ -2740,6 +2748,100 @@ namespace pbrt
         // it finds a path), the edge in both directions (leaving the camera side and the light side vertex), and the transmittance
         // of the whole path with the factors of the spectral MIS weights. The part of the path outside the medium is straight and
         // is found from the surface that bounds the medium, like volpath does it for its light samples.
+        // (not in pbrt-v4) A light sampled from a vertex inside a refractive medium, reached along a curved path (area lights by area, point and
+        // spot lights at their position, infinite lights at a point far away along the direction that is sampled). Whether the strategy
+        // is the only one that finds the path (a light at infinity: the camera subpath that escapes along a curve, and the light
+        // subpaths that enter along one, are not used), and the weight is one.
+        public static bool CurvedLightSample(Integrator integrator, RefractiveMedium refractive, Vertex pt, Light light, Float p_l,
+                                             LightSampleContext ctx, Point2f u, SampledWavelengths lambda, LightSampler lightSampler,
+                                             out Vertex sampled, out SampledSpectrum L, out EdgeGeometry curvedToLight, out EdgeGeometry curvedToCamera,
+                                             out SampledSpectrum connRu, out SampledSpectrum connRl, out bool unique)
+        {
+            sampled = new Vertex();
+            L = new SampledSpectrum(0.0f);
+            curvedToLight = default;
+            curvedToCamera = default;
+            connRu = new SampledSpectrum(1.0f);
+            connRl = new SampledSpectrum(1.0f);
+            unique = false;
+            DiffuseAreaLight areaLight = light as DiffuseAreaLight;
+            PointLight pointLight = light as PointLight;
+            SpotLight spotLight = light as SpotLight;
+            bool infinite = light.Type() == LightType.Infinite;
+            if (areaLight == null && pointLight == null && spotLight == null && !infinite)
+            {
+                ErrorExit("bdpt supports area, point, spot and infinite lights with a refractive medium (docs/refractive-media.md).");
+            }
+            Interaction yIntr = default;
+            Float pdfPoint = 1;
+            Point3f x = pt.p();
+            if (areaLight != null)
+            {
+                if (!areaLight.SampleArea(u, out yIntr, out pdfPoint))
+                {
+                    return false;
+                }
+            }
+            else if (spotLight != null)
+            {
+                yIntr = spotLight.PositionInteraction();
+            }
+            else if (pointLight != null)
+            {
+                pstd.optional<LightLiSample> pointSample = pointLight.SampleLi(ctx, u, lambda);
+                if (!pointSample || !(bool)pointSample.value().L)
+                {
+                    return false;
+                }
+                yIntr = pointSample.value().pLight;
+            }
+            else
+            {
+                pstd.optional<LightLiSample> infiniteSample = light.SampleLi(ctx, u, lambda, true);
+                if (!infiniteSample || !(bool)infiniteSample.value().L || infiniteSample.value().pdf == 0)
+                {
+                    return false;
+                }
+                Float distance = 300 * Length(refractive.Bounds().pMax - refractive.Bounds().pMin);
+                yIntr = new Interaction(x + distance * infiniteSample.value().wi, pt.time(), (Medium)null);
+                pdfPoint = infiniteSample.value().pdf / (distance * distance);
+                unique = true;
+            }
+            Point3f y = yIntr.p();
+            if (DistanceSquared(x, y) == 0 ||
+                !CurvedConnection(integrator, refractive, pt, yIntr, true, lambda, out curvedToLight, out curvedToCamera, out int count,
+                                  out SampledSpectrum curvedT, out connRu, out connRl))
+            {
+                return false;
+            }
+            SampledSpectrum Le;
+            if (areaLight != null)
+            {
+                Le = light.L(y, yIntr.n, yIntr.uv, (-1) * curvedToLight.arriving, lambda, yIntr.time);
+            }
+            else if (spotLight != null)
+            {
+                Le = spotLight.IAlong((-1) * curvedToLight.arriving, lambda);
+            }
+            else if (pointLight != null)
+            {
+                Le = pointLight.SampleLi(ctx, new Point2f(0.5f, 0.5f), lambda).value().L * DistanceSquared(x, y);
+            }
+            else
+            {
+                Le = light.Le(new Ray(x, curvedToLight.arriving), lambda);
+            }
+            if (!(bool)Le)
+            {
+                return false;
+            }
+            sampled = Vertex.CreateLight(new EndpointInteraction(light, yIntr), Le / (pdfPoint * p_l), 0);
+            sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
+            L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
+            L *= GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
+            return true;
+        }
+
         public static bool CurvedConnection(Integrator integrator, RefractiveMedium medium, Vertex inside, Interaction other,
                                             bool insideIsCameraSide, SampledWavelengths lambda, out EdgeGeometry toLight,
                                             out EdgeGeometry toCamera, out int count, out SampledSpectrum transmittance,
@@ -3227,6 +3329,7 @@ namespace pbrt
 
             // Perform connection and write contribution to _L_
             Vertex sampled = new Vertex();
+            bool uniqueStrategy = false;
             if (s == 0)
             {
                 // Interpret the camera subpath as a complete path
@@ -3288,71 +3391,48 @@ namespace pbrt
                         RefractiveMedium refractive = BDPT.RefractiveOf(pt);
                         if (refractive != null)
                         {
-                            PointLight pointLight = light as PointLight;
-                            if (light.Type() == LightType.Infinite || (IsDeltaLight(light.Type()) && pointLight == null))
-                                ErrorExit("bdpt supports area lights, point lights and the emission of media only with a refractive medium (docs/refractive-media.md).");
                             VolumeEmissionLight emissiveVolume = light as VolumeEmissionLight;
-                            DiffuseAreaLight areaLight = light as DiffuseAreaLight;
-                            if (emissiveVolume == null && areaLight == null && pointLight == null)
-                                ErrorExit("bdpt supports diffuse area lights and the emission of media only with a refractive medium (docs/refractive-media.md).");
-                            // The point is sampled by area (or by volume for the emission of a medium): a curved path reaches points that
-                            // the straight line does not see
-                            Interaction yIntr = default;
-                            Float pdfPoint = 0;
-                            SampledSpectrum emissionOfVolume = default;
-                            bool sampledPoint;
-                            if (pointLight != null)
+                            if (emissiveVolume == null)
                             {
-                                // The intensity of the point is the radiance of the straight sample times the squared distance
-                                pstd.optional<LightLiSample> pointSample = pointLight.SampleLi(ctx, sampler.Get2D(), lambda);
-                                sampledPoint = pointSample && (bool)pointSample.value().L;
-                                if (sampledPoint)
+                                if (CurvedLightSample(integrator, refractive, pt, light, p_l, ctx, sampler.Get2D(), lambda, lightSampler,
+                                                      out sampled, out L, out curvedToLight, out curvedToCamera, out connRu, out connRl,
+                                                      out bool onlyStrategy))
                                 {
-                                    yIntr = pointSample.value().pLight;
-                                    pdfPoint = 1;
-                                    emissionOfVolume = pointSample.value().L * DistanceSquared(pt.p(), yIntr.p());
+                                    uniqueStrategy = onlyStrategy;
                                 }
                             }
-                            else if (emissiveVolume != null)
+                            else
                             {
+                                // The point is sampled by volume: a curved path reaches points that the straight line does not see
+                                Interaction yIntr = default;
                                 pstd.optional<LightLiSample> volumeSample = emissiveVolume.SampleLiVolume(ctx, sampler.Get2D(), sampler.Get1D(), lambda);
-                                sampledPoint = volumeSample && (bool)volumeSample.value().L && volumeSample.value().pdf > 0;
+                                bool sampledPoint = volumeSample && (bool)volumeSample.value().L && volumeSample.value().pdf > 0;
+                                SampledSpectrum emissionOfVolume = default;
+                                Float pdfPoint = 0;
                                 if (sampledPoint)
                                 {
                                     yIntr = volumeSample.value().pLight;
                                     emissionOfVolume = volumeSample.value().L;
                                     pdfPoint = volumeSample.value().pdf / DistanceSquared(pt.p(), yIntr.p());
                                 }
-                            }
-                            else
-                            {
-                                sampledPoint = areaLight.SampleArea(sampler.Get2D(), out yIntr, out pdfPoint);
-                            }
-                            if (sampledPoint)
-                            {
-                                Point3f y = yIntr.p();
-                                if (DistanceSquared(pt.p(), y) > 0 &&
-                                    CurvedConnection(integrator, refractive, pt, yIntr, true, lambda,
-                                                     out curvedToLight, out curvedToCamera, out int count,
-                                                     out SampledSpectrum curvedT, out connRu, out connRl) &&
-                                    (emissiveVolume == null ||
-                                     MediumEmits(MediumTracking.Current(StackAtPoint(integrator, camera, y, pt.time())), emissiveVolume)))
+                                if (sampledPoint)
                                 {
-                                    // The emission of a medium is the same in all directions
-                                    SampledSpectrum Le = emissiveVolume != null || pointLight != null
-                                        ? emissionOfVolume
-                                        : light.L(y, yIntr.n, yIntr.uv, (-1) * curvedToLight.arriving, lambda, yIntr.time);
-                                    EndpointInteraction ei = new EndpointInteraction(light, yIntr);
-                                    sampled = Vertex.CreateLight(ei, Le / (pdfPoint * p_l), 0);
-                                    sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
-                                    if (emissiveVolume != null)
+                                    Point3f y = yIntr.p();
+                                    if (DistanceSquared(pt.p(), y) > 0 &&
+                                        CurvedConnection(integrator, refractive, pt, yIntr, true, lambda,
+                                                         out curvedToLight, out curvedToCamera, out int count,
+                                                         out SampledSpectrum curvedT, out connRu, out connRl) &&
+                                        MediumEmits(MediumTracking.Current(StackAtPoint(integrator, camera, y, pt.time())), emissiveVolume))
                                     {
+                                        EndpointInteraction ei = new EndpointInteraction(light, yIntr);
+                                        sampled = Vertex.CreateLight(ei, emissionOfVolume / (pdfPoint * p_l), 0);
+                                        sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
                                         SampledSpectrum majorant = emissiveVolume.Source().MajorantAt(y, lambda, ctx.time);
                                         sampled.sigmaT0 = majorant[0];
                                         sampled.emissionMaj = majorant / majorant[0];
+                                        L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
+                                        L *= GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
                                     }
-                                    L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
-                                    L *= GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
                                 }
                             }
                         }
@@ -3455,8 +3535,8 @@ namespace pbrt
                 PathIntegrator.pathLength = new StatIntDistribution();
             PathIntegrator.pathLength.Add(s + t - 2);
             // Compute MIS weight for connection strategy
-            Float misWeight = (bool)L ? MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler,
-                                                  connRu, connRl, curvedToLight, curvedToCamera)
+            Float misWeight = (bool)L ? (uniqueStrategy ? 1.0f : MISWeight(integrator, camera, lightVertices, cameraVertices, sampled, s, t, lightSampler,
+                                                  connRu, connRl, curvedToLight, curvedToCamera))
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;

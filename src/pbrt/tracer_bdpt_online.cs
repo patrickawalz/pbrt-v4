@@ -260,6 +260,7 @@ namespace pbrt
                 return L;
             }
             Vertex sampled = new Vertex();
+            bool uniqueStrategy = false;
             if (s == 0)
             {
                 // Interpret the camera subpath as a complete path
@@ -283,47 +284,12 @@ namespace pbrt
                         RefractiveMedium refractive = BDPT.RefractiveOf(pt);
                         if (refractive != null)
                         {
-                            // From inside a refractive medium an area light is reached along a curved path to a point sampled by area
-                            DiffuseAreaLight areaLight = light as DiffuseAreaLight;
-                            PointLight pointLight = light as PointLight;
-                            if (areaLight == null && pointLight == null)
+                            // From inside a refractive medium the light is reached along a curved path
+                            if (BDPT.CurvedLightSample(integrator, refractive, pt, light, p_l, ctx, sampler.Get2D(), lambda, lightSampler,
+                                                       out sampled, out L, out curvedToLight, out curvedToCamera, out connRu, out connRl,
+                                                       out bool onlyStrategy))
                             {
-                                ErrorExit("tracerbdptonline supports diffuse area lights and point lights only from inside a refractive medium.");
-                            }
-                            Interaction yIntr = default;
-                            Float pdfPoint = 1;
-                            SampledSpectrum pointIntensity = default;
-                            bool sampledPoint;
-                            if (pointLight != null)
-                            {
-                                // The intensity of the point is the radiance of the straight sample times the squared distance
-                                pstd.optional<LightLiSample> pointSample = pointLight.SampleLi(ctx, sampler.Get2D(), lambda);
-                                sampledPoint = pointSample && (bool)pointSample.value().L;
-                                if (sampledPoint)
-                                {
-                                    yIntr = pointSample.value().pLight;
-                                    pointIntensity = pointSample.value().L * DistanceSquared(pt.p(), yIntr.p());
-                                }
-                            }
-                            else
-                            {
-                                sampledPoint = areaLight.SampleArea(sampler.Get2D(), out yIntr, out pdfPoint);
-                            }
-                            if (sampledPoint)
-                            {
-                                Point3f y = yIntr.p();
-                                if (DistanceSquared(pt.p(), y) > 0 &&
-                                    BDPT.CurvedConnection(integrator, refractive, pt, yIntr, true, lambda, out curvedToLight,
-                                                          out curvedToCamera, out int count, out SampledSpectrum curvedT, out connRu,
-                                                          out connRl))
-                                {
-                                    SampledSpectrum Le = pointLight != null ? pointIntensity : light.L(y, yIntr.n, yIntr.uv, (-1) * curvedToLight.arriving, lambda, yIntr.time);
-                                    EndpointInteraction ei = new EndpointInteraction(light, yIntr);
-                                    sampled = Vertex.CreateLight(ei, Le / (pdfPoint * p_l), 0);
-                                    sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
-                                    L = pt.beta * pt.f(sampled, TransportMode.Radiance, curvedToLight) * sampled.beta;
-                                    L *= BDPT.GeometryTerm(pt, sampled, curvedToLight) * (Float)count * curvedT;
-                                }
+                                uniqueStrategy = onlyStrategy;
                             }
                         }
                         else
@@ -386,6 +352,10 @@ namespace pbrt
                 }
             }
             if (!L)
+            {
+                return L;
+            }
+            if (uniqueStrategy)
             {
                 return L;
             }
@@ -518,6 +488,10 @@ namespace pbrt
                 }
                 int t = bounces + 2;
                 Vertex cur;
+                if (scatter.kind == EventKind.Escaped && scatter.curved && BDPT.RefractiveOf(prev) != null)
+                {
+                    break;
+                }
                 if (scatter.kind == EventKind.Escaped)
                 {
                     cur = Vertex.CreateLight(new EndpointInteraction(new Ray(cameraRay)), state.beta, pdfFwd);

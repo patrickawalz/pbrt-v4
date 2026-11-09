@@ -409,7 +409,13 @@ namespace pbrt
                     return false;
                 }
             }
-            else if (pointLight != null || spotLight != null)
+            else if (spotLight != null)
+            {
+                // The point of the light: a curved path can arrive inside the cone where the straight direction does not
+                target = spotLight.PositionInteraction();
+                pdfPoint = 1;
+            }
+            else if (pointLight != null)
             {
                 pstd.optional<LightLiSample> sample = light.SampleLi(context, u, lambda);
                 if (!sample)

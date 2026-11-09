@@ -2238,6 +2238,12 @@ namespace pbrt
             return new LightLiSample(Li, wi, 1, new Interaction(p, mediumInterface));
         }
 
+        // The light as a point, whether or not the straight direction to a point lies in its cone
+        public Interaction PositionInteraction()
+        {
+            return new Interaction(renderFromLight.Apply(new Point3f(0, 0, 0)), mediumInterface);
+        }
+
         // The intensity towards a point along a direction (in render space) that leaves the light
         public SampledSpectrum IAlong(Vector3f renderDirectionFromLight, SampledWavelengths lambda)
         {
