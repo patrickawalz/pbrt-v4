@@ -1443,6 +1443,7 @@ namespace pbrt
         public static SimpleVolPathIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler,
                                                      Primitive aggregate, List<Light> lights, FileLoc loc)
         {
+            MediumTracking.RequireNoRefractive("simplevolpath");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             return new SimpleVolPathIntegrator(maxDepth, camera, sampler, aggregate, lights);
         }
@@ -7370,9 +7371,11 @@ namespace pbrt
             SampledSpectrum zero = new SampledSpectrum(0.0f);
             if (!refractiveNee || light.Type() == LightType.Infinite)
                 return zero;
-            if (IsDeltaLight(light.Type()))
-                ErrorExit("Delta lights are not supported with the next event estimation from inside a refractive medium " +
-                          "(docs/refractive-media.md): use area lights.");
+            PointLight pointLight = light as PointLight;
+            SpotLight spotLight = light as SpotLight;
+            if (IsDeltaLight(light.Type()) && pointLight == null && spotLight == null)
+                ErrorExit("Only point and spot lights are supported among the delta lights with the next event estimation from inside " +
+                          "a refractive medium (docs/refractive-media.md).");
             Point3f x = intr.p();
             Interaction yIntr;
             // The density of the point on the light: per unit area for an area light, per unit volume for the emission of a medium
@@ -7399,6 +7402,20 @@ namespace pbrt
                     return zero;
                 pdfPoint = volumeSample.value().pdf / distance2;
             }
+            else if (spotLight != null)
+            {
+                // A light at a point: the curved path reaches the position, with a density of one on the point
+                yIntr = spotLight.PositionInteraction();
+                pdfPoint = 1;
+            }
+            else if (pointLight != null)
+            {
+                pstd.optional<LightLiSample> pointSample = pointLight.SampleLi(ctx, uLight, lambda);
+                if (!pointSample || !(bool)pointSample.value().L)
+                    return zero;
+                yIntr = pointSample.value().pLight;
+                pdfPoint = 1;
+            }
             else
             {
                 DiffuseAreaLight areaLight = light as DiffuseAreaLight;
@@ -7420,7 +7437,7 @@ namespace pbrt
             if (!medium.ConnectToPoint(x, y, options, ref rng, out RefractiveConnectionPath path, out int count))
                 return zero;
             // The area of the light seen from the end of the path, which a point of a volume does not have
-            Float cosineEnd = volumeLight != null ? 1 : AbsDot(yIntr.n, path.endDirection);
+            Float cosineEnd = (volumeLight != null || pointLight != null || spotLight != null) ? 1 : AbsDot(yIntr.n, path.endDirection);
             if (cosineEnd == 0 || path.areaJacobian == 0)
                 return zero;
             Vector3f wo = intr.wo, wi = path.startDirection;
@@ -7430,7 +7447,24 @@ namespace pbrt
             if (!f_hat)
                 return zero;
             // The emission toward the vertex, along the end of the path
-            SampledSpectrum Le = volumeLight != null ? LeMedium : light.L(y, yIntr.n, yIntr.uv, -path.endDirection, lambda, yIntr.time);
+            SampledSpectrum Le;
+            if (volumeLight != null)
+            {
+                Le = LeMedium;
+            }
+            else if (spotLight != null)
+            {
+                Le = spotLight.IAlong(-path.endDirection, lambda);
+            }
+            else if (pointLight != null)
+            {
+                // The intensity: the radiance of the straight sample times the squared distance
+                Le = pointLight.SampleLi(ctx, new Point2f(0.5f, 0.5f), lambda).value().L * DistanceSquared(x, y);
+            }
+            else
+            {
+                Le = light.L(y, yIntr.n, yIntr.uv, -path.endDirection, lambda, yIntr.time);
+            }
             if (!Le)
                 return zero;
 
