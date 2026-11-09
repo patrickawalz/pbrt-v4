@@ -6433,7 +6433,7 @@ namespace pbrt
                 scatterPdf = ps.pdf;
                 prevIntrContext = new LightSampleContext(intr);
                 curvedSegment = false;
-                vertexInRefractive = scatterInRefractive;
+                vertexInRefractive = ctx.refractive != null;
                 fneeScatterPdf = ps.pdf;
                 fneeRatio = -1;
                 fneeOrigin = p;
@@ -6505,10 +6505,18 @@ namespace pbrt
             {
                 isect.rayType = oslRayType;
                 SampledSpectrum LeSurf = isect.Le(-ctx.ray.d, ctx.lambda);
+                // (not in pbrt-v4) An area light reached along a curved path from a vertex in the refractive medium is found by the next
+                // event estimation along curved paths only (SampleLdRefractive); from a vertex outside, no other strategy finds the path
+                // (the straight segments through the medium are blocked), and the walk has the full weight
+                if ((bool)LeSurf && curvedSegment && vertexInRefractive && vp.refractiveNee && depth > 0 && !specularBounce &&
+                    isect.areaLight != null)
+                {
+                    LeSurf = new SampledSpectrum(0.0f);
+                }
                 if ((bool)LeSurf)
                 {
                     // Add contribution of emission from intersected surface
-                    if (depth == 0 || specularBounce || isect.areaLight == null)
+                    if (depth == 0 || specularBounce || isect.areaLight == null || curvedSegment)
                     {
                         L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
                         if (polarised)
@@ -7448,7 +7456,7 @@ namespace pbrt
             if (exitLength < 1e-4f * diagonal)
             {
                 // Within a few rounding errors of the vertex: no surface to find from a distance, the medium is left here
-                stack.Pop(new BoundaryStackElement(null, medium), MediumTracking.interfacePriority);
+                stack.RemoveMedium(medium);
                 lightRay = new Ray(exitPoint, yIntr.p() - exitPoint);
             }
             else
@@ -7597,7 +7605,7 @@ namespace pbrt
         Float analyserAngle;
         PolarisedPathIntegrator.Measurement measurement;
         Vector3f cameraUp;
-        bool refractiveNee;
+        bool refractiveNee = true;
     }
 
 }  // namespace pbrt

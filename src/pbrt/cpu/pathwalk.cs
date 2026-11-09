@@ -188,7 +188,13 @@ namespace pbrt
                                 ctx.ray.o = p;
                                 ctx.ray.d = tangent;
                                 return collision(p, mp, sigma_maj, T_maj_);
-                            }, out Point3f endPoint, out Vector3f endDirection, out Float endLength, ctx.transport);
+                            }, out Point3f endPoint, out Vector3f endDirection, out Float endLength, ctx.transport,
+                            (Point3f a, Point3f b) =>
+                            {
+                                // The surfaces of the scene meet the curve along its own chords (the boundary of the volume ends it)
+                                pstd.optional<ShapeIntersection> chordHit = ctx.integrator.Intersect(new Ray(a, b - a, ctx.ray.time), 1);
+                                return chordHit && chordHit.value().tHit > 1e-4f ? chordHit.value().tHit : -1;
+                            });
                         // The path left the region. The bounding surface is found by a ray that ends at the end of the path, from
                         // a little before it (the path is straight to the accuracy of the step over that distance), and crossing it
                         // pops the medium. A path that ends within a few rounding errors of its start (it entered at an edge) has
@@ -199,7 +205,7 @@ namespace pbrt
                         {
                             if (endLength < 1e-4f * diagonal)
                             {
-                                ctx.stack.Pop(new BoundaryStackElement(null, refractive), MediumTracking.interfacePriority);
+                                ctx.stack.RemoveMedium(refractive);
                                 ctx.ray.o = endLength == 0 ? ctx.ray.o : endPoint;
                                 ctx.ray.d = endLength == 0 ? ctx.ray.d : endDirection;
                                 si = ctx.integrator.Intersect(new Ray(ctx.ray));
