@@ -444,24 +444,40 @@ namespace pbrt
     public sealed unsafe class TracerBDPTOnlineIntegrator : RayIntegrator
     {
         public TracerBDPTOnlineIntegrator(Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights, int maxDepth,
-                                          bool regularize)
-            : base(camera, sampler, aggregate, lights)
+                                          bool regularize, bool gatherMediumEmission = true)
+            : base(camera, sampler, aggregate, BDPTIntegrator.EmissionLightsForBDPT(lights))
         {
+            this.gatherMediumEmission = gatherMediumEmission;
+            // The weights of the strategies that sample or gather the emission of a medium need the whole camera subpath (see
+            // BDPT.MISSum), which this integrator does not store: a scene with emissive media is rendered by tracerbdpt, which has the same
+            // strategies and weights from stored subpaths
+            foreach (Light light in this.lights)
+            {
+                if (light is VolumeEmissionLight)
+                {
+                    emissiveFallback = new TracerBDPTIntegrator(camera, sampler, aggregate, lights, maxDepth, regularize, gatherMediumEmission);
+                    break;
+                }
+            }
             this.maxDepth = maxDepth;
             this.bdptMaxDepth = maxDepth;
             this.regularize = regularize;
-            this.lightSampler = new PowerLightSampler(lights.ToArray(), new Allocator());
+            this.lightSampler = new PowerLightSampler(this.lights.ToArray(), new Allocator());
             this.tracer = new UnifiedTracer(this, camera, maxDepth);
         }
 
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler, ScratchBuffer scratchBuffer,
                                            VisibleSurface visibleSurface)
         {
+            if (emissiveFallback != null)
+            {
+                return emissiveFallback.Li(ray, ref lambda, sampler, scratchBuffer, visibleSurface);
+            }
             SampledSpectrum L = new SampledSpectrum(0.0f);
 
             // The light subpath is stored, with its sums
             Vertex[] lightVertices = NewVertices(maxDepth + 1);
-            int nLight = TracerBDPT.GenerateLightSubpath(tracer, this, ref lambda, sampler, scratchBuffer, maxDepth + 1, ray.time,
+            int nLight = TracerBDPT.GenerateLightSubpath(tracer, this, ref lambda, sampler, camera, scratchBuffer, maxDepth + 1, ray.time,
                                                          lightSampler, lightVertices, regularize);
             PathSums[] lightSums = OnlineBDPT.LightSums(lightVertices, nLight);
 
@@ -605,8 +621,13 @@ namespace pbrt
         protected override void NoCameraRay(CameraSample cameraSample, ref SampledWavelengths lambda, Sampler sampler,
                                             ScratchBuffer scratchBuffer)
         {
+            if (emissiveFallback != null)
+            {
+                emissiveFallback.NoCameraRayOf(cameraSample, ref lambda, sampler, scratchBuffer);
+                return;
+            }
             Vertex[] lightVertices = NewVertices(maxDepth + 1);
-            int nLight = TracerBDPT.GenerateLightSubpath(tracer, this, ref lambda, sampler, scratchBuffer, maxDepth + 1,
+            int nLight = TracerBDPT.GenerateLightSubpath(tracer, this, ref lambda, sampler, camera, scratchBuffer, maxDepth + 1,
                                                          camera.SampleTime(cameraSample.time), lightSampler, lightVertices, regularize);
             PathSums[] lightSums = OnlineBDPT.LightSums(lightVertices, nLight);
             SplatLightVertices(ref lambda, lightVertices, lightSums, nLight, sampler);
@@ -636,13 +657,15 @@ namespace pbrt
                 ErrorExit("Only the \"perspective\" and \"realistic\" cameras are currently supported with the \"tracerbdptonline\" integrator.");
             }
             return new TracerBDPTOnlineIntegrator(camera, sampler, aggregate, lights, parameters.GetOneInt("maxdepth", 5),
-                                                  parameters.GetOneBool("regularize", false));
+                                                  parameters.GetOneBool("regularize", false),
+                                                  parameters.GetOneBool("gathermediumemission", true));
         }
 
         readonly int maxDepth;
         readonly bool regularize;
         readonly LightSampler lightSampler;
         readonly UnifiedTracer tracer;
+        readonly TracerBDPTIntegrator emissiveFallback;
     }
 
 }  // namespace pbrt

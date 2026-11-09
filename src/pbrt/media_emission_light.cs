@@ -20,16 +20,36 @@ using System.Collections.Generic;
 
 namespace pbrt
 {
+    // The media whose emission a light can sample: a texture medium, and a refractive medium that carries an emissive one
+    public interface IEmissionMedium
+    {
+        Medium AsMedium();
+        Bounds3f MediumBounds();
+        Transform RenderFromMedium();
+        Transform RenderFromMedium(Float time);
+        bool IsAnimated();
+        Float StartTime();
+        Bounds3f MotionBounds(Bounds3f boxInMediumSpace);
+        SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda, Float time = 0);
+        Float EmissionBound(Bounds3f renderBox);
+        SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time = 0);
+        void EnableEmissionSampling(int res, bool fnee);
+        VolumeEmissionLight EmissionLight();
+    }
+
     public sealed unsafe class VolumeEmissionLight : LightBase
     {
-        public VolumeEmissionLight(TextureMedium medium, int res)
-            : base(LightType.Area, new Transform(), new MediumInterface(medium))
+        public VolumeEmissionLight(IEmissionMedium medium, int res)
+            : base(LightType.Area, new Transform(), new MediumInterface(medium.AsMedium()))
         {
             this.medium = medium;
             this.res = std.max(res, 1);
         }
 
-        public TextureMedium Medium() { return medium; }
+        public Medium Medium() { return medium.AsMedium(); }
+
+        // The emission of the medium: its bounds, its majorant and its coefficients
+        public IEmissionMedium Source() { return medium; }
 
         // Whether the volumetric path tracer samples the emission along lines (see PdfDirection) and not at points
         public bool UsesFnee() { return fnee; }
@@ -255,7 +275,7 @@ namespace pbrt
             SampledSpectrum L = medium.EmissionAt(p, lambda, ctx.time);
             if (!L)
                 return new pstd.optional<LightLiSample>();
-            Interaction pLight = new Interaction(p, new MediumInterface(medium));
+            Interaction pLight = new Interaction(p, new MediumInterface(medium.AsMedium()));
             pLight.time = ctx.time;
             return new LightLiSample(L, wi, pdfPoint * distance2, pLight);
         }
@@ -318,7 +338,7 @@ namespace pbrt
             if (!L)
                 return new pstd.optional<LightLeSample>();
             Vector3f w = pbrt.SampleUniformSphere(u2);
-            return new LightLeSample(L, new Ray(p, w, time), pdfPoint, pbrt.UniformSpherePDF(), medium);
+            return new LightLeSample(L, new Ray(p, w, time), pdfPoint, pbrt.UniformSpherePDF(), medium.AsMedium());
         }
 
         public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda, Float time)
@@ -335,7 +355,7 @@ namespace pbrt
 
         public override string ToString() { return pbrt.StringPrintf("[ VolumeEmissionLight res: %d ]", res); }
 
-        private TextureMedium medium;
+        private IEmissionMedium medium;
         private int res;
         private bool fnee;
         private Float[] weight, cdf;

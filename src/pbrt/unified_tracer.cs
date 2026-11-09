@@ -96,7 +96,7 @@ namespace pbrt
                         {
                             return result;
                         }
-                        GatherMediumEmission(collision, ray, state, buffers);
+                        GatherMediumEmission(collision, ray, state, buffers, medium, stack, curvedMedium);
                         SampledSpectrum sigma_n = ClampZero(collision.sigma_maj - collision.mp.sigma_a - collision.mp.sigma_s);
                         if (!state.NullCollision(collision.T_maj, collision.sigma_maj, sigma_n))
                         {
@@ -110,7 +110,7 @@ namespace pbrt
                         {
                             return result;
                         }
-                        GatherMediumEmission(collision, ray, state, buffers);
+                        GatherMediumEmission(collision, ray, state, buffers, medium, stack, curvedMedium);
                         if (integration.end == VolumeEnd.Absorbed)
                         {
                             return result;
@@ -491,7 +491,8 @@ namespace pbrt
         }
 
         // The emission of a medium at a collision, with the weights volpath gives it when no other strategy finds the point
-        void GatherMediumEmission(VolumeCollision collision, RayDifferential ray, PathState state, TraceBuffers buffers)
+        void GatherMediumEmission(VolumeCollision collision, RayDifferential ray, PathState state, TraceBuffers buffers, Medium medium,
+                                  BoundaryStack stack, RefractiveMedium curvedMedium)
         {
             if (state.depth >= maxDepth || !(bool)collision.mp.Le)
             {
@@ -513,6 +514,14 @@ namespace pbrt
             emission.r_u = state.r_u;
             emission.r_l = state.r_l;
             emission.r_e = r_e;
+            emission.medium = medium;
+            emission.T_maj = collision.T_maj;
+            emission.sigma_maj = collision.sigma_maj;
+            emission.coefficient = collision.mp.sigma_a * collision.mp.Le;
+            emission.segU = state.segU;
+            emission.segL = state.segL;
+            emission.stack = stack;
+            emission.curvedMedium = curvedMedium;
             buffers.emission.Add(emission);
         }
 

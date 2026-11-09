@@ -13,7 +13,7 @@ namespace pbrt
 {
 
     // TextureMedium Definition
-    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<RayMajorantIterator>
+    public sealed unsafe class TextureMedium : Medium, IMajorantMedium<RayMajorantIterator>, IEmissionMedium
     {
         // TextureMedium Public Methods
         public TextureMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
@@ -266,17 +266,36 @@ namespace pbrt
         }
 
         public VolumeEmissionLight EmissionLight() { return emissionLight; }
+        public Medium AsMedium() { return this; }
 
         // The bidirectional path tracer only finds emission by sampling it, so every medium with emission gets its light
         public static void EnableEmissionSamplingForAll(int res)
         {
-            List<TextureMedium> all;
+            List<IEmissionMedium> all;
             lock (emissionMedia)
             {
-                all = new List<TextureMedium>(emissiveMedia);
+                all = new List<IEmissionMedium>(emissiveMedia);
             }
-            foreach (TextureMedium medium in all)
+            foreach (IEmissionMedium medium in all)
                 medium.EnableEmissionSampling(res, false);
+        }
+
+        // A medium that emits and is not a texture medium (a refractive medium) asks to be sampled like one
+        public static void RegisterEmissive(IEmissionMedium medium)
+        {
+            lock (emissionMedia)
+            {
+                emissiveMedia.Add(medium);
+            }
+        }
+
+        // The medium asks for its light to be added to the lights of the integrators
+        public static void RegisterEmissionLight(IEmissionMedium medium)
+        {
+            lock (emissionMedia)
+            {
+                emissionMedia.Add(medium);
+            }
         }
 
         // The lights plus the emission lights of the media that ask for them
@@ -285,10 +304,11 @@ namespace pbrt
             List<Light> all = new List<Light>(lights);
             lock (emissionMedia)
             {
-                foreach (TextureMedium medium in emissionMedia)
+                foreach (IEmissionMedium medium in emissionMedia)
                 {
-                    if (medium.emissionLight.HasEmission() && !all.Contains(medium.emissionLight))
-                        all.Add(medium.emissionLight);
+                    VolumeEmissionLight light = medium.EmissionLight();
+                    if (light.HasEmission() && !all.Contains(light))
+                        all.Add(light);
                 }
             }
             return all;
@@ -435,8 +455,8 @@ namespace pbrt
         private Float emissionScale;
         private SpectrumTexture emissionTexture;
         private VolumeEmissionLight emissionLight;
-        private static readonly List<TextureMedium> emissionMedia = new List<TextureMedium>();
-        private static readonly List<TextureMedium> emissiveMedia = new List<TextureMedium>();
+        private static readonly List<IEmissionMedium> emissionMedia = new List<IEmissionMedium>();
+        private static readonly List<IEmissionMedium> emissiveMedia = new List<IEmissionMedium>();
     }
 
 }  // namespace pbrt

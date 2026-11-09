@@ -563,6 +563,9 @@ namespace pbrt
 
         public override bool IsEmissive() { return Le_spec.MaxValue() > 0; }
 
+        // The largest emission per length (sigma_a Le) of any wavelength
+        public Float EmissionPeak() { return sigma_a_spec.MaxValue() * Le_spec.MaxValue(); }
+
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
             SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);

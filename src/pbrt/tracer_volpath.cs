@@ -53,7 +53,7 @@ namespace pbrt
                         {
                             L += emission.beta * emission.radiance / emission.r_e.Average();
                         }
-                        else if (emission.curved && vertexInRefractive && emission.depth > 0 && !specularBounce)
+                        else if (emission.curved && vertexInRefractive && emission.depth > 0 && !specularBounce && !debugWalkOnly)
                         {
                             // Found by the curved next event estimation from the vertex (SampleLdRefractive)
                         }
@@ -100,7 +100,7 @@ namespace pbrt
 
                     // Light sampling at the event, a surface or a medium point alike
                     vertexInRefractive = MediumTracking.Current(stack) is RefractiveMedium;
-                    if (scatter.inMedium || IsNonSpecular(scatter.bsdf.Flags()))
+                    if ((scatter.inMedium || IsNonSpecular(scatter.bsdf.Flags())) && !(debugWalkOnly && vertexInRefractive))
                     {
                         L += SampleLd(scatter, state, stack, sampler, lambda);
                     }
@@ -201,6 +201,8 @@ namespace pbrt
             return new TracerVolPathIntegrator(maxDepth, camera, sampler, aggregate, lights, lightStrategy);
         }
 
+        // TEMPORARY: the walk alone finds the lights from a vertex in a refractive volume (an unbiased reference for the curved NEE)
+        static readonly bool debugWalkOnly = Environment.GetEnvironmentVariable("REFR_WALKONLY") == "1";
         readonly int maxDepth;
         readonly LightSampler lightSampler;
         readonly UnifiedTracer tracer;

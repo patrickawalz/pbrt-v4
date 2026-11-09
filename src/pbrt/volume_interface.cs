@@ -491,7 +491,7 @@ namespace pbrt
 
         public override bool IsEmissive() { return medium.IsEmissive(); }
 
-        public override VolumeEmissionLight EmissionLight() { return (medium as TextureMedium)?.EmissionLight(); }
+        public override VolumeEmissionLight EmissionLight() { return (medium as IEmissionMedium)?.EmissionLight(); }
 
         readonly Medium medium;
         readonly Bounds3f bounds;
@@ -1001,6 +1001,18 @@ namespace pbrt
         public SampledSpectrum r_u;
         public SampledSpectrum r_l;
         public SampledSpectrum r_e;
+
+        // (bdpt) What a camera subpath needs to make the collision a light vertex that ends it: the medium, the majorant and the
+        // transmittance of the distance to the collision, the emission sigma_a Le, the null collisions of the segment so far, the
+        // media the path is in, and the refractive medium whose curve the collision is on
+        public Medium medium;
+        public SampledSpectrum T_maj;
+        public SampledSpectrum sigma_maj;
+        public SampledSpectrum coefficient;
+        public SampledSpectrum segU;
+        public SampledSpectrum segL;
+        public BoundaryStack stack;
+        public RefractiveMedium curvedMedium;
     }
 
     // TraceBuffers Definition: the lists that one path reuses for every Trace (a tracer is shared by the threads, a path is not)

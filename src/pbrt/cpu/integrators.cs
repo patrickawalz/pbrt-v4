@@ -2081,6 +2081,18 @@ namespace pbrt
     // BDPT Utility Functions
     public static unsafe class BDPT
     {
+        // (not in pbrt-v4) The emission of a medium as a light: of a texture medium, or of the medium that a refractive medium carries
+        public static VolumeEmissionLight EmissionLightOf(Medium medium)
+        {
+            return (medium as IEmissionMedium)?.EmissionLight();
+        }
+
+        // (not in pbrt-v4) Whether the light emits in the medium (the medium of a point is the refractive medium when the path is curved there)
+        public static bool MediumEmits(Medium medium, VolumeEmissionLight light)
+        {
+            return medium == light.Medium();
+        }
+
         // (not in pbrt-v4) A light vertex inside an emissive volume
         public static bool IsVolumeEmission(Vertex v)
         {
@@ -2166,7 +2178,7 @@ namespace pbrt
                 if (valid)
                 {
                     stack = StackAtPoint(integrator, camera, les.value().ray.o, time);
-                    valid = MediumTracking.Current(stack) == volumeLight.Medium();
+                    valid = MediumEmits(MediumTracking.Current(stack), volumeLight);
                 }
                 if (!valid)
                 {
@@ -2192,7 +2204,7 @@ namespace pbrt
             // (not in pbrt-v4) The extinction at the point of an emissive medium, for the weight of a camera subpath that gathers it
             if (path[0].ei.light is VolumeEmissionLight emissiveMedium)
             {
-                SampledSpectrum majorant = emissiveMedium.Medium().MajorantAt(ray.o, lambda, ray.time);
+                SampledSpectrum majorant = emissiveMedium.Source().MajorantAt(ray.o, lambda, ray.time);
                 path[0].sigmaT0 = majorant[0];
                 path[0].emissionMaj = majorant / majorant[0];
             }
@@ -2558,7 +2570,7 @@ namespace pbrt
                 // light share the weight (see MISWeight). The emission end is kept next to the subpath: the walk goes on.
                 if (emissionEnds != null && ctx.mode == TransportMode.Radiance && (bool)mp.Le && (bool)ctx.st.beta)
                 {
-                    VolumeEmissionLight emissionLight = (medium as TextureMedium)?.EmissionLight();
+                    VolumeEmissionLight emissionLight = EmissionLightOf(medium);
                     if (emissionLight != null)
                     {
                         Float pdfCollision = sigma_maj[0] * T_maj[0];
@@ -3324,7 +3336,7 @@ namespace pbrt
                                                      out curvedToLight, out curvedToCamera, out int count,
                                                      out SampledSpectrum curvedT, out connRu, out connRl) &&
                                     (emissiveVolume == null ||
-                                     MediumTracking.Current(StackAtPoint(integrator, camera, y, pt.time())) == emissiveVolume.Medium()))
+                                     MediumEmits(MediumTracking.Current(StackAtPoint(integrator, camera, y, pt.time())), emissiveVolume)))
                                 {
                                     // The emission of a medium is the same in all directions
                                     SampledSpectrum Le = emissiveVolume != null || pointLight != null
@@ -3335,7 +3347,7 @@ namespace pbrt
                                     sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler, curvedToCamera);
                                     if (emissiveVolume != null)
                                     {
-                                        SampledSpectrum majorant = emissiveVolume.Medium().MajorantAt(y, lambda, ctx.time);
+                                        SampledSpectrum majorant = emissiveVolume.Source().MajorantAt(y, lambda, ctx.time);
                                         sampled.sigmaT0 = majorant[0];
                                         sampled.emissionMaj = majorant / majorant[0];
                                     }
@@ -3358,7 +3370,7 @@ namespace pbrt
                                 sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
                                 if (volumeLight != null)
                                 {
-                                    SampledSpectrum majorant = volumeLight.Medium().MajorantAt(lightWeight.value().pLight.p(), lambda, ctx.time);
+                                    SampledSpectrum majorant = volumeLight.Source().MajorantAt(lightWeight.value().pLight.p(), lambda, ctx.time);
                                     sampled.sigmaT0 = majorant[0];
                                     sampled.emissionMaj = majorant / majorant[0];
                                 }
@@ -3371,7 +3383,7 @@ namespace pbrt
                                     L *= integrator.TrSegments(pt.GetInteraction(), lightWeight.value().pLight, pt.stack, lambda,
                                                                out connRu, out connRl, out Medium endMedium);
                                     // The point has to lie in the medium that emits
-                                    if (volumeLight != null && endMedium != volumeLight.Medium())
+                                    if (volumeLight != null && !MediumEmits(endMedium, volumeLight))
                                         L = new SampledSpectrum(0.0f);
                                 }
                         }
@@ -7197,7 +7209,7 @@ namespace pbrt
             {
                 if (MediumTracking.Current(stack) != volumeLight.Medium())
                     return new SampledSpectrum(0.0f);
-                r_u *= volumeLight.Medium().MajorantAt(ls.value().pLight.p(), lambda, ctx.time);
+                r_u *= volumeLight.Source().MajorantAt(ls.value().pLight.p(), lambda, ctx.time);
             }
             // (not in pbrt-v4) Equiangular sampling finds the same path (this vertex, this point light) by choosing the light and then
             // the distance along the segment: its probability, with the null collisions of the walk as that way connects them

@@ -69,6 +69,40 @@ namespace pbrt
             return mp;
         }
 
+        // An upper bound of sigma_a Le over a box: the inner peak times the largest density and emission grid values of the nodes that
+        // the box touches (the interpolation stays between them)
+        public Float EmissionBound(Bounds3f box)
+        {
+            HomogeneousMedium homogeneous = inner as HomogeneousMedium;
+            if (homogeneous == null)
+            {
+                pbrt.ErrorExit("The emission of a refractive medium is sampled as a light only for a homogeneous inner medium.");
+            }
+            Float densityMax = density == null ? 1 : GridMax(density, box);
+            Float emissionMax = emission == null ? 1 : GridMax(emission, box);
+            return homogeneous.EmissionPeak() * densityMax * emissionMax;
+        }
+
+        Float GridMax(Float[] values, Bounds3f box)
+        {
+            Vector3f lo = bounds.Offset(box.pMin), hi = bounds.Offset(box.pMax);
+            int x0 = Math.Max(0, (int)Math.Floor(lo.x * (resolutionX - 1)) - 1), x1 = Math.Min(resolutionX - 1, (int)Math.Ceiling(hi.x * (resolutionX - 1)) + 1);
+            int y0 = Math.Max(0, (int)Math.Floor(lo.y * (resolutionY - 1)) - 1), y1 = Math.Min(resolutionY - 1, (int)Math.Ceiling(hi.y * (resolutionY - 1)) + 1);
+            int z0 = Math.Max(0, (int)Math.Floor(lo.z * (resolutionZ - 1)) - 1), z1 = Math.Min(resolutionZ - 1, (int)Math.Ceiling(hi.z * (resolutionZ - 1)) + 1);
+            Float best = 0;
+            for (int z = z0; z <= z1; ++z)
+            {
+                for (int y = y0; y <= y1; ++y)
+                {
+                    for (int x = x0; x <= x1; ++x)
+                    {
+                        best = Math.Max(best, values[(z * resolutionY + y) * resolutionX + x]);
+                    }
+                }
+            }
+            return best;
+        }
+
         // The largest factor of the extinction coefficients: a majorant of the medium is the inner one times this
         public Float MaxDensity() { return maxDensity; }
 
@@ -228,9 +262,68 @@ namespace pbrt
     }
 
     // RefractiveMedium Definition
-    public sealed unsafe class RefractiveMedium : Medium
+    public sealed unsafe class RefractiveMedium : Medium, IEmissionMedium
     {
         // RefractiveMedium Public Methods
+
+        // The medium that scatters, absorbs and emits along the curves
+        public Medium Inner { get { return inner; } }
+
+        // IEmissionMedium: the emission of the inner medium over the bounds, in render space (the medium does not move)
+        public Medium AsMedium() { return this; }
+        public Bounds3f MediumBounds() { return bounds; }
+        public Transform RenderFromMedium() { return new Transform(); }
+        public Transform RenderFromMedium(Float time) { return new Transform(); }
+        public bool IsAnimated() { return false; }
+        public Float StartTime() { return 0; }
+        public Bounds3f MotionBounds(Bounds3f boxInMediumSpace) { return boxInMediumSpace; }
+
+        public SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda, Float time = 0)
+        {
+            if (!contains(p))
+            {
+                return new SampledSpectrum(0.0f);
+            }
+            MediumProperties mp = inner.SamplePoint(p, lambda);
+            return mp.sigma_a * mp.Le;
+        }
+
+        public Float EmissionBound(Bounds3f renderBox)
+        {
+            GridModulatedMedium modulated = inner as GridModulatedMedium;
+            if (modulated != null)
+            {
+                return modulated.EmissionBound(renderBox);
+            }
+            HomogeneousMedium homogeneous = inner as HomogeneousMedium;
+            if (homogeneous != null)
+            {
+                return homogeneous.EmissionPeak();
+            }
+            pbrt.ErrorExit("The emission of a refractive medium is sampled as a light only for a homogeneous inner medium.");
+            return 0;
+        }
+
+        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time = 0)
+        {
+            return majorant(lambda);
+        }
+
+        public void EnableEmissionSampling(int res, bool fnee)
+        {
+            lock (this)
+            {
+                if (emissionLight == null)
+                {
+                    emissionLight = new VolumeEmissionLight(this, res);
+                    emissionLight.SetFnee(fnee);
+                    TextureMedium.RegisterEmissionLight(this);
+                }
+            }
+        }
+
+        public VolumeEmissionLight EmissionLight() { return emissionLight; }
+        VolumeEmissionLight emissionLight;
 
         // majorant gives sigma_maj for the wavelengths: it has to bound sigma_a + sigma_s of the inner medium everywhere in
         // the bounds. stepSize is the arc length of one integrator step. The path is discretised on a grid of steps from its
@@ -256,6 +349,10 @@ namespace pbrt
             MediumTracking.hasRefractive = true;
             this.boundedField = new BoundedRefractiveIndexField(field, this.contains, 1.0f);
             volumeIntegrator = inner.volumeIntegrator;
+            if (inner.IsEmissive())
+            {
+                TextureMedium.RegisterEmissive(this);
+            }
             WarnIfIndexIsNotOneOnBoundary();
         }
 
