@@ -44,8 +44,12 @@ namespace pbrt
         // than to the pixel of the camera ray (for tests of the radiance of a ray)
         public bool skipCameraSampling = false;
 
+        static readonly System.Collections.Generic.HashSet<string> debugAllow = Environment.GetEnvironmentVariable("REFR_ALLOW") == null ? null :
+            new System.Collections.Generic.HashSet<string>(Environment.GetEnvironmentVariable("REFR_ALLOW").Split(','));
         public bool StrategyAllowed(int s, int t)
         {
+            if (debugAllow != null) // TEMPORARY
+                return debugAllow.Contains(s + "_" + t);
             if (skipCameraSampling && t == 1)
             {
                 return false;
@@ -2331,6 +2335,7 @@ namespace pbrt
                 FinishEdge(ctx, path[index - 1], path[index]);
             }
 
+            static readonly int debugNFactor = int.Parse(Environment.GetEnvironmentVariable("REFR_NFACTOR") ?? "0");
             void FinishEdge(WalkContext ctx, Vertex previousVertex, Vertex currentVertex)
             {
                 if (edgeMedium == null)
@@ -2366,6 +2371,15 @@ namespace pbrt
                 }
                 if (found)
                 {
+                    if (debugNFactor != 0 && ctx.mode == TransportMode.Importance) // TEMPORARY
+                    {
+                        edgeMedium.BoundedField().ValueAndGradient(previous, out Float nPrevious, out Vector3f unusedA);
+                        edgeMedium.BoundedField().ValueAndGradient(current, out Float nCurrent, out Vector3f unusedB);
+                        Float ratio = (nPrevious / nCurrent) * (nPrevious / nCurrent);
+                        Float factor = debugNFactor == 1 ? ratio : 1 / ratio;
+                        currentVertex.beta *= factor;
+                        ctx.st.beta *= factor;
+                    }
                     currentVertex.curvedEdge = true;
                     currentVertex.edge = edge;
                     // The density of the vertex, per area perpendicular to the arrival, from the density of the direction it was
@@ -3306,6 +3320,7 @@ namespace pbrt
             return Lend;
         }
 
+        static readonly bool debugNoMis = Environment.GetEnvironmentVariable("REFR_NOMIS") == "1"; // TEMPORARY
         public static SampledSpectrum ConnectBDPT(Integrator integrator, ref SampledWavelengths lambdaRef,
                                                   Vertex[] lightVertices, Vertex[] cameraVertices, int s, int t,
                                                   LightSampler lightSampler, Camera camera, Sampler sampler,
@@ -3540,7 +3555,7 @@ namespace pbrt
                                                   connRu, connRl, curvedToLight, curvedToCamera))
                                 : 0.0f;
             DCHECK(!IsNaN(misWeight));
-            L *= misWeight;
+            L *= debugNoMis ? 1 : misWeight; // TEMPORARY
             misWeightOut = misWeight;
 
             // (not in pbrt-v4) What the sensor measures of the polarised light of the path. The scalar contribution has all the

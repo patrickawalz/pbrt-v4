@@ -629,7 +629,9 @@ namespace pbrt
             Float size = pbrt.Length(bounds.pMax - bounds.pMin);
             RefractiveConnectionOptions options = new RefractiveConnectionOptions();
             options.stepSize = stepSize;
-            options.tolerance = 5e-4f * size;
+            // The error of a path that counts as reaching the target: the bias of the connection grows with the square of it (a tolerance ten
+            // times this one gave +2% on the lens scene, and its tenth removes it)
+            options.tolerance = 5e-5f * size;
             options.maxLength = 4 * (size + distance);
             options.maxTrials = maxTrials;
             options.hintFraction = hintFraction;

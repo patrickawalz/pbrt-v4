@@ -477,9 +477,26 @@ namespace pbrt
         public override void ExtinctionMinMax(Bounds3f region, SampledWavelengths lambda, out SampledSpectrum minimum,
                                               out SampledSpectrum maximum)
         {
-            // To do: the density texture's RegionBounds(region) times sigma_t for a TextureMedium; the grid's cell bounds for the
-            // grid media
-            throw new NotImplementedException("HeterogeneousVolume.ExtinctionMinMax");
+            // The extinction on a regular grid of points of the region (nine along each axis): the bounds are an estimate that the
+            // grid of the medium refines, and only guide subdivision (the integrators sample with the majorants of the medium)
+            minimum = new SampledSpectrum(Infinity);
+            maximum = new SampledSpectrum(0.0f);
+            for (int i = 0; i < 9; ++i)
+            {
+                for (int j = 0; j < 9; ++j)
+                {
+                    for (int k = 0; k < 9; ++k)
+                    {
+                        Point3f p = region.Lerp(new Point3f(i / 8.0f, j / 8.0f, k / 8.0f));
+                        SampledSpectrum extinction = Extinction(p, 0, 0, lambda);
+                        for (int c = 0; c < NSpectrumSamples; ++c)
+                        {
+                            minimum[c] = Math.Min(minimum[c], extinction[c]);
+                            maximum[c] = Math.Max(maximum[c], extinction[c]);
+                        }
+                    }
+                }
+            }
         }
 
         public override PhaseFunction GetPhaseFunction(Point3f p, Float time, SampledWavelengths lambda)
