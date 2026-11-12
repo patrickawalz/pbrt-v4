@@ -193,7 +193,7 @@ namespace pbrt
             else if (bxdf is ThinFilmBxDF film)
             {
                 if (!film.Fresnel(cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
-                                  out SampledSpectrum Dp))
+                                  out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT))
                     return false;
                 // The first element is the ratio of the spectral reflectance to the one of the hero wavelength, which chose
                 // between reflection and transmission
@@ -210,8 +210,7 @@ namespace pbrt
                     if (T0 <= 0)
                         return false;
                     A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T0 / Sqr(bs.eta) : 1 / T0),
-                                            new SampledSpectrum(1.0f) - Fs, new SampledSpectrum(1.0f) - Fp, new SampledSpectrum(0.0f),
-                                            new SampledSpectrum(0.0f));
+                                            new SampledSpectrum(1.0f) - Fs, new SampledSpectrum(1.0f) - Fp, DsT, DpT);
                 }
             }
             else if (bxdf is ThinCoatBxDF coat)
@@ -298,8 +297,15 @@ namespace pbrt
             }
             else
             {
-                // The BxDFs whose light meets more than one microfacet build their own matrix, frames included
-                return bxdf.Polarised(bsdf, woL, wiL, weight, mode, out A);
+                // Every other BxDF builds its own matrix, frames included, with the weight of one
+                if (!bxdf.HasMuellerMatrix())
+                    return false;
+                bool polarised;
+                bxdf.f(bsdf, woL, wiL, mode, out polarised, out A);
+                if (!polarised)
+                    return false;
+                A *= weight;
+                return true;
             }
 
             A = A.Scattered(wo, wi, bsdf.LocalToRender(wm), mode == TransportMode.Radiance);
@@ -378,12 +384,16 @@ namespace pbrt
 
                 if (IsNonSpecular(bsdf.Flags()))
                 {
-                    SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler, out Vector3f wiLight);
+                    // The BxDF gives the matrix with the value it is asked for anyway (one evaluation); the rough conductor and
+                    // dielectric of pbrt have theirs built here
+                    SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler, out Vector3f wiLight, out bool matrixKnown,
+                                                  out Attenuation M);
                     if ((bool)Ld)
                     {
                         PLight Lp = new PLight(Ld);
-                        if (roughPolarisation && RoughAttenuation(bsdf, isect, -ray.d, wiLight, new SampledSpectrum(1.0f), TransportMode.Radiance,
-                                             out Attenuation M))
+                        if (matrixKnown ||
+                            (roughPolarisation && StockRough(bsdf) &&
+                             RoughAttenuation(bsdf, isect, -ray.d, wiLight, new SampledSpectrum(1.0f), TransportMode.Radiance, out M)))
                             Lp = M * Lp;
                         L += beta * Lp;
                     }
@@ -391,12 +401,21 @@ namespace pbrt
 
                 Vector3f wo = -ray.d;
                 Float u = sampler.Get1D();
-                pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, u, sampler.Get2D());
+                // The matrix of the sampled path itself, from the BxDFs that follow one; the others are asked for the matrix
+                // of the pair of directions
+                bool pathPolarised = false;
+                Attenuation pathMatrix = default;
+                Point2f u2 = sampler.Get2D();
+                pstd.optional<BSDFSample> bs = roughPolarisation
+                    ? bsdf.Sample_f(wo, u, u2, TransportMode.Radiance, BxDFReflTransFlags.All, out pathPolarised, out pathMatrix)
+                    : bsdf.Sample_f(wo, u, u2);
                 if (!bs)
                     break;
                 SampledSpectrum scalar = bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
-                if (SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out Attenuation A) ||
-                    (roughPolarisation && RoughAttenuation(bsdf, isect, wo, bs.value().wi, scalar, TransportMode.Radiance, out A)))
+                if (pathPolarised)
+                    beta *= pathMatrix * scalar;
+                else if (SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out Attenuation A) ||
+                         (roughPolarisation && RoughAttenuation(bsdf, isect, wo, bs.value().wi, scalar, TransportMode.Radiance, out A)))
                     beta *= A;
                 else
                     beta *= Attenuation.Lambert(scalar);
@@ -478,10 +497,19 @@ namespace pbrt
             analyserAngle = Radians(analyser ? angle : 0);
         }
 
+        // Whether the rough matrix of the BSDF is built by RoughAttenuation itself (the BxDFs of pbrt), not by the BxDF
+        static bool StockRough(BSDF bsdf)
+        {
+            BxDF bxdf = bsdf.GetBxDF();
+            return bxdf is ConductorBxDF || bxdf is DielectricBxDF;
+        }
+
         SampledSpectrum SampleLd(SurfaceInteraction intr, BSDF bsdf, ref SampledWavelengths lambda, Sampler sampler,
-                                 out Vector3f wiLight)
+                                 out Vector3f wiLight, out bool matrixKnown, out Attenuation matrix)
         {
             wiLight = default;
+            matrixKnown = false;
+            matrix = default;
             LightSampleContext ctx = new LightSampleContext(intr);
             BxDFFlags flags = bsdf.Flags();
             if (IsReflective(flags) && !IsTransmissive(flags))
@@ -501,7 +529,9 @@ namespace pbrt
                 return new SampledSpectrum(0.0f);
 
             Vector3f wo = intr.wo, wi = ls.value().wi;
-            SampledSpectrum f = bsdf.f(wo, wi) * AbsDot(wi, intr.shading.n);
+            SampledSpectrum f = (roughPolarisation && !StockRough(bsdf)
+                                     ? bsdf.f(wo, wi, TransportMode.Radiance, out matrixKnown, out matrix)
+                                     : bsdf.f(wo, wi)) * AbsDot(wi, intr.shading.n);
             if (!f || !Unoccluded(intr, ls.value().pLight))
                 return new SampledSpectrum(0.0f);
             wiLight = wi;

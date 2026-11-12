@@ -199,7 +199,7 @@ namespace pbrt
         }
     }
 
-    public struct MuellerMatrix
+    public unsafe struct MuellerMatrix
     {
         public SampledSpectrum m00, m01, m02, m03;
         public SampledSpectrum m10, m11, m12, m13;
@@ -281,46 +281,82 @@ namespace pbrt
 
         public void operator *=(SampledSpectrum b)
         {
-            for (int row = 0; row < 4; ++row)
-            {
-                for (int column = 0; column < 4; ++column)
-                {
-                    Set(row, column, Get(row, column) * b);
-                }
-            }
+            m00 *= b;
+            m01 *= b;
+            m02 *= b;
+            m03 *= b;
+            m10 *= b;
+            m11 *= b;
+            m12 *= b;
+            m13 *= b;
+            m20 *= b;
+            m21 *= b;
+            m22 *= b;
+            m23 *= b;
+            m30 *= b;
+            m31 *= b;
+            m32 *= b;
+            m33 *= b;
         }
 
         public void operator /=(SampledSpectrum b)
         {
-            for (int row = 0; row < 4; ++row)
-            {
-                for (int column = 0; column < 4; ++column)
-                {
-                    Set(row, column, Get(row, column) / b);
-                }
-            }
+            m00 /= b;
+            m01 /= b;
+            m02 /= b;
+            m03 /= b;
+            m10 /= b;
+            m11 /= b;
+            m12 /= b;
+            m13 /= b;
+            m20 /= b;
+            m21 /= b;
+            m22 /= b;
+            m23 /= b;
+            m30 /= b;
+            m31 /= b;
+            m32 /= b;
+            m33 /= b;
         }
 
         public void operator +=(MuellerMatrix b)
         {
-            for (int row = 0; row < 4; ++row)
-            {
-                for (int column = 0; column < 4; ++column)
-                {
-                    Set(row, column, Get(row, column) + b.Get(row, column));
-                }
-            }
+            m00 += b.m00;
+            m01 += b.m01;
+            m02 += b.m02;
+            m03 += b.m03;
+            m10 += b.m10;
+            m11 += b.m11;
+            m12 += b.m12;
+            m13 += b.m13;
+            m20 += b.m20;
+            m21 += b.m21;
+            m22 += b.m22;
+            m23 += b.m23;
+            m30 += b.m30;
+            m31 += b.m31;
+            m32 += b.m32;
+            m33 += b.m33;
         }
 
         public void operator -=(MuellerMatrix b)
         {
-            for (int row = 0; row < 4; ++row)
-            {
-                for (int column = 0; column < 4; ++column)
-                {
-                    Set(row, column, Get(row, column) - b.Get(row, column));
-                }
-            }
+            m00 -= b.m00;
+            m01 -= b.m01;
+            m02 -= b.m02;
+            m03 -= b.m03;
+            m10 -= b.m10;
+            m11 -= b.m11;
+            m12 -= b.m12;
+            m13 -= b.m13;
+            m20 -= b.m20;
+            m21 -= b.m21;
+            m22 -= b.m22;
+            m23 -= b.m23;
+            m30 -= b.m30;
+            m31 -= b.m31;
+            m32 -= b.m32;
+            m33 -= b.m33;
         }
 
         public void operator *=(MuellerMatrix b)
@@ -343,38 +379,77 @@ namespace pbrt
         public static StokesVector operator *(MuellerMatrix a, StokesVector b)
         {
             StokesVector result = default;
-            for (int row = 0; row < 4; ++row)
-            {
-                SampledSpectrum sum = a.Get(row, 0) * b[0];
-                for (int column = 1; column < 4; ++column)
-                {
-                    sum += a.Get(row, column) * b[column];
-                }
-
-                result[row] = sum;
-            }
-
+            result.s0 = a.m00 * b.s0 + a.m01 * b.s1 + a.m02 * b.s2 + a.m03 * b.s3;
+            result.s1 = a.m10 * b.s0 + a.m11 * b.s1 + a.m12 * b.s2 + a.m13 * b.s3;
+            result.s2 = a.m20 * b.s0 + a.m21 * b.s1 + a.m22 * b.s2 + a.m23 * b.s3;
+            result.s3 = a.m30 * b.s0 + a.m31 * b.s1 + a.m32 * b.s2 + a.m33 * b.s3;
             return result;
         }
 
+        // The product, one wavelength at a time on the values of the elements (the sixteen spectra of a matrix lie one after
+        // the other, row by row): the same sums as with the operators of SampledSpectrum, without their temporaries. The
+        // product of two matrices is the cost of a polarised path at every scattering.
         public static MuellerMatrix operator *(MuellerMatrix a, MuellerMatrix b)
         {
+            DCHECK_EQ(sizeof(MuellerMatrix), 16 * NSpectrumSamples * sizeof(Float));
             MuellerMatrix result = default;
-            for (int row = 0; row < 4; ++row)
+            Float* pa = (Float*)&a;
+            Float* pb = (Float*)&b;
+            Float* pr = (Float*)&result;
+            for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                for (int column = 0; column < 4; ++column)
-                {
-                    SampledSpectrum sum = a.Get(row, 0) * b.Get(0, column);
-                    for (int k = 1; k < 4; ++k)
-                    {
-                        sum += a.Get(row, k) * b.Get(k, column);
-                    }
+                Float a00 = pa[0 * NSpectrumSamples + i], a01 = pa[1 * NSpectrumSamples + i], a02 = pa[2 * NSpectrumSamples + i], a03 = pa[3 * NSpectrumSamples + i];
+                Float a10 = pa[4 * NSpectrumSamples + i], a11 = pa[5 * NSpectrumSamples + i], a12 = pa[6 * NSpectrumSamples + i], a13 = pa[7 * NSpectrumSamples + i];
+                Float a20 = pa[8 * NSpectrumSamples + i], a21 = pa[9 * NSpectrumSamples + i], a22 = pa[10 * NSpectrumSamples + i], a23 = pa[11 * NSpectrumSamples + i];
+                Float a30 = pa[12 * NSpectrumSamples + i], a31 = pa[13 * NSpectrumSamples + i], a32 = pa[14 * NSpectrumSamples + i], a33 = pa[15 * NSpectrumSamples + i];
+                Float b00 = pb[0 * NSpectrumSamples + i], b01 = pb[1 * NSpectrumSamples + i], b02 = pb[2 * NSpectrumSamples + i], b03 = pb[3 * NSpectrumSamples + i];
+                Float b10 = pb[4 * NSpectrumSamples + i], b11 = pb[5 * NSpectrumSamples + i], b12 = pb[6 * NSpectrumSamples + i], b13 = pb[7 * NSpectrumSamples + i];
+                Float b20 = pb[8 * NSpectrumSamples + i], b21 = pb[9 * NSpectrumSamples + i], b22 = pb[10 * NSpectrumSamples + i], b23 = pb[11 * NSpectrumSamples + i];
+                Float b30 = pb[12 * NSpectrumSamples + i], b31 = pb[13 * NSpectrumSamples + i], b32 = pb[14 * NSpectrumSamples + i], b33 = pb[15 * NSpectrumSamples + i];
+                pr[0 * NSpectrumSamples + i] = a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                pr[1 * NSpectrumSamples + i] = a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                pr[2 * NSpectrumSamples + i] = a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                pr[3 * NSpectrumSamples + i] = a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                pr[4 * NSpectrumSamples + i] = a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                pr[5 * NSpectrumSamples + i] = a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                pr[6 * NSpectrumSamples + i] = a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                pr[7 * NSpectrumSamples + i] = a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                pr[8 * NSpectrumSamples + i] = a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                pr[9 * NSpectrumSamples + i] = a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                pr[10 * NSpectrumSamples + i] = a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                pr[11 * NSpectrumSamples + i] = a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                pr[12 * NSpectrumSamples + i] = a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                pr[13 * NSpectrumSamples + i] = a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                pr[14 * NSpectrumSamples + i] = a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                pr[15 * NSpectrumSamples + i] = a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            return result;
+        }
 
-                    result.Set(row, column, sum);
+        // This matrix times the rotation of the frame of its argument (RotateFrame): the Stokes vector that it takes is given
+        // in a frame turned from its own, with cos2 and sin2 from StokesVector.GetRotationCosSin(). Only the two columns of
+        // the linear polarisation change.
+        public void RotateEnter(Float cos2, Float sin2)
+        {
+            fixed (MuellerMatrix* matrix = &this)
+            {
+                Float* p = (Float*)matrix;
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    Float first0 = p[1 * NSpectrumSamples + i], second0 = p[2 * NSpectrumSamples + i];
+                    p[1 * NSpectrumSamples + i] = cos2 * first0 - sin2 * second0;
+                    p[2 * NSpectrumSamples + i] = sin2 * first0 + cos2 * second0;
+                    Float first1 = p[5 * NSpectrumSamples + i], second1 = p[6 * NSpectrumSamples + i];
+                    p[5 * NSpectrumSamples + i] = cos2 * first1 - sin2 * second1;
+                    p[6 * NSpectrumSamples + i] = sin2 * first1 + cos2 * second1;
+                    Float first2 = p[9 * NSpectrumSamples + i], second2 = p[10 * NSpectrumSamples + i];
+                    p[9 * NSpectrumSamples + i] = cos2 * first2 - sin2 * second2;
+                    p[10 * NSpectrumSamples + i] = sin2 * first2 + cos2 * second2;
+                    Float first3 = p[13 * NSpectrumSamples + i], second3 = p[14 * NSpectrumSamples + i];
+                    p[13 * NSpectrumSamples + i] = cos2 * first3 - sin2 * second3;
+                    p[14 * NSpectrumSamples + i] = sin2 * first3 + cos2 * second3;
                 }
             }
-
-            return result;
         }
 
         // The matrix that expresses a Stokes vector of enterFrame in exitFrame

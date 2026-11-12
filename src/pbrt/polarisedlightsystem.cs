@@ -667,9 +667,14 @@ namespace pbrt
                         elementType = PolarisationElementType.Standard;
                         return;
                     case PolarisationElementType.Standard:
-                        matrix *= MuellerMatrix.RotateFrame(enterFrame, b.exitFrame) * b.matrix;
+                    {
+                        // matrix * RotateFrame(enterFrame, b.exitFrame) * b.matrix, the rotation applied in place
+                        StokesVector.GetRotationCosSin(enterFrame, b.exitFrame, out Float cos2, out Float sin2);
+                        matrix.RotateEnter(cos2, sin2);
+                        matrix *= b.matrix;
                         enterFrame = b.enterFrame;
                         return;
+                    }
                     default:
                         pbrt.LOG_FATAL("PolarisedLightSystem: the frame of an attenuation is not set");
                         return;
@@ -793,6 +798,41 @@ namespace pbrt
                     pbrt.LOG_FATAL("PolarisedLightSystem: plain attenuations and partial depolarisers cannot be added");
                     return;
                 }
+            }
+
+            // A depolariser as a full matrix with both frames, so that it can be added to matrices that are not depolarisers
+            // (the paths through a layered surface: some meet a diffuse base and some do not). The light leaves along
+            // directionExit and arrives along directionEnter; the frame of the side that the element depolarises is free, and
+            // the elements that it does not use are set to zero. False for an element without a direction of its own (plain).
+            public bool WithFrames(Vector3f directionExit, Vector3f directionEnter)
+            {
+                SampledSpectrum zero = new SampledSpectrum(0.0f);
+                switch (elementType)
+                {
+                case PolarisationElementType.Standard:
+                    return true;
+                case PolarisationElementType.DepolarisingBoth:
+                    matrix = new MuellerMatrix(matrix.m00, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero);
+                    exitFrame.SetFromZ(directionExit);
+                    enterFrame.SetFromZ(directionEnter);
+                    break;
+                case PolarisationElementType.DepolarisingEnter:
+                    // Whatever arrives, the same light leaves: the first column
+                    matrix = new MuellerMatrix(matrix.m00, zero, zero, zero, matrix.m10, zero, zero, zero, matrix.m20, zero, zero, zero,
+                                               matrix.m30, zero, zero, zero);
+                    enterFrame.SetFromZ(directionEnter);
+                    break;
+                case PolarisationElementType.DepolarisingExit:
+                    // Unpolarised light leaves, as much as the polarisation of what arrives decides: the first row
+                    matrix = new MuellerMatrix(matrix.m00, matrix.m01, matrix.m02, matrix.m03, zero, zero, zero, zero, zero, zero, zero, zero,
+                                               zero, zero, zero, zero);
+                    exitFrame.SetFromZ(directionExit);
+                    break;
+                default:
+                    return false;
+                }
+                elementType = PolarisationElementType.Standard;
+                return true;
             }
 
             // Both frames point the same way: for the participating media. Only to be called while the frame is not set.

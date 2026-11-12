@@ -49,6 +49,18 @@ namespace pbrt
             return f(woRender, wiRender, TransportMode.Radiance);
         }
 
+        // (not in pbrt-v4) The value with the Mueller matrix of the scattering (see BxDF)
+        public SampledSpectrum f(Vector3f woRender, Vector3f wiRender, TransportMode mode, out bool polarised,
+                                 out PolarisedLightSystem.Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);
+            if (wo.z == 0 && !isVolume)
+                return default;
+            return bxdf.f(this, wo, wi, mode, out polarised, out matrix);
+        }
+
         public pstd.optional<BSDFSample> Sample_f(Vector3f woRender, Float u, Point2f u2, TransportMode mode,
                                                   BxDFReflTransFlags sampleFlags)
         {
@@ -68,6 +80,27 @@ namespace pbrt
         public pstd.optional<BSDFSample> Sample_f(Vector3f woRender, Float u, Point2f u2)
         {
             return Sample_f(woRender, u, u2, TransportMode.Radiance, BxDFReflTransFlags.All);
+        }
+
+        // (not in pbrt-v4) The sample with the Mueller matrix of the path that was sampled (see BxDF)
+        public pstd.optional<BSDFSample> Sample_f(Vector3f woRender, Float u, Point2f u2, TransportMode mode,
+                                                  BxDFReflTransFlags sampleFlags, out bool polarised,
+                                                  out PolarisedLightSystem.Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            Vector3f wo = RenderToLocal(woRender);
+            if ((wo.z == 0 && !isVolume) || (bxdf.Flags() & sampleFlags) == 0)
+                return default;
+            pstd.optional<BSDFSample> bs = bxdf.Sample_f(this, wo, u, u2, mode, sampleFlags, out polarised, out matrix);
+            if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || (bs.value().wi.z == 0 && !isVolume))
+            {
+                polarised = false;
+                return default;
+            }
+            BSDFSample s = bs.value();
+            s.wi = LocalToRender(s.wi);
+            return s;
         }
 
         public Float PDF(Vector3f woRender, Vector3f wiRender, TransportMode mode, BxDFReflTransFlags sampleFlags)

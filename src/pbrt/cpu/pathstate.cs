@@ -178,14 +178,21 @@ namespace pbrt
 
         // The scattering of a sampled BSDF direction at a surface: the scalar weight, and the Mueller matrix, which smooth
         // dielectrics and conductors polarise and every other scattering depolarises
-        public void ScatterSurface(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode)
+        // pathMatrix (when pathPolarised) is the matrix of the path that the BxDF sampled, with the weight of one.
+        public void ScatterSurface(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode, bool pathPolarised,
+                                   PAttenuation pathMatrix)
         {
             SampledSpectrum w = bs.f * AbsDot(bs.wi, isect.shading.n) / bs.pdf;
             beta *= w;
             if (polarised)
             {
-                if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs, mode, out PAttenuation A) &&
-                    !PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, wo, bs.wi, w, mode, out A))
+                PAttenuation A;
+                if (pathPolarised)
+                {
+                    A = pathMatrix * w;
+                }
+                else if (!PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs, mode, out A) &&
+                         !PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, wo, bs.wi, w, mode, out A))
                 {
                     A = PAttenuation.Lambert(w);
                 }

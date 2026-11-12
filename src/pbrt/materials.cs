@@ -192,8 +192,11 @@ namespace pbrt
     {
         // DielectricMaterial Public Methods
         public DielectricMaterial(FloatTexture uRoughness, FloatTexture vRoughness, Spectrum eta, FloatTexture displacement,
-                                  Image normalMap, bool remapRoughness)
+                                  Image normalMap, bool remapRoughness,
+                                  MicrofacetDistributionType distribution = MicrofacetDistributionType.TrowbridgeReitz, Float gamma = 2)
         {
+            this.distribution = distribution;
+            this.gamma = gamma;
             this.normalMap = normalMap;
             this.displacement = displacement;
             this.uRoughness = uRoughness;
@@ -254,7 +257,10 @@ namespace pbrt
 
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
             bool remapRoughness = parameters.GetOneBool("remaproughness", true);
-            return new DielectricMaterial(uRoughness, vRoughness, eta, displacement, normalMap, remapRoughness);
+            // (not in pbrt-v4) "string distribution": "ggx" (the default), "beckmann" or "studentt", with "float gamma" for the last
+            MicrofacetDistributionType distribution = MicrofacetDistribution.ParseType(parameters.GetOneString("distribution", "ggx"), loc);
+            Float gamma = parameters.GetOneFloat("gamma", 2f);
+            return new DielectricMaterial(uRoughness, vRoughness, eta, displacement, normalMap, remapRoughness, distribution, gamma);
         }
 
         public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
@@ -284,7 +290,7 @@ namespace pbrt
                 urough = TrowbridgeReitzDistribution.RoughnessToAlpha(urough);
                 vrough = TrowbridgeReitzDistribution.RoughnessToAlpha(vrough);
             }
-            TrowbridgeReitzDistribution distrib = new TrowbridgeReitzDistribution(urough, vrough);
+            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, urough, vrough, gamma);
 
             // Return BSDF for dielectric material
             return new DielectricBxDF(sampledEta, distrib);
@@ -296,6 +302,8 @@ namespace pbrt
         private FloatTexture uRoughness, vRoughness;
         private bool remapRoughness;
         private Spectrum eta;
+        private MicrofacetDistributionType distribution;
+        private Float gamma;
     }
 
     // (not in pbrt-v4) ThinCoatMaterial Definition: a thin clear dielectric coat over whatever is behind it (a medium, usually).
@@ -384,14 +392,19 @@ namespace pbrt
         private Image normalMap;
     }
 
-    // (not in pbrt-v4) ThinFilmMaterial Definition: thin films on a smooth substrate, a dielectric ("float substrateeta") or a
+    // (not in pbrt-v4) ThinFilmMaterial Definition: thin films on a substrate, a dielectric ("float substrateeta") or a
     // conductor ("spectrum substrateeta" and "spectrum substratek"), with layers from the surface inward listed in "float layereta"
-    // (real indices) and "float layerthickness" (nanometres)
+    // (real indices) and "float layerthickness" (nanometres). The surface is smooth unless it is given a roughness, as for
+    // "conductor": "float roughness", "uroughness", "vroughness" (default 0), "bool remaproughness" (default true), "string
+    // distribution" ("ggx", "beckmann", "studentt") and "float gamma".
     public sealed unsafe class ThinFilmMaterial : Material
     {
         public ThinFilmMaterial(Float[] layerEta, Float[] layerThickness, Float substrateEta, SpectrumTexture conductorEta,
-                                SpectrumTexture conductorK, FloatTexture displacement, Image normalMap)
+                                SpectrumTexture conductorK, FloatTexture displacement, Image normalMap, FloatTexture uRoughness,
+                                FloatTexture vRoughness, bool remapRoughness, MicrofacetDistributionType distribution, Float gamma)
         {
+            this.uRoughness = uRoughness; this.vRoughness = vRoughness; this.remapRoughness = remapRoughness;
+            this.distribution = distribution; this.gamma = gamma;
             this.layerEta = layerEta; this.layerThickness = layerThickness; this.substrateEta = substrateEta;
             this.conductorEta = conductorEta; this.conductorK = conductorK;
             this.displacement = displacement; this.normalMap = normalMap;
@@ -399,7 +412,7 @@ namespace pbrt
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
         {
-            return texEval.CanEvaluate(new FloatTexture[] { }, new SpectrumTexture[] { conductorEta, conductorK });
+            return texEval.CanEvaluate(new FloatTexture[] { uRoughness, vRoughness }, new SpectrumTexture[] { conductorEta, conductorK });
         }
 
         public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
@@ -408,7 +421,14 @@ namespace pbrt
             bool conductor = conductorK != null;
             SampledSpectrum etas = conductor ? texEval.Apply(conductorEta, ctx, lambda) : new SampledSpectrum(1.0f);
             SampledSpectrum ks = conductor ? texEval.Apply(conductorK, ctx, lambda) : new SampledSpectrum(0.0f);
-            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(new ThinFilmBxDF(lambda, layerEta, layerThickness, substrateEta, etas, ks, conductor)));
+            Float uRough = texEval.Apply(uRoughness, ctx), vRough = texEval.Apply(vRoughness, ctx);
+            if (remapRoughness)
+            {
+                uRough = TrowbridgeReitzDistribution.RoughnessToAlpha(uRough);
+                vRough = TrowbridgeReitzDistribution.RoughnessToAlpha(vRough);
+            }
+            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(new ThinFilmBxDF(lambda, layerEta, layerThickness, substrateEta, etas, ks, conductor, distrib)));
         }
 
         public static string Name() { return "ThinFilmMaterial"; }
@@ -444,9 +464,27 @@ namespace pbrt
             }
             Float substrateEta = parameters.GetOneFloat("substrateeta", 1.5f);
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
-            return new ThinFilmMaterial(layerEta, layerThickness, substrateEta, conductorEta, conductorK, displacement, normalMap);
+            FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
+            FloatTexture vRoughness = parameters.GetFloatTextureOrNull("vroughness", alloc);
+            if (uRoughness == null)
+            {
+                uRoughness = parameters.GetFloatTexture("roughness", 0f, alloc);
+            }
+            if (vRoughness == null)
+            {
+                vRoughness = parameters.GetFloatTexture("roughness", 0f, alloc);
+            }
+            bool remapRoughness = parameters.GetOneBool("remaproughness", true);
+            MicrofacetDistributionType distribution = MicrofacetDistribution.ParseType(parameters.GetOneString("distribution", "ggx"), loc);
+            Float gamma = parameters.GetOneFloat("gamma", 2f);
+            return new ThinFilmMaterial(layerEta, layerThickness, substrateEta, conductorEta, conductorK, displacement, normalMap, uRoughness,
+                                        vRoughness, remapRoughness, distribution, gamma);
         }
 
+        private FloatTexture uRoughness, vRoughness;
+        private bool remapRoughness;
+        private MicrofacetDistributionType distribution;
+        private Float gamma;
         private Float[] layerEta, layerThickness;
         private Float substrateEta;
         private SpectrumTexture conductorEta, conductorK;
@@ -992,6 +1030,263 @@ namespace pbrt
         private FloatTexture roughness;
     }
 
+    // MicrosurfaceKind Definition
+    public enum MicrosurfaceKind
+    {
+        MultiScatterConductor,
+        MultiScatterDielectric,
+        MultiScatterDiffuse
+    }
+
+    // MicrosurfaceMaterial Definition
+    // (not in pbrt-v4) The materials of the microsurfaces whose light meets more than one microfacet. Each is a material of its
+    // own name, and they share this class:
+    //   "multiscatterconductor"   MultiScatterConductorBxDF: the Smith microsurface of a conductor with its multiple scattering
+    //                             (Heitz et al. 2016)
+    //   "multiscatterdielectric"  MultiScatterDielectricBxDF: the same for a dielectric interface
+    //   "multiscatterdiffuse"     MultiScatterDiffuseBxDF: the same for Lambertian microfacets (a rough diffuse surface)
+    // Parameters:
+    //   float roughness, uroughness, vroughness   as for "conductor"; default 0.3
+    //   bool remaproughness                       as for "conductor"; default true
+    //   string distribution                       "ggx" (default), "beckmann", "studentt"
+    //   float gamma                               the shape of "studentt"; default 2
+    //   integer scatterdepth                      the reflections a walk may make; default 32
+    //   spectrum eta, k, or spectrum reflectance  the conductors, as for "conductor"
+    //   float or spectrum eta                     "multiscatterdielectric", as for "dielectric"; default 1.5
+    //   spectrum reflectance                      "multiscatterdiffuse": the reflectance of a microfacet; default 0.5
+    //   float layereta, layerthickness            thin films on the microfacets of the conductor and of the dielectric, from the
+    //                                             surface inward, as for "thinfilm" (real indices, nanometres); default none
+    // A microsurface that is effectively smooth is the specular BxDF of pbrt (or the Lambertian one).
+    public sealed unsafe class MicrosurfaceMaterial : Material
+    {
+        // MicrosurfaceMaterial Public Methods
+        public MicrosurfaceMaterial(MicrosurfaceKind kind, SpectrumTexture eta, SpectrumTexture k, SpectrumTexture reflectance, Spectrum dielectricEta,
+                                    FloatTexture uRoughness, FloatTexture vRoughness, FloatTexture displacement, Image normalMap, bool remapRoughness,
+                                    MicrofacetDistributionType distribution, Float gamma, int depth, Float[] layerEta, Float[] layerThickness)
+        {
+            this.layerEta = layerEta;
+            this.layerThickness = layerThickness;
+            this.kind = kind;
+            this.eta = eta;
+            this.k = k;
+            this.reflectance = reflectance;
+            this.dielectricEta = dielectricEta;
+            this.uRoughness = uRoughness;
+            this.vRoughness = vRoughness;
+            this.displacement = displacement;
+            this.normalMap = normalMap;
+            this.remapRoughness = remapRoughness;
+            this.distribution = distribution;
+            this.gamma = gamma;
+            this.depth = depth;
+        }
+
+        public static string Name() { return "MicrosurfaceMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return displacement; }
+        public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
+        {
+            return texEval.CanEvaluate(new FloatTexture[] { uRoughness, vRoughness }, new SpectrumTexture[] { eta, k, reflectance });
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ MicrosurfaceMaterial kind: %s displacement: %s normalMap: %s eta: %s k: %s reflectance: %s dielectricEta: %s " +
+                                     "uRoughness: %s vRoughness: %s remapRoughness: %s distribution: %s gamma: %f depth: %d ]", kind.ToString(), displacement,
+                                     (normalMap != null ? normalMap.ToString() : "(nullptr)"), eta, k, reflectance, dielectricEta, uRoughness, vRoughness,
+                                     remapRoughness, distribution.ToString(), gamma, depth);
+        }
+
+        public static MicrosurfaceMaterial Create(MicrosurfaceKind kind, TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
+        {
+            SpectrumTexture eta = null, k = null, reflectance = null;
+            Spectrum dielectricEta = null;
+            bool conductor = kind == MicrosurfaceKind.MultiScatterConductor;
+            if (conductor)
+            {
+                eta = parameters.GetSpectrumTextureOrNull("eta", SpectrumType.Unbounded, alloc);
+                k = parameters.GetSpectrumTextureOrNull("k", SpectrumType.Unbounded, alloc);
+                reflectance = parameters.GetSpectrumTextureOrNull("reflectance", SpectrumType.Albedo, alloc);
+                if (reflectance != null && (eta != null || k != null))
+                {
+                    pbrt.ErrorExit(loc, "For a conductor, both \"reflectance\" and \"eta\" and \"k\" can't be provided.");
+                }
+                if (reflectance == null)
+                {
+                    if (eta == null)
+                    {
+                        eta = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-eta"));
+                    }
+                    if (k == null)
+                    {
+                        k = new SpectrumConstantTexture(pbrt.GetNamedSpectrum("metal-Cu-k"));
+                    }
+                }
+            }
+            else if (kind == MicrosurfaceKind.MultiScatterDielectric)
+            {
+                if (parameters.GetFloatArray("eta").Count != 0)
+                {
+                    dielectricEta = new ConstantSpectrum(parameters.GetFloatArray("eta")[0]);
+                }
+                else
+                {
+                    dielectricEta = parameters.GetOneSpectrum("eta", null, SpectrumType.Unbounded, alloc);
+                }
+                if (dielectricEta == null)
+                {
+                    dielectricEta = new ConstantSpectrum(1.5f);
+                }
+            }
+            else
+            {
+                reflectance = parameters.GetSpectrumTexture("reflectance", null, SpectrumType.Albedo, alloc);
+                if (reflectance == null)
+                {
+                    reflectance = new SpectrumConstantTexture(new ConstantSpectrum(0.5f));
+                }
+            }
+
+            FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
+            FloatTexture vRoughness = parameters.GetFloatTextureOrNull("vroughness", alloc);
+            if (uRoughness == null)
+            {
+                uRoughness = parameters.GetFloatTexture("roughness", 0.3f, alloc);
+            }
+            if (vRoughness == null)
+            {
+                vRoughness = parameters.GetFloatTexture("roughness", 0.3f, alloc);
+            }
+            FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+            bool remapRoughness = parameters.GetOneBool("remaproughness", true);
+            MicrofacetDistributionType distribution = MicrofacetDistribution.ParseType(parameters.GetOneString("distribution", "ggx"), loc);
+            Float gamma = parameters.GetOneFloat("gamma", 2f);
+            int depth = parameters.GetOneInt("scatterdepth", 32);
+            Float[] layerEta = new Float[0], layerThickness = new Float[0];
+            if (kind != MicrosurfaceKind.MultiScatterDiffuse)
+            {
+                layerEta = parameters.GetFloatArray("layereta").ToArray();
+                layerThickness = parameters.GetFloatArray("layerthickness").ToArray();
+                if (layerEta.Length != layerThickness.Length)
+                {
+                    pbrt.ErrorExit(loc, "\"layereta\" and \"layerthickness\" need the same number of values.");
+                }
+            }
+            return new MicrosurfaceMaterial(kind, eta, k, reflectance, dielectricEta, uRoughness, vRoughness, displacement, normalMap, remapRoughness,
+                                            distribution, gamma, depth, layerEta, layerThickness);
+        }
+
+        public BxDF GetBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx, ref SampledWavelengths lambda)
+            where TextureEvaluator : ITextureEvaluator
+        {
+            Float uRough = texEval.Apply(uRoughness, ctx), vRough = texEval.Apply(vRoughness, ctx);
+            if (remapRoughness)
+            {
+                uRough = TrowbridgeReitzDistribution.RoughnessToAlpha(uRough);
+                vRough = TrowbridgeReitzDistribution.RoughnessToAlpha(vRough);
+            }
+            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
+            MicrosurfaceHeight height = new MicrosurfaceHeightUniform();
+            switch (kind)
+            {
+            case MicrosurfaceKind.MultiScatterDielectric:
+            {
+                Float sampledEta = dielectricEta.Evaluate(lambda[0]);
+                if (!(dielectricEta is ConstantSpectrum))
+                {
+                    lambda.TerminateSecondary();
+                }
+                if (sampledEta == 0)
+                {
+                    sampledEta = 1;
+                }
+                if (layerEta.Length > 0)
+                {
+                    // The films: the smooth surface, or one whose index bends nothing, is the thin film BxDF
+                    if (distrib.EffectivelySmooth() || sampledEta == 1)
+                    {
+                        return new ThinFilmBxDF(lambda, layerEta, layerThickness, sampledEta, new SampledSpectrum(1f), new SampledSpectrum(0f), false,
+                                                distrib);
+                    }
+                    return new MultiScatterDielectricBxDF(distrib, height, sampledEta, depth, new ThinFilmStack(lambda, layerEta, layerThickness));
+                }
+                if (distrib.EffectivelySmooth() || sampledEta == 1)
+                {
+                    return new DielectricBxDF(sampledEta, distrib);
+                }
+                return new MultiScatterDielectricBxDF(distrib, height, sampledEta, depth);
+            }
+            case MicrosurfaceKind.MultiScatterDiffuse:
+            {
+                SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+                if (distrib.EffectivelySmooth())
+                {
+                    return new DiffuseBxDF(r);
+                }
+                return new MultiScatterDiffuseBxDF(distrib, height, r, depth);
+            }
+            default:
+            {
+                SampledSpectrum etas, ks;
+                if (eta != null)
+                {
+                    etas = texEval.Apply(eta, ctx, lambda);
+                    ks = texEval.Apply(k, ctx, lambda);
+                }
+                else
+                {
+                    // Avoid r==0 NaN case...
+                    SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, .9999f);
+                    etas = new SampledSpectrum(1f);
+                    ks = 2 * pbrt.Sqrt(r) / pbrt.Sqrt(pbrt.ClampZero(new SampledSpectrum(1f) - r));
+                }
+                if (layerEta.Length > 0)
+                {
+                    if (distrib.EffectivelySmooth())
+                    {
+                        return new ThinFilmBxDF(lambda, layerEta, layerThickness, 1.5f, etas, ks, true, distrib);
+                    }
+                    return new MultiScatterConductorBxDF(distrib, height, etas, ks, depth, new ThinFilmStack(lambda, layerEta, layerThickness));
+                }
+                if (distrib.EffectivelySmooth())
+                {
+                    return new ConductorBxDF(distrib, etas, ks);
+                }
+                return new MultiScatterConductorBxDF(distrib, height, etas, ks, depth);
+            }
+            }
+        }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            BxDF bxdf = GetBxDF(texEval, ctx, ref lambda);
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
+        }
+
+        // MicrosurfaceMaterial Private Members
+        private MicrosurfaceKind kind;
+        private SpectrumTexture eta, k, reflectance;
+        private Spectrum dielectricEta;
+        private FloatTexture uRoughness, vRoughness;
+        private FloatTexture displacement;
+        private Image normalMap;
+        private bool remapRoughness;
+        private MicrofacetDistributionType distribution;
+        private Float gamma;
+        private int depth;
+        private Float[] layerEta, layerThickness;
+    }
+
     // ConductorMaterial Definition
     public sealed unsafe class ConductorMaterial : Material
     {
@@ -1024,7 +1319,7 @@ namespace pbrt
                 etas = new SampledSpectrum(1f);
                 ks = 2 * pbrt.Sqrt(r) / pbrt.Sqrt(pbrt.ClampZero(new SampledSpectrum(1f) - r));
             }
-            TrowbridgeReitzDistribution distrib = new TrowbridgeReitzDistribution(uRough, vRough);
+            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
             return new ConductorBxDF(distrib, etas, ks);
         }
 
@@ -1036,11 +1331,14 @@ namespace pbrt
         }
 
         public ConductorMaterial(SpectrumTexture eta, SpectrumTexture k, SpectrumTexture reflectance, FloatTexture uRoughness,
-                                 FloatTexture vRoughness, FloatTexture displacement, Image normalMap, bool remapRoughness)
+                                 FloatTexture vRoughness, FloatTexture displacement, Image normalMap, bool remapRoughness,
+                                 MicrofacetDistributionType distribution = MicrofacetDistributionType.TrowbridgeReitz, Float gamma = 2)
         {
             this.displacement = displacement; this.normalMap = normalMap; this.eta = eta; this.k = k;
             this.reflectance = reflectance; this.uRoughness = uRoughness; this.vRoughness = vRoughness;
             this.remapRoughness = remapRoughness;
+            this.distribution = distribution;
+            this.gamma = gamma;
         }
 
         public static string Name() { return "ConductorMaterial"; }
@@ -1090,7 +1388,10 @@ namespace pbrt
 
             FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
             bool remapRoughness = parameters.GetOneBool("remaproughness", true);
-            return new ConductorMaterial(eta, k, reflectance, uRoughness, vRoughness, displacement, normalMap, remapRoughness);
+            // (not in pbrt-v4) "string distribution": "ggx" (the default), "beckmann" or "studentt", with "float gamma" for the last
+            MicrofacetDistributionType distribution = MicrofacetDistribution.ParseType(parameters.GetOneString("distribution", "ggx"), loc);
+            Float gamma = parameters.GetOneFloat("gamma", 2f);
+            return new ConductorMaterial(eta, k, reflectance, uRoughness, vRoughness, displacement, normalMap, remapRoughness, distribution, gamma);
         }
 
         // ConductorMaterial Private Data
@@ -1099,6 +1400,8 @@ namespace pbrt
         private SpectrumTexture eta, k, reflectance;
         private FloatTexture uRoughness, vRoughness;
         private bool remapRoughness;
+        private MicrofacetDistributionType distribution;
+        private Float gamma;
     }
 
     // CoatedDiffuseMaterial Definition
@@ -1779,6 +2082,12 @@ namespace pbrt
                 material = OSLMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "multiscatterconductor")
+                material = MicrosurfaceMaterial.Create(MicrosurfaceKind.MultiScatterConductor, parameters, normalMap, loc, alloc);
+            else if (name == "multiscatterdielectric")
+                material = MicrosurfaceMaterial.Create(MicrosurfaceKind.MultiScatterDielectric, parameters, normalMap, loc, alloc);
+            else if (name == "multiscatterdiffuse")
+                material = MicrosurfaceMaterial.Create(MicrosurfaceKind.MultiScatterDiffuse, parameters, normalMap, loc, alloc);
             else if (name == "eondiffuse")
                 material = EonDiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "vmfdiffuse")

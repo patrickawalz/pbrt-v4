@@ -592,7 +592,7 @@ namespace pbrt
 
         // The characteristic matrix method (Born and Wolf) for layers with real indices: the reflection amplitude
         static Complex CharacteristicReflection(double ambient, double[] n, double[] d, double substrate, double wavelength,
-                                                double cosI, bool perpendicular)
+                                                double cosI, bool perpendicular, bool transmission = false)
         {
             double sinI = Math.Sqrt(1 - cosI * cosI);
             Complex Eta(double index)
@@ -615,6 +615,11 @@ namespace pbrt
             Complex e0 = Eta(ambient), es = Eta(substrate);
             Complex numerator = e0 * (m11 + m12 * es) - (m21 + m22 * es);
             Complex denominator = e0 * (m11 + m12 * es) + (m21 + m22 * es);
+            if (transmission)
+            {
+                // The ratio of the tangential fields: its phase is that of the transmitted wave for both polarisations
+                return 2 * e0 / denominator;
+            }
             return numerator / denominator;
         }
 
@@ -661,11 +666,39 @@ namespace pbrt
                 }
             }
 
+            // What goes through the same two layers: the phase difference of the two polarisations against the characteristic
+            // matrix method, and the same light the other way (from the substrate, at the refracted angle, the layers in the
+            // other order) has the same reflectance and the same phase difference
+            foreach (double w in new double[] { 450, 520, 600, 680 })
+            {
+                foreach (double cosI in new double[] { 1.0, 0.8, 0.5, 0.2 })
+                {
+                    Float DsT, DpT;
+                    pbrt.FrThinFilmPolarised((Float)cosI, 1, new Float[] { 1.38f, 2.1f }, new Float[] { 95, 60 }, false, (Float)w,
+                                             new pstd.complex(1.52f), out Fs, out Fp, out Ds, out Dp, out DsT, out DpT);
+                    Complex ts = CharacteristicReflection(1, layers, widths, 1.52, w, cosI, true, true);
+                    Complex tp = CharacteristicReflection(1, layers, widths, 1.52, w, cosI, false, true);
+                    double expectedDelta = tp.Phase - ts.Phase;
+                    double deltaCode = DpT - DsT;
+                    EXPECT_LT(std.abs((Float)Math.Atan2(Math.Sin(deltaCode - expectedDelta), Math.Cos(deltaCode - expectedDelta))), (Float)1e-3);
+                    // The transmittance of the perpendicular polarisation from the amplitude: 1 - Fs
+                    double cosT = Math.Sqrt(1 - (1 - cosI * cosI) / (1.52 * 1.52));
+                    EXPECT_LT(std.abs((Float)(1.52 * cosT / cosI * ts.Magnitude * ts.Magnitude) - (1 - Fs)), (Float)1e-4);
+
+                    Float Fs2, Fp2, Ds2, Dp2, DsT2, DpT2;
+                    pbrt.FrThinFilmPolarised((Float)cosT, 1.52f, new Float[] { 1.38f, 2.1f }, new Float[] { 95, 60 }, true, (Float)w,
+                                             new pstd.complex(1), out Fs2, out Fp2, out Ds2, out Dp2, out DsT2, out DpT2);
+                    EXPECT_LT(std.abs(Fs - Fs2) + std.abs(Fp - Fp2), (Float)2e-4);
+                    double other = DpT2 - DsT2;
+                    EXPECT_LT(std.abs((Float)Math.Atan2(Math.Sin(deltaCode - other), Math.Cos(deltaCode - other))), (Float)1e-3);
+                }
+            }
+
             // A dielectric substrate: the sampled weights of reflection and transmission add up to one for every wavelength
             // (energy is conserved), and a conductor substrate only reflects
             SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
             ThinFilmBxDF film = new ThinFilmBxDF(lambda, new Float[] { 1.38f }, new Float[] { 100 }, 1.52f, new SampledSpectrum(1.0f),
-                                                 new SampledSpectrum(0.0f), false);
+                                                 new SampledSpectrum(0.0f), false, new TrowbridgeReitzDistribution(0, 0));
             Vector3f wo = pbrt.Normalize(new Vector3f(0.4f, 0.1f, 0.8f));
             SampledSpectrum total = new SampledSpectrum(0.0f);
             int count = 20000;

@@ -181,12 +181,17 @@ namespace pbrt
                 // Sample the BSDF at the current vertex
                 Vector3f wo = isect.wo;
                 Float uc = ctx.sampler.Get1D();
-                pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, uc, ctx.sampler.Get2D(), ctx.mode, BxDFReflTransFlags.All);
+                bool pathPolarised = false;
+                PolarisedLightSystem.Attenuation pathMatrix = default;
+                Point2f u2 = ctx.sampler.Get2D();
+                pstd.optional<BSDFSample> bs = ctx.st.polarised
+                    ? bsdf.Sample_f(wo, uc, u2, ctx.mode, BxDFReflTransFlags.All, out pathPolarised, out pathMatrix)
+                    : bsdf.Sample_f(wo, uc, u2, ctx.mode, BxDFReflTransFlags.All);
                 if (!bs)
                 {
                     return;
                 }
-                ctx.st.ScatterSurface(bsdf, isect, wo, bs.value(), ctx.mode);
+                ctx.st.ScatterSurface(bsdf, isect, wo, bs.value(), ctx.mode, pathPolarised, pathMatrix);
                 ctx.ray = isect.SpawnRay(ctx.ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
                 MediumTracking.CrossSurface(ref ctx.stack, isect, ctx.ray.d);
                 if (!hook.OnSurfaceScattered(ctx, si.value(), isect, bsdf, bs.value()))

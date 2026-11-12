@@ -205,16 +205,31 @@ namespace pbrt
         }
         public abstract Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags);
 
-        // (not in pbrt-v4) The Mueller matrix of the scattering from wi to wo (directions of the local frame), for the polarised
-        // integrators: what PolarisedPathIntegrator.RoughAttenuation asks of a BxDF that it does not know itself. Its first
-        // element is `weight` times the ratio of the polarised reflectance to the scalar one (1 for a single reflection),
-        // and its frames are those of the first and of the last microfacet that the light meets. False when the BxDF
-        // depolarises, or has no polarised form: the scattering is then taken as that of a Lambertian surface.
-        public virtual bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode,
-                                      out PolarisedLightSystem.Attenuation A)
+        // (not in pbrt-v4) Whether the f below builds a Mueller matrix: asked before f is evaluated only for its matrix
+        public virtual bool HasMuellerMatrix() { return false; }
+
+        // (not in pbrt-v4) The same value with the Mueller matrix of the scattering, from the one evaluation: for a BxDF whose
+        // f is a random walk, the walk is made once. The matrix has the weight of one: times a scalar weight of the
+        // scattering it is its Mueller weight (the first element is then that weight, to the ratio of the polarised
+        // reflectance to the scalar one). polarised is false when the BxDF has nothing to say (the matrix is not set, and the
+        // scattering is taken as depolarising). bsdf gives the frame of the surface, for the frames of the matrix.
+        public virtual SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised,
+                                         out PolarisedLightSystem.Attenuation matrix)
         {
-            A = default;
-            return false;
+            polarised = false;
+            matrix = default;
+            return f(wo, wi, mode);
+        }
+
+        // (not in pbrt-v4) The same sample with the Mueller matrix of the path that was sampled, with the weight of one as
+        // above: times f cos / pdf of the sample it is the Mueller weight of the sample.
+        public virtual pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                          BxDFReflTransFlags sampleFlags, out bool polarised,
+                                                          out PolarisedLightSystem.Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            return Sample_f(wo, uc, u, mode, sampleFlags);
         }
         public Float PDF(Vector3f wo, Vector3f wi, TransportMode mode)
         {

@@ -76,27 +76,22 @@ namespace pbrt
             SampledSpectrum eta = S(0.2f), k = S(3.9f);
             BxDF single = new ConductorBxDF(new TrowbridgeReitzDistribution(0.4f, 0.4f), eta, k);
             BxDF walk = new MultiScatterConductorBxDF(new TrowbridgeReitzDistribution(0.4f, 0.4f), new MicrosurfaceHeightUniform(), eta, k, 1);
-            BxDF groove = new VCavityConductorBxDF(new TrowbridgeReitzDistribution(0.4f, 0.4f), eta, k, 1);
             BxDF glass = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.4f, 0.4f));
             BxDF glassWalk = new MultiScatterDielectricBxDF(new TrowbridgeReitzDistribution(0.4f, 0.4f), new MicrosurfaceHeightUniform(), 1.5f, 1);
-            double worstWalk = 0, worstGroove = 0, worstGlass = 0;
+            double worstWalk = 0, worstGlass = 0;
             int compared = 0, comparedGlass = 0;
             for (int i = 0; i < 2000; ++i)
             {
                 Vector3f wo = Upper(ref rng), wi = Upper(ref rng);
                 foreach (TransportMode mode in new TransportMode[] { TransportMode.Radiance, TransportMode.Importance })
                 {
-                    MuellerMatrix reference, a, b;
+                    MuellerMatrix reference, a;
                     if (Matrix(single, wo, wi, mode, out reference))
                     {
                         if (Matrix(walk, wo, wi, mode, out a))
                         {
                             worstWalk = Math.Max(worstWalk, Difference(reference, a));
                             ++compared;
-                        }
-                        if (Matrix(groove, wo, wi, mode, out b))
-                        {
-                            worstGroove = Math.Max(worstGroove, Difference(reference, b));
                         }
                     }
                     // The dielectric: reflection on either side, and transmission both ways
@@ -111,13 +106,11 @@ namespace pbrt
                     }
                 }
             }
-            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised one reflection against the single-scattering BxDFs of pbrt (worst element): walk conductor %.1e, " +
-                                                      "V-cavity conductor %.1e (%d pairs), walk dielectric %.1e (%d pairs)", worstWalk, worstGroove, compared, worstGlass,
-                                                      comparedGlass));
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised one reflection against the single-scattering BxDFs of pbrt (worst element): walk conductor %.1e " +
+                                                      "(%d pairs), walk dielectric %.1e (%d pairs)", worstWalk, compared, worstGlass, comparedGlass));
             EXPECT_GT(compared, 1000);
             EXPECT_GT(comparedGlass, 1000);
             EXPECT_LT(worstWalk, 1e-3);
-            EXPECT_LT(worstGroove, 1e-3);
             EXPECT_LT(worstGlass, 1e-3);
         }
 
@@ -127,16 +120,13 @@ namespace pbrt
             RNG rng = new RNG(3);
             BxDF[] mirrors = new BxDF[]
             {
-                new MultiScatterConductorBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), new MicrosurfaceHeightUniform(), S(1), S(1e4f), 50),
-                new VCavityConductorBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), S(1), S(1e4f), 16)
+                new MultiScatterConductorBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), new MicrosurfaceHeightUniform(), S(1), S(1e4f), 50)
             };
             BxDF[] real = new BxDF[]
             {
                 new MultiScatterConductorBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), new MicrosurfaceHeightUniform(), S(0.2f), S(3.9f), 50),
                 new MultiScatterConductorBxDF(new BeckmannDistribution(0.6f, 0.6f), new MicrosurfaceHeightUniform(), S(0.2f), S(3.9f), 50),
                 new MultiScatterConductorBxDF(new StudentTDistribution(0.6f, 0.6f, 3f), new MicrosurfaceHeightUniform(), S(0.2f), S(3.9f), 50),
-                new VCavityConductorBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), S(0.2f), S(3.9f), 16),
-                new VCavityConductorBxDF(new BeckmannDistribution(0.6f, 0.6f), S(0.2f), S(3.9f), 16),
                 new MultiScatterDielectricBxDF(new TrowbridgeReitzDistribution(0.6f, 0.6f), new MicrosurfaceHeightUniform(), 1.5f, 50)
             };
             double worstWeight = 0, worstUnphysical = 0;
@@ -172,37 +162,6 @@ namespace pbrt
             EXPECT_GT(answered, asked * 8 / 10);
             EXPECT_LT(worstWeight, 2e-3);
             EXPECT_LT(worstUnphysical, 2e-3);
-        }
-
-        // The V-cavity matrix is a value: the two modes agree element by element, with paths of several reflections
-        [TEST("PolarisedMicrofacet", "CameraPathIsLightPath")]
-        public static void PolarisedMicrofacet_CameraPathIsLightPath()
-        {
-            RNG rng = new RNG(4);
-            BxDF groove = new VCavityConductorBxDF(new TrowbridgeReitzDistribution(0.8f, 0.8f), S(0.2f), S(3.9f), 16);
-            BxDF grooveOne = new VCavityConductorBxDF(new TrowbridgeReitzDistribution(0.8f, 0.8f), S(0.2f), S(3.9f), 1);
-            double worst = 0, multiple = 0;
-            int compared = 0;
-            for (int i = 0; i < 3000; ++i)
-            {
-                Vector3f wo = Upper(ref rng), wi = Upper(ref rng);
-                MuellerMatrix camera, light, one;
-                if (Matrix(groove, wo, wi, TransportMode.Radiance, out camera) && Matrix(groove, wi, wo, TransportMode.Importance, out light))
-                {
-                    worst = Math.Max(worst, Difference(camera, light));
-                    ++compared;
-                    // How much of the matrix comes from paths of more than one reflection
-                    if (Matrix(grooveOne, wo, wi, TransportMode.Radiance, out one))
-                    {
-                        multiple = Math.Max(multiple, Difference(camera, one));
-                    }
-                }
-            }
-            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised V-cavity: camera path against light path, worst element %.1e over %d pairs (the paths of several " +
-                                                      "reflections change an element by up to %.2f)", worst, compared, multiple));
-            EXPECT_GT(compared, 2000);
-            EXPECT_LT(worst, 1e-3);
-            EXPECT_GT(multiple, 0.05);
         }
 
         // The walks are estimates. With the weight of a pair set to the scalar estimate of the same walk (f cos), the matrix is
@@ -345,6 +304,367 @@ namespace pbrt
             EXPECT_LT(worst, 1e-5);
             EXPECT_LT(worstEnergy, 1e-5);
             EXPECT_LT(worstUnphysical, 1e-5);
+        }
+
+        // The rough thin film (ThinFilmBxDF.Polarised). With no thickness its matrix is that of the bare rough surface; with
+        // one, the matrix for a path from the camera is that of the same light followed from its source (a transmission
+        // meets the layers in the other order from the other side, with the same phases), and it is physical.
+        [TEST("PolarisedMicrofacet", "RoughThinFilm")]
+        public static void PolarisedMicrofacet_RoughThinFilm()
+        {
+            RNG rng = new RNG(6);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            MicrofacetDistribution distribution = new TrowbridgeReitzDistribution(0.4f, 0.4f);
+            SampledSpectrum eta = S(0.2f), k = S(3.9f);
+            BxDF glass = new DielectricBxDF(1.5f, distribution), metal = new ConductorBxDF(distribution, eta, k);
+            BxDF glassNone = new ThinFilmBxDF(lambda, new Float[] { 2.1f }, new Float[] { 0 }, 1.5f, S(1), S(0), false, distribution);
+            BxDF metalNone = new ThinFilmBxDF(lambda, new Float[] { 2.1f }, new Float[] { 0 }, 1.5f, eta, k, true, distribution);
+            BxDF glassFilm = new ThinFilmBxDF(lambda, new Float[] { 1.38f, 2.1f }, new Float[] { 95, 300 }, 1.5f, S(1), S(0), false, distribution);
+            BxDF metalFilm = new ThinFilmBxDF(lambda, new Float[] { 1.5f }, new Float[] { 400 }, 1.5f, eta, k, true, distribution);
+            double worstBare = 0, worstPath = 0, worstUnphysical = 0, effect = 0;
+            int comparedBare = 0, comparedPath = 0;
+            for (int i = 0; i < 3000; ++i)
+            {
+                Vector3f wo = Upper(ref rng), wi = Upper(ref rng);
+                TransportMode mode = (i & 1) == 0 ? TransportMode.Radiance : TransportMode.Importance;
+                MuellerMatrix a, b;
+                if (Matrix(metal, wo, wi, mode, out a) && Matrix(metalNone, wo, wi, mode, out b))
+                {
+                    worstBare = Math.Max(worstBare, Difference(a, b));
+                    ++comparedBare;
+                }
+                // The dielectric: reflection on either side, and transmission both ways
+                Vector3f go = (i & 2) != 0 ? -wo : wo, gi = (i & 4) != 0 ? -wi : wi;
+                if (Matrix(glass, go, gi, mode, out a) && Matrix(glassNone, go, gi, mode, out b))
+                {
+                    worstBare = Math.Max(worstBare, Difference(a, b));
+                    ++comparedBare;
+                }
+                foreach (BxDF film in new BxDF[] { glassFilm, metalFilm })
+                {
+                    Vector3f fo = film == glassFilm ? go : wo, fi = film == glassFilm ? gi : wi;
+                    MuellerMatrix camera, light;
+                    if (Matrix(film, fo, fi, TransportMode.Radiance, out camera) && Matrix(film, fi, fo, TransportMode.Importance, out light))
+                    {
+                        worstPath = Math.Max(worstPath, Difference(camera, light));
+                        worstUnphysical = Math.Max(worstUnphysical, Unphysical(camera));
+                        ++comparedPath;
+                        if (film == glassFilm && Matrix(glass, fo, fi, TransportMode.Radiance, out a))
+                        {
+                            effect = Math.Max(effect, Difference(camera, a));
+                        }
+                    }
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised rough thin film: no thickness against the bare surface %.1e (%d pairs); camera path " +
+                                                      "against light path %.1e (%d pairs), degree of polarisation above 1 by at most %.1e; the layers change " +
+                                                      "an element by up to %.2f", worstBare, comparedBare, worstPath, comparedPath, worstUnphysical, effect));
+            EXPECT_GT(comparedBare, 3000);
+            EXPECT_GT(comparedPath, 3000);
+            EXPECT_LT(worstBare, 1e-3);
+            EXPECT_LT(worstPath, 1e-3);
+            EXPECT_LT(worstUnphysical, 2e-3);
+            EXPECT_GT(effect, 0.05);
+        }
+
+        // The layered BxDFs (LayeredBxDF.Polarised), against cases with a known answer:
+        //   - under a coat of index 1 there is no coat: the matrix is that of the conductor below, rough or smooth;
+        //   - over a black base only the coat reflects: the matrix is that of the rough dielectric;
+        //   - over a white diffuse base the light that went through the coat comes back unpolarised: the first element stays
+        //     the weight, and on average the surface polarises much less than the coat alone. (Not for every pair: the
+        //     light of the base is polarised again as it leaves through the coat, at grazing angles more than the coat
+        //     polarises what it reflects near its normal.)
+        [TEST("PolarisedMicrofacet", "Layered")]
+        public static void PolarisedMicrofacet_Layered()
+        {
+            RNG rng = new RNG(8);
+            SampledSpectrum eta = S(0.2f), k = S(3.9f);
+            MicrofacetDistribution rough = new TrowbridgeReitzDistribution(0.3f, 0.3f), smooth = new TrowbridgeReitzDistribution(0, 0);
+            BxDF metal = new ConductorBxDF(rough, eta, k);
+            BxDF noCoat = new CoatedConductorBxDF(new DielectricBxDF(1f, smooth), new ConductorBxDF(rough, eta, k), 0.01f, S(0), 0, 10, 1);
+            BxDF coat = new DielectricBxDF(1.5f, rough);
+            BxDF blackBase = new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, rough), new DiffuseBxDF(S(0)), 0.01f, S(0), 0, 10, 1);
+            BxDF whiteBase = new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, rough), new DiffuseBxDF(S(0.9f)), 0.01f, S(0), 0, 10, 4);
+            BxDF coatedMetal = new CoatedConductorBxDF(new DielectricBxDF(1.5f, rough), new ConductorBxDF(rough, eta, k), 0.01f, S(0), 0, 10, 4);
+            BxDF cloudy = new CoatedConductorBxDF(new DielectricBxDF(1.5f, rough), new ConductorBxDF(rough, eta, k), 0.3f, S(0.8f), 0.2f, 10, 4);
+            double worstNoCoat = 0, worstBlack = 0, worstWeight = 0, worstUnphysical = 0, diluted = 0, alone = 0;
+            int comparedNoCoat = 0, comparedBlack = 0, comparedWhite = 0, answered = 0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                Vector3f wo = Upper(ref rng), wi = Upper(ref rng);
+                // The layers are two sided: from below they are what they are from above (the bare dielectric is not: it is
+                // asked from above)
+                Vector3f lo = (i & 2) != 0 ? -wo : wo, li = (i & 2) != 0 ? -wi : wi;
+                TransportMode mode = (i & 1) == 0 ? TransportMode.Radiance : TransportMode.Importance;
+                MuellerMatrix a, b;
+                if (Matrix(metal, wo, wi, mode, out a) && Matrix(noCoat, lo, li, mode, out b))
+                {
+                    worstNoCoat = Math.Max(worstNoCoat, Difference(a, b));
+                    ++comparedNoCoat;
+                }
+                if (Matrix(coat, wo, wi, mode, out a))
+                {
+                    if (Matrix(blackBase, lo, li, mode, out b))
+                    {
+                        worstBlack = Math.Max(worstBlack, Difference(a, b));
+                        ++comparedBlack;
+                    }
+                    if (Matrix(whiteBase, lo, li, mode, out b))
+                    {
+                        worstWeight = Math.Max(worstWeight, Math.Abs(b.m00[0] - 1));
+                        worstUnphysical = Math.Max(worstUnphysical, Unphysical(b));
+                        // The polarisation that the surface gives to unpolarised light
+                        double white = Math.Sqrt(Sqr((double)b.m10[0]) + Sqr((double)b.m20[0]) + Sqr((double)b.m30[0]));
+                        double bare = Math.Sqrt(Sqr((double)a.m10[0]) + Sqr((double)a.m20[0]) + Sqr((double)a.m30[0]));
+                        diluted += white;
+                        alone += bare;
+                        ++comparedWhite;
+                    }
+                }
+                foreach (BxDF bxdf in new BxDF[] { coatedMetal, cloudy })
+                {
+                    if (Matrix(bxdf, lo, li, mode, out b))
+                    {
+                        worstUnphysical = Math.Max(worstUnphysical, Unphysical(b));
+                        ++answered;
+                    }
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised layered: a coat of index 1 against the bare conductor %.1e (%d pairs); a black base " +
+                                                      "against the coat alone %.1e (%d pairs); a white diffuse base keeps the weight within %.1e, and polarises " +
+                                                      "unpolarised light %.3f on average where the coat alone does %.3f (%d pairs); degree of polarisation above 1 " +
+                                                      "by at most %.1e (%d matrices of coated conductors)", worstNoCoat, comparedNoCoat, worstBlack, comparedBlack,
+                                                      worstWeight, diluted / comparedWhite, alone / comparedWhite, comparedWhite, worstUnphysical, answered));
+            EXPECT_GT(comparedNoCoat, 1500);
+            EXPECT_GT(comparedBlack, 1500);
+            EXPECT_GT(comparedWhite, 1500);
+            EXPECT_GT(answered, 3000);
+            EXPECT_LT(worstNoCoat, 1e-3);
+            EXPECT_LT(worstBlack, 1e-3);
+            EXPECT_LT(worstWeight, 1e-3);
+            EXPECT_LT(worstUnphysical, 2e-3);
+            EXPECT_LT(diluted, 0.8 * alone);
+        }
+
+        // The matrix of a sampled path (the Sample_f that returns one), in the frames of the matrix of the pair of directions
+        static bool SampledMatrix(BxDF bxdf, Vector3f wo, ref RNG rng, TransportMode mode, out Vector3f wi, out MuellerMatrix matrix)
+        {
+            BSDF bsdf = new BSDF(new Normal3f(0, 0, 1), new Vector3f(1, 0, 0), bxdf);
+            bool polarised;
+            Attenuation A;
+            pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()), mode,
+                                                         BxDFReflTransFlags.All, out polarised, out A);
+            wi = default;
+            matrix = default;
+            if (!bs || !polarised)
+            {
+                return false;
+            }
+            wi = bs.value().wi;
+            matrix = A.GetMuellerMatrix();
+            return true;
+        }
+
+        // The matrix that comes with a sampled direction is that of the path that was sampled:
+        //   - a walk allowed one reflection is one microfacet: the matrix of the single-scattering BxDF for that direction;
+        //   - under a smooth coat of index 1 a smooth conductor is itself: its Fresnel matrix at the mirror direction;
+        //   - over a black base a sample is a reflection of the coat: the matrix of the dielectric;
+        //   - with every reflection allowed, and through real coats, the matrices are physical.
+        [TEST("PolarisedMicrofacet", "SampledPath")]
+        public static void PolarisedMicrofacet_SampledPath()
+        {
+            RNG rng = new RNG(12);
+            SampledSpectrum eta = S(0.2f), k = S(3.9f);
+            MicrofacetDistribution rough = new TrowbridgeReitzDistribution(0.4f, 0.4f), smooth = new TrowbridgeReitzDistribution(0, 0);
+            BxDF metal = new ConductorBxDF(rough, eta, k), glass = new DielectricBxDF(1.5f, rough);
+            // The mirror direction through a conductor that is barely rough: its half vector is the normal
+            BxDF mirror = new ConductorBxDF(new TrowbridgeReitzDistribution(0.01f, 0.01f), eta, k);
+            BxDF metalOne = new MultiScatterConductorBxDF(rough, new MicrosurfaceHeightUniform(), eta, k, 1);
+            BxDF glassOne = new MultiScatterDielectricBxDF(rough, new MicrosurfaceHeightUniform(), 1.5f, 1);
+            BxDF noCoat = new CoatedConductorBxDF(new DielectricBxDF(1f, smooth), new ConductorBxDF(smooth, eta, k), 0.01f, S(0), 0, 10, 1);
+            BxDF blackBase = new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, rough), new DiffuseBxDF(S(0)), 0.01f, S(0), 0, 10, 1);
+            BxDF[] others = new BxDF[]
+            {
+                new MultiScatterConductorBxDF(rough, new MicrosurfaceHeightUniform(), eta, k, 50),
+                new MultiScatterDielectricBxDF(rough, new MicrosurfaceHeightUniform(), 1.5f, 50),
+                new CoatedConductorBxDF(new DielectricBxDF(1.5f, smooth), new ConductorBxDF(smooth, eta, k), 0.01f, S(0), 0, 10, 1),
+                new CoatedConductorBxDF(new DielectricBxDF(1.5f, rough), new ConductorBxDF(rough, eta, k), 0.3f, S(0.8f), 0.2f, 10, 1),
+                new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, rough), new DiffuseBxDF(S(0.9f)), 0.01f, S(0), 0, 10, 1)
+            };
+            double worstMetal = 0, worstGlass = 0, worstNoCoat = 0, worstBlack = 0, worstUnphysical = 0;
+            int comparedMetal = 0, comparedGlass = 0, comparedNoCoat = 0, comparedBlack = 0, sampled = 0;
+            for (int i = 0; i < 3000; ++i)
+            {
+                Vector3f wo = Upper(ref rng), wi;
+                TransportMode mode = (i & 1) == 0 ? TransportMode.Radiance : TransportMode.Importance;
+                MuellerMatrix a, b;
+                if (SampledMatrix(metalOne, wo, ref rng, mode, out wi, out a) && Matrix(metal, wo, wi, mode, out b))
+                {
+                    worstMetal = Math.Max(worstMetal, Difference(a, b));
+                    ++comparedMetal;
+                }
+                Vector3f go = (i & 2) != 0 ? -wo : wo;
+                if (SampledMatrix(glassOne, go, ref rng, mode, out wi, out a) && Matrix(glass, go, wi, mode, out b))
+                {
+                    worstGlass = Math.Max(worstGlass, Difference(a, b));
+                    ++comparedGlass;
+                }
+                if (SampledMatrix(noCoat, wo, ref rng, mode, out wi, out a) && Matrix(mirror, wo, wi, mode, out b))
+                {
+                    worstNoCoat = Math.Max(worstNoCoat, Difference(a, b));
+                    ++comparedNoCoat;
+                }
+                if (SampledMatrix(blackBase, wo, ref rng, mode, out wi, out a) && wi.z > 0 && Matrix(glass, wo, wi, mode, out b))
+                {
+                    worstBlack = Math.Max(worstBlack, Difference(a, b));
+                    ++comparedBlack;
+                }
+                foreach (BxDF bxdf in others)
+                {
+                    if (SampledMatrix(bxdf, bxdf is MultiScatterDielectricBxDF ? go : wo, ref rng, mode, out wi, out a))
+                    {
+                        worstUnphysical = Math.Max(worstUnphysical, Unphysical(a));
+                        ++sampled;
+                    }
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised sampled paths: one reflection against single scattering, conductor %.1e (%d), " +
+                                                      "dielectric %.1e (%d); a smooth conductor under a coat of index 1 %.1e (%d); the coat over a black " +
+                                                      "base %.1e (%d); degree of polarisation above 1 by at most %.1e (%d other samples)", worstMetal,
+                                                      comparedMetal, worstGlass, comparedGlass, worstNoCoat, comparedNoCoat, worstBlack, comparedBlack,
+                                                      worstUnphysical, sampled));
+            EXPECT_GT(comparedMetal, 1500);
+            EXPECT_GT(comparedGlass, 1500);
+            EXPECT_GT(comparedNoCoat, 2500);
+            EXPECT_GT(comparedBlack, 100);
+            EXPECT_GT(sampled, 8000);
+            EXPECT_LT(worstMetal, 1e-3);
+            EXPECT_LT(worstGlass, 1e-3);
+            EXPECT_LT(worstNoCoat, 1e-3);
+            EXPECT_LT(worstBlack, 1e-3);
+            EXPECT_LT(worstUnphysical, 2e-3);
+        }
+
+        // The two ways to the same light. Unpolarised light arrives evenly from every direction; the light that leaves along
+        // wo is found by sampling directions with their path matrices (Sample_f), and by evaluating the matrix of directions
+        // taken evenly (f). Both estimate one Stokes vector: its degree of polarisation agrees within their noise. (The
+        // matrix of a sampled path has no ratio of two estimates in it; a matrix asked for the pair of directions of a
+        // sample, scaled by the weight of the sample, does, and gave a polarisation some percent off.)
+        static void SampledAgainstEvaluated(BxDF bxdf, string name, int samples, bool sameIntensity)
+        {
+            RNG rng = new RNG(13);
+            BSDF bsdf = new BSDF(new Normal3f(0, 0, 1), new Vector3f(1, 0, 0), bxdf);
+            Vector3f wo = Normalize(new Vector3f(0.75f, 0.1f, 0.5f)), up = new Vector3f(0, 0, 1);
+            double[] sumSampled = new double[4], sumEvaluated = new double[4];
+            double squareSampled = 0, squareEvaluated = 0;
+            for (int i = 0; i < samples; ++i)
+            {
+                bool polarised;
+                Attenuation A;
+                pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
+                                                             TransportMode.Radiance, BxDFReflTransFlags.All, out polarised, out A);
+                if ((bool)bs && polarised)
+                {
+                    SampledSpectrum weight = bs.value().f * AbsCosTheta(bs.value().wi) / bs.value().pdf;
+                    StokesVector light = ((A * weight) * new PolarisedLightSystem.Light(S(1))).RepresentInDirection(wo, up).ToStokesVector();
+                    sumSampled[0] += light.s0[0]; sumSampled[1] += light.s1[0]; sumSampled[2] += light.s2[0]; sumSampled[3] += light.s3[0];
+                    squareSampled += Sqr((double)light.s1[0]);
+                }
+                Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                SampledSpectrum f = bsdf.f(wo, wi, TransportMode.Radiance, out polarised, out A);
+                if (polarised && (bool)f)
+                {
+                    SampledSpectrum weight = f * (AbsCosTheta(wi) * 4 * Pi);
+                    StokesVector light = ((A * weight) * new PolarisedLightSystem.Light(S(1))).RepresentInDirection(wo, up).ToStokesVector();
+                    sumEvaluated[0] += light.s0[0]; sumEvaluated[1] += light.s1[0]; sumEvaluated[2] += light.s2[0]; sumEvaluated[3] += light.s3[0];
+                    squareEvaluated += Sqr((double)light.s1[0]);
+                }
+            }
+            double sampledIntensity = sumSampled[0] / samples, evaluatedIntensity = sumEvaluated[0] / samples;
+            double sampledS1 = sumSampled[1] / samples, evaluatedS1 = sumEvaluated[1] / samples;
+            double error = Math.Sqrt((squareSampled / samples - sampledS1 * sampledS1 + squareEvaluated / samples - evaluatedS1 * evaluatedS1) / samples);
+            double sigmas = Math.Abs(sampledS1 - evaluatedS1) / error;
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised %s: light from an even unpolarised surround, sampled against evaluated: intensity %.4f " +
+                                                      "/ %.4f, s1 %+.5f / %+.5f (%.1f sigma, error %.5f), s2 %+.5f / %+.5f, s3 %+.5f / %+.5f", name,
+                                                      sampledIntensity, evaluatedIntensity, sampledS1, evaluatedS1, sigmas, error, sumSampled[2] / samples,
+                                                      sumEvaluated[2] / samples, sumSampled[3] / samples, sumEvaluated[3] / samples));
+            EXPECT_LT(sigmas, 4.0, name);
+            if (sameIntensity)
+            {
+                EXPECT_LT(Math.Abs(sampledIntensity - evaluatedIntensity), 0.02 * evaluatedIntensity, name);
+            }
+        }
+
+        [TEST("PolarisedMicrofacet", "SampledAgainstEvaluated")]
+        public static void PolarisedMicrofacet_SampledAgainstEvaluated()
+        {
+            SampledSpectrum eta = S(0.2f), k = S(3.9f);
+            MicrofacetDistribution rough = new TrowbridgeReitzDistribution(0.5f, 0.5f), coat = new TrowbridgeReitzDistribution(0.1f, 0.1f);
+            SampledAgainstEvaluated(new MultiScatterConductorBxDF(rough, new MicrosurfaceHeightUniform(), eta, k, 50), "walk conductor GGX 0.5", 400000, true);
+            SampledAgainstEvaluated(new MultiScatterDielectricBxDF(rough, new MicrosurfaceHeightUniform(), 1.5f, 50), "walk dielectric GGX 0.5", 400000, true);
+            // The layered BxDFs: the scalar Sample_f and f of the layers already disagree by some 4% about the light
+            // they return (BxDFCheck measures the same on the scalar BxDF, at any depth, before any of this), so the
+            // intensities are printed and only the polarised part is held to its noise
+            SampledAgainstEvaluated(new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, coat), new DiffuseBxDF(S(0.7f)), 0.01f, S(0), 0, 10, 1),
+                                    "coated diffuse", 400000, false);
+            SampledAgainstEvaluated(new CoatedConductorBxDF(new DielectricBxDF(1.5f, coat), new ConductorBxDF(new TrowbridgeReitzDistribution(0.3f, 0.3f), eta, k),
+                                                            0.01f, S(0), 0, 10, 1), "coated conductor", 400000, false);
+        }
+
+        // Thin films on the microfacets of the multiple scattering microsurfaces: with one reflection allowed the matrix is
+        // that of the rough thin film BxDF for the same directions (conductor; dielectric on both sides and through), and
+        // with all of them it is physical.
+        [TEST("PolarisedMicrofacet", "MultiScatterThinFilm")]
+        public static void PolarisedMicrofacet_MultiScatterThinFilm()
+        {
+            RNG rng = new RNG(10);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            SampledSpectrum eta = S(0.2f), k = S(3.9f);
+            MicrofacetDistribution distribution = new TrowbridgeReitzDistribution(0.4f, 0.4f);
+            Float[] metalEta = new Float[] { 1.5f }, metalThickness = new Float[] { 400 };
+            Float[] glassEta = new Float[] { 1.38f, 2.1f }, glassThickness = new Float[] { 95, 300 };
+            ThinFilmStack metalFilm = new ThinFilmStack(lambda, metalEta, metalThickness), glassFilm = new ThinFilmStack(lambda, glassEta, glassThickness);
+            BxDF metal = new ThinFilmBxDF(lambda, metalEta, metalThickness, 1.5f, eta, k, true, distribution);
+            BxDF glass = new ThinFilmBxDF(lambda, glassEta, glassThickness, 1.5f, S(1), S(0), false, distribution);
+            BxDF metalOne = new MultiScatterConductorBxDF(distribution, new MicrosurfaceHeightUniform(), eta, k, 1, metalFilm);
+            BxDF glassOne = new MultiScatterDielectricBxDF(distribution, new MicrosurfaceHeightUniform(), 1.5f, 1, glassFilm);
+            BxDF metalAll = new MultiScatterConductorBxDF(distribution, new MicrosurfaceHeightUniform(), eta, k, 50, metalFilm);
+            BxDF glassAll = new MultiScatterDielectricBxDF(distribution, new MicrosurfaceHeightUniform(), 1.5f, 50, glassFilm);
+            double worstMetal = 0, worstGlass = 0, worstUnphysical = 0;
+            int comparedMetal = 0, comparedGlass = 0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                Vector3f wo = Upper(ref rng), wi = Upper(ref rng);
+                TransportMode mode = (i & 1) == 0 ? TransportMode.Radiance : TransportMode.Importance;
+                MuellerMatrix a, b;
+                if (Matrix(metal, wo, wi, mode, out a) && Matrix(metalOne, wo, wi, mode, out b))
+                {
+                    worstMetal = Math.Max(worstMetal, Difference(a, b));
+                    ++comparedMetal;
+                }
+                Vector3f go = (i & 2) != 0 ? -wo : wo, gi = (i & 4) != 0 ? -wi : wi;
+                if (Matrix(glass, go, gi, mode, out a) && Matrix(glassOne, go, gi, mode, out b))
+                {
+                    worstGlass = Math.Max(worstGlass, Difference(a, b));
+                    ++comparedGlass;
+                }
+                if (Matrix(metalAll, wo, wi, mode, out a))
+                {
+                    worstUnphysical = Math.Max(worstUnphysical, Unphysical(a));
+                }
+                if (Matrix(glassAll, go, gi, mode, out a))
+                {
+                    worstUnphysical = Math.Max(worstUnphysical, Unphysical(a));
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE polarised walks with thin films: one reflection against the rough thin film BxDF, conductor %.1e " +
+                                                      "(%d pairs), dielectric %.1e (%d pairs); all reflections: degree of polarisation above 1 by at most %.1e",
+                                                      worstMetal, comparedMetal, worstGlass, comparedGlass, worstUnphysical));
+            EXPECT_GT(comparedMetal, 1000);
+            EXPECT_GT(comparedGlass, 1000);
+            EXPECT_LT(worstMetal, 1e-3);
+            EXPECT_LT(worstGlass, 1e-3);
+            EXPECT_LT(worstUnphysical, 2e-3);
         }
     }
 }

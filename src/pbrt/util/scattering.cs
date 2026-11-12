@@ -130,6 +130,15 @@ namespace pbrt
         }
     }
 
+    // MicrofacetDistributionType Definition
+    // (not in pbrt-v4) The distributions that a material can ask for by name ("string distribution")
+    public enum MicrofacetDistributionType
+    {
+        TrowbridgeReitz,
+        Beckmann,
+        StudentT
+    }
+
     // MicrofacetDistribution Definition
     // (not in pbrt-v4, which has TrowbridgeReitzDistribution alone) The interface of the microfacet distributions, as the
     // MicrofacetDistribution of pbrt-v3 was, with the names of pbrt-v4. The normals of the microfacets are in the upper
@@ -146,6 +155,39 @@ namespace pbrt
     // The two agree for a direction above the horizon, where Sigma(w) = cos(theta) (1 + Lambda(w)).
     public abstract unsafe class MicrofacetDistribution
     {
+        // "ggx" (or "trowbridgereitz"), "beckmann", "studentt"
+        public static MicrofacetDistributionType ParseType(string name, FileLoc loc)
+        {
+            if (name == "ggx" || name == "trowbridgereitz")
+            {
+                return MicrofacetDistributionType.TrowbridgeReitz;
+            }
+            if (name == "beckmann")
+            {
+                return MicrofacetDistributionType.Beckmann;
+            }
+            if (name == "studentt")
+            {
+                return MicrofacetDistributionType.StudentT;
+            }
+            ErrorExit(loc, StringPrintf("%s: microfacet distribution unknown (\"ggx\", \"beckmann\" and \"studentt\" are known).", name));
+            return MicrofacetDistributionType.TrowbridgeReitz;
+        }
+
+        // gamma is the shape of the Student's t distribution, and is not used by the others
+        public static MicrofacetDistribution Create(MicrofacetDistributionType type, Float ax, Float ay, Float gamma)
+        {
+            switch (type)
+            {
+            case MicrofacetDistributionType.Beckmann:
+                return new BeckmannDistribution(ax, ay);
+            case MicrofacetDistributionType.StudentT:
+                return new StudentTDistribution(ax, ay, gamma);
+            default:
+                return new TrowbridgeReitzDistribution(ax, ay);
+            }
+        }
+
         // MicrofacetDistribution Interface
         public abstract Float D(Vector3f wm);
         public abstract Float Lambda(Vector3f w);
@@ -735,7 +777,8 @@ namespace pbrt
         // without bound there (as cos(theta)^(2 gamma - 4)), and what a cutoff removes is a part of the cross section
         public override Float D(Vector3f wm)
         {
-            if (!(wm.z > 0))
+            // As for the other distributions, the normal may be given on either side (the BxDFs of pbrt pass wo + wi as it is)
+            if (wm.z == 0 || IsNaN(wm.z))
                 return 0;
             double cos2Theta = (double)wm.z * wm.z;
             double e = (Sqr((double)wm.x / alpha_x) + Sqr((double)wm.y / alpha_y)) / cos2Theta;

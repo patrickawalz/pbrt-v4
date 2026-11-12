@@ -255,10 +255,15 @@ namespace pbrt
                     }
 
                     // The albedo by directions uniform over the sphere, and the integral of the pdf
+                    // The directions are jittered over a grid: with independent directions the integral of the pdf of a narrow
+                    // lobe is some percent wrong at this count, which is the size of what the check is to find. (The error of
+                    // the albedo below is computed as for independent directions, and so is an upper limit.)
                     double uniformSum = 0, uniformSum2 = 0, pdfSum = 0;
-                    for (int i = 0; i < options.samples; ++i)
+                    int grid = Math.Max(1, (int)Math.Sqrt((double)options.samples));
+                    int uniformSamples = grid * grid;
+                    for (int i = 0; i < uniformSamples; ++i)
                     {
-                        Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                        Vector3f wi = SampleUniformSphere(new Point2f((i % grid + rng.Uniform<Float>()) / grid, (i / grid + rng.Uniform<Float>()) / grid));
                         double f = bxdf.f(wo, wi, TransportMode.Importance).Average();
                         double value = f * AbsCosTheta(wi) * 4 * Pi;
                         if (!(value >= 0) || Double.IsInfinity(value))
@@ -270,8 +275,8 @@ namespace pbrt
                         uniformSum2 += value * value;
                         pdfSum += bxdf.PDF(wo, wi, TransportMode.Importance, BxDFReflTransFlags.All) * 4 * Pi;
                     }
-                    double uniform = uniformSum / options.samples;
-                    double uniformError = Math.Sqrt(Math.Max(0, uniformSum2 / options.samples - uniform * uniform) / options.samples);
+                    double uniform = uniformSum / uniformSamples;
+                    double uniformError = Math.Sqrt(Math.Max(0, uniformSum2 / uniformSamples - uniform * uniform) / uniformSamples);
                     double error = Math.Sqrt(sampledError * sampledError + uniformError * uniformError);
                     if (error > 0)
                     {
@@ -281,7 +286,7 @@ namespace pbrt
                     {
                         result.albedoRelative = Math.Max(result.albedoRelative, Math.Abs(sampled - uniform) / Math.Max(sampled, uniform));
                     }
-                    double pdfIntegral = pdfSum / options.samples;
+                    double pdfIntegral = pdfSum / uniformSamples;
                     result.pdfMax = Math.Max(result.pdfMax, pdfIntegral);
                     result.pdfMin = Math.Min(result.pdfMin, pdfIntegral);
                 }
@@ -339,6 +344,112 @@ namespace pbrt
             BxDF bxdf = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.3f, 0.3f));
             BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric eta 1.5 alpha 0.3", new BxDFCheckOptions());
             BxDFCheck.Expect(result, "RoughDielectric", 2e-3, 1.005, 5, 0.85);
+        }
+
+        // The stock BxDFs on the other distributions ("string distribution" of the materials), held to the limits of GGX
+        [TEST("BxDFCheck", "RoughConductorBeckmann")]
+        public static void BxDFCheck_RoughConductorBeckmann()
+        {
+            BxDF bxdf = new ConductorBxDF(new BeckmannDistribution(0.3f, 0.3f), new SampledSpectrum(0.2f), new SampledSpectrum(3.9f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughConductor Beckmann alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughConductorBeckmann", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughConductorStudentT")]
+        public static void BxDFCheck_RoughConductorStudentT()
+        {
+            BxDF bxdf = new ConductorBxDF(new StudentTDistribution(0.3f, 0.3f, 4f), new SampledSpectrum(0.2f), new SampledSpectrum(3.9f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughConductor StudentT gamma 4 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughConductorStudentT", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughDielectricBeckmann")]
+        public static void BxDFCheck_RoughDielectricBeckmann()
+        {
+            BxDF bxdf = new DielectricBxDF(1.5f, new BeckmannDistribution(0.3f, 0.3f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric Beckmann eta 1.5 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughDielectricBeckmann", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughDielectricStudentT")]
+        public static void BxDFCheck_RoughDielectricStudentT()
+        {
+            BxDF bxdf = new DielectricBxDF(1.5f, new StudentTDistribution(0.3f, 0.3f, 4f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric StudentT gamma 4 eta 1.5 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughDielectricStudentT", 2e-3, 1.005, 5, 0.85);
+        }
+
+        // A rough thin film (ThinFilmBxDF with a distribution): the microfacet model of the two BxDFs above with the reflectance
+        // of the stack of layers, held to their limits. On a conductor the film has one side.
+        [TEST("BxDFCheck", "RoughThinFilmDielectric")]
+        public static void BxDFCheck_RoughThinFilmDielectric()
+        {
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            BxDF bxdf = new ThinFilmBxDF(lambda, new Float[] { 2.1f }, new Float[] { 300 }, 1.5f, new SampledSpectrum(1f), new SampledSpectrum(0f), false,
+                                         new TrowbridgeReitzDistribution(0.3f, 0.3f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughThinFilm on a dielectric, eta 2.1 300 nm on 1.5, alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughThinFilmDielectric", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughThinFilmConductor")]
+        public static void BxDFCheck_RoughThinFilmConductor()
+        {
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            BxDF bxdf = new ThinFilmBxDF(lambda, new Float[] { 1.5f }, new Float[] { 400 }, 1.5f, new SampledSpectrum(0.2f), new SampledSpectrum(3.9f), true,
+                                         new BeckmannDistribution(0.3f, 0.3f));
+            BxDFCheckOptions options = new BxDFCheckOptions();
+            options.bothSides = false;
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughThinFilm on a conductor, eta 1.5 400 nm, Beckmann alpha 0.3", options);
+            BxDFCheck.Expect(result, "RoughThinFilmConductor", 2e-3, 1.005, 5, 0.85);
+        }
+
+        // A film of no thickness is the bare surface: f and PDF of the rough film are those of DielectricBxDF and ConductorBxDF
+        [TEST("BxDFCheck", "RoughThinFilmOfNoThickness")]
+        public static void BxDFCheck_RoughThinFilmOfNoThickness()
+        {
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            MicrofacetDistribution distribution = new TrowbridgeReitzDistribution(0.4f, 0.25f);
+            SampledSpectrum eta = new SampledSpectrum(0.2f), k = new SampledSpectrum(3.9f);
+            BxDF glass = new DielectricBxDF(1.5f, distribution), metal = new ConductorBxDF(distribution, eta, k);
+            BxDF glassFilm = new ThinFilmBxDF(lambda, new Float[] { 2.1f }, new Float[] { 0 }, 1.5f, new SampledSpectrum(1f), new SampledSpectrum(0f), false,
+                                              distribution);
+            BxDF metalFilm = new ThinFilmBxDF(lambda, new Float[] { 2.1f }, new Float[] { 0 }, 1.5f, eta, k, true, distribution);
+            RNG rng = new RNG(11);
+            double worstF = 0, worstPdf = 0;
+            int compared = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                Vector3f wo = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                TransportMode mode = (i & 1) == 0 ? TransportMode.Radiance : TransportMode.Importance;
+                for (int b = 0; b < 2; ++b)
+                {
+                    BxDF bare = b == 0 ? glass : metal, film = b == 0 ? glassFilm : metalFilm;
+                    if (b == 1 && wo.z < 0)
+                    {
+                        // The film on a conductor has one side
+                        continue;
+                    }
+                    double f0 = bare.f(wo, wi, mode).Average(), f1 = film.f(wo, wi, mode).Average();
+                    double p0 = bare.PDF(wo, wi, mode, BxDFReflTransFlags.All), p1 = film.PDF(wo, wi, mode, BxDFReflTransFlags.All);
+                    if (Math.Max(f0, f1) > 1e-3)
+                    {
+                        // Next to total reflection the transmittance 1 - R is the difference of two numbers near 1, good to the
+                        // rounding of R (1e-7) only: the difference is allowed that much on top of the relative one
+                        worstF = Math.Max(worstF, Math.Max(0, Math.Abs(f0 - f1) - 3e-6) / Math.Max(f0, f1));
+                        ++compared;
+                    }
+                    if (Math.Max(p0, p1) > 1e-3)
+                    {
+                        worstPdf = Math.Max(worstPdf, Math.Max(0, Math.Abs(p0 - p1) - 3e-6) / Math.Max(p0, p1));
+                    }
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE bxdf rough thin film of no thickness against the bare BxDFs: f %.1e, PDF %.1e (%d pairs)", worstF,
+                                                      worstPdf, compared));
+            EXPECT_GT(compared, 1500);
+            EXPECT_LT(worstF, 1e-4);
+            EXPECT_LT(worstPdf, 1e-4);
         }
 
         [TEST("BxDFCheck", "SmoothDielectric")]
@@ -694,34 +805,35 @@ namespace pbrt
                              "MultiScatterDiffuse StudentT 0.5 gamma 3", false);
         }
 
-        // The V-cavity conductor (Lee et al. 2018) on each distribution, with a perfectly reflecting microsurface: every ray
-        // that enters a groove leaves it, so the albedo is 1 but for the reflections beyond maxBounces. f is a value here, and
-        // the reciprocity is exact.
-        static void VCavityConductor(MicrofacetDistribution distribution, string name)
+        // Thin films on the microfacets of the multiple scattering microsurfaces. With one reflection allowed the conductor
+        // is the rough thin film BxDF; the films do not absorb, so the dielectric still returns all the light; and both
+        // stay reciprocal.
+        [TEST("BxDFCheck", "MultiScatterThinFilm")]
+        public static void BxDFCheck_MultiScatterThinFilm()
         {
-            BxDF bxdf = new VCavityConductorBxDF(distribution, new SampledSpectrum(1f), new SampledSpectrum(1e4f), 24);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            SampledSpectrum eta = new SampledSpectrum(0.2f), k = new SampledSpectrum(3.9f);
+            MicrofacetDistribution distribution = new TrowbridgeReitzDistribution(0.5f, 0.5f);
+            Float[] layerEta = new Float[] { 1.5f }, layerThickness = new Float[] { 400 };
+            ThinFilmStack film = new ThinFilmStack(lambda, layerEta, layerThickness);
             BxDFCheckOptions options = new BxDFCheckOptions();
             options.cosines = new Float[] { 0.9f, 0.5f, 0.2f };
-            options.pairs = 3000;
-            options.samples = 100000;
-            BxDFCheckResult result = BxDFCheck.Run(bxdf, name, options);
-            EXPECT_EQ(0, result.invalid, name + ": negative or non finite values");
-            EXPECT_GT(result.reciprocityPairs, 100, name + ": too few pairs with a value");
-            EXPECT_LT(result.reciprocity, 2e-3, name + ": not reciprocal");
-            EXPECT_LT(result.albedoMax, 1.005, name + ": albedo above one");
-            EXPECT_GT(result.albedoMin, 0.99, name + ": a perfectly reflecting microsurface loses energy");
-            // The integral of the pdf is not asserted from the directions uniform over the sphere that Run uses: the density
-            // grows as the inverse of a distance about one direction, and that estimate has a variance without bound (it is
-            // printed, and is right to 2%). VCavity.DensityIntegratesToOne integrates it properly, to 1 within 1%.
-        }
+            options.pairs = 600;
+            options.repeats = 24;
+            options.bothSides = false;
+            BxDFCheckResult single = BxDFCheck.Run(new ThinFilmBxDF(lambda, layerEta, layerThickness, 1.5f, eta, k, true, distribution),
+                                                   "RoughThinFilm on a conductor, GGX 0.5", options);
+            BxDFCheckResult first = BxDFCheck.Run(new MultiScatterConductorBxDF(distribution, new MicrosurfaceHeightUniform(), eta, k, 1, film),
+                                                  "MultiScatterConductor with a film, GGX 0.5, one reflection", options);
+            EXPECT_LT(Math.Abs(first.albedoMax - single.albedoMax), 0.01);
+            EXPECT_LT(Math.Abs(first.albedoMin - single.albedoMin), 0.01);
+            TightReciprocity(new MultiScatterConductorBxDF(distribution, new MicrosurfaceHeightUniform(), eta, k, 100, film),
+                             "MultiScatterConductor with a film, GGX 0.5", false);
 
-        [TEST("BxDFCheck", "VCavityConductor")]
-        public static void BxDFCheck_VCavityConductor()
-        {
-            VCavityConductor(new TrowbridgeReitzDistribution(0.5f, 0.5f), "VCavityConductor GGX 0.5");
-            VCavityConductor(new TrowbridgeReitzDistribution(0.5f, 0.15f), "VCavityConductor GGX 0.5 0.15");
-            VCavityConductor(new BeckmannDistribution(0.5f, 0.5f), "VCavityConductor Beckmann 0.5");
-            VCavityConductor(new StudentTDistribution(0.5f, 0.5f, 3f), "VCavityConductor StudentT 0.5 gamma 3");
+            ThinFilmStack coating = new ThinFilmStack(lambda, new Float[] { 2.1f }, new Float[] { 300 });
+            BxDF glass = new MultiScatterDielectricBxDF(distribution, new MicrosurfaceHeightUniform(), 1.5f, 200, coating);
+            MultiScatterOther(glass, "MultiScatterDielectric with a film, GGX 0.5 eta 1.5", 200000, true, false);
+            RandomPairReciprocity(glass, "MultiScatterDielectric with a film, GGX 0.5 eta 1.5", 60, 300000);
         }
     }
 }

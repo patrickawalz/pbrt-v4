@@ -528,6 +528,17 @@ namespace pbrt
             return fromCamera ? chain * next : next * chain;
         }
 
+        // 1 / v by wavelength, and 0 where v is 0: what gives a matrix a first element of 1
+        public static SampledSpectrum Reciprocal(SampledSpectrum v)
+        {
+            SampledSpectrum result = new SampledSpectrum(0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                result[i] = v[i] > 0 ? 1 / v[i] : 0;
+            }
+            return result;
+        }
+
         // weight sum / scalar: the sum of the matrices of the paths, over the sum of their scalar reflectances. False where the
         // BxDF is next to nothing (the far tail of a distribution): the ratio of two numbers that underflow is not a matrix.
         public static bool Normalise(Attenuation sum, SampledSpectrum scalar, SampledSpectrum weight, out Attenuation A)
@@ -545,6 +556,64 @@ namespace pbrt
             A = sum * scale;
             return !A.HasNaNs();
         }
+    }
+
+    // ThinFilmStack Definition
+    // (not in pbrt-v4) The thin films on a surface, for the wavelengths of a path: the layers from the ambient medium to the
+    // substrate, with real indices and thicknesses in nanometres (see FrThinFilmPolarised()). ThinFilmBxDF and the
+    // multiple-scattering microsurfaces take their Fresnel terms from it at each (micro)facet.
+    public struct ThinFilmStack
+    {
+        public ThinFilmStack(SampledWavelengths lambda, Float[] layerEta, Float[] layerThickness)
+        {
+            wavelengths = new SampledSpectrum(0.0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                wavelengths[i] = lambda[i];
+            }
+            this.layerEta = layerEta;
+            this.layerThickness = layerThickness;
+        }
+
+        public int Layers() { return layerEta.Length; }
+
+        // On a conductor, for light from the ambient medium with the cosine `cosine`
+        public void Conductor(Float cosine, SampledSpectrum eta, SampledSpectrum k, out SampledSpectrum Fs, out SampledSpectrum Fp,
+                              out SampledSpectrum Ds, out SampledSpectrum Dp)
+        {
+            Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
+            Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float fs, fp, ds, dp;
+                pbrt.FrThinFilmPolarised(cosine, 1, layerEta, layerThickness, false, wavelengths[i], new pstd.complex(eta[i], k[i]),
+                                         out fs, out fp, out ds, out dp, out Float _, out Float _);
+                Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp;
+            }
+        }
+
+        // On a dielectric of index substrateEta, for light that arrives with the signed cosine cosTheta (negative: from the
+        // substrate, which meets the layers in the other order). DsT and DpT are the phases of what goes through; the
+        // transmittances are 1 - Fs and 1 - Fp.
+        public void Dielectric(Float cosTheta, Float substrateEta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
+                               out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT)
+        {
+            Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
+            Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
+            DsT = new SampledSpectrum(0.0f); DpT = new SampledSpectrum(0.0f);
+            bool inside = cosTheta < 0;
+            Float cosine = std.abs(cosTheta);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float fs, fp, ds, dp, dsT, dpT;
+                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, layerEta, layerThickness, inside, wavelengths[i],
+                                         new pstd.complex(inside ? 1 : substrateEta), out fs, out fp, out ds, out dp, out dsT, out dpT);
+                Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT;
+            }
+        }
+
+        private SampledSpectrum wavelengths;
+        private Float[] layerEta, layerThickness;
     }
 
     // MultiScatterConductorBxDF Definition
@@ -568,6 +637,15 @@ namespace pbrt
             this.eta = eta;
             this.k = k;
             this.maxOrder = maxOrder;
+        }
+
+        // The same microsurface with thin films on its microfacets
+        public MultiScatterConductorBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, SampledSpectrum eta, SampledSpectrum k,
+                                         int maxOrder, ThinFilmStack film)
+            : this(mfDistrib, height, eta, k, maxOrder)
+        {
+            this.film = film;
+            this.coated = true;
         }
 
         public override BxDFFlags Flags()
@@ -596,10 +674,28 @@ namespace pbrt
 
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
+            return Sample(default, wo, uc, u, mode, sampleFlags, false, out bool _, out Attenuation _);
+        }
+
+        // The same walk with the matrix of every microfacet it reflects from: the matrix of the sampled path
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            return Sample(bsdf, wo, uc, u, mode, sampleFlags, true, out polarised, out matrix);
+        }
+
+        private pstd.optional<BSDFSample> Sample(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags,
+                                                 bool keep, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
             if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z == 0)
             {
                 return default;
             }
+            bool fromCamera = mode == TransportMode.Radiance;
+            Attenuation chain = default;
+            bool hasChain = false;
             bool flip = wo.z < 0;
             Vector3f start = flip ? -wo : wo;
             RNG rng = new RNG(Hash(wo), Hash(uc, u));
@@ -616,6 +712,8 @@ namespace pbrt
                         return default;
                     }
                     Vector3f wi = flip ? -wr : wr;
+                    polarised = keep && hasChain;
+                    matrix = chain;
                     return new BSDFSample(energy / AbsCosTheta(wi), wi, 1, BxDFFlags.GlossyReflection, 1, true);
                 }
                 if (order == maxOrder)
@@ -624,11 +722,18 @@ namespace pbrt
                 }
                 Vector3f incoming = -wr;
                 Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
-                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                SampledSpectrum reflectance = Reflectance(AbsDot(incoming, wm));
+                energy *= reflectance;
                 wr = Reflect(incoming, wm);
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     return default;
+                }
+                if (keep)
+                {
+                    Attenuation facet = Facet(bsdf, flip ? -1 : 1, incoming, wr, wm, fromCamera) * PolarisedFacet.Reciprocal(reflectance);
+                    chain = PolarisedFacet.Compose(chain, hasChain, facet, fromCamera);
+                    hasChain = true;
                 }
             }
             return default;
@@ -655,13 +760,14 @@ namespace pbrt
 
         // The walk of f for this pair of directions, with the Mueller matrix of every microfacet kept: what each microfacet
         // would send to wi is the matrix of the microfacets before it times that of the reflection towards wi. The matrix
-        // is an estimate, as f is; its first element over the scalar estimate of the same walk scales `weight`.
-        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
+        // is an estimate, as f is: the sum of the matrices over the scalar estimate of the same walk, which is returned.
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
         {
-            A = default;
+            polarised = false;
+            matrix = default;
             if (!SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
             {
-                return false;
+                return new SampledSpectrum(0f);
             }
             Float side = 1;
             if (wo.z < 0)
@@ -693,8 +799,8 @@ namespace pbrt
                     Float term = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine) * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
                     if (!IsNaN(term) && !IsInf(term) && term > 0)
                     {
-                        scalar += energy * FrComplex(cosine, eta, k) * term;
-                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, incoming, wi, wh, eta, k, fromCamera),
+                        scalar += energy * Reflectance(cosine) * term;
+                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, Facet(bsdf, side, incoming, wi, wh, fromCamera),
                                                                           fromCamera) * new SampledSpectrum(term);
                         if (hasSum)
                         {
@@ -708,23 +814,25 @@ namespace pbrt
                     }
                 }
                 Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
-                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                energy *= Reflectance(AbsDot(incoming, wm));
                 wr = Reflect(incoming, wm);
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     break;
                 }
-                chain = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, incoming, wr, wm, eta, k, fromCamera), fromCamera);
+                chain = PolarisedFacet.Compose(chain, hasChain, Facet(bsdf, side, incoming, wr, wm, fromCamera), fromCamera);
                 hasChain = true;
             }
-            if (!hasSum)
+            if (hasSum)
             {
-                return false;
+                polarised = PolarisedFacet.Normalise(sum, scalar, new SampledSpectrum(1f), out matrix);
             }
-            return PolarisedFacet.Normalise(sum, scalar, weight, out A);
+            return scalar / wi.z;
         }
 
         public static string Name() { return "MultiScatterConductorBxDF"; }
+
+        public override bool HasMuellerMatrix() { return true; }
 
         public override void Regularize()
         {
@@ -737,6 +845,29 @@ namespace pbrt
         }
 
         // MultiScatterConductorBxDF Private Methods
+        // The reflectance of a microfacet, bare or under the films
+        private SampledSpectrum Reflectance(Float cosine)
+        {
+            if (!coated)
+            {
+                return FrComplex(cosine, eta, k);
+            }
+            film.Conductor(cosine, eta, k, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _);
+            return (Fs + Fp) * 0.5f;
+        }
+
+        // Its matrix (not normalised: the first element is the reflectance)
+        private Attenuation Facet(BSDF bsdf, Float side, Vector3f a, Vector3f b, Vector3f m, bool fromCamera)
+        {
+            if (!coated)
+            {
+                return PolarisedFacet.Conductor(bsdf, side, a, b, m, eta, k, fromCamera);
+            }
+            film.Conductor(AbsDot(a, m), eta, k, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp);
+            return Attenuation.Fresnel(new SampledSpectrum(1f), Fs, Fp, Ds, Dp)
+                .Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+        }
+
         // One walk from wo (both directions above the surface). sum estimates f(wo, wi) cos(theta_i); density estimates the
         // density of wi among the directions in which the walk of a mirror microsurface leaves.
         private void Walk(Vector3f wo, Vector3f wi, ref RNG rng, out SampledSpectrum sum, out Float density)
@@ -764,12 +895,12 @@ namespace pbrt
                     if (!IsNaN(term) && !IsInf(term) && term > 0)
                     {
                         density += term;
-                        sum += energy * FrComplex(cosine, eta, k) * term;
+                        sum += energy * Reflectance(cosine) * term;
                     }
                 }
                 // Next direction
                 Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
-                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                energy *= Reflectance(AbsDot(incoming, wm));
                 wr = Reflect(incoming, wm);
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
@@ -783,6 +914,8 @@ namespace pbrt
         private MicrosurfaceHeight height;
         private SampledSpectrum eta, k;
         private int maxOrder;
+        private ThinFilmStack film;
+        private bool coated;
     }
 
     // MultiScatterDiffuseBxDF Definition
@@ -862,6 +995,22 @@ namespace pbrt
                 }
             }
             return default;
+        }
+
+        // Diffuse microfacets depolarise: the matrix of every path is that of a depolariser
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
+        {
+            polarised = true;
+            matrix = Attenuation.Lambert(new SampledSpectrum(1f));
+            return f(wo, wi, mode);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            polarised = true;
+            matrix = Attenuation.Lambert(new SampledSpectrum(1f));
+            return Sample_f(wo, uc, u, mode, sampleFlags);
         }
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
@@ -950,6 +1099,15 @@ namespace pbrt
             this.maxOrder = maxOrder;
         }
 
+        // The same microsurface with thin films on its microfacets: the reflectance of a microfacet then depends on the
+        // wavelength, the walk chooses between reflection and transmission by its average, and carries the rest as a weight
+        public MultiScatterDielectricBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, Float eta, int maxOrder, ThinFilmStack film)
+            : this(mfDistrib, height, eta, maxOrder)
+        {
+            this.film = film;
+            this.coated = true;
+        }
+
         public override BxDFFlags Flags()
         {
             return eta == 1 ? BxDFFlags.GlossyTransmission : (BxDFFlags.GlossyReflection | BxDFFlags.GlossyTransmission);
@@ -961,28 +1119,50 @@ namespace pbrt
             {
                 return new SampledSpectrum(0f);
             }
-            Float etaAbove = eta;
+            bool flipped = false;
             if (wo.z < 0)
             {
                 wo = -wo;
                 wi = -wi;
-                etaAbove = 1 / eta;
+                flipped = true;
             }
+            Float etaAbove = flipped ? 1 / eta : eta;
             RNG rng = new RNG(Hash(wo), Hash(wi));
-            Float value = Walk(wo, wi, etaAbove, ref rng) / AbsCosTheta(wi);
+            SampledSpectrum value;
+            Float density;
+            Walk(wo, wi, flipped, ref rng, out value, out density);
+            value /= AbsCosTheta(wi);
             if (wi.z < 0 && mode == TransportMode.Radiance)
             {
                 value /= Sqr(etaAbove);
             }
-            return new SampledSpectrum(value);
+            return value;
         }
 
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
+            return Sample(default, wo, uc, u, mode, sampleFlags, false, out bool _, out Attenuation _);
+        }
+
+        // The same walk with the matrix of every microfacet it meets: the matrix of the sampled path
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            return Sample(bsdf, wo, uc, u, mode, sampleFlags, true, out polarised, out matrix);
+        }
+
+        private pstd.optional<BSDFSample> Sample(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags,
+                                                 bool keep, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
             if (wo.z == 0)
             {
                 return default;
             }
+            bool fromCamera = mode == TransportMode.Radiance;
+            Attenuation chain = default;
+            bool hasChain = false;
             bool flip = wo.z < 0;
             Vector3f start = flip ? -wo : wo;
             Float etaAbove = flip ? 1 / eta : eta;
@@ -990,6 +1170,7 @@ namespace pbrt
             Vector3f wr = -start;
             Float h = MicrosurfaceWalk.StartHeight(height);
             bool outside = true;
+            SampledSpectrum energy = new SampledSpectrum(1f);
             for (int order = 0; order <= maxOrder; ++order)
             {
                 h = NextHeight(wr, h, outside, rng.Uniform<Float>());
@@ -1005,12 +1186,13 @@ namespace pbrt
                         return default;
                     }
                     Vector3f wi = flip ? -wr : wr;
-                    Float weight = 1;
                     if (!outside && mode == TransportMode.Radiance)
                     {
-                        weight /= Sqr(etaAbove);
+                        energy /= Sqr(etaAbove);
                     }
-                    return new BSDFSample(new SampledSpectrum(weight / AbsCosTheta(wi)), wi, 1,
+                    polarised = keep && hasChain;
+                    matrix = chain;
+                    return new BSDFSample(energy / AbsCosTheta(wi), wi, 1,
                                           outside ? BxDFFlags.GlossyReflection : BxDFFlags.GlossyTransmission, outside ? 1 : etaAbove, true);
                 }
                 if (order == maxOrder)
@@ -1019,10 +1201,24 @@ namespace pbrt
                 }
                 Vector3f wm;
                 bool reflected;
-                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng, out wm, out reflected);
+                bool wasOutside = outside;
+                Vector3f incoming = -wr;
+                SampledSpectrum weight;
+                wr = SamplePhase(incoming, flip, ref outside, ref rng, out wm, out reflected, out weight);
+                energy *= weight;
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     return default;
+                }
+                if (keep)
+                {
+                    Attenuation step;
+                    if (!Facet(bsdf, flip ? -1 : 1, incoming, wr, wm, Dot(incoming, wm), flip, wasOutside, reflected, fromCamera, out step))
+                    {
+                        return default;
+                    }
+                    chain = PolarisedFacet.Compose(chain, hasChain, step, fromCamera);
+                    hasChain = true;
                 }
             }
             return default;
@@ -1039,19 +1235,24 @@ namespace pbrt
             {
                 return 0;
             }
-            Float etaAbove = eta;
+            bool flipped = false;
             if (wo.z < 0)
             {
                 wo = -wo;
                 wi = -wi;
-                etaAbove = 1 / eta;
+                flipped = true;
             }
             RNG rng = new RNG(Hash(wi, 0x5044464d53UL), Hash(wo));
             // Nothing is absorbed: the power the walk sends to wi is the density of wi
-            return std.max<Float>(Walk(wo, wi, etaAbove, ref rng), 1e-6f);
+            SampledSpectrum value;
+            Float density;
+            Walk(wo, wi, flipped, ref rng, out value, out density);
+            return std.max<Float>(density, 1e-6f);
         }
 
         public static string Name() { return "MultiScatterDielectricBxDF"; }
+
+        public override bool HasMuellerMatrix() { return true; }
 
         public override void Regularize()
         {
@@ -1074,19 +1275,46 @@ namespace pbrt
             return -MicrosurfaceWalk.SampleHeight(mfDistrib, height, -wr, -h, u);
         }
 
-        // The power per solid angle that a microfacet met from the direction wi (pointing away from it), on the side
-        // `outside`, sends to wo on the side `woOutside`. wh is the normal of the microfacet that does it and cosine that of
-        // wi with it (for the Fresnel equations); zero when there is none.
-        private Float EvalPhase(Vector3f wi, Vector3f wo, Float etaAbove, bool outside, bool woOutside, out Vector3f wh, out Float cosine)
+        // The reflectance of a microfacet for light that meets it with the cosine `cosine` (positive) from the side
+        // `outside` of the walk, which is the other side of the surface when the walk is `flipped`. Returns the probability
+        // with which the walk reflects: the reflectance, or its average over the wavelengths under thin films.
+        private Float Fresnel(Float cosine, bool flipped, bool outside, out SampledSpectrum R)
         {
+            if (!coated)
+            {
+                Float etaAbove = flipped ? 1 / eta : eta;
+                Float reflectance = FrDielectric(cosine, outside ? etaAbove : 1 / etaAbove);
+                R = new SampledSpectrum(reflectance);
+                return reflectance;
+            }
+            bool above = outside != flipped;
+            film.Dielectric(above ? cosine : -cosine, eta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
+                            out SampledSpectrum _, out SampledSpectrum _);
+            R = (Fs + Fp) * 0.5f;
+            return Clamp(R.Average(), 0, 1);
+        }
+
+        // The power per solid angle that a microfacet met from the direction wi (pointing away from it), on the side
+        // `outside`, sends to wo on the side `woOutside`: the returned value times `fresnel` (the reflectance or the
+        // transmittance of the microfacet, by wavelength). `probability` is the same with the probability that the walk
+        // gives to the reflection or the transmission in the place of `fresnel`. wh is the normal of the microfacet that
+        // does it and cosine that of wi with it; zero when there is none.
+        private Float EvalPhase(Vector3f wi, Vector3f wo, bool flipped, bool outside, bool woOutside, out Vector3f wh, out Float cosine,
+                                out SampledSpectrum fresnel, out Float probability)
+        {
+            Float etaAbove = flipped ? 1 / eta : eta;
             Float etaLocal = outside ? etaAbove : 1 / etaAbove;
             Float side = outside ? 1 : -1;
+            fresnel = new SampledSpectrum(0f);
+            probability = 0;
             if (outside == woOutside)
             {
                 // Reflection
                 wh = Normalize(wi + wo);
                 cosine = Dot(wi, wh);
-                return 0.25f * mfDistrib.PDF_SingleSided(side * wi, side * wh) / cosine * FrDielectric(cosine, etaLocal);
+                Float geometry = 0.25f * mfDistrib.PDF_SingleSided(side * wi, side * wh) / cosine;
+                probability = Fresnel(cosine, flipped, outside, out fresnel);
+                return geometry;
             }
             else
             {
@@ -1101,52 +1329,107 @@ namespace pbrt
                 {
                     return 0;
                 }
-                return Sqr(etaLocal) * (1 - FrDielectric(cosine, etaLocal)) * mfDistrib.PDF_SingleSided(side * wi, side * wh) *
+                SampledSpectrum R;
+                probability = 1 - Fresnel(cosine, flipped, outside, out R);
+                fresnel = new SampledSpectrum(1f) - R;
+                return Sqr(etaLocal) * mfDistrib.PDF_SingleSided(side * wi, side * wh) *
                        std.max<Float>(0, -Dot(wo, wh)) / Sqr(cosine + etaLocal * Dot(wo, wh));
             }
         }
 
         // The direction in which a microfacet met from wi sends the walk, and the side it is then on. wm is the normal of
-        // the microfacet, on the side of wi, and reflected tells what it did.
-        private Vector3f SamplePhase(Vector3f wi, Float etaAbove, ref bool outside, ref RNG rng, out Vector3f wm, out bool reflected)
+        // the microfacet, on the side of wi, and reflected tells what it did. weight is what the choice leaves of the light
+        // of each wavelength: 1 for a bare microfacet.
+        private Vector3f SamplePhase(Vector3f wi, bool flipped, ref bool outside, ref RNG rng, out Vector3f wm, out bool reflected,
+                                     out SampledSpectrum weight)
         {
+            Float etaAbove = flipped ? 1 / eta : eta;
             Float etaLocal = outside ? etaAbove : 1 / etaAbove;
             Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
             wm = outside ? mfDistrib.Sample_wm_SingleSided(wi, u) : -mfDistrib.Sample_wm_SingleSided(-wi, u);
             Float cosine = Dot(wi, wm);
-            Float reflectance = FrDielectric(cosine, etaLocal);
+            SampledSpectrum R;
+            Float reflectance = Fresnel(cosine, flipped, outside, out R);
             reflected = rng.Uniform<Float>() < reflectance;
+            weight = new SampledSpectrum(1f);
             if (reflected)
             {
+                if (coated)
+                {
+                    weight = R / reflectance;
+                }
                 return -wi + 2 * cosine * wm;
+            }
+            if (coated)
+            {
+                weight = (new SampledSpectrum(1f) - R) / (1 - reflectance);
             }
             outside = !outside;
             Float cosTransmitted = -SafeSqrt(1 - (1 - cosine * cosine) / Sqr(etaLocal));
             return Normalize(wm * (cosine / etaLocal + cosTransmitted) - wi / etaLocal);
         }
 
-        // The walk of f for this pair of directions with the Mueller matrix of every microfacet kept. A microfacet that the
-        // walk reflected from, or went through, with the probability of the scalar reflectance (or transmittance) has its
-        // matrix divided by that probability.
-        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
+        // The matrix of a microfacet met from a (on the side `outside` of the walk) that sends the light to b, with a first
+        // element of 1 at every wavelength. False when the microfacet does not do it at any.
+        private bool Facet(BSDF bsdf, Float side, Vector3f a, Vector3f b, Vector3f m, Float cosine, bool flipped, bool outside, bool reflect,
+                           bool fromCamera, out Attenuation matrix)
         {
-            A = default;
-            if (wo.z == 0 || wi.z == 0)
+            matrix = default;
+            if (!coated)
+            {
+                Float etaAbove = flipped ? 1 / eta : eta;
+                Float scalar;
+                matrix = PolarisedFacet.Dielectric(bsdf, side, a, b, m, cosine, outside ? etaAbove : 1 / etaAbove, reflect, fromCamera, out scalar);
+                if (!(scalar > 0))
+                {
+                    return false;
+                }
+                matrix *= new SampledSpectrum(1 / scalar);
+                return true;
+            }
+            bool above = outside != flipped;
+            film.Dielectric(above ? cosine : -cosine, eta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
+                            out SampledSpectrum DsT, out SampledSpectrum DpT);
+            SampledSpectrum one = new SampledSpectrum(1f), scale = new SampledSpectrum(0f);
+            bool any = false;
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float R = 0.5f * (Fs[i] + Fp[i]);
+                Float norm = reflect ? R : 1 - R;
+                scale[i] = norm > 0 ? 1 / norm : 0;
+                any |= norm > 0;
+            }
+            if (!any)
             {
                 return false;
             }
-            Float etaAbove = eta;
+            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, one - Fs, one - Fp, DsT, DpT);
+            matrix = matrix.Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+            return true;
+        }
+
+        // The walk of f for this pair of directions with the Mueller matrix of every microfacet kept, each with a first
+        // element of 1: the scalar factors are those of the walk of f, whose value is returned.
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            if (wo.z == 0 || wi.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            bool flipped = false;
             Float side = 1;
             if (wo.z < 0)
             {
                 wo = -wo;
                 wi = -wi;
-                etaAbove = 1 / eta;
+                flipped = true;
                 side = -1;
             }
             bool fromCamera = mode == TransportMode.Radiance;
             RNG rng = new RNG(Hash(wo), Hash(wi));
-            Float scalar = 0;
+            SampledSpectrum scalar = new SampledSpectrum(0f), energy = new SampledSpectrum(1f);
             Attenuation sum = default, chain = default;
             bool hasSum = false, hasChain = false;
             Vector3f wr = -wo;
@@ -1161,20 +1444,19 @@ namespace pbrt
                     break;
                 }
                 Vector3f incoming = -wr;
-                Float etaLocal = outside ? etaAbove : 1 / etaAbove;
                 Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
                 Vector3f wh;
-                Float cosine;
-                Float term = EvalPhase(incoming, wi, etaAbove, outside, wiOutside, out wh, out cosine) * shadowing;
+                Float cosine, probability;
+                SampledSpectrum fresnel;
+                Float term = EvalPhase(incoming, wi, flipped, outside, wiOutside, out wh, out cosine, out fresnel, out probability) * shadowing;
                 if (!IsNaN(term) && !IsInf(term) && term > 0)
                 {
-                    Float probability;
-                    Attenuation facet = PolarisedFacet.Dielectric(bsdf, side, incoming, wi, wh, cosine, etaLocal, outside == wiOutside, fromCamera,
-                                                                  out probability);
-                    if (probability > 0)
+                    Attenuation facet;
+                    if (Facet(bsdf, side, incoming, wi, wh, cosine, flipped, outside, outside == wiOutside, fromCamera, out facet))
                     {
-                        scalar += term;
-                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, facet, fromCamera) * new SampledSpectrum(term / probability);
+                        SampledSpectrum contributed = energy * fresnel * term;
+                        scalar += contributed;
+                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, facet, fromCamera) * contributed;
                         if (hasSum)
                         {
                             sum += contribution;
@@ -1188,32 +1470,41 @@ namespace pbrt
                 }
                 Vector3f wm;
                 bool reflected;
-                wr = SamplePhase(incoming, etaAbove, ref outside, ref rng, out wm, out reflected);
+                bool wasOutside = outside;
+                SampledSpectrum stepWeight;
+                wr = SamplePhase(incoming, flipped, ref outside, ref rng, out wm, out reflected, out stepWeight);
+                energy *= stepWeight;
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     break;
                 }
-                Float chosen;
-                Attenuation step = PolarisedFacet.Dielectric(bsdf, side, incoming, wr, wm, Dot(incoming, wm), etaLocal, reflected, fromCamera, out chosen);
-                if (!(chosen > 0))
+                Attenuation step;
+                if (!Facet(bsdf, side, incoming, wr, wm, Dot(incoming, wm), flipped, wasOutside, reflected, fromCamera, out step))
                 {
                     break;
                 }
-                chain = PolarisedFacet.Compose(chain, hasChain, step * new SampledSpectrum(1 / chosen), fromCamera);
+                chain = PolarisedFacet.Compose(chain, hasChain, step, fromCamera);
                 hasChain = true;
             }
-            if (!hasSum)
+            if (hasSum)
             {
-                return false;
+                polarised = PolarisedFacet.Normalise(sum, scalar, new SampledSpectrum(1f), out matrix);
             }
-            return PolarisedFacet.Normalise(sum, new SampledSpectrum(scalar), weight, out A);
+            SampledSpectrum value = scalar / AbsCosTheta(wi);
+            if (wi.z < 0 && mode == TransportMode.Radiance)
+            {
+                value /= Sqr(flipped ? 1 / eta : eta);
+            }
+            return value;
         }
 
-        // One walk from wo above the surface: the estimate of the power per solid angle sent to wi (f cos(theta_i), without
-        // the factor of the radiance)
-        private Float Walk(Vector3f wo, Vector3f wi, Float etaAbove, ref RNG rng)
+        // One walk from wo above the surface: sum estimates the power per solid angle sent to wi (f cos(theta_i), without
+        // the factor of the radiance), and density the density of wi among the directions in which the walk leaves.
+        private void Walk(Vector3f wo, Vector3f wi, bool flipped, ref RNG rng, out SampledSpectrum sum, out Float density)
         {
-            Float sum = 0;
+            sum = new SampledSpectrum(0f);
+            density = 0;
+            SampledSpectrum energy = new SampledSpectrum(1f);
             Vector3f wr = -wo;
             Float h = MicrosurfaceWalk.StartHeight(height);
             bool outside = true;
@@ -1227,20 +1518,22 @@ namespace pbrt
                 }
                 Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
                 Vector3f wh, wm;
-                Float cosine;
+                Float cosine, probability;
                 bool reflected;
-                Float term = EvalPhase(-wr, wi, etaAbove, outside, wiOutside, out wh, out cosine) * shadowing;
+                SampledSpectrum fresnel, weight;
+                Float term = EvalPhase(-wr, wi, flipped, outside, wiOutside, out wh, out cosine, out fresnel, out probability) * shadowing;
                 if (!IsNaN(term) && !IsInf(term) && term > 0)
                 {
-                    sum += term;
+                    sum += energy * fresnel * term;
+                    density += probability * term;
                 }
-                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng, out wm, out reflected);
+                wr = SamplePhase(-wr, flipped, ref outside, ref rng, out wm, out reflected, out weight);
+                energy *= weight;
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     break;
                 }
             }
-            return sum;
         }
 
         // MultiScatterDielectricBxDF Private Members
@@ -1248,327 +1541,8 @@ namespace pbrt
         private MicrosurfaceHeight height;
         private Float eta;
         private int maxOrder;
-    }
-
-    // VCavityHit Definition
-    public struct VCavityHit
-    {
-        // contribution to p(o) (solid angle density)
-        public double w;
-        // tilt of the facet normals
-        public double alpha;
-        public int first, n, axis;
-    }
-
-    // VCavityGrooves Definition
-    // (not in pbrt-v4) What the V-cavity BxDFs share: the grooves that reflect one direction to another
-    public static unsafe class VCavityGrooves
-    {
-        public const int kMaxHits = 512;
-
-        public static double DAt(MicrofacetDistribution distrib, double alpha, double cphi, double sphi)
-        {
-            double sa = Math.Sin(alpha), ca = Math.Cos(alpha);
-            return distrib.D(new Vector3f((Float)(sa * cphi), (Float)(sa * sphi), (Float)ca));
-        }
-
-        // Enumerates every (axis orientation, first facet, bounce count, groove tilt) that maps i to o.
-        public static int Enumerate(MicrofacetDistribution distrib, int maxN, Vector3f i, Vector3f o, VCavityHit* hits, out double ellOut, double* thI)
-        {
-            ellOut = 0;
-            double hx = (double)i.x + o.x, hy = (double)i.y + o.y;
-            double L = Math.Sqrt(hx * hx + hy * hy);
-            if (!(L > 1e-9))
-            {
-                return 0;
-            }
-            double tx = hx / L, ty = hy / L;
-            double a_i = i.x * tx + i.y * ty, b_i = i.z, a_o = o.x * tx + o.y * ty, b_o = o.z;
-            ellOut = Math.Sqrt(a_i * a_i + b_i * b_i);
-            const double PI = VCavity.kPi;
-            int nh = 0;
-            VCavityOutcome* outcomes = stackalloc VCavityOutcome[VCavity.kMaxOutcomes];
-            for (int axis = 0; axis < 2; ++axis)
-            {
-                double sg = axis == 0 ? 1.0 : -1.0;
-                double thi = Math.Atan2(sg * a_i, b_i), tho = Math.Atan2(sg * a_o, b_o);
-                thI[axis] = thi;
-                // azimuth of the left-facet normal
-                double cphi = sg * tx, sphi = sg * ty;
-                for (int first = 0; first < 2; ++first)
-                {
-                    for (int n = 1; n <= maxN; ++n)
-                    {
-                        bool odd = (n & 1) != 0;
-                        double x0;
-                        if (first == 0)
-                        {
-                            x0 = odd ? tho + thi : thi + PI - tho;
-                        }
-                        else
-                        {
-                            x0 = odd ? -tho - thi : tho - thi - PI;
-                        }
-                        double alo = 1e-9;
-                        if (n >= 2)
-                        {
-                            alo = Math.Max(alo, PI / 2 - (PI + 2 * Math.Abs(thi)) / (2.0 * (n - 1)));
-                        }
-                        int m0 = (int)Math.Ceiling((2 * n * alo - x0) / (2 * PI));
-                        int m1 = (int)Math.Floor((n * PI - x0) / (2 * PI));
-                        for (int m = m0; m <= m1; ++m)
-                        {
-                            double alpha = (x0 + 2 * PI * m) / (2.0 * n);
-                            if (!(alpha > 1e-9 && alpha < PI / 2 - 1e-9))
-                            {
-                                continue;
-                            }
-                            int cnt = VCavity.Trace(thi, alpha, -alpha, maxN, outcomes);
-                            for (int j = 0; j < cnt; ++j)
-                            {
-                                if (outcomes[j].first != first || outcomes[j].n != n || Math.Abs(VCavity.WrapPi(outcomes[j].thetaO - tho)) > 1e-6)
-                                {
-                                    continue;
-                                }
-                                double sa = Math.Sin(alpha), ca = Math.Cos(alpha);
-                                double q = ca * DAt(distrib, alpha, cphi, sphi);
-                                double w = q * outcomes[j].prob * sa / (2.0 * n * L);
-                                if (w > 0 && nh < kMaxHits)
-                                {
-                                    hits[nh].w = w;
-                                    hits[nh].alpha = alpha;
-                                    hits[nh].first = first;
-                                    hits[nh].n = n;
-                                    hits[nh].axis = axis;
-                                    ++nh;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return nh;
-        }
-    }
-
-    // VCavityConductorBxDF Definition
-    // (not in pbrt-v4) A rough conductor made of symmetric V grooves, with every order of the reflections inside a groove in
-    // closed form: Lee, Jarabo, Jeon, Gutierrez and Kim, "Practical Multiple Scattering for Rough Surfaces" (SIGGRAPH Asia
-    // 2018), on any MicrofacetDistribution (the model asks it for D and for normals with the density D cos(theta)). The
-    // groove whose left facet has the normal s is taken with the density D(s) (s . n). For a pair of directions, the grooves
-    // whose axis is perpendicular to the half vector of the projections, and that send one direction to the other after n
-    // reflections, are enumerated (VCavity.Trace gives the part of the beam that makes each number of reflections), and f is
-    // their sum: a value, not an estimate. Sample_f picks a groove and one of its outcomes; its density is the same sum
-    // without the Fresnel reflectances (PDF).
-    public sealed unsafe class VCavityConductorBxDF : BxDF
-    {
-        // VCavityConductorBxDF Public Methods
-        public VCavityConductorBxDF() { }
-        public VCavityConductorBxDF(MicrofacetDistribution distrib, SampledSpectrum eta, SampledSpectrum k, int maxBounces)
-        {
-            this.distrib = distrib;
-            this.eta = eta;
-            this.k = k;
-            maxN = Math.Max(1, Math.Min(maxBounces, 64));
-        }
-
-        public override BxDFFlags Flags()
-        {
-            return BxDFFlags.GlossyReflection;
-        }
-
-        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
-        {
-            if (wo.z * wi.z <= 0)
-            {
-                return new SampledSpectrum(0f);
-            }
-            bool flip = wo.z < 0;
-            Vector3f i = flip ? -wo : wo, o = flip ? -wi : wi;
-            VCavityHit* hits = stackalloc VCavityHit[VCavityGrooves.kMaxHits];
-            double ell;
-            double* thI = stackalloc double[2];
-            int nh = VCavityGrooves.Enumerate(distrib, maxN, i, o, hits, out ell, thI);
-            SampledSpectrum sum = new SampledSpectrum(0f);
-            for (int h = 0; h < nh; ++h)
-            {
-                sum += (Float)hits[h].w * PathFresnel(thI[hits[h].axis], hits[h].alpha, hits[h].first, hits[h].n, ell);
-            }
-            return ClampZero(sum / o.z);
-        }
-
-        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z == 0)
-            {
-                return default;
-            }
-            bool flip = wo.z < 0;
-            Vector3f i = flip ? -wo : wo;
-            // groove: left-facet normal s ~ |s.n| D(s) (visible normals of n == |s.n| D(s))
-            Vector3f s = distrib.Sample_wm(new Vector3f(0, 0, 1), u);
-            double sinA = Math.Sqrt((double)s.x * s.x + (double)s.y * s.y);
-            if (!(sinA > 1e-9))
-            {
-                return default;
-            }
-            double alpha = Math.Atan2(sinA, s.z);
-            double tx = s.x / sinA, ty = s.y / sinA;
-            double a_i = i.x * tx + i.y * ty, b_i = i.z, i_u = -i.x * ty + i.y * tx;
-            double ell = Math.Sqrt(a_i * a_i + b_i * b_i);
-            double thI = Math.Atan2(a_i, b_i);
-            VCavityOutcome* outcomes = stackalloc VCavityOutcome[VCavity.kMaxOutcomes];
-            int cnt = VCavity.Trace(thI, alpha, -alpha, maxN, outcomes);
-            double acc = 0, target = uc;
-            int pick = -1;
-            for (int j = 0; j < cnt; ++j)
-            {
-                acc += outcomes[j].prob;
-                if (target < acc)
-                {
-                    pick = j;
-                    break;
-                }
-            }
-            if (pick < 0)
-            {
-                // beyond maxBounces: energy truncated
-                return default;
-            }
-            SampledSpectrum F = PathFresnel(thI, alpha, outcomes[pick].first, outcomes[pick].n, ell);
-            double st = Math.Sin(outcomes[pick].thetaO), ct = Math.Cos(outcomes[pick].thetaO);
-            Vector3f wi = new Vector3f((Float)(ell * st * tx + i_u * ty), (Float)(ell * st * ty - i_u * tx), (Float)(ell * ct));
-            if (flip)
-            {
-                wi = -wi;
-            }
-            if (wi.z == 0 || IsNaN(wi.x + wi.y + wi.z))
-            {
-                return default;
-            }
-            return new BSDFSample(F / AbsCosTheta(wi), wi, 1, BxDFFlags.GlossyReflection, 1, true);
-        }
-
-        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z * wi.z <= 0)
-            {
-                return 0;
-            }
-            bool flip = wo.z < 0;
-            Vector3f i = flip ? -wo : wo, o = flip ? -wi : wi;
-            VCavityHit* hits = stackalloc VCavityHit[VCavityGrooves.kMaxHits];
-            double ell;
-            double* thI = stackalloc double[2];
-            int nh = VCavityGrooves.Enumerate(distrib, maxN, i, o, hits, out ell, thI);
-            double sum = 0;
-            for (int h = 0; h < nh; ++h)
-            {
-                sum += hits[h].w;
-            }
-            return std.max<Float>((Float)sum, 1e-6f);
-        }
-
-        // The grooves that send one direction to the other, each with the matrices of its reflections in their order: the two
-        // facets of a groove are known, so the matrix of a path is exact.
-        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
-        {
-            A = default;
-            if (wo.z * wi.z <= 0)
-            {
-                return false;
-            }
-            Float side = wo.z < 0 ? -1 : 1;
-            Vector3f i = side * wo, o = side * wi;
-            bool fromCamera = mode == TransportMode.Radiance;
-            VCavityHit* hits = stackalloc VCavityHit[VCavityGrooves.kMaxHits];
-            double ell;
-            double* thI = stackalloc double[2];
-            int nh = VCavityGrooves.Enumerate(distrib, maxN, i, o, hits, out ell, thI);
-            double hx = (double)i.x + o.x, hy = (double)i.y + o.y;
-            double L = Math.Sqrt(hx * hx + hy * hy);
-            if (nh == 0 || !(L > 1e-9))
-            {
-                return false;
-            }
-            SampledSpectrum scalar = new SampledSpectrum(0f);
-            Attenuation sum = default;
-            bool hasSum = false;
-            for (int h = 0; h < nh; ++h)
-            {
-                // The facets of the groove: the left one is tilted towards the azimuth of the groove
-                double sg = hits[h].axis == 0 ? 1.0 : -1.0;
-                double sa = Math.Sin(hits[h].alpha), ca = Math.Cos(hits[h].alpha);
-                Vector3f left = new Vector3f((Float)(sa * sg * hx / L), (Float)(sa * sg * hy / L), (Float)ca);
-                Vector3f right = new Vector3f(-left.x, -left.y, left.z);
-                Attenuation chain = default;
-                bool hasChain = false;
-                SampledSpectrum reflectance = new SampledSpectrum(1f);
-                Vector3f from = i;
-                for (int j = 1; j <= hits[h].n; ++j)
-                {
-                    bool leftWall = (hits[h].first == 0) ? ((j & 1) != 0) : ((j & 1) == 0);
-                    Vector3f m = leftWall ? left : right;
-                    Vector3f to = Reflect(from, m);
-                    reflectance *= FrComplex(AbsDot(from, m), eta, k);
-                    chain = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, from, to, m, eta, k, fromCamera), fromCamera);
-                    hasChain = true;
-                    from = -to;
-                }
-                // The path ends along o, or it is not the path of this groove
-                if (!hasChain || Length(-from - o) > 1e-3f)
-                {
-                    continue;
-                }
-                scalar += (Float)hits[h].w * reflectance;
-                Attenuation contribution = chain * new SampledSpectrum((Float)hits[h].w);
-                if (hasSum)
-                {
-                    sum += contribution;
-                }
-                else
-                {
-                    sum = contribution;
-                    hasSum = true;
-                }
-            }
-            if (!hasSum)
-            {
-                return false;
-            }
-            return PolarisedFacet.Normalise(sum, scalar, weight, out A);
-        }
-
-        public static string Name() { return "VCavityConductorBxDF"; }
-
-        public override void Regularize()
-        {
-            distrib.Regularize();
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ VCavityConductorBxDF distrib: %s eta: %s k: %s maxBounces: %d ]", distrib, eta, k, maxN);
-        }
-
-        // VCavityConductorBxDF Private Methods
-        // The product of the Fresnel reflectances of the reflections of a path
-        private SampledSpectrum PathFresnel(double thI, double alpha, int first, int n, double ell)
-        {
-            double* c2 = stackalloc double[64];
-            VCavity.PathCosines(thI, alpha, -alpha, first, n, c2);
-            SampledSpectrum F = new SampledSpectrum(1f);
-            for (int j = 0; j < n; ++j)
-            {
-                F *= FrComplex((Float)Math.Min(1.0, ell * c2[j]), eta, k);
-            }
-            return F;
-        }
-
-        // VCavityConductorBxDF Private Members
-        private MicrofacetDistribution distrib;
-        private SampledSpectrum eta, k;
-        private int maxN = 16;
+        private ThinFilmStack film;
+        private bool coated;
     }
 
     // DiffuseTransmissionBxDF Definition
@@ -1657,7 +1631,7 @@ namespace pbrt
     {
         // DielectricBxDF Public Methods
         public DielectricBxDF() { }
-        public DielectricBxDF(Float eta, TrowbridgeReitzDistribution mfDistrib)
+        public DielectricBxDF(Float eta, MicrofacetDistribution mfDistrib)
         {
             this.eta = eta;
             this.mfDistrib = mfDistrib;
@@ -1876,7 +1850,7 @@ namespace pbrt
 
         // DielectricBxDF Private Members
         private Float eta;
-        private TrowbridgeReitzDistribution mfDistrib;
+        private MicrofacetDistribution mfDistrib;
     }
 
     // ThinDielectricBxDF Definition
@@ -2000,122 +1974,315 @@ namespace pbrt
         private Float eta = 1.5f;
     }
 
-    // (not in pbrt-v4) ThinFilmBxDF Definition: a smooth interface coated with thin films (an anti-reflection coating of a lens, the
-    // interference colours of an oxide on a metal). The reflectance is that of the stack of layers (see FrThinFilmPolarised()):
-    // it depends on the wavelength, on the angle and on the polarisation. The substrate is a conductor (the film only reflects) or
-    // a dielectric (the light that is not reflected goes through, as at a DielectricBxDF; the layers are lossless).
+    // (not in pbrt-v4) ThinFilmBxDF Definition: an interface coated with thin films (an anti-reflection coating of a lens, the
+    // interference colours of an oxide on a metal), smooth or rough. The reflectance is that of the stack of layers (see
+    // FrThinFilmPolarised()): it depends on the wavelength, on the angle and on the polarisation. The substrate is a conductor
+    // (the film only reflects, and only on its outer side) or a dielectric (the light that is not reflected goes through, as at
+    // a DielectricBxDF; the layers are lossless). A rough film is the microfacet model of ConductorBxDF and DielectricBxDF with
+    // the reflectance of the stack at each microfacet, and it is polarised the same way (Polarised()).
     public sealed unsafe class ThinFilmBxDF : BxDF
     {
         // ThinFilmBxDF Public Methods
         public ThinFilmBxDF() { }
         public ThinFilmBxDF(SampledWavelengths lambda, Float[] layerEta, Float[] layerThickness, Float substrateEta,
-                            SampledSpectrum conductorEta, SampledSpectrum conductorK, bool conductor)
+                            SampledSpectrum conductorEta, SampledSpectrum conductorK, bool conductor, MicrofacetDistribution mfDistrib)
         {
-            this.wavelengths = new SampledSpectrum(0.0f);
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                wavelengths[i] = lambda[i];
-            }
-            this.layerEta = layerEta; this.layerThickness = layerThickness; this.substrateEta = substrateEta;
+            this.film = new ThinFilmStack(lambda, layerEta, layerThickness);
+            this.substrateEta = substrateEta;
             this.conductorEta = conductorEta; this.conductorK = conductorK; this.conductor = conductor;
+            this.mfDistrib = mfDistrib;
         }
 
-        public bool IsSpecular() { return true; }
+        // A dielectric substrate of index 1 does not bend the light: there is no microfacet normal for a transmission
+        public bool IsSpecular() { return mfDistrib.EffectivelySmooth() || (!conductor && substrateEta == 1); }
 
         public Float SubstrateEta() { return substrateEta; }
 
         public bool IsConductor() { return conductor; }
 
-        // The reflectance of the stack for light that arrives with the (signed) cosine cosTheta. False when the light cannot
-        // arrive from that side (the substrate of a conductor is opaque)
+        // The reflectance of the stack for light that arrives with the (signed) cosine cosTheta, and the phases of what goes
+        // through (DsT, DpT; the transmittances are 1 - Fs and 1 - Fp). False when the light cannot arrive from that side
+        // (the substrate of a conductor is opaque)
         public bool Fresnel(Float cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
-                            out SampledSpectrum Dp)
+                            out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT)
         {
-            Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
-            Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
-            bool inside = cosTheta < 0;
-            if (inside && conductor)
-                return false;
-            Float cosine = std.abs(cosTheta);
-            Float[] eta = layerEta, thickness = layerThickness;
-            if (inside)
+            if (conductor)
             {
-                // From the substrate: the layers in the other order, the ambient medium in the place of the substrate
-                eta = (Float[])layerEta.Clone(); thickness = (Float[])layerThickness.Clone();
-                Array.Reverse(eta); Array.Reverse(thickness);
+                DsT = new SampledSpectrum(0.0f); DpT = new SampledSpectrum(0.0f);
+                if (cosTheta < 0)
+                {
+                    Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
+                    Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
+                    return false;
+                }
+                film.Conductor(cosTheta, conductorEta, conductorK, out Fs, out Fp, out Ds, out Dp);
+                return true;
             }
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                pstd.complex substrate = inside ? new pstd.complex(1) :
-                                         conductor ? new pstd.complex(conductorEta[i], conductorK[i]) : new pstd.complex(substrateEta);
-                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, eta, thickness, wavelengths[i], substrate,
-                                         out Fs[i], out Fp[i], out Ds[i], out Dp[i]);
-            }
+            film.Dielectric(cosTheta, substrateEta, out Fs, out Fp, out Ds, out Dp, out DsT, out DpT);
             return true;
         }
 
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
-            return new SampledSpectrum(0);
+            return Evaluate(default, wo, wi, mode, false, out bool _, out Attenuation _);
+        }
+
+        // The value with the Mueller matrix of the rough film: that of the stack at the microfacet normal, in the frames of
+        // the plane of that normal, as PolarisedPathIntegrator.RoughAttenuation() builds it for ConductorBxDF and
+        // DielectricBxDF. A transmission keeps the phase difference that the layers put between the two polarisations.
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
+        {
+            return Evaluate(bsdf, wo, wi, mode, true, out polarised, out matrix);
+        }
+
+        private SampledSpectrum Evaluate(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, bool keep, out bool polarised,
+                                         out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            if (IsSpecular())
+                return new SampledSpectrum(0);
+            // Evaluate rough thin film BSDF
+            Vector3f wm;
+            bool reflect;
+            Float etap;
+            if (!HalfVector(wo, wi, out wm, out reflect, out etap))
+                return new SampledSpectrum(0);
+            if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
+                         out SampledSpectrum DsT, out SampledSpectrum DpT))
+                return new SampledSpectrum(0);
+            if (keep)
+                polarised = FacetMatrix(bsdf, wo, wi, wm, reflect, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+            SampledSpectrum R = (Fs + Fp) * 0.5f;
+            Float cosTheta_o = CosTheta(wo), cosTheta_i = CosTheta(wi);
+            if (reflect)
+            {
+                return R * (mfDistrib.D(wm) * mfDistrib.G(wo, wi) / std.abs(4 * cosTheta_i * cosTheta_o));
+            }
+            Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap) * cosTheta_i * cosTheta_o;
+            SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) *
+                                 (mfDistrib.D(wm) * mfDistrib.G(wo, wi) * std.abs(Dot(wi, wm) * Dot(wo, wm) / denom));
+            // Account for non-symmetry with transmission to different medium
+            if (mode == TransportMode.Radiance)
+                ft /= Sqr(etap);
+            return ft;
+        }
+
+        // The matrix of a microfacet from the terms of the stack, with a first element of 1. False when the stack does not
+        // reflect (or let through) any of the wavelengths.
+        private bool FacetMatrix(BSDF bsdf, Vector3f wo, Vector3f wi, Vector3f wm, bool reflect, TransportMode mode, SampledSpectrum Fs,
+                                 SampledSpectrum Fp, SampledSpectrum Ds, SampledSpectrum Dp, SampledSpectrum DsT, SampledSpectrum DpT,
+                                 out Attenuation matrix)
+        {
+            matrix = default;
+            SampledSpectrum one = new SampledSpectrum(1.0f), scale = new SampledSpectrum(0.0f);
+            bool any = false;
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float R = 0.5f * (Fs[i] + Fp[i]);
+                Float norm = reflect ? R : 1 - R;
+                // A wavelength that the stack does not reflect (or does not let through) has no weight either
+                scale[i] = norm > 0 ? 1 / norm : 0;
+                any |= norm > 0;
+            }
+            if (!any)
+                return false;
+            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, one - Fs, one - Fp, DsT, DpT);
+            matrix = matrix.Scattered(bsdf.LocalToRender(wo), bsdf.LocalToRender(wi), bsdf.LocalToRender(wm), mode == TransportMode.Radiance);
+            return true;
         }
 
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
                                                            BxDFReflTransFlags sampleFlags)
         {
-            if (wo.z == 0 || !Fresnel(CosTheta(wo), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _,
-                                      out SampledSpectrum _))
-                return default;
-            SampledSpectrum R = (Fs + Fp) * 0.5f;
-            Float pr = Clamp(R[0], 0, 1), pt = 1 - pr;
-            if (conductor)
-            {
-                pt = 0;
-            }
-            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
-                pr = 0;
-            if ((sampleFlags & BxDFReflTransFlags.Transmission) == 0)
-                pt = 0;
-            if (pr == 0 && pt == 0)
-                return default;
-            if (uc < pr / (pr + pt))
-            {
-                Vector3f wi = new Vector3f(-wo.x, -wo.y, wo.z);
-                return new BSDFSample(R / AbsCosTheta(wi), wi, pr / (pr + pt), BxDFFlags.SpecularReflection);
-            }
+            return Sample(default, wo, uc, u, mode, sampleFlags, false, out bool _, out Attenuation _);
+        }
 
-            Vector3f wt;
-            Float etap;
-            if (!Refract(wo, new Normal3f(0, 0, 1), substrateEta, &etap, &wt))
+        // The same sample with the matrix of the microfacet that was sampled (a rough film: the smooth one is a specular
+        // scattering, which the integrators handle)
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            return Sample(bsdf, wo, uc, u, mode, sampleFlags, true, out polarised, out matrix);
+        }
+
+        private pstd.optional<BSDFSample> Sample(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags,
+                                                 bool keep, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            if (wo.z == 0)
                 return default;
-            SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) / AbsCosTheta(wt);
-            if (mode == TransportMode.Radiance)
-                ft /= Sqr(etap);
-            return new BSDFSample(ft, wt, pt / (pr + pt), BxDFFlags.SpecularTransmission, etap);
+            if (IsSpecular())
+            {
+                // Sample perfect specular thin film BSDF
+                if (!Fresnel(CosTheta(wo), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
+                             out SampledSpectrum _, out SampledSpectrum _))
+                    return default;
+                SampledSpectrum R = (Fs + Fp) * 0.5f;
+                Float pr = Clamp(R[0], 0, 1), pt = 1 - pr;
+                if (conductor)
+                {
+                    pt = 0;
+                }
+                if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                    pr = 0;
+                if ((sampleFlags & BxDFReflTransFlags.Transmission) == 0)
+                    pt = 0;
+                if (pr == 0 && pt == 0)
+                    return default;
+                if (uc < pr / (pr + pt))
+                {
+                    Vector3f wi = new Vector3f(-wo.x, -wo.y, wo.z);
+                    return new BSDFSample(R / AbsCosTheta(wi), wi, pr / (pr + pt), BxDFFlags.SpecularReflection);
+                }
+
+                Vector3f wt;
+                Float etap;
+                if (!Refract(wo, new Normal3f(0, 0, 1), substrateEta, &etap, &wt))
+                    return default;
+                SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) / AbsCosTheta(wt);
+                if (mode == TransportMode.Radiance)
+                    ft /= Sqr(etap);
+                return new BSDFSample(ft, wt, pt / (pr + pt), BxDFFlags.SpecularTransmission, etap);
+            }
+            else
+            {
+                // Sample rough thin film BSDF
+                if (conductor && wo.z < 0)
+                    return default;
+                Vector3f wm = mfDistrib.Sample_wm(wo, u);
+                if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
+                             out SampledSpectrum DsT, out SampledSpectrum DpT))
+                    return default;
+                SampledSpectrum R = (Fs + Fp) * 0.5f;
+                // Compute probabilities _pr_ and _pt_ for sampling reflection and transmission
+                Float pr, pt;
+                Probabilities(R, sampleFlags, out pr, out pt);
+                if (pr == 0 && pt == 0)
+                    return default;
+
+                Float pdf;
+                if (uc < pr / (pr + pt))
+                {
+                    // Sample reflection at rough thin film interface
+                    Vector3f wi = Reflect(wo, wm);
+                    if (!SameHemisphere(wo, wi))
+                        return default;
+                    pdf = mfDistrib.PDF(wo, wm) / (4 * AbsDot(wo, wm)) * pr / (pr + pt);
+                    SampledSpectrum fr = R * (mfDistrib.D(wm) * mfDistrib.G(wo, wi) / (4 * CosTheta(wi) * CosTheta(wo)));
+                    if (keep)
+                        polarised = FacetMatrix(bsdf, wo, wi, wm, true, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+                    return new BSDFSample(fr, wi, pdf, BxDFFlags.GlossyReflection);
+                }
+                else
+                {
+                    // Sample transmission at rough thin film interface
+                    Float etap;
+                    Vector3f wi;
+                    bool tir = !Refract(wo, (Normal3f)wm, substrateEta, &etap, &wi);
+                    if (tir || SameHemisphere(wo, wi) || wi.z == 0)
+                        return default;
+                    Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap);
+                    Float dwm_dwi = AbsDot(wi, wm) / denom;
+                    pdf = mfDistrib.PDF(wo, wm) * dwm_dwi * pt / (pr + pt);
+                    SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) *
+                                         (mfDistrib.D(wm) * mfDistrib.G(wo, wi) *
+                                          std.abs(Dot(wi, wm) * Dot(wo, wm) / (CosTheta(wi) * CosTheta(wo) * denom)));
+                    // Account for non-symmetry with transmission to different medium
+                    if (mode == TransportMode.Radiance)
+                        ft /= Sqr(etap);
+                    if (keep)
+                        polarised = FacetMatrix(bsdf, wo, wi, wm, false, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+                    return new BSDFSample(ft, wi, pdf, BxDFFlags.GlossyTransmission, etap);
+                }
+            }
         }
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
-            return 0;
+            if (IsSpecular())
+                return 0;
+            // Evaluate sampling PDF of rough thin film BSDF
+            Vector3f wm;
+            bool reflect;
+            Float etap;
+            if (!HalfVector(wo, wi, out wm, out reflect, out etap))
+                return 0;
+            if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
+                         out SampledSpectrum _, out SampledSpectrum _))
+                return 0;
+            Float pr, pt;
+            Probabilities((Fs + Fp) * 0.5f, sampleFlags, out pr, out pt);
+            if (pr == 0 && pt == 0)
+                return 0;
+            if (reflect)
+            {
+                return mfDistrib.PDF(wo, wm) / (4 * AbsDot(wo, wm)) * pr / (pr + pt);
+            }
+            Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap);
+            Float dwm_dwi = AbsDot(wi, wm) / denom;
+            return mfDistrib.PDF(wo, wm) * dwm_dwi * pt / (pr + pt);
         }
 
         public static string Name() { return "ThinFilmBxDF"; }
 
-        public override void Regularize() { }
+        public override bool HasMuellerMatrix() { return true; }
+
+        public override void Regularize() { mfDistrib.Regularize(); }
 
         public override BxDFFlags Flags()
         {
-            return conductor ? BxDFFlags.SpecularReflection : BxDFFlags.SpecularReflection | BxDFFlags.SpecularTransmission;
+            BxDFFlags flags = conductor ? BxDFFlags.Reflection : BxDFFlags.Reflection | BxDFFlags.Transmission;
+            return flags | (IsSpecular() ? BxDFFlags.Specular : BxDFFlags.Glossy);
         }
 
         public override string ToString()
         {
-            return StringPrintf("[ ThinFilmBxDF layers: %d substrate: %s ]", layerEta.Length, conductor ? "conductor" : "dielectric");
+            return StringPrintf("[ ThinFilmBxDF layers: %d substrate: %s mfDistrib: %s ]", film.Layers(), conductor ? "conductor" : "dielectric",
+                                mfDistrib);
         }
 
-        private SampledSpectrum wavelengths, conductorEta, conductorK;
-        private Float[] layerEta, layerThickness;
+        // ThinFilmBxDF Private Methods
+        // The microfacet normal that sends wi to wo (the generalised half vector for a transmission), on the upper side.
+        // False when the pair has none.
+        private bool HalfVector(Vector3f wo, Vector3f wi, out Vector3f wm, out bool reflect, out Float etap)
+        {
+            Float cosTheta_o = CosTheta(wo), cosTheta_i = CosTheta(wi);
+            reflect = cosTheta_i * cosTheta_o > 0;
+            etap = 1;
+            wm = default;
+            if (conductor && (!reflect || cosTheta_o < 0))
+                return false;
+            if (!reflect)
+                etap = cosTheta_o > 0 ? substrateEta : (1 / substrateEta);
+            wm = wi * etap + wo;
+            if (cosTheta_i == 0 || cosTheta_o == 0 || LengthSquared(wm) == 0)
+                return false;
+            wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+            // Discard backfacing microfacets
+            if (Dot(wm, wi) * cosTheta_i < 0 || Dot(wm, wo) * cosTheta_o < 0)
+                return false;
+            return true;
+        }
+
+        // The probabilities of sampling the reflection and the transmission of a microfacet: by the reflectance averaged over
+        // the wavelengths, which all follow the one direction
+        private void Probabilities(SampledSpectrum R, BxDFReflTransFlags sampleFlags, out Float pr, out Float pt)
+        {
+            pr = Clamp(R.Average(), 0, 1);
+            pt = conductor ? 0 : 1 - pr;
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                pr = 0;
+            if ((sampleFlags & BxDFReflTransFlags.Transmission) == 0)
+                pt = 0;
+        }
+
+        private ThinFilmStack film;
+        private SampledSpectrum conductorEta, conductorK;
         private Float substrateEta = 1.5f;
         private bool conductor;
+        private MicrofacetDistribution mfDistrib;
     }
 
     // ConductorBxDF Definition
@@ -2123,7 +2290,7 @@ namespace pbrt
     {
         // ConductorBxDF Public Methods
         public ConductorBxDF() { }
-        public ConductorBxDF(TrowbridgeReitzDistribution mfDistrib, SampledSpectrum eta, SampledSpectrum k)
+        public ConductorBxDF(MicrofacetDistribution mfDistrib, SampledSpectrum eta, SampledSpectrum k)
         {
             this.mfDistrib = mfDistrib;
             this.eta = eta;
@@ -2225,7 +2392,7 @@ namespace pbrt
         }
 
         // ConductorBxDF Private Members
-        private TrowbridgeReitzDistribution mfDistrib;
+        private MicrofacetDistribution mfDistrib;
         private SampledSpectrum eta, k;
     }
 
@@ -2264,6 +2431,8 @@ namespace pbrt
             bottom.Regularize();
         }
 
+        public override bool HasMuellerMatrix() { return true; }
+
         public override BxDFFlags Flags()
         {
             BxDFFlags topFlags = top.Flags(), bottomFlags = bottom.Flags();
@@ -2286,13 +2455,51 @@ namespace pbrt
 
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
+            return Evaluate(wo, wi, mode, default, false, out Attenuation _, out bool _);
+        }
+
+        // (not in pbrt-v4) The value with the Mueller matrix of the layers for the pair of directions: the one random walk,
+        // with the matrix of every scattering kept (Evaluate). The interfaces polarise by the Fresnel equations at their
+        // (micro)facet normals, as when they are BxDFs of their own; a diffuse interface and a scattering in the medium
+        // between the interfaces depolarise. The matrix is an estimate, as f is: the sum of the matrices of the paths over
+        // the sum of their scalar contributions.
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            SampledSpectrum value = Evaluate(wo, wi, mode, bsdf, true, out Attenuation sum, out bool hasSum);
+            if (hasSum)
+            {
+                polarised = PolarisedFacet.Normalise(sum, value * nSamples, new SampledSpectrum(1f), out matrix);
+            }
+            return value;
+        }
+
+        // The estimate of f, and with `polarised` the sum of the matrices of its paths, each times its scalar contribution
+        // (hasSum: there is one). chain is the matrix of the path so far, each scattering with a first element of 1: beta
+        // carries the scalar factors as before.
+        private SampledSpectrum Evaluate(Vector3f wo, Vector3f wi, TransportMode mode, BSDF bsdf, bool polarised, out Attenuation sum,
+                                         out bool hasSum)
+        {
+            sum = default;
+            hasSum = false;
             SampledSpectrum f = new SampledSpectrum(0f);
             // Estimate _LayeredBxDF_ value _f_ using random sampling
             // Set _wo_ and _wi_ for layered BSDF evaluation
+            Float side = 1;
             if (twoSided && wo.z < 0)
             {
                 wo = -wo;
                 wi = -wi;
+                side = -1;
+            }
+            bool fromCamera = mode == TransportMode.Radiance;
+            Vector3f directionExit = default, directionEnter = default;
+            if (polarised)
+            {
+                Vector3f woRender = bsdf.LocalToRender(side * wo), wiRender = bsdf.LocalToRender(side * wi);
+                directionExit = fromCamera ? woRender : wiRender;
+                directionEnter = fromCamera ? -wiRender : -woRender;
             }
 
             // Determine entrance interface for layered BSDF
@@ -2319,7 +2526,11 @@ namespace pbrt
 
             // Account for reflection at the entrance interface
             if (SameHemisphere(wo, wi))
+            {
                 f = nSamples * enterInterface.f(wo, wi, mode);
+                if (polarised && (bool)f)
+                    Accumulate(ref sum, ref hasSum, EventMatrix(bsdf, side, enterInterface, wo, wi, fromCamera), f, directionExit, directionEnter);
+            }
 
             // Declare _RNG_ for layered BSDF evaluation
             RNG rng = new RNG(Hash(GetOptions().seed, wo), Hash(wi));
@@ -2348,6 +2559,12 @@ namespace pbrt
 
                 // Declare state for random walk through BSDF layers
                 SampledSpectrum beta = wos.value().f * AbsCosTheta(wos.value().wi) / wos.value().pdf;
+                Attenuation chain = default, exitMatrix = default;
+                if (polarised)
+                {
+                    chain = EventMatrix(bsdf, side, enterInterface, wo, wos.value().wi, fromCamera);
+                    exitMatrix = EventMatrix(bsdf, side, exitInterface, wis.value().wi, wi, fromCamera);
+                }
                 Float z = enteredTop ? thickness : 0;
                 Vector3f w = wos.value().wi;
                 HGPhaseFunction phase = new HGPhaseFunction(g);
@@ -2387,8 +2604,16 @@ namespace pbrt
                             Float wt = 1;
                             if (!IsSpecular(exitInterface.Flags()))
                                 wt = PowerHeuristic(1, wis.value().pdf, 1, phase.PDF(-w, -wis.value().wi));
-                            f += beta * albedo * phase.p(-w, -wis.value().wi) * wt * Tr(zp - exitZ, wis.value().wi) *
-                                 wis.value().f / wis.value().pdf;
+                            SampledSpectrum scattered = beta * albedo * phase.p(-w, -wis.value().wi) * wt * Tr(zp - exitZ, wis.value().wi) *
+                                                        wis.value().f / wis.value().pdf;
+                            f += scattered;
+                            // The scattering in the medium depolarises
+                            if (polarised)
+                            {
+                                Attenuation path = PolarisedFacet.Compose(chain, true, Attenuation.Lambert(new SampledSpectrum(1f)), fromCamera);
+                                Accumulate(ref sum, ref hasSum, PolarisedFacet.Compose(path, true, exitMatrix, fromCamera), scattered, directionExit,
+                                           directionEnter);
+                            }
 
                             // Sample phase function and update layered path state
                             Point2f u = default;
@@ -2400,6 +2625,8 @@ namespace pbrt
                             beta *= albedo * ps.value().p / ps.value().pdf;
                             w = ps.value().wi;
                             z = zp;
+                            if (polarised)
+                                chain = PolarisedFacet.Compose(chain, true, Attenuation.Lambert(new SampledSpectrum(1f)), fromCamera);
 
                             // Possibly account for scattering through _exitInterface_
                             if (((z < exitZ && w.z > 0) || (z > exitZ && w.z < 0)) && !IsSpecular(exitInterface.Flags()))
@@ -2410,7 +2637,12 @@ namespace pbrt
                                 {
                                     Float exitPDF = exitInterface.PDF(-w, wi, mode, BxDFReflTransFlags.Transmission);
                                     Float wt2 = PowerHeuristic(1, ps.value().pdf, 1, exitPDF);
-                                    f += beta * Tr(zp - exitZ, ps.value().wi) * fExit * wt2;
+                                    SampledSpectrum through = beta * Tr(zp - exitZ, ps.value().wi) * fExit * wt2;
+                                    f += through;
+                                    if (polarised)
+                                        Accumulate(ref sum, ref hasSum,
+                                                   PolarisedFacet.Compose(chain, true, EventMatrix(bsdf, side, exitInterface, -w, wi, fromCamera), fromCamera),
+                                                   through, directionExit, directionEnter);
                                 }
                             }
 
@@ -2431,6 +2663,8 @@ namespace pbrt
                         if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                             break;
                         beta *= bs.value().f * AbsCosTheta(bs.value().wi) / bs.value().pdf;
+                        if (polarised)
+                            chain = PolarisedFacet.Compose(chain, true, EventMatrix(bsdf, side, exitInterface, -w, bs.value().wi, fromCamera), fromCamera);
                         w = bs.value().wi;
                     }
                     else
@@ -2442,8 +2676,17 @@ namespace pbrt
                             Float wt = 1;
                             if (!IsSpecular(exitInterface.Flags()))
                                 wt = PowerHeuristic(1, wis.value().pdf, 1, nonExitInterface.PDF(-w, -wis.value().wi, mode));
-                            f += beta * nonExitInterface.f(-w, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * wt *
-                                 Tr(thickness, wis.value().wi) * wis.value().f / wis.value().pdf;
+                            SampledSpectrum connected = beta * nonExitInterface.f(-w, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * wt *
+                                                        Tr(thickness, wis.value().wi) * wis.value().f / wis.value().pdf;
+                            f += connected;
+                            if (polarised && (bool)connected)
+                            {
+                                Attenuation path = PolarisedFacet.Compose(chain, true,
+                                                                          EventMatrix(bsdf, side, nonExitInterface, -w, -wis.value().wi, fromCamera),
+                                                                          fromCamera);
+                                Accumulate(ref sum, ref hasSum, PolarisedFacet.Compose(path, true, exitMatrix, fromCamera), connected, directionExit,
+                                           directionEnter);
+                            }
                         }
                         // Sample new direction using BSDF at _nonExitInterface_
                         Float uc3 = r();
@@ -2454,6 +2697,8 @@ namespace pbrt
                         if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                             break;
                         beta *= bs.value().f * AbsCosTheta(bs.value().wi) / bs.value().pdf;
+                        if (polarised)
+                            chain = PolarisedFacet.Compose(chain, true, EventMatrix(bsdf, side, nonExitInterface, -w, bs.value().wi, fromCamera), fromCamera);
                         w = bs.value().wi;
 
                         if (!IsSpecular(exitInterface.Flags()))
@@ -2468,7 +2713,12 @@ namespace pbrt
                                     Float exitPDF = exitInterface.PDF(-w, wi, mode, BxDFReflTransFlags.Transmission);
                                     wt = PowerHeuristic(1, bs.value().pdf, 1, exitPDF);
                                 }
-                                f += beta * Tr(thickness, bs.value().wi) * fExit * wt;
+                                SampledSpectrum through = beta * Tr(thickness, bs.value().wi) * fExit * wt;
+                                f += through;
+                                if (polarised)
+                                    Accumulate(ref sum, ref hasSum,
+                                               PolarisedFacet.Compose(chain, true, EventMatrix(bsdf, side, exitInterface, -w, wi, fromCamera), fromCamera),
+                                               through, directionExit, directionEnter);
                             }
                         }
                     }
@@ -2481,6 +2731,22 @@ namespace pbrt
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
                                                            BxDFReflTransFlags sampleFlags)
         {
+            return Sample(default, wo, uc, u, mode, sampleFlags, false, out bool _, out Attenuation _);
+        }
+
+        // (not in pbrt-v4) The same sample with the matrix of every scattering of the path it followed: the reflection of
+        // the top interface, or what the light met on its way down and back
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            return Sample(bsdf, wo, uc, u, mode, sampleFlags, true, out polarised, out matrix);
+        }
+
+        private pstd.optional<BSDFSample> Sample(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags,
+                                                 bool keep, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
             CHECK(sampleFlags == BxDFReflTransFlags.All);  // for now
             // Set _wo_ for layered BSDF sampling
             bool flipWi = false;
@@ -2489,6 +2755,9 @@ namespace pbrt
                 wo = -wo;
                 flipWi = true;
             }
+            Float side = flipWi ? -1 : 1;
+            bool fromCamera = mode == TransportMode.Radiance;
+            Attenuation chain = default;
 
             // Sample BSDF at entrance interface to get initial direction _w_
             bool enteredTop = twoSided || wo.z > 0;
@@ -2496,11 +2765,15 @@ namespace pbrt
             if (!bs0 || !(bool)bs0.value().f || bs0.value().pdf == 0 || bs0.value().wi.z == 0)
                 return default;
             BSDFSample bs = bs0.value();
+            if (keep)
+                chain = EventMatrix(bsdf, side, enteredTop ? top : bottom, wo, bs.wi, fromCamera);
             if (bs.IsReflection())
             {
                 if (flipWi)
                     bs.wi = -bs.wi;
                 bs.pdfIsProportional = true;
+                polarised = keep;
+                matrix = chain;
                 return bs;
             }
             Vector3f w = bs.wi;
@@ -2554,6 +2827,9 @@ namespace pbrt
                         specularPath = false;
                         w = ps.value().wi;
                         z = zp;
+                        // The scattering in the medium depolarises
+                        if (keep)
+                            chain = PolarisedFacet.Compose(chain, true, Attenuation.Lambert(new SampledSpectrum(1f)), fromCamera);
 
                         continue;
                     }
@@ -2588,6 +2864,8 @@ namespace pbrt
                 f *= bsi.f;
                 pdf *= bsi.pdf;
                 specularPath &= bsi.IsSpecular();
+                if (keep)
+                    chain = PolarisedFacet.Compose(chain, true, EventMatrix(bsdf, side, iface, -w, bsi.wi, fromCamera), fromCamera);
                 w = bsi.wi;
 
                 // Return _BSDFSample_ if path has left the layers
@@ -2597,6 +2875,8 @@ namespace pbrt
                     flags |= specularPath ? BxDFFlags.Specular : BxDFFlags.Glossy;
                     if (flipWi)
                         w = -w;
+                    polarised = keep;
+                    matrix = chain;
                     return new BSDFSample(f, w, pdf, flags, 1f, true);
                 }
 
@@ -2607,6 +2887,86 @@ namespace pbrt
         }
 
         // LayeredBxDF Private Methods
+        // The matrix of one scattering at an interface, from the direction a on the side of the walk to b (both point away
+        // from the interface), with a first element of 1. A dielectric or a conductor is polarised by the Fresnel equations
+        // at the normal that sends one direction to the other (the normal of the interface when it is smooth); anything
+        // else depolarises.
+        private static Attenuation EventMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, bool fromCamera)
+        {
+            Vector3f m;
+            if (iface is DielectricBxDF dielectric)
+            {
+                Float eta = dielectric.Eta();
+                bool reflect = a.z * b.z > 0;
+                if (eta == 1)
+                {
+                    // No interface: the light goes straight through, as it is
+                    return new Attenuation(new SampledSpectrum(1f));
+                }
+                Float etap = reflect ? 1 : (a.z > 0 ? eta : 1 / eta);
+                m = b * etap + a;
+                if (LengthSquared(m) == 0)
+                {
+                    return Attenuation.Lambert(new SampledSpectrum(1f));
+                }
+                m = FaceForward(Normalize(m), new Normal3f(0, 0, 1));
+                FrDielectricPolarised(Dot(a, m), eta, out Float fs, out Float fp, out Float ds, out Float dp);
+                Float R = 0.5f * (fs + fp);
+                Float norm = reflect ? R : 1 - R;
+                if (!(norm > 0))
+                {
+                    return Attenuation.Lambert(new SampledSpectrum(1f));
+                }
+                Attenuation matrix = reflect ? Attenuation.Fresnel(new SampledSpectrum(1 / norm), fs, fp, ds, dp)
+                                             : Attenuation.Fresnel(new SampledSpectrum(1 / norm), 1 - fs, 1 - fp, 0, 0);
+                return matrix.Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+            }
+            if (iface is ConductorBxDF conductor && a.z * b.z > 0)
+            {
+                m = a + b;
+                if (LengthSquared(m) == 0)
+                {
+                    return Attenuation.Lambert(new SampledSpectrum(1f));
+                }
+                m = FaceForward(Normalize(m), new Normal3f(0, 0, 1));
+                SampledSpectrum eta = conductor.Eta(), k = conductor.K();
+                SampledSpectrum Fs = new SampledSpectrum(0f), Fp = new SampledSpectrum(0f), Ds = new SampledSpectrum(0f), Dp = new SampledSpectrum(0f);
+                SampledSpectrum scale = new SampledSpectrum(0f);
+                Float cosine = AbsDot(a, m);
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    Float fs, fp, ds, dp;
+                    FrComplexPolarised(cosine, new pstd.complex(eta[i], k[i]), out fs, out fp, out ds, out dp);
+                    Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp;
+                    Float F = 0.5f * (fs + fp);
+                    scale[i] = F > 0 ? 1 / F : 0;
+                }
+                return Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp)
+                    .Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+            }
+            return Attenuation.Lambert(new SampledSpectrum(1f));
+        }
+
+        // Adds the matrix of a path times its scalar contribution to the sum
+        private static void Accumulate(ref Attenuation sum, ref bool hasSum, Attenuation matrix, SampledSpectrum contribution, Vector3f directionExit,
+                                       Vector3f directionEnter)
+        {
+            matrix *= contribution;
+            if (!matrix.WithFrames(directionExit, directionEnter) || matrix.HasNaNs())
+            {
+                return;
+            }
+            if (hasSum)
+            {
+                sum += matrix;
+            }
+            else
+            {
+                sum = matrix;
+                hasSum = true;
+            }
+        }
+
         private static Float Tr(Float dz, Vector3f w)
         {
             if (std.abs(dz) <= FloatMinNormal)
