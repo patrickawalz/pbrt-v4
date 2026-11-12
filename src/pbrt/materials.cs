@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // materials.h, materials.cpp
@@ -235,6 +235,15 @@ namespace pbrt
                 eta = parameters.GetOneSpectrum("eta", null, SpectrumType.Unbounded, alloc);
             if (eta == null)
                 eta = new ConstantSpectrum(1.5f);
+            // (not in pbrt-v4) "float abbe": the index given is the one at the sodium D line, and the dispersion follows from the
+            // Abbe number (AbbeDispersionSpectrum). Without it a single index has no dispersion, as before.
+            Float abbe = parameters.GetOneFloat("abbe", 0f);
+            if (abbe != 0)
+            {
+                if (!(eta is ConstantSpectrum))
+                    ErrorExit(loc, "\"abbe\" needs a single index of refraction (\"float eta\"), not a spectrum.");
+                eta = new AbbeDispersionSpectrum(eta.Evaluate(AbbeDispersionSpectrum.LambdaD), abbe);
+            }
 
             FloatTexture uRoughness = parameters.GetFloatTextureOrNull("uroughness", alloc);
             FloatTexture vRoughness = parameters.GetFloatTextureOrNull("vroughness", alloc);
@@ -803,6 +812,7 @@ namespace pbrt
             return texEval.CanEvaluate(new FloatTexture[0], new SpectrumTexture[] { reflectance });
         }
 
+        // (The EON and VMF lobes that the C++ fork put in this material are the materials "eondiffuse" and "vmfdiffuse".)
         public DiffuseBxDF GetBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx, ref SampledWavelengths lambda)
             where TextureEvaluator : ITextureEvaluator
         {
@@ -821,6 +831,165 @@ namespace pbrt
         private Image normalMap;
         private FloatTexture displacement;
         private SpectrumTexture reflectance;
+    }
+
+    // EonDiffuseMaterial Definition
+    // (not in pbrt-v4) The material "eondiffuse": the energy-preserving Oren-Nayar BRDF of Portsmouth, Kutz and Hill
+    // (EonDiffuseBxDF) on its own. It is the rough diffuse lobe of OpenPBR.
+    //   spectrum reflectance   the single scattering albedo (rho of the paper). Default 0.5
+    //   float roughness        0 (Lambertian) to 1; a texture. Default 0.5
+    public sealed unsafe class EonDiffuseMaterial : Material
+    {
+        // EonDiffuseMaterial Public Methods
+        public static string Name() { return "EonDiffuseMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return displacement; }
+        public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public EonDiffuseMaterial(SpectrumTexture reflectance, FloatTexture roughness, FloatTexture displacement, Image normalMap)
+        {
+            this.normalMap = normalMap;
+            this.displacement = displacement;
+            this.reflectance = reflectance;
+            this.roughness = roughness;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ EonDiffuseMaterial displacement: %s normapMap: %s reflectance: %s roughness: %s ]", displacement,
+                                     (normalMap != null ? normalMap.ToString() : "(nullptr)"), reflectance, roughness);
+        }
+
+        public static EonDiffuseMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
+        {
+            SpectrumTexture reflectance = parameters.GetSpectrumTexture("reflectance", null, SpectrumType.Albedo, alloc);
+            if (reflectance == null)
+            {
+                reflectance = new SpectrumConstantTexture(new ConstantSpectrum(0.5f));
+            }
+            FloatTexture roughness = parameters.GetFloatTexture("roughness", 0.5f, alloc);
+            FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+
+            return new EonDiffuseMaterial(reflectance, roughness, displacement, normalMap);
+        }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
+        {
+            return texEval.CanEvaluate(new FloatTexture[] { roughness }, new SpectrumTexture[] { reflectance });
+        }
+
+        // The lobe is Lambertian where the roughness is 0 (the model reduces to it)
+        public BxDF GetBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx, ref SampledWavelengths lambda)
+            where TextureEvaluator : ITextureEvaluator
+        {
+            SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            Float rough = pbrt.Clamp(texEval.Apply(roughness, ctx), 0, 1);
+            if (rough == 0)
+            {
+                return new DiffuseBxDF(r);
+            }
+            return new EonDiffuseBxDF(r, rough);
+        }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            BxDF bxdf = GetBxDF(texEval, ctx, ref lambda);
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
+        }
+
+        // EonDiffuseMaterial Private Members
+        private Image normalMap;
+        private FloatTexture displacement;
+        private SpectrumTexture reflectance;
+        private FloatTexture roughness;
+    }
+
+    // VmfDiffuseMaterial Definition
+    // (not in pbrt-v4) The material "vmfdiffuse": the VMF Diffuse BRDF of d'Eon and Weidlich (VmfDiffuseBxDF) on its own. It is
+    // kept out of the other materials because its fits are not energy conserving to better than a few percent (a white surface
+    // reflects between 0.91 and 1.06), which a layered material would compound.
+    //   spectrum reflectance   the colour seen (the albedo mapping of the paper is applied). Default 0.5
+    //   float roughness        0 (Lambertian) to 1 (the Lambert-sphere BRDF); a texture. Default 0.5
+    public sealed unsafe class VmfDiffuseMaterial : Material
+    {
+        // VmfDiffuseMaterial Public Methods
+        public static string Name() { return "VmfDiffuseMaterial"; }
+
+        public override FloatTexture GetDisplacement() { return displacement; }
+        public override Image GetNormalMap() { return normalMap; }
+        public override bool HasSubsurfaceScattering() { return false; }
+
+        public override BSSRDF GetBSSRDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                           ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            return null;
+        }
+
+        public VmfDiffuseMaterial(SpectrumTexture reflectance, FloatTexture roughness, FloatTexture displacement, Image normalMap)
+        {
+            this.normalMap = normalMap;
+            this.displacement = displacement;
+            this.reflectance = reflectance;
+            this.roughness = roughness;
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ VmfDiffuseMaterial displacement: %s normapMap: %s reflectance: %s roughness: %s ]", displacement,
+                                     (normalMap != null ? normalMap.ToString() : "(nullptr)"), reflectance, roughness);
+        }
+
+        public static VmfDiffuseMaterial Create(TextureParameterDictionary parameters, Image normalMap, FileLoc loc, Allocator alloc)
+        {
+            SpectrumTexture reflectance = parameters.GetSpectrumTexture("reflectance", null, SpectrumType.Albedo, alloc);
+            if (reflectance == null)
+            {
+                reflectance = new SpectrumConstantTexture(new ConstantSpectrum(0.5f));
+            }
+            FloatTexture roughness = parameters.GetFloatTexture("roughness", 0.5f, alloc);
+            FloatTexture displacement = parameters.GetFloatTextureOrNull("displacement", alloc);
+
+            return new VmfDiffuseMaterial(reflectance, roughness, displacement, normalMap);
+        }
+
+        public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
+        {
+            return texEval.CanEvaluate(new FloatTexture[] { roughness }, new SpectrumTexture[] { reflectance });
+        }
+
+        // The lobe is Lambertian where the roughness is 0, as in the paper
+        public BxDF GetBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx, ref SampledWavelengths lambda)
+            where TextureEvaluator : ITextureEvaluator
+        {
+            SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            Float rough = pbrt.Clamp(texEval.Apply(roughness, ctx), 0, 1);
+            if (rough == 0)
+            {
+                return new DiffuseBxDF(r);
+            }
+            return new VmfDiffuseBxDF(r, rough);
+        }
+
+        public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                       ref SampledWavelengths lambda, ScratchBuffer buf)
+        {
+            BxDF bxdf = GetBxDF(texEval, ctx, ref lambda);
+            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
+        }
+
+        // VmfDiffuseMaterial Private Members
+        private Image normalMap;
+        private FloatTexture displacement;
+        private SpectrumTexture reflectance;
+        private FloatTexture roughness;
     }
 
     // ConductorMaterial Definition
@@ -1610,6 +1779,10 @@ namespace pbrt
                 material = OSLMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "eondiffuse")
+                material = EonDiffuseMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "vmfdiffuse")
+                material = VmfDiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "coateddiffuse")
                 material = CoatedDiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "coatedconductor")

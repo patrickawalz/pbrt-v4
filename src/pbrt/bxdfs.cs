@@ -67,6 +67,952 @@ namespace pbrt
         private SampledSpectrum R;
     }
 
+    // EonDiffuseBxDF Definition
+    // (not in pbrt-v4) Energy-preserving Oren-Nayar (EON): Portsmouth, Kutz and Hill, JCGT 14(1), 2025. The single scattering
+    // lobe of the Fujii form of Oren-Nayar plus the multiple scattering lobe that brings the albedo of a white surface to 1.
+    // Sampled by the mixture of a uniform hemisphere and a clipped linearly transformed cosine of the paper.
+    public sealed unsafe class EonDiffuseBxDF : BxDF
+    {
+        // EonDiffuseBxDF Public Methods
+        public EonDiffuseBxDF() { }
+        public EonDiffuseBxDF(SampledSpectrum R, Float roughness)
+        {
+            this.R = R;
+            this.roughness = Clamp(roughness, 0, 1);
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi))
+            {
+                return new SampledSpectrum(0f);
+            }
+            if (AbsCosTheta(wi) == 0 || AbsCosTheta(wo) == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            bool flip = wo.z < 0;
+            return Eval(flip ? -wi : wi, flip ? -wo : wo);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+            {
+                return default;
+            }
+            if (wo.z == 0)
+            {
+                return default;
+            }
+            bool flip = wo.z < 0;
+            Vector3f woL = flip ? -wo : wo;
+            Vector3f wiL;
+            Float pdf;
+            if (!Sample(woL, uc, u, out wiL, out pdf) || !(wiL.z > 0) || !(pdf > 0))
+            {
+                return default;
+            }
+            return new BSDFSample(Eval(wiL, woL), flip ? -wiL : wiL, pdf, BxDFFlags.DiffuseReflection);
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || !SameHemisphere(wo, wi))
+            {
+                return 0;
+            }
+            if (AbsCosTheta(wi) == 0 || AbsCosTheta(wo) == 0)
+            {
+                return 0;
+            }
+            bool flip = wo.z < 0;
+            return Pdf(flip ? -wo : wo, flip ? -wi : wi);
+        }
+
+        public static string Name() { return "EonDiffuseBxDF"; }
+
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags()
+        {
+            return (bool)R ? BxDFFlags.DiffuseReflection : BxDFFlags.Unset;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ EonDiffuseBxDF R: %s roughness: %f ]", R, roughness);
+        }
+
+        // EonDiffuseBxDF Private Methods
+        // Directions are in the local frame with wo.z > 0 and wi.z > 0.
+        private const Float K1 = 0.5f - 2f / (3f * Pi);
+        private const Float K2 = 2f / 3f - 28f / (15f * Pi);
+
+        private Float AF() { return 1 / (1 + K1 * roughness); }
+        private Float Avg() { return AF() * (1 + K2 * roughness); }
+        // Directional albedo of the single-scattering (FON) lobe for rho = 1 (quartic fit, error < 0.1%).
+        private Float FonAlbedo(Float mu)
+        {
+            Float x = 1 - mu;
+            Float gOverPi = x * (0.0571085289f + x * (0.491881867f + x * (-0.332181442f + x * 0.0714429953f)));
+            return (1 + roughness * gOverPi) / (1 + K1 * roughness);
+        }
+
+        private SampledSpectrum Eval(Vector3f wi, Vector3f wo)
+        {
+            Float mi = wi.z, mo = wo.z;
+            Float s = Dot(wi, wo) - mi * mo;
+            Float st = s > 0 ? s / Math.Max(mi, mo) : s;
+            Float af = AF(), avg = Avg();
+            SampledSpectrum fss = R * (InvPi * af * (1 + roughness * st));
+            SampledSpectrum rhoMs = R * R * avg / (new SampledSpectrum(1f) - R * (1 - avg));
+            const Float eps = 1e-7f;
+            Float ms = Math.Max(eps, 1 - FonAlbedo(mo)) * Math.Max(eps, 1 - FonAlbedo(mi)) / Math.Max(eps, 1 - avg);
+            return fss + rhoMs * (InvPi * ms);
+        }
+
+        private static Float Pu(Float mu, Float r)
+        {
+            return MathF.Pow(r, 0.1f) * (0.162925f + (-0.372058f + (0.538233f - 0.290822f * mu) * mu) * mu);
+        }
+
+        private static void Ltc(Float mu, Float r, out Float a, out Float b, out Float c, out Float d)
+        {
+            a = 1 + r * (0.303392f + (-0.518982f + 0.111709f * mu) * mu + (-0.276266f + 0.335918f * mu) * r);
+            b = r * (-1.16407f + 1.15859f * mu + (0.150815f - 0.150105f * mu) * r) / (mu * mu * mu - 1.43545f);
+            c = 1 + r * (0.20013f + (-0.506373f + 0.261777f * mu) * mu);
+            d = r * (0.540852f + (-1.01625f + 0.475392f * mu) * mu) / (-1.0743f + (0.0725628f + mu) * mu);
+        }
+
+        // Aligned frame: wo lies in the xz plane.
+        private static void Basis(Vector3f wo, out Vector3f x, out Vector3f y)
+        {
+            Float l2 = Sqr(wo.x) + Sqr(wo.y);
+            x = l2 > 0 ? new Vector3f(wo.x, wo.y, 0) / MathF.Sqrt(l2) : new Vector3f(1, 0, 0);
+            y = new Vector3f(-x.y, x.x, 0);
+        }
+
+        private Float CltcPdf(Vector3f wo, Vector3f wiLocal)
+        {
+            Vector3f bx, by;
+            Basis(wo, out bx, out by);
+            Vector3f wi = new Vector3f(Dot(bx, wiLocal), Dot(by, wiLocal), wiLocal.z);
+            Float a, b, c, d;
+            Ltc(wo.z, roughness, out a, out b, out c, out d);
+            Float detM = c * (a - b * d);
+            Vector3f wh = new Vector3f(c * (wi.x - b * wi.z), (a - b * d) * wi.y, -c * (d * wi.x - a * wi.z));
+            Float lensq = LengthSquared(wh);
+            Float s = 0.5f * (1 + 1 / MathF.Sqrt(d * d + 1));
+            return Sqr(detM) / Sqr(lensq) * Math.Max(wh.z, 0) / (Pi * s);
+        }
+
+        private Float Pdf(Vector3f wo, Vector3f wi)
+        {
+            Float pu = Pu(wo.z, roughness);
+            return pu * Inv2Pi + (1 - pu) * CltcPdf(wo, wi);
+        }
+
+        private bool Sample(Vector3f wo, Float uc, Point2f u, out Vector3f wi, out Float pdf)
+        {
+            Float pu = Pu(wo.z, roughness);
+            if (uc < pu)
+            {
+                Float sn = SafeSqrt(1 - Sqr(u[0])), phiU = 2 * Pi * u[1];
+                wi = new Vector3f(sn * MathF.Cos(phiU), sn * MathF.Sin(phiU), u[0]);
+                pdf = Pdf(wo, wi);
+                return true;
+            }
+            Float a, b, c, d;
+            Ltc(wo.z, roughness, out a, out b, out c, out d);
+            Float rr = MathF.Sqrt(u[0]), phi = 2 * Pi * u[1];
+            Float x = rr * MathF.Cos(phi), y = rr * MathF.Sin(phi);
+            Float s = 0.5f * (1 + 1 / MathF.Sqrt(d * d + 1));
+            x = -((1 - s) * SafeSqrt(1 - Sqr(y)) + s * x);
+            Float whz = SafeSqrt(1 - Sqr(x) - Sqr(y));
+            Vector3f t = new Vector3f(a * x + b * whz, c * y, d * x + whz);
+            Vector3f bx, by;
+            Basis(wo, out bx, out by);
+            wi = Normalize(t.x * bx + t.y * by + new Vector3f(0, 0, t.z));
+            pdf = Pdf(wo, wi);
+            return !IsNaN(wi.x + wi.y + wi.z) && !IsNaN(pdf);
+        }
+
+        // EonDiffuseBxDF Private Members
+        private SampledSpectrum R;
+        private Float roughness;
+    }
+
+    // VmfDiffuseBxDF Definition
+    // (not in pbrt-v4) VMF Diffuse: d'Eon and Weidlich, EGSR 2024 (the fits of the authors' reference shader). A Lambertian
+    // microsurface whose normals follow a von Mises-Fisher distribution, with its multiple scattering. Sampled by the cosine,
+    // as in the paper. Evaluated in double precision (the sigma series cancels in float).
+    //
+    // Checked against the paper, equation by equation: the roughness (2), the cross section (4) and (6), every C coefficient of the
+    // three orders, f_m (9) and the albedo mapping agree. Where the code is not the paper's text, it is the authors' Shadertoy:
+    //   - between alpha 0.25 and 0.9 the cross section is the spherical harmonic expansion the paper allows, not its fit (5);
+    //   - the cosine terms of the azimuth carry a factor 2 that the paper's series omits (a simulated single scattering has
+    //     the moments of the factor 2);
+    //   - the base of C_a is 1.0075 + 1.16942 sqrt(1 - c), the paper prints 1 + 1.169 sqrt(1 - c) (no effect at c = 1);
+    //   - the albedo mapping, optional in the paper, is always applied: the reflectance given is the colour seen.
+    public sealed unsafe class VmfDiffuseBxDF : BxDF
+    {
+        // VmfDiffuseBxDF Public Methods
+        public VmfDiffuseBxDF() { }
+        public VmfDiffuseBxDF(SampledSpectrum R, Float roughness)
+        {
+            this.R = R;
+            this.roughness = Clamp(roughness, 0, 0.9999f);
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi))
+            {
+                return new SampledSpectrum(0f);
+            }
+            if (AbsCosTheta(wi) == 0 || AbsCosTheta(wo) == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            return Eval(wo, wi);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+            {
+                return default;
+            }
+            Vector3f wi = SampleCosineHemisphere(u);
+            if (wo.z < 0)
+            {
+                wi.z *= -1;
+            }
+            Float pdf = CosineHemispherePDF(AbsCosTheta(wi));
+            if (!(pdf > 0) || AbsCosTheta(wo) == 0)
+            {
+                return default;
+            }
+            return new BSDFSample(Eval(wo, wi), wi, pdf, BxDFFlags.DiffuseReflection);
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || !SameHemisphere(wo, wi))
+            {
+                return 0;
+            }
+            return CosineHemispherePDF(AbsCosTheta(wi));
+        }
+
+        public static string Name() { return "VmfDiffuseBxDF"; }
+
+        public override void Regularize() { }
+
+        public override BxDFFlags Flags()
+        {
+            return (bool)R ? BxDFFlags.DiffuseReflection : BxDFFlags.Unset;
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ VmfDiffuseBxDF R: %s roughness: %f ]", R, roughness);
+        }
+
+        // VmfDiffuseBxDF Private Methods
+        private static double VmfSigma(double u, double m)
+        {
+            double m2 = m * m;
+            double u2 = u * u;
+            if (m < 0.25)
+            {
+                if (m == 0)
+                {
+                    return (u + Math.Abs(u)) * 0.5;
+                }
+                if (u == 1)
+                {
+                    return 1 - 0.5 * m2;
+                }
+                return ((Math.Exp(u2 / (m2 * (-1 + u2))) * m * Math.Sqrt(1 - u2)) / Math.Sqrt(Math.PI) +
+                        u * (1 + pbrt.Erf(u / (m * Math.Sqrt(1 - u2))))) * 0.5 -
+                       0.25 * m2 * (u + Math.Abs(u));
+            }
+            double m4 = m2 * m2, m8 = m4 * m4;
+            double u4 = u2 * u2, u6 = u2 * u4, u8 = u4 * u4, u10 = u6 * u4,
+                   u12 = u6 * u6;
+            double c = 1 / Math.Tanh(2 / m2);
+            double sh = Math.Sinh(2 / m2);
+            double e2 = Math.Exp(-2 / m2);
+            double s = 0.25 - 0.25 * u * (m2 - 2 * c) +
+                       0.0390625 * (-1 + 3 * u2) * (4 + 3 * m4 - 6 * m2 * c);
+            if (m > 0.9)
+            {
+                return s;
+            }
+            s += -0.000732421875 * (3 - 30 * u2 + 35 * u4) *
+                     (16 + 180 * m4 + 105 * m8 - 10 * m2 * (8 + 21 * m4) * c) +
+                 0.000049591064453125 * (-5 + 105 * u2 - 315 * u4 + 231 * u6) *
+                     (64 + 105 * m4 * (32 + 180 * m4 + 99 * m8) -
+                      42 * m2 * (16 + 240 * m4 + 495 * m8) * c) +
+                 (1.0132789611816406e-6 * (35 - 1260 * u2 + 6930 * u4 - 12012 * u6 + 6435 * u8) *
+                  (1 + c) *
+                  (-256 - 315 * m4 * (128 + 33 * m4 * (80 + 364 * m4 + 195 * m8)) +
+                   18 * m2 * (256 + 385 * m4 * (32 + 312 * m4 + 585 * m8)) * c) * sh) * e2 -
+                 (9.12696123123169e-8 *
+                  (-63 + 3465 * u2 - 30030 * u4 + 90090 * u6 - 109395 * u8 + 46189 * u10) *
+                  (1 + c) *
+                  (-1024 - 495 * m4 * (768 + 91 * m4 * (448 + 15 * m4 * (448 + 1836 * m4 + 969 * m8))) +
+                   110 * m2 * (256 + 117 * m4 * (256 + 21 * m4 * (336 + 85 * m4 * (32 + 57 * m4)))) * c) *
+                  sh) * e2 +
+                 (4.3655745685100555e-9 *
+                  (231 - 18018 * u2 + 225225 * u4 - 1.02102e6 * u6 + 2.078505e6 * u8 -
+                   1.939938e6 * u10 + 676039 * u12) *
+                  (1 + c) *
+                  (-4096 - 3003 * m4 * (1024 + 45 * m4 * (2560 + 51 * m4 * (1792 + 285 * m4 * (80 + 308 * m4 + 161 * m8)))) +
+                   78 * m2 * (2048 + 385 * m4 * (1280 + 153 * m4 * (512 + 57 * m4 * (192 + 35 * m4 * (40 + 69 * m4))))) * c) *
+                  sh) * e2;
+            return s;
+        }
+        private static double VmfFm(double ui, double uo, double r, double c)
+        {
+            double C = Math.Sqrt(Math.Max(0.0, 1 - c));
+            double Ck = (1 - 0.5441615108674713 * C - 0.45302863761693374 * (1 - c)) /
+                        (1 + 1.4293127703064865 * C);
+            double Ca = c / Math.Pow(1.0075 + 1.16942 * C,
+                                     Math.Atan((0.0225272 + (-0.264641 + r) * r) * pbrt.Erf(C)));
+            double v = 0.384016 * (-0.341969 + Ca) * Ca * Ck *
+                       (-0.0578978 / (0.287663 + ui * uo) + Math.Abs(-0.0898863 + Math.Tanh(r)));
+            return Math.Max(0.0, v);
+        }
+        private static double VmfAlbedoMap(double kd, double r)
+        {
+            if (kd <= 0)
+            {
+                return 0;
+            }
+            double s = 0.64985 + 0.631112 * r + 1.38922 * r * r;
+            double sr = Math.Sqrt(r);
+            return (-1 + kd + Math.Sqrt(1 - 2 * kd + kd * kd + 4 * s * s * kd * kd)) / (2 * s * kd) * sr +
+                   (1 - sr) * kd;
+        }
+        // ui, uo > 0; cphi = cos of the azimuth difference (1 = backscatter side). Returns f (no cosine).
+        private static double VmfBrdf(double ui, double uo, double cphi, double r, double c)
+        {
+            double m = -Math.Log(1 - Math.Sqrt(r));
+            double sigmai = VmfSigma(ui, m), sigmao = VmfSigma(uo, m), sigmano = VmfSigma(-uo, m);
+            double sigio = sigmai * sigmao;
+            double sigdenom = uo * sigmai + ui * sigmano;
+            double r2 = r * r, r25 = r2 * Math.Sqrt(r), r3 = r * r2, r4 = r2 * r2,
+                   r45 = r4 * Math.Sqrt(r), r5 = r3 * r2;
+            double ui2 = ui * ui, uo2 = uo * uo;
+            double sq = Math.Sqrt(Math.Max(0.0, (1 - ui2) * (1 - uo2)));
+            double s = ui + uo;
+            double C100 = 1 + (-0.1 * r + 0.84 * r4) / (1 + 9 * r3);
+            double C101 = (0.0173 * r + 20.4 * r2 - 9.47 * r3) / (1 + 7.46 * r);
+            double C102 = (-0.927 * r + 2.37 * r2) / (1.24 + r2);
+            double C103 = (-0.11 * r - 1.54 * r2) / (1 - 1.05 * r + 7.1 * r2);
+            double f10 = ((C100 + C101 * ui * uo + C102 * ui2 * uo2 + C103 * (ui2 + uo2)) * sigio) / sigdenom;
+            double C110 = (0.54 * r - 0.182 * r3) / (1 + 1.32 * r2);
+            double C111 = (-0.097 * r + 0.62 * r2 - 0.375 * r3) / (1 + 0.4 * r3);
+            double C112 = 0.283 + 0.862 * r - 0.681 * r2;
+            double f11 = (sq * (C110 + C111 * ui * uo)) * Math.Pow(sigio, C112) / sigdenom;
+            double C120 = (2.25 * r + 5.1 * r2) / (1 + 9.8 * r + 32.4 * r2);
+            double C121 = (-4.32 * r + 6 * r3) / (1 + 9.7 * r + 287 * r3);
+            double f12 = ((1 - ui2) * (1 - uo2) * (C120 + C121 * uo) * (C120 + C121 * ui)) / s;
+            double C200 = (0.00056 * r + 0.226 * r2) / (1 + 7.07 * r2);
+            double C201 = (-0.268 * r + 4.57 * r2 - 12.04 * r3) / (1 + 36.7 * r3);
+            double C202 = (0.418 * r + 2.52 * r2 - 0.97 * r3) / (1 + 10 * r2);
+            double C203 = (0.068 * r - 2.25 * r2 + 2.65 * r3) / (1 + 21.4 * r3);
+            double C204 = (0.05 * r - 4.22 * r3) / (1 + 17.6 * r2 + 43.1 * r3);
+            double f20 = (C200 + C201 * ui * uo + C203 * ui2 * uo2 + C202 * s + C204 * (ui2 + uo2)) / s;
+            double C210 = (-0.049 * r - 0.027 * r3) / (1 + 3.36 * r2);
+            double C211 = (2.77 * r2 - 8.332 * r25 + 6.073 * r3) / (1 + 50 * r4);
+            double C212 = (-0.431 * r2 - 0.295 * r3) / (1 + 23.9 * r3);
+            double f21 = (sq * (C210 + C211 * ui * uo + C212 * s)) / s;
+            double C300 = (-0.083 * r3 + 0.262 * r4) / (1 - 1.9 * r2 + 38.6 * r4);
+            double C301 = (-0.627 * r2 + 4.95 * r25 - 2.44 * r3) / (1 + 31.5 * r4);
+            double C302 = (0.33 * r2 + 0.31 * r25 + 1.4 * r3) / (1 + 20 * r3);
+            double C303 = (-0.74 * r2 + 1.77 * r25 - 4.06 * r3) / (1 + 215 * r5);
+            double C304 = (-1.026 * r3) / (1 + 5.81 * r2 + 13.2 * r3);
+            double f30 = (C300 + C301 * ui * uo + C303 * ui2 * uo2 + C302 * s + C304 * (ui2 + uo2)) / s;
+            double C310 = (0.028 * r2 - 0.0132 * r3) / (1 + 7.46 * r2 - 3.315 * r4);
+            double C311 = (-0.134 * r2 + 0.162 * r25 + 0.302 * r3) / (1 + 57.5 * r45);
+            double C312 = (-0.119 * r2 + 0.5 * r25 - 0.207 * r3) / (1 + 18.7 * r3);
+            double f31 = (sq * (C310 + C311 * ui * uo + C312 * s)) / s;
+            double c2phi = 2 * cphi * cphi - 1;
+            return (1 / Math.PI) * (c * Math.Max(0.0, f10 + 2 * f11 * cphi + 2 * f12 * c2phi) +
+                               c * c * Math.Max(0.0, f20 + 2 * f21 * cphi) +
+                               c * c * c * Math.Max(0.0, f30 + 2 * f31 * cphi)) +
+                   VmfFm(ui, uo, r, c);
+        }
+
+        private SampledSpectrum Eval(Vector3f wo, Vector3f wi)
+        {
+            double ui = AbsCosTheta(wo), uo = AbsCosTheta(wi);
+            double sti = Math.Sqrt(Math.Max(0.0, 1.0 - ui * ui)), sto = Math.Sqrt(Math.Max(0.0, 1.0 - uo * uo));
+            double cphi = 0;
+            if (sti > 0 && sto > 0)
+            {
+                cphi = Clamp(((double)wo.x * wi.x + (double)wo.y * wi.y) / (sti * sto), -1.0, 1.0);
+            }
+            SampledSpectrum result = new SampledSpectrum(0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                double c = VmfAlbedoMap(Clamp((double)R[i], 0.0, 1.0), roughness);
+                result[i] = (Float)VmfBrdf(ui, uo, cphi, roughness, c);
+            }
+            return result;
+        }
+
+        // VmfDiffuseBxDF Private Members
+        private SampledSpectrum R;
+        private Float roughness;
+    }
+
+    // MultiScatterConductorBxDF Definition
+    // (not in pbrt-v4) A rough conductor with the multiple scattering of its microsurface: the random walk of Heitz, Hanika,
+    // d'Eon and Dachsbacher, "Multiple-Scattering Microfacet BSDFs with the Smith Model" (SIGGRAPH 2016), as in the tutorial
+    // code of the paper, on any MicrofacetDistribution (the walk asks it for its single sided functions only). The walk starts
+    // against wo above the microsurface; at each microfacet it meets it reflects, and what it would send to wi is added (next
+    // event estimation), until it leaves or has made maxOrder reflections. f is therefore an estimate, not a value: it is
+    // unbiased, and the same for the same pair of directions. Sample_f follows one walk, and its weight is the product of
+    // the Fresnel reflectances; its density is not known in closed form (pdfIsProportional), and PDF estimates it, as the
+    // walk of a perfect mirror microsurface.
+    public sealed unsafe class MultiScatterConductorBxDF : BxDF
+    {
+        // MultiScatterConductorBxDF Public Methods
+        public MultiScatterConductorBxDF() { }
+        public MultiScatterConductorBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, SampledSpectrum eta, SampledSpectrum k,
+                                         int maxOrder)
+        {
+            this.mfDistrib = mfDistrib;
+            this.height = height;
+            this.eta = eta;
+            this.k = k;
+            this.maxOrder = maxOrder;
+        }
+
+        public override BxDFFlags Flags()
+        {
+            return BxDFFlags.GlossyReflection;
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            // The other face of the surface is the same microsurface, mirrored
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            RNG rng = new RNG(Hash(wo), Hash(wi));
+            SampledSpectrum sum;
+            Float density;
+            Walk(wo, wi, ref rng, out sum, out density);
+            return sum / wi.z;
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z == 0)
+            {
+                return default;
+            }
+            bool flip = wo.z < 0;
+            Vector3f start = flip ? -wo : wo;
+            RNG rng = new RNG(Hash(wo), Hash(uc, u));
+            Vector3f wr = -start;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            SampledSpectrum energy = new SampledSpectrum(1f);
+            for (int order = 0; order <= maxOrder; ++order)
+            {
+                h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left)
+                {
+                    if (order == 0 || !(wr.z > 0))
+                    {
+                        return default;
+                    }
+                    Vector3f wi = flip ? -wr : wr;
+                    return new BSDFSample(energy / AbsCosTheta(wi), wi, 1, BxDFFlags.GlossyReflection, 1, true);
+                }
+                if (order == maxOrder)
+                {
+                    break;
+                }
+                Vector3f incoming = -wr;
+                Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                wr = Reflect(incoming, wm);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    return default;
+                }
+            }
+            return default;
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || !SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
+            {
+                return 0;
+            }
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            RNG rng = new RNG(Hash(wi, 0x5044464d53UL), Hash(wo));
+            SampledSpectrum sum;
+            Float density;
+            Walk(wo, wi, ref rng, out sum, out density);
+            // Strictly positive: the integrator divides by it
+            return std.max<Float>(density, 1e-6f);
+        }
+
+        public static string Name() { return "MultiScatterConductorBxDF"; }
+
+        public override void Regularize()
+        {
+            mfDistrib.Regularize();
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ MultiScatterConductorBxDF mfDistrib: %s eta: %s k: %s maxOrder: %d ]", mfDistrib, eta, k, maxOrder);
+        }
+
+        // MultiScatterConductorBxDF Private Methods
+        // One walk from wo (both directions above the surface). sum estimates f(wo, wi) cos(theta_i); density estimates the
+        // density of wi among the directions in which the walk of a mirror microsurface leaves.
+        private void Walk(Vector3f wo, Vector3f wi, ref RNG rng, out SampledSpectrum sum, out Float density)
+        {
+            sum = new SampledSpectrum(0f);
+            density = 0;
+            Vector3f wr = -wo;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            SampledSpectrum energy = new SampledSpectrum(1f);
+            for (int order = 0; order < maxOrder; ++order)
+            {
+                h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left)
+                {
+                    return;
+                }
+                // Next event estimation: the reflection of this microfacet towards wi, and its way out
+                Vector3f incoming = -wr;
+                Vector3f wh = Normalize(incoming + wi);
+                if (wh.z > 0)
+                {
+                    Float cosine = Dot(incoming, wh);
+                    Float phase = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine);
+                    Float term = phase * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                    if (!IsNaN(term) && !IsInf(term) && term > 0)
+                    {
+                        density += term;
+                        sum += energy * FrComplex(cosine, eta, k) * term;
+                    }
+                }
+                // Next direction
+                Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                wr = Reflect(incoming, wm);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    return;
+                }
+            }
+        }
+
+        // MultiScatterConductorBxDF Private Members
+        private MicrofacetDistribution mfDistrib;
+        private MicrosurfaceHeight height;
+        private SampledSpectrum eta, k;
+        private int maxOrder;
+    }
+
+    // MultiScatterDiffuseBxDF Definition
+    // (not in pbrt-v4) A rough diffuse surface: a microsurface of Lambertian microfacets with its multiple scattering, by the
+    // random walk of Heitz et al. 2016 (the MicrosurfaceDiffuse of the tutorial code of the paper) on any
+    // MicrofacetDistribution. As for MultiScatterConductorBxDF, f is an unbiased estimate, the same for the same pair of
+    // directions, and the density of Sample_f is estimated by PDF, as the walk of a white microsurface.
+    public sealed unsafe class MultiScatterDiffuseBxDF : BxDF
+    {
+        // MultiScatterDiffuseBxDF Public Methods
+        public MultiScatterDiffuseBxDF() { }
+        public MultiScatterDiffuseBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, SampledSpectrum R, int maxOrder)
+        {
+            this.mfDistrib = mfDistrib;
+            this.height = height;
+            this.R = R;
+            this.maxOrder = maxOrder;
+        }
+
+        public override BxDFFlags Flags()
+        {
+            return (bool)R ? BxDFFlags.DiffuseReflection : BxDFFlags.Unset;
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            RNG rng = new RNG(Hash(wo), Hash(wi));
+            SampledSpectrum sum;
+            Float density;
+            Walk(wo, wi, ref rng, out sum, out density);
+            return sum / wi.z;
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z == 0)
+            {
+                return default;
+            }
+            bool flip = wo.z < 0;
+            Vector3f start = flip ? -wo : wo;
+            RNG rng = new RNG(Hash(wo), Hash(uc, u));
+            Vector3f wr = -start;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            SampledSpectrum energy = new SampledSpectrum(1f);
+            for (int order = 0; order <= maxOrder; ++order)
+            {
+                h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left)
+                {
+                    if (order == 0 || !(wr.z > 0))
+                    {
+                        return default;
+                    }
+                    Vector3f wi = flip ? -wr : wr;
+                    return new BSDFSample(energy / AbsCosTheta(wi), wi, 1, BxDFFlags.DiffuseReflection, 1, true);
+                }
+                if (order == maxOrder)
+                {
+                    break;
+                }
+                Vector3f wm = mfDistrib.Sample_wm_SingleSided(-wr, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                energy *= R;
+                wr = Frame.FromZ(wm).FromLocal(SampleCosineHemisphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>())));
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    return default;
+                }
+            }
+            return default;
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || !SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
+            {
+                return 0;
+            }
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            RNG rng = new RNG(Hash(wi, 0x5044464d53UL), Hash(wo));
+            SampledSpectrum sum;
+            Float density;
+            Walk(wo, wi, ref rng, out sum, out density);
+            return std.max<Float>(density, 1e-6f);
+        }
+
+        public static string Name() { return "MultiScatterDiffuseBxDF"; }
+
+        public override void Regularize() { }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ MultiScatterDiffuseBxDF mfDistrib: %s R: %s maxOrder: %d ]", mfDistrib, R, maxOrder);
+        }
+
+        // MultiScatterDiffuseBxDF Private Methods
+        // One walk from wo (both directions above the surface). At each microfacet the Lambertian reflection towards wi is
+        // taken with the normal that continues the walk.
+        private void Walk(Vector3f wo, Vector3f wi, ref RNG rng, out SampledSpectrum sum, out Float density)
+        {
+            sum = new SampledSpectrum(0f);
+            density = 0;
+            Vector3f wr = -wo;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            SampledSpectrum energy = new SampledSpectrum(1f);
+            for (int order = 0; order < maxOrder; ++order)
+            {
+                h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left)
+                {
+                    return;
+                }
+                Vector3f wm = mfDistrib.Sample_wm_SingleSided(-wr, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                energy *= R;
+                Float term = InvPi * std.max<Float>(Dot(wi, wm), 0) * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                if (!IsNaN(term) && !IsInf(term))
+                {
+                    density += term;
+                    sum += energy * term;
+                }
+                wr = Frame.FromZ(wm).FromLocal(SampleCosineHemisphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>())));
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    return;
+                }
+            }
+        }
+
+        // MultiScatterDiffuseBxDF Private Members
+        private MicrofacetDistribution mfDistrib;
+        private MicrosurfaceHeight height;
+        private SampledSpectrum R;
+        private int maxOrder;
+    }
+
+    // MultiScatterDielectricBxDF Definition
+    // (not in pbrt-v4) A rough dielectric interface with the multiple scattering of its microsurface, by the random walk of
+    // Heitz et al. 2016 (the MicrosurfaceDielectric of the tutorial code of the paper) on any MicrofacetDistribution. The walk
+    // is above or below the microsurface, and each microfacet reflects or refracts it by its Fresnel reflectance; nothing is
+    // absorbed. eta is the index below the surface over the index above, as for DielectricBxDF, and a pair of directions that
+    // starts below is the mirrored pair of the surface of index 1 / eta. The walk carries power: the radiance transported
+    // across the interface has the factor 1 / eta^2 of pbrt on top.
+    public sealed unsafe class MultiScatterDielectricBxDF : BxDF
+    {
+        // MultiScatterDielectricBxDF Public Methods
+        public MultiScatterDielectricBxDF() { }
+        public MultiScatterDielectricBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, Float eta, int maxOrder)
+        {
+            this.mfDistrib = mfDistrib;
+            this.height = height;
+            this.eta = eta;
+            this.maxOrder = maxOrder;
+        }
+
+        public override BxDFFlags Flags()
+        {
+            return eta == 1 ? BxDFFlags.GlossyTransmission : (BxDFFlags.GlossyReflection | BxDFFlags.GlossyTransmission);
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (wo.z == 0 || wi.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            Float etaAbove = eta;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+                etaAbove = 1 / eta;
+            }
+            RNG rng = new RNG(Hash(wo), Hash(wi));
+            Float value = Walk(wo, wi, etaAbove, ref rng) / AbsCosTheta(wi);
+            if (wi.z < 0 && mode == TransportMode.Radiance)
+            {
+                value /= Sqr(etaAbove);
+            }
+            return new SampledSpectrum(value);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if (wo.z == 0)
+            {
+                return default;
+            }
+            bool flip = wo.z < 0;
+            Vector3f start = flip ? -wo : wo;
+            Float etaAbove = flip ? 1 / eta : eta;
+            RNG rng = new RNG(Hash(wo), Hash(uc, u));
+            Vector3f wr = -start;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            bool outside = true;
+            for (int order = 0; order <= maxOrder; ++order)
+            {
+                h = NextHeight(wr, h, outside, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left || h == -MicrosurfaceWalk.Left)
+                {
+                    if (order == 0 || (outside ? !(wr.z > 0) : !(wr.z < 0)))
+                    {
+                        return default;
+                    }
+                    BxDFReflTransFlags wanted = outside ? BxDFReflTransFlags.Reflection : BxDFReflTransFlags.Transmission;
+                    if ((sampleFlags & wanted) == 0)
+                    {
+                        return default;
+                    }
+                    Vector3f wi = flip ? -wr : wr;
+                    Float weight = 1;
+                    if (!outside && mode == TransportMode.Radiance)
+                    {
+                        weight /= Sqr(etaAbove);
+                    }
+                    return new BSDFSample(new SampledSpectrum(weight / AbsCosTheta(wi)), wi, 1,
+                                          outside ? BxDFFlags.GlossyReflection : BxDFFlags.GlossyTransmission, outside ? 1 : etaAbove, true);
+                }
+                if (order == maxOrder)
+                {
+                    break;
+                }
+                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    return default;
+                }
+            }
+            return default;
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if (wo.z == 0 || wi.z == 0)
+            {
+                return 0;
+            }
+            BxDFReflTransFlags wanted = SameHemisphere(wo, wi) ? BxDFReflTransFlags.Reflection : BxDFReflTransFlags.Transmission;
+            if ((sampleFlags & wanted) == 0)
+            {
+                return 0;
+            }
+            Float etaAbove = eta;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+                etaAbove = 1 / eta;
+            }
+            RNG rng = new RNG(Hash(wi, 0x5044464d53UL), Hash(wo));
+            // Nothing is absorbed: the power the walk sends to wi is the density of wi
+            return std.max<Float>(Walk(wo, wi, etaAbove, ref rng), 1e-6f);
+        }
+
+        public static string Name() { return "MultiScatterDielectricBxDF"; }
+
+        public override void Regularize()
+        {
+            mfDistrib.Regularize();
+        }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ MultiScatterDielectricBxDF mfDistrib: %s eta: %f maxOrder: %d ]", mfDistrib, eta, maxOrder);
+        }
+
+        // MultiScatterDielectricBxDF Private Methods
+        // Below the microsurface the walk is the mirror image of a walk above
+        private Float NextHeight(Vector3f wr, Float h, bool outside, Float u)
+        {
+            if (outside)
+            {
+                return MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, u);
+            }
+            return -MicrosurfaceWalk.SampleHeight(mfDistrib, height, -wr, -h, u);
+        }
+
+        // The power per solid angle that a microfacet met from the direction wi (pointing away from it), on the side
+        // `outside`, sends to wo on the side `woOutside`
+        private Float EvalPhase(Vector3f wi, Vector3f wo, Float etaAbove, bool outside, bool woOutside)
+        {
+            Float etaLocal = outside ? etaAbove : 1 / etaAbove;
+            Float side = outside ? 1 : -1;
+            if (outside == woOutside)
+            {
+                // Reflection
+                Vector3f wh = Normalize(wi + wo);
+                Float cosine = Dot(wi, wh);
+                return 0.25f * mfDistrib.PDF_SingleSided(side * wi, side * wh) / cosine * FrDielectric(cosine, etaLocal);
+            }
+            else
+            {
+                // Transmission
+                Vector3f wh = -Normalize(wi + wo * etaLocal);
+                if ((wh.z < 0) == outside)
+                {
+                    wh = -wh;
+                }
+                Float cosine = Dot(wi, wh);
+                if (cosine < 0)
+                {
+                    return 0;
+                }
+                return Sqr(etaLocal) * (1 - FrDielectric(cosine, etaLocal)) * mfDistrib.PDF_SingleSided(side * wi, side * wh) *
+                       std.max<Float>(0, -Dot(wo, wh)) / Sqr(cosine + etaLocal * Dot(wo, wh));
+            }
+        }
+
+        // The direction in which a microfacet met from wi sends the walk, and the side it is then on
+        private Vector3f SamplePhase(Vector3f wi, Float etaAbove, ref bool outside, ref RNG rng)
+        {
+            Float etaLocal = outside ? etaAbove : 1 / etaAbove;
+            Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
+            Vector3f wm = outside ? mfDistrib.Sample_wm_SingleSided(wi, u) : -mfDistrib.Sample_wm_SingleSided(-wi, u);
+            Float cosine = Dot(wi, wm);
+            Float reflectance = FrDielectric(cosine, etaLocal);
+            if (rng.Uniform<Float>() < reflectance)
+            {
+                return -wi + 2 * cosine * wm;
+            }
+            outside = !outside;
+            Float cosTransmitted = -SafeSqrt(1 - (1 - cosine * cosine) / Sqr(etaLocal));
+            return Normalize(wm * (cosine / etaLocal + cosTransmitted) - wi / etaLocal);
+        }
+
+        // One walk from wo above the surface: the estimate of the power per solid angle sent to wi (f cos(theta_i), without
+        // the factor of the radiance)
+        private Float Walk(Vector3f wo, Vector3f wi, Float etaAbove, ref RNG rng)
+        {
+            Float sum = 0;
+            Vector3f wr = -wo;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            bool outside = true;
+            bool wiOutside = wi.z > 0;
+            for (int order = 0; order < maxOrder; ++order)
+            {
+                h = NextHeight(wr, h, outside, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left || h == -MicrosurfaceWalk.Left)
+                {
+                    break;
+                }
+                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
+                Float term = EvalPhase(-wr, wi, etaAbove, outside, wiOutside) * shadowing;
+                if (!IsNaN(term) && !IsInf(term) && term > 0)
+                {
+                    sum += term;
+                }
+                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    break;
+                }
+            }
+            return sum;
+        }
+
+        // MultiScatterDielectricBxDF Private Members
+        private MicrofacetDistribution mfDistrib;
+        private MicrosurfaceHeight height;
+        private Float eta;
+        private int maxOrder;
+    }
+
     // DiffuseTransmissionBxDF Definition
     public sealed unsafe class DiffuseTransmissionBxDF : BxDF
     {

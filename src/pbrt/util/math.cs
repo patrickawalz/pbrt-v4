@@ -1463,6 +1463,149 @@ namespace pbrt
             return (int)((i + p) % l);
         }
 
+        // (not in pbrt-v4) The error function in double precision (C++ has std::erf): its series near 0, and the continued
+        // fraction of the complementary function beyond
+        public static double Erf(double x)
+        {
+            double a = Math.Abs(x);
+            if (a > 6)
+            {
+                return x > 0 ? 1 : -1;
+            }
+            if (a < 2.5)
+            {
+                double sum = x, term = x;
+                for (int n = 1; n < 200; ++n)
+                {
+                    term *= -x * x / n;
+                    double add = term / (2 * n + 1);
+                    sum += add;
+                    if (Math.Abs(add) < 1e-17 * Math.Abs(sum))
+                    {
+                        break;
+                    }
+                }
+                return 2 / Math.Sqrt(Math.PI) * sum;
+            }
+            // erfc(a) = exp(-a^2) / (a sqrt(pi)) * 1 / (1 + 1 / (2 a^2) / (1 + 2 / (2 a^2) / (1 + ...)))
+            double fraction = 1;
+            for (int n = 60; n >= 1; --n)
+            {
+                fraction = 1 + n / (2 * a * a) / fraction;
+            }
+            double erfc = Math.Exp(-a * a) / (a * Math.Sqrt(Math.PI)) / fraction;
+            return x > 0 ? 1 - erfc : erfc - 1;
+        }
+
+        // (not in pbrt-v4) The complementary error function in double precision, without the cancellation of 1 - Erf(x) where
+        // it is small
+        public static double Erfc(double x)
+        {
+            if (x < 0)
+            {
+                return 2 - Erfc(-x);
+            }
+            if (x < 2.5)
+            {
+                return 1 - Erf(x);
+            }
+            if (x > 27)
+            {
+                return 0;
+            }
+            double fraction = 1;
+            for (int n = 60; n >= 1; --n)
+            {
+                fraction = 1 + n / (2 * x * x) / fraction;
+            }
+            return Math.Exp(-x * x) / (x * Math.Sqrt(Math.PI)) / fraction;
+        }
+
+        // (not in pbrt-v4) The logarithm of the gamma function for a positive argument (Lanczos, g = 7, 9 terms)
+        public static double LogGamma(double x)
+        {
+            if (x < 0.5)
+            {
+                // Reflection
+                return Math.Log(Math.PI / Math.Sin(Math.PI * x)) - LogGamma(1 - x);
+            }
+            x -= 1;
+            double sum = 0.99999999999980993 + 676.5203681218851 / (x + 1) - 1259.1392167224028 / (x + 2) +
+                         771.32342877765313 / (x + 3) - 176.61502916214059 / (x + 4) + 12.507343278686905 / (x + 5) -
+                         0.13857109526572012 / (x + 6) + 9.9843695780195716e-6 / (x + 7) + 1.5056327351493116e-7 / (x + 8);
+            double t = x + 7.5;
+            return 0.5 * Math.Log(2 * Math.PI) + (x + 0.5) * Math.Log(t) - t + Math.Log(sum);
+        }
+
+        // (not in pbrt-v4) The regularised incomplete beta function I_x(a, b), by its continued fraction (the modified Lentz
+        // method), which is taken on the side where it converges fast. A small value has its relative precision.
+        public static double IncompleteBeta(double a, double b, double x)
+        {
+            if (!(x > 0))
+            {
+                return 0;
+            }
+            if (!(x < 1))
+            {
+                return 1;
+            }
+            double front = Math.Exp(LogGamma(a + b) - LogGamma(a) - LogGamma(b) + a * Math.Log(x) + b * Math.Log(1 - x));
+            if (x < (a + 1) / (a + b + 2))
+            {
+                return front * IncompleteBetaFraction(a, b, x) / a;
+            }
+            return 1 - front * IncompleteBetaFraction(b, a, 1 - x) / b;
+        }
+
+        private static double IncompleteBetaFraction(double a, double b, double x)
+        {
+            const double tiny = 1e-300;
+            double qab = a + b, qap = a + 1, qam = a - 1;
+            double c = 1, d = 1 - qab * x / qap;
+            if (Math.Abs(d) < tiny)
+            {
+                d = tiny;
+            }
+            d = 1 / d;
+            double h = d;
+            for (int m = 1; m <= 300; ++m)
+            {
+                int m2 = 2 * m;
+                double aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+                d = 1 + aa * d;
+                if (Math.Abs(d) < tiny)
+                {
+                    d = tiny;
+                }
+                c = 1 + aa / c;
+                if (Math.Abs(c) < tiny)
+                {
+                    c = tiny;
+                }
+                d = 1 / d;
+                h *= d * c;
+                aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+                d = 1 + aa * d;
+                if (Math.Abs(d) < tiny)
+                {
+                    d = tiny;
+                }
+                c = 1 + aa / c;
+                if (Math.Abs(c) < tiny)
+                {
+                    c = tiny;
+                }
+                d = 1 / d;
+                double delta = d * c;
+                h *= delta;
+                if (Math.Abs(delta - 1) < 1e-15)
+                {
+                    break;
+                }
+            }
+            return h;
+        }
+
         public static Float ErfInv(Float a)
         {
             // https://stackoverflow.com/a/49743348
