@@ -259,9 +259,7 @@ namespace pbrt
                     for (int i = 0; i < options.samples; ++i)
                     {
                         Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
-                        double f = options.repeats <= 1 || (i % 16) != 0
-                            ? bxdf.f(wo, wi, TransportMode.Importance).Average()
-                            : Evaluate(bxdf, wo, wi, TransportMode.Importance, options.repeats, out double unused).Average();
+                        double f = bxdf.f(wo, wi, TransportMode.Importance).Average();
                         double value = f * AbsCosTheta(wi) * 4 * Pi;
                         if (!(value >= 0) || Double.IsInfinity(value))
                         {
@@ -507,7 +505,7 @@ namespace pbrt
 
         // The multiple scattering diffuse and dielectric microsurfaces. Neither absorbs here (a white diffuse microfacet, a
         // dielectric): the albedo is 1.
-        static BxDFCheckResult MultiScatterOther(BxDF bxdf, string name, int samples, bool bothSides, double chi2Limit = 1.6, double pdfTolerance = 0.04)
+        static BxDFCheckResult MultiScatterOther(BxDF bxdf, string name, int samples, bool bothSides, bool pairStatistic = true)
         {
             BxDFCheckOptions options = new BxDFCheckOptions();
             options.cosines = new Float[] { 0.9f, 0.5f, 0.2f };
@@ -518,12 +516,15 @@ namespace pbrt
             BxDFCheckResult result = BxDFCheck.Run(bxdf, name, options);
             EXPECT_EQ(0, result.invalid, name + ": negative or non finite values");
             EXPECT_GT(result.reciprocityPairs, 100, name + ": too few pairs with a value");
-            EXPECT_LT(result.reciprocityChi2, chi2Limit, name + ": not reciprocal");
+            if (pairStatistic)
+            {
+                EXPECT_LT(result.reciprocityChi2, 1.6, name + ": not reciprocal");
+            }
             EXPECT_LT(result.albedoMax, 1.01, name + ": albedo above one");
             EXPECT_GT(result.albedoMin, 0.99, name + ": energy is lost");
             EXPECT_TRUE(result.albedoSigmas < 5 || result.albedoRelative < 1e-2, name + ": Sample_f and f disagree about the albedo");
-            EXPECT_LT(result.pdfMax, 1 + pdfTolerance, name + ": the pdf integrates to more than one");
-            EXPECT_GT(result.pdfMin, 1 - pdfTolerance, name + ": the pdf integrates to less than one");
+            EXPECT_LT(result.pdfMax, 1.04, name + ": the pdf integrates to more than one");
+            EXPECT_GT(result.pdfMin, 0.96, name + ": the pdf integrates to less than one");
             return result;
         }
 
@@ -541,17 +542,106 @@ namespace pbrt
                               "MultiScatterDiffuse StudentT 0.5 gamma 3", 20000, false);
         }
 
-        [TEST("BxDFCheck", "MultiScatterDielectric")]
-        public static void BxDFCheck_MultiScatterDielectric()
+        // The estimate of a refraction has a heavy tail (single estimates of 10000 times the mean occur), and the variance of a
+        // pair taken from a few thousand estimates misses it: the squared difference in units of that variance is not a test
+        // here. The reciprocity is tested directly instead (RandomPairReciprocity): pairs of directions over both sides and
+        // down to grazing, each estimated until the difference is known, at the 4 sigma limit of the other walks.
+        static void Dielectric(MicrofacetDistribution distribution, MicrosurfaceHeight height, string name, int pairs, int estimates)
         {
-            MultiScatterOther(new MultiScatterDielectricBxDF(new TrowbridgeReitzDistribution(0.5f, 0.5f), new MicrosurfaceHeightUniform(), 1.5f, 200),
-                              "MultiScatterDielectric GGX 0.5 eta 1.5", 200000, true, 3.0);
-            MultiScatterOther(new MultiScatterDielectricBxDF(new TrowbridgeReitzDistribution(0.5f, 0.5f), new MicrosurfaceHeightGaussian(), 1.5f, 200),
-                              "MultiScatterDielectric GGX 0.5 eta 1.5 Gaussian heights", 200000, true, 3.0);
-            MultiScatterOther(new MultiScatterDielectricBxDF(new BeckmannDistribution(0.5f, 0.5f), new MicrosurfaceHeightUniform(), 1.5f, 200),
-                              "MultiScatterDielectric Beckmann 0.5 eta 1.5", 30000, true, 3.0, 0.1);
-            MultiScatterOther(new MultiScatterDielectricBxDF(new StudentTDistribution(0.5f, 0.5f, 3f), new MicrosurfaceHeightUniform(), 1.5f, 200),
-                              "MultiScatterDielectric StudentT 0.5 gamma 3 eta 1.5", 20000, true, 3.0, 0.1);
+            BxDF bxdf = new MultiScatterDielectricBxDF(distribution, height, 1.5f, 200);
+            MultiScatterOther(bxdf, name, 200000, true, false);
+            RandomPairReciprocity(bxdf, name, pairs, estimates);
+        }
+
+        // The difference of f(wo, wi, Radiance) and f(wi, wo, Importance) from `estimates` estimates of each, in units of its
+        // standard error, and as a fraction
+        static void PairDifference(BxDF bxdf, Vector3f wo, Vector3f wi, int estimates, ref RNG rng, out double z, out double relative, out double mean, out double other)
+        {
+            double sumA = 0, sumA2 = 0, sumB = 0, sumB2 = 0;
+            for (int i = 0; i < estimates; ++i)
+            {
+                Vector3f d = 1e-4f * new Vector3f(rng.Uniform<Float>() - 0.5f, rng.Uniform<Float>() - 0.5f, rng.Uniform<Float>() - 0.5f);
+                Vector3f a = Normalize(wo + d), b = Normalize(wi - d);
+                double x = bxdf.f(a, b, TransportMode.Radiance).Average();
+                double y = bxdf.f(b, a, TransportMode.Importance).Average();
+                sumA += x;
+                sumA2 += x * x;
+                sumB += y;
+                sumB2 += y * y;
+            }
+            double meanA = sumA / estimates, meanB = sumB / estimates;
+            double error = Math.Sqrt((sumA2 / estimates - meanA * meanA + sumB2 / estimates - meanB * meanB) / estimates);
+            mean = Math.Max(meanA, meanB);
+            other = Math.Min(meanA, meanB);
+            z = error > 0 ? Math.Abs(meanA - meanB) / error : 0;
+            relative = mean > 0 ? Math.Abs(meanA - meanB) / mean : 0;
+        }
+
+        // A pair whose difference stands out (above 3 sigma) is estimated again, independently and 16 times longer: a
+        // difference that is real grows fourfold in sigma, and one that came from a variance taken too small (the heavy tail)
+        // does not come back. The second look is what is judged.
+        static void RandomPairReciprocity(BxDF bxdf, string name, int pairs, int estimates)
+        {
+            RNG rng = new RNG(1234);
+            double worstZ = 0, worstRelative = 0;
+            int used = 0, again = 0, negligible = 0;
+            for (int pair = 0; pair < pairs; ++pair)
+            {
+                Vector3f wo = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                if (Math.Abs(wo.z) < 0.02f || Math.Abs(wi.z) < 0.02f)
+                {
+                    continue;
+                }
+                double z, relative, mean, other;
+                PairDifference(bxdf, wo, wi, estimates, ref rng, out z, out relative, out mean, out other);
+                if (mean < 1e-3)
+                {
+                    // Where the BSDF is next to nothing (it is of the order of 0.01 to 1 elsewhere) its estimate is made of
+                    // rare walks, and no number of them that a test can afford tells the two directions apart
+                    ++negligible;
+                    continue;
+                }
+                if (z > 3)
+                {
+                    ++again;
+                    double first = z;
+                    PairDifference(bxdf, wo, wi, 16 * estimates, ref rng, out z, out relative, out mean, out other);
+                    Console.Error.WriteLine(pbrt.StringPrintf("MEASURE bxdf %s: pair wo.z %.3f wi.z %.3f at %.1f sigma; again with %d estimates: %.1f sigma, relative %.2e (%.3g against %.3g)",
+                                                              name, wo.z, wi.z, first, 16 * estimates, z, relative, mean, other));
+                }
+                ++used;
+                worstZ = Math.Max(worstZ, z);
+                if (mean > 0.02)
+                {
+                    worstRelative = Math.Max(worstRelative, relative);
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE bxdf %s: reciprocity of %d random pairs (both sides, to grazing), %d estimates each (%d pairs looked at " +
+                                                      "again, %d below 0.001 left out): worst %.1f sigma, worst relative difference %.2e (pairs above 0.02)",
+                                                      name, used, estimates, again, negligible, worstZ, worstRelative));
+            EXPECT_GT(used, pairs / 4);
+            EXPECT_LT(worstZ, 4.0, name + ": not reciprocal");
+        }
+
+        [TEST("BxDFCheck", "MultiScatterDielectricGGX")]
+        public static void BxDFCheck_MultiScatterDielectricGGX()
+        {
+            Dielectric(new TrowbridgeReitzDistribution(0.5f, 0.5f), new MicrosurfaceHeightUniform(), "MultiScatterDielectric GGX 0.5 eta 1.5", 48, 300000);
+            Dielectric(new TrowbridgeReitzDistribution(0.5f, 0.5f), new MicrosurfaceHeightGaussian(), "MultiScatterDielectric GGX 0.5 eta 1.5 Gaussian heights",
+                       48, 300000);
+        }
+
+        [TEST("BxDFCheck", "MultiScatterDielectricBeckmann")]
+        public static void BxDFCheck_MultiScatterDielectricBeckmann()
+        {
+            Dielectric(new BeckmannDistribution(0.5f, 0.5f), new MicrosurfaceHeightUniform(), "MultiScatterDielectric Beckmann 0.5 eta 1.5", 24, 60000);
+        }
+
+        [TEST("BxDFCheck", "MultiScatterDielectricStudentT")]
+        public static void BxDFCheck_MultiScatterDielectricStudentT()
+        {
+            Dielectric(new StudentTDistribution(0.5f, 0.5f, 3f), new MicrosurfaceHeightUniform(), "MultiScatterDielectric StudentT 0.5 gamma 3 eta 1.5", 16, 40000);
         }
 
         // A closer look at the reciprocity of the walks: a few pairs of directions, each estimated many times, so that the
