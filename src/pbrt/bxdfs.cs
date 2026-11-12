@@ -1657,7 +1657,7 @@ namespace pbrt
     {
         // DielectricBxDF Public Methods
         public DielectricBxDF() { }
-        public DielectricBxDF(Float eta, TrowbridgeReitzDistribution mfDistrib)
+        public DielectricBxDF(Float eta, MicrofacetDistribution mfDistrib)
         {
             this.eta = eta;
             this.mfDistrib = mfDistrib;
@@ -1876,7 +1876,7 @@ namespace pbrt
 
         // DielectricBxDF Private Members
         private Float eta;
-        private TrowbridgeReitzDistribution mfDistrib;
+        private MicrofacetDistribution mfDistrib;
     }
 
     // ThinDielectricBxDF Definition
@@ -2123,7 +2123,7 @@ namespace pbrt
     {
         // ConductorBxDF Public Methods
         public ConductorBxDF() { }
-        public ConductorBxDF(TrowbridgeReitzDistribution mfDistrib, SampledSpectrum eta, SampledSpectrum k)
+        public ConductorBxDF(MicrofacetDistribution mfDistrib, SampledSpectrum eta, SampledSpectrum k)
         {
             this.mfDistrib = mfDistrib;
             this.eta = eta;
@@ -2225,7 +2225,7 @@ namespace pbrt
         }
 
         // ConductorBxDF Private Members
-        private TrowbridgeReitzDistribution mfDistrib;
+        private MicrofacetDistribution mfDistrib;
         private SampledSpectrum eta, k;
     }
 

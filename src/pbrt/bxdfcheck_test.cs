@@ -255,10 +255,15 @@ namespace pbrt
                     }
 
                     // The albedo by directions uniform over the sphere, and the integral of the pdf
+                    // The directions are jittered over a grid: with independent directions the integral of the pdf of a narrow
+                    // lobe is some percent wrong at this count, which is the size of what the check is to find. (The error of
+                    // the albedo below is computed as for independent directions, and so is an upper limit.)
                     double uniformSum = 0, uniformSum2 = 0, pdfSum = 0;
-                    for (int i = 0; i < options.samples; ++i)
+                    int grid = Math.Max(1, (int)Math.Sqrt((double)options.samples));
+                    int uniformSamples = grid * grid;
+                    for (int i = 0; i < uniformSamples; ++i)
                     {
-                        Vector3f wi = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                        Vector3f wi = SampleUniformSphere(new Point2f((i % grid + rng.Uniform<Float>()) / grid, (i / grid + rng.Uniform<Float>()) / grid));
                         double f = bxdf.f(wo, wi, TransportMode.Importance).Average();
                         double value = f * AbsCosTheta(wi) * 4 * Pi;
                         if (!(value >= 0) || Double.IsInfinity(value))
@@ -270,8 +275,8 @@ namespace pbrt
                         uniformSum2 += value * value;
                         pdfSum += bxdf.PDF(wo, wi, TransportMode.Importance, BxDFReflTransFlags.All) * 4 * Pi;
                     }
-                    double uniform = uniformSum / options.samples;
-                    double uniformError = Math.Sqrt(Math.Max(0, uniformSum2 / options.samples - uniform * uniform) / options.samples);
+                    double uniform = uniformSum / uniformSamples;
+                    double uniformError = Math.Sqrt(Math.Max(0, uniformSum2 / uniformSamples - uniform * uniform) / uniformSamples);
                     double error = Math.Sqrt(sampledError * sampledError + uniformError * uniformError);
                     if (error > 0)
                     {
@@ -281,7 +286,7 @@ namespace pbrt
                     {
                         result.albedoRelative = Math.Max(result.albedoRelative, Math.Abs(sampled - uniform) / Math.Max(sampled, uniform));
                     }
-                    double pdfIntegral = pdfSum / options.samples;
+                    double pdfIntegral = pdfSum / uniformSamples;
                     result.pdfMax = Math.Max(result.pdfMax, pdfIntegral);
                     result.pdfMin = Math.Min(result.pdfMin, pdfIntegral);
                 }
@@ -339,6 +344,39 @@ namespace pbrt
             BxDF bxdf = new DielectricBxDF(1.5f, new TrowbridgeReitzDistribution(0.3f, 0.3f));
             BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric eta 1.5 alpha 0.3", new BxDFCheckOptions());
             BxDFCheck.Expect(result, "RoughDielectric", 2e-3, 1.005, 5, 0.85);
+        }
+
+        // The stock BxDFs on the other distributions ("string distribution" of the materials), held to the limits of GGX
+        [TEST("BxDFCheck", "RoughConductorBeckmann")]
+        public static void BxDFCheck_RoughConductorBeckmann()
+        {
+            BxDF bxdf = new ConductorBxDF(new BeckmannDistribution(0.3f, 0.3f), new SampledSpectrum(0.2f), new SampledSpectrum(3.9f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughConductor Beckmann alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughConductorBeckmann", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughConductorStudentT")]
+        public static void BxDFCheck_RoughConductorStudentT()
+        {
+            BxDF bxdf = new ConductorBxDF(new StudentTDistribution(0.3f, 0.3f, 4f), new SampledSpectrum(0.2f), new SampledSpectrum(3.9f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughConductor StudentT gamma 4 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughConductorStudentT", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughDielectricBeckmann")]
+        public static void BxDFCheck_RoughDielectricBeckmann()
+        {
+            BxDF bxdf = new DielectricBxDF(1.5f, new BeckmannDistribution(0.3f, 0.3f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric Beckmann eta 1.5 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughDielectricBeckmann", 2e-3, 1.005, 5, 0.85);
+        }
+
+        [TEST("BxDFCheck", "RoughDielectricStudentT")]
+        public static void BxDFCheck_RoughDielectricStudentT()
+        {
+            BxDF bxdf = new DielectricBxDF(1.5f, new StudentTDistribution(0.3f, 0.3f, 4f));
+            BxDFCheckResult result = BxDFCheck.Run(bxdf, "RoughDielectric StudentT gamma 4 eta 1.5 alpha 0.3", new BxDFCheckOptions());
+            BxDFCheck.Expect(result, "RoughDielectricStudentT", 2e-3, 1.005, 5, 0.85);
         }
 
         [TEST("BxDFCheck", "SmoothDielectric")]
