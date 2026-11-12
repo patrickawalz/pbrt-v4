@@ -189,6 +189,191 @@ namespace pbrt
             }
             return std.max<Float>(Dot(w, wm), 0) * D(wm) / sigma;
         }
+
+        // MicrofacetDistribution V-Cavity Interface
+        // The slopes of the unit distribution (alpha = 1), which is what a distribution is once the directions are stretched by
+        // its roughness. P2 is the marginal density of the slope along one axis.
+        //   UnitSlopeCdf(x)       the integral of P2 below x
+        //   UnitSlopeMoment(x)    minus the integral of s P2(s) below x (positive)
+        //   SampleUnitSlopeAcross the slope along the other axis, given the slope x along the first
+        public abstract double UnitSlopeCdf(double x);
+        public abstract double UnitSlopeDensity(double x);
+        public abstract double UnitSlopeMoment(double x);
+        public abstract double SampleUnitSlopeAcross(double x, double u);
+
+        // MicrofacetDistribution V-Cavity Methods
+        // The V-cavity masking of Torrance and Sparrow, for the same distributions, with the single sided normalisation of
+        // Tokuyoshi 2021 (supplementary document, section 2) for a direction below the horizon. The masking of a microfacet is
+        //     G(w, wm) = min(2 (wm . n) |w . n| / (w . wm), 1) for w . wm > 0,
+        // the probability that a ray along w meets the microsurface is H(w) (1 above the horizon), and the density of the
+        // visible normals is G(w, wm) D(wm) (w . wm) / (H(w) |w . n|). Below the horizon it has two forms, on either side of the
+        // slope 3 cot(theta) along the direction: H and the sampling are written with the slopes of the unit distribution, so
+        // that they hold for every distribution (the document gives them for GGX and Beckmann).
+        public Float G_VCavity(Vector3f w, Vector3f wm)
+        {
+            Float cosine = Dot(w, wm);
+            if (!(cosine > 0) || !(wm.z > 0))
+            {
+                return 0;
+            }
+            return std.min<Float>(1, 2 * wm.z * std.abs(w.z) / cosine);
+        }
+
+        public Float HitProbability_VCavity(Vector3f w)
+        {
+            if (w.z >= 0)
+            {
+                return 1;
+            }
+            double length, sinTheta, cosTheta, cosPhi, sinPhi;
+            Stretch(w, out length, out sinTheta, out cosTheta, out cosPhi, out sinPhi);
+            if (sinTheta < 1e-9)
+            {
+                return 0;
+            }
+            double cot = cosTheta / sinTheta;
+            double boundary = 3 * cot;
+            double h = 2 * UnitSlopeCdf(boundary) +
+                       length * (UnitVisibleSlopeCdf(sinTheta, cosTheta, cot) - UnitVisibleSlopeCdf(sinTheta, cosTheta, boundary)) / -w.z;
+            return (Float)Math.Max(h, 0.0);
+        }
+
+        public Float PDF_VCavity(Vector3f w, Vector3f wm)
+        {
+            Float h = HitProbability_VCavity(w);
+            if (!(h > 0) || w.z == 0)
+            {
+                return 0;
+            }
+            return G_VCavity(w, wm) * D(wm) * Dot(w, wm) / (h * std.abs(w.z));
+        }
+
+        public Vector3f Sample_wm_VCavity(Vector3f w, Float uc, Point2f u)
+        {
+            if (w.z >= 0)
+            {
+                // Heitz and d'Eon 2014: a normal of the distribution, or its mirror image across the groove, by the area
+                // each shows to the direction
+                Vector3f normal1 = Sample_wm_SingleSided(new Vector3f(0, 0, 1), u);
+                Vector3f normal2 = new Vector3f(-normal1.x, -normal1.y, normal1.z);
+                Float a1 = std.max<Float>(Dot(w, normal1), 0), a2 = std.max<Float>(Dot(w, normal2), 0);
+                if (!(a1 + a2 > 0))
+                {
+                    return normal1;
+                }
+                return uc * (a1 + a2) < a1 ? normal1 : normal2;
+            }
+            double length, sinTheta, cosTheta, cosPhi, sinPhi;
+            Stretch(w, out length, out sinTheta, out cosTheta, out cosPhi, out sinPhi);
+            if (sinTheta < 1e-9)
+            {
+                return new Vector3f(0, 0, 1);
+            }
+            double cot = cosTheta / sinTheta;
+            double boundary = 3 * cot;
+            double below = UnitSlopeCdf(boundary);
+            double visibleLow = UnitVisibleSlopeCdf(sinTheta, cosTheta, boundary), visibleHigh = UnitVisibleSlopeCdf(sinTheta, cosTheta, cot);
+            double masked = 2 * below, unmasked = length * (visibleHigh - visibleLow) / -w.z;
+            if (!(masked + unmasked > 0))
+            {
+                return new Vector3f(0, 0, 1);
+            }
+            double slopeX;
+            if (uc * (masked + unmasked) < masked)
+            {
+                // The density proportional to D(wm) (wm . n), over the slopes below the boundary
+                slopeX = InvertUnitSlopeCdf(u[0] * below, boundary);
+            }
+            else
+            {
+                // The density proportional to D(wm) (w . wm), over the slopes from the boundary to cot(theta)
+                slopeX = InvertUnitVisibleSlopeCdf(sinTheta, cosTheta, visibleLow + u[0] * (visibleHigh - visibleLow), boundary, cot);
+            }
+            double slopeY = SampleUnitSlopeAcross(slopeX, Clamp(u[1], 1e-7f, OneMinusEpsilon));
+            double x = cosPhi * slopeX - sinPhi * slopeY;
+            double y = sinPhi * slopeX + cosPhi * slopeY;
+            return Normalize(new Vector3f((Float)(-AlphaX() * x), (Float)(-AlphaY() * y), 1));
+        }
+
+        public abstract Float AlphaX();
+        public abstract Float AlphaY();
+
+        // The integral of (cos(theta) - s sin(theta)) P2(s) over the slopes s below x
+        public double UnitVisibleSlopeCdf(double sinTheta, double cosTheta, double x)
+        {
+            return cosTheta * UnitSlopeCdf(x) + sinTheta * UnitSlopeMoment(x);
+        }
+
+        // The direction stretched by the roughness: its length, its polar angle and its azimuth
+        private void Stretch(Vector3f w, out double length, out double sinTheta, out double cosTheta, out double cosPhi, out double sinPhi)
+        {
+            double dx = (double)AlphaX() * w.x, dy = (double)AlphaY() * w.y, dz = w.z;
+            length = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            double planar = Math.Sqrt(dx * dx + dy * dy);
+            sinTheta = planar / length;
+            cosTheta = dz / length;
+            cosPhi = planar > 0 ? dx / planar : 1;
+            sinPhi = planar > 0 ? dy / planar : 0;
+        }
+
+        // The slope below `high` at which UnitSlopeCdf is `target`. The slope is tan(psi), and psi is found in its finite
+        // interval by a Newton iteration kept inside a bracket.
+        private double InvertUnitSlopeCdf(double target, double high)
+        {
+            double low = -0.5 * Math.PI, top = Math.Atan(high);
+            double psi = 0.5 * (low + top);
+            for (int i = 0; i < 80; ++i)
+            {
+                double x = Math.Tan(psi);
+                double value = UnitSlopeCdf(x) - target;
+                if (value > 0)
+                {
+                    top = psi;
+                }
+                else
+                {
+                    low = psi;
+                }
+                if (top - low < 1e-11)
+                {
+                    break;
+                }
+                double cosPsi = Math.Cos(psi);
+                double derivative = UnitSlopeDensity(x) / (cosPsi * cosPsi);
+                double next = derivative > 0 ? psi - value / derivative : low - 1;
+                psi = (next > low && next < top) ? next : 0.5 * (low + top);
+            }
+            return Math.Tan(psi);
+        }
+
+        // The slope between `from` and `to` at which UnitVisibleSlopeCdf is `target`
+        private double InvertUnitVisibleSlopeCdf(double sinTheta, double cosTheta, double target, double from, double to)
+        {
+            double low = Math.Atan(from), top = Math.Atan(to);
+            double psi = 0.5 * (low + top);
+            for (int i = 0; i < 80; ++i)
+            {
+                double x = Math.Tan(psi);
+                double value = UnitVisibleSlopeCdf(sinTheta, cosTheta, x) - target;
+                if (value > 0)
+                {
+                    top = psi;
+                }
+                else
+                {
+                    low = psi;
+                }
+                if (top - low < 1e-11)
+                {
+                    break;
+                }
+                double cosPsi = Math.Cos(psi);
+                double derivative = (cosTheta - x * sinTheta) * UnitSlopeDensity(x) / (cosPsi * cosPsi);
+                double next = derivative > 0 ? psi - value / derivative : low - 1;
+                psi = (next > low && next < top) ? next : 0.5 * (low + top);
+            }
+            return Math.Tan(psi);
+        }
     }
 
     // TrowbridgeReitzDistribution Definition
@@ -289,6 +474,55 @@ namespace pbrt
         public override string ToString()
         {
             return $"[ TrowbridgeReitzDistribution alpha_x: {alpha_x} alpha_y: {alpha_y} ]";
+        }
+
+        // The slopes of the unit distribution: P2(x) = (1 + x^2)^(-3/2) / 2
+        public override Float AlphaX() { return alpha_x; }
+        public override Float AlphaY() { return alpha_y; }
+
+        public override double UnitSlopeCdf(double x)
+        {
+            // (1 + x / sqrt(1 + x^2)) / 2, without the cancellation of a large negative slope
+            double root = Math.Sqrt(1 + x * x);
+            return x < 0 ? 0.5 / (root * (root - x)) : 0.5 * (1 + x / root);
+        }
+
+        public override double UnitSlopeDensity(double x)
+        {
+            return 0.5 / ((1 + x * x) * Math.Sqrt(1 + x * x));
+        }
+
+        public override double UnitSlopeMoment(double x)
+        {
+            return 0.5 / Math.Sqrt(1 + x * x);
+        }
+
+        // The slope across is sqrt(1 + x^2) tan(psi), with psi of density (2 / pi) cos^2(psi)
+        public override double SampleUnitSlopeAcross(double x, double u)
+        {
+            double low = -0.5 * Math.PI, high = 0.5 * Math.PI;
+            double psi = Math.PI * (u - 0.5);
+            for (int i = 0; i < 60; ++i)
+            {
+                double value = 0.5 + (psi + Math.Sin(psi) * Math.Cos(psi)) / Math.PI - u;
+                if (value > 0)
+                {
+                    high = psi;
+                }
+                else
+                {
+                    low = psi;
+                }
+                if (high - low < 1e-11)
+                {
+                    break;
+                }
+                double cosPsi = Math.Cos(psi);
+                double derivative = 2 * cosPsi * cosPsi / Math.PI;
+                double next = derivative > 0 ? psi - value / derivative : low - 1;
+                psi = (next > low && next < high) ? next : 0.5 * (low + high);
+            }
+            return Math.Sqrt(1 + x * x) * Math.Tan(psi);
         }
 
         // TrowbridgeReitzDistribution Private Members
@@ -431,6 +665,31 @@ namespace pbrt
                 x = (next > low && next < high) ? next : 0.5 * (low + high);
             }
             return x;
+        }
+
+        // The slopes of the unit distribution: P2(x) = exp(-x^2) / sqrt(pi)
+        public override Float AlphaX() { return alpha_x; }
+        public override Float AlphaY() { return alpha_y; }
+
+        public override double UnitSlopeCdf(double x)
+        {
+            return 0.5 * Erfc(-x);
+        }
+
+        public override double UnitSlopeDensity(double x)
+        {
+            return Math.Exp(-x * x) / Math.Sqrt(Math.PI);
+        }
+
+        public override double UnitSlopeMoment(double x)
+        {
+            return Math.Exp(-x * x) / (2 * Math.Sqrt(Math.PI));
+        }
+
+        // The two slopes are independent
+        public override double SampleUnitSlopeAcross(double x, double u)
+        {
+            return ErfInv((Float)(2 * u - 1));
         }
 
         // BeckmannDistribution Private Members
@@ -619,6 +878,30 @@ namespace pbrt
                 psi = (next > low && next < high) ? next : 0.5 * (low + high);
             }
             return Math.Tan(psi);
+        }
+
+        // The slopes of the unit distribution: P2(x) = c (1 + x^2 / (gamma - 1))^(1/2 - gamma)
+        public override Float AlphaX() { return alpha_x; }
+        public override Float AlphaY() { return alpha_y; }
+
+        public override double UnitSlopeCdf(double x)
+        {
+            return MarginalCdf(x);
+        }
+
+        public override double UnitSlopeDensity(double x)
+        {
+            return marginal * Math.Pow(1 + x * x / (gamma - 1), 0.5 - gamma);
+        }
+
+        public override double UnitSlopeMoment(double x)
+        {
+            return marginal * (gamma - 1) / (2 * gamma - 3) * Math.Pow(1 + x * x / (gamma - 1), 1.5 - gamma);
+        }
+
+        public override double SampleUnitSlopeAcross(double x, double u)
+        {
+            return Math.Sqrt((gamma - 1) + x * x) * SampleAcross(u);
         }
 
         // StudentTDistribution Private Members

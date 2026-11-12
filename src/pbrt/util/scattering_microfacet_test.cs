@@ -237,5 +237,117 @@ namespace pbrt
                 }
             }
         }
+
+        // The V-cavity functions of the interface: the density of the visible normals, G(w, wm) D(wm) (w . wm) / (H(w) |w . n|),
+        // integrates to 1 over the normals above and below the horizon (which is what makes H the hit probability), and the
+        // sampled normals have it. The H of the Trowbridge-Reitz and Beckmann distributions is that of the closed forms of
+        // Tokuyoshi 2021.
+        static void CheckVCavity(MicrofacetDistribution distribution, string name)
+        {
+            RNG rng = new RNG(21);
+            foreach (Float cosTheta in new Float[] { 0.8f, 0.3f, -0.2f, -0.6f })
+            {
+                Vector3f w = Direction(cosTheta, 0.7f);
+                double[] cells = new double[ThetaCells * PhiCells];
+                double integral = 0;
+                double dPhi = 2 * Math.PI / PhiSteps;
+                for (int i = 0; i < ThetaSteps; ++i)
+                {
+                    double step = (i + 0.5) / ThetaSteps;
+                    double theta = 0.5 * Math.PI * (1 - step * step);
+                    double dTheta = Math.PI * step / ThetaSteps;
+                    double sinTheta = Math.Sin(theta), cosThetaM = Math.Cos(theta);
+                    for (int j = 0; j < PhiSteps; ++j)
+                    {
+                        double phi = (j + 0.5) * dPhi;
+                        Vector3f wm = new Vector3f((Float)(sinTheta * Math.Cos(phi)), (Float)(sinTheta * Math.Sin(phi)), (Float)cosThetaM);
+                        double value = distribution.PDF_VCavity(w, wm) * sinTheta * dTheta * dPhi;
+                        integral += value;
+                        cells[Math.Min(ThetaCells - 1, (int)(theta / (0.5 * Math.PI) * ThetaCells)) * PhiCells + j * PhiCells / PhiSteps] += value;
+                    }
+                }
+                EXPECT_LT(Math.Abs(integral - 1), 3e-3, name + ": the V-cavity density does not integrate to 1");
+
+                int samples = 400000;
+                int[] counts = new int[ThetaCells * PhiCells];
+                int invalid = 0;
+                for (int i = 0; i < samples; ++i)
+                {
+                    Vector3f wm = distribution.Sample_wm_VCavity(w, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                    if (!(wm.z > 0) || !(Dot(w, wm) >= -1e-4f) || IsNaN(wm.x + wm.y + wm.z))
+                    {
+                        ++invalid;
+                        continue;
+                    }
+                    double theta = Math.Acos(Math.Min(1.0, (double)wm.z));
+                    double phi = Math.Atan2(wm.y, wm.x);
+                    if (phi < 0)
+                    {
+                        phi += 2 * Math.PI;
+                    }
+                    int a = Math.Min(ThetaCells - 1, (int)(theta / (0.5 * Math.PI) * ThetaCells));
+                    int b = Math.Min(PhiCells - 1, (int)(phi / (2 * Math.PI) * PhiCells));
+                    ++counts[a * PhiCells + b];
+                }
+                EXPECT_EQ(0, invalid, name + ": normals below the horizon, or facing away from the direction");
+                double worst = 0;
+                for (int c = 0; c < cells.Length; ++c)
+                {
+                    double expected = samples * cells[c] / integral;
+                    if (expected < 20)
+                    {
+                        continue;
+                    }
+                    // The quadrature of a cell is good to about 0.3% (the density has a step and a kink)
+                    double deviation = Math.Abs(counts[c] - expected) / Math.Sqrt(expected + Sqr(3e-3 * expected));
+                    worst = Math.Max(worst, deviation);
+                }
+                EXPECT_LT(worst, 5.0, name + ": the sampled normals do not have the V-cavity density");
+                Console.Error.WriteLine(pbrt.StringPrintf("MEASURE microfacet V-cavity %s, cos %.2f: H %.6f, density integrates to %.5f, samples against density %.1f sigma worst cell",
+                                                          name, cosTheta, distribution.HitProbability_VCavity(w), integral, worst));
+            }
+        }
+
+        [TEST("MicrofacetDistribution", "VCavity")]
+        public static void MicrofacetDistribution_VCavity()
+        {
+            CheckVCavity(new TrowbridgeReitzDistribution(0.3f, 0.3f), "GGX 0.3");
+            CheckVCavity(new TrowbridgeReitzDistribution(0.5f, 0.15f), "GGX 0.5 0.15");
+            CheckVCavity(new BeckmannDistribution(0.3f, 0.3f), "Beckmann 0.3");
+            CheckVCavity(new BeckmannDistribution(0.5f, 0.15f), "Beckmann 0.5 0.15");
+            CheckVCavity(new StudentTDistribution(0.3f, 0.3f, 4f), "StudentT 0.3 gamma 4");
+            CheckVCavity(new StudentTDistribution(0.5f, 0.15f, 2.5f), "StudentT 0.5 0.15 gamma 2.5");
+        }
+
+        // The hit probability against the closed forms of Tokuyoshi 2021 (supplementary document, section 2.2)
+        [TEST("MicrofacetDistribution", "VCavityHitProbability")]
+        public static void MicrofacetDistribution_VCavityHitProbability()
+        {
+            RNG rng = new RNG(6);
+            Float ax = 0.5f, ay = 0.15f;
+            MicrofacetDistribution ggx = new TrowbridgeReitzDistribution(ax, ay), beckmann = new BeckmannDistribution(ax, ay);
+            double worstGgx = 0, worstBeckmann = 0;
+            for (int i = 0; i < 2000; ++i)
+            {
+                Vector3f w = Direction(-0.02f - 0.95f * rng.Uniform<Float>(), 6 * rng.Uniform<Float>());
+                double b = Sqr((double)ax * w.x) + Sqr((double)ay * w.y), z = w.z;
+                double hGgx = 1 + (Math.Sqrt(b + 9 * z * z) - Math.Sqrt(b + z * z)) / (2 * z);
+                double v = z / Math.Sqrt(b);
+                double hBeckmann = 1 + (Math.Exp(-9 * v * v) - Math.Exp(-v * v)) / (2 * Math.Sqrt(Math.PI) * v) + (3 * pbrt.Erf(3 * v) - pbrt.Erf(v)) / 2;
+                double a = ggx.HitProbability_VCavity(w), c = beckmann.HitProbability_VCavity(w);
+                if (hGgx > 1e-4)
+                {
+                    worstGgx = Math.Max(worstGgx, Math.Abs(a - hGgx) / hGgx);
+                }
+                if (hBeckmann > 1e-4)
+                {
+                    worstBeckmann = Math.Max(worstBeckmann, Math.Abs(c - hBeckmann) / hBeckmann);
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE microfacet V-cavity hit probability against the closed forms: GGX %.1e, Beckmann %.1e (worst relative)",
+                                                      worstGgx, worstBeckmann));
+            EXPECT_LT(worstGgx, 1e-4);
+            EXPECT_LT(worstBeckmann, 1e-4);
+        }
     }
 }
