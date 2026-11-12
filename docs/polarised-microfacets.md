@@ -183,14 +183,24 @@ weight of the sample times a ratio of two estimates from another walk, which is 
 in an even surround must return unpolarised light: its rim polarisation was 2.8% before and is 0.1% now.
 `SampledAgainstEvaluated` checks that sampling paths and evaluating directions find the same polarised light.
 
-## 11. Not done
+## 11. The energy of the layered BxDFs
+
+With a rough coat, `f` of `LayeredBxDF` returned about 4% more light than `Sample_f`. `f` reaches the exit interface
+in two ways (a direction sampled from `wi` through the interface, and the direction of the path) and weights them by
+their densities. The density of the first was asked for the wrong pair of directions and mode: from the path to
+`wi`, where the interface was sampled from `wi` to the path. `Sample_f` was right. The density is now
+`exitInterface.PDF(wi, -w, !mode, Transmission)`, as in the C++ fork. A smooth coat has one way only and was never
+affected.
+
+`BxDFCheck.LayeredSampledAgainstEvaluated` holds the two to 1% and 4 sigma (now 0.01% to 0.98%, at most 1.6 sigma),
+and `SampledAgainstEvaluated` holds their intensities to 2% and their polarisation to its noise (0.1 and 0.2 sigma).
+
+## 12. Not done
 
 - The OSL closures.
 - A scattering in the medium of a layered BxDF is taken as depolarising.
 - `SampleLd` of the volumetric path integrator still evaluates `f` and then asks for the matrix (two walks); the
   polarised path integrator and the shared path walk use the single evaluation.
-- The scalar `LayeredBxDF` returns about 4% less light through `Sample_f` than through `f` (measured by the harness on
-  the BxDF as it was before any of this work); not looked into yet.
 - The V-cavity conductor (Lee et al. 2018) had a polarised form too (the exact product over the reflections of each
   groove). It was removed from this branch with the BxDF, which is kept on the branch `vcavity-backup`: an evaluation
   cost about 300 microseconds, most of it the products of the Mueller matrices of the reflections.

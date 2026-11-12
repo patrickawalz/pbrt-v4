@@ -835,5 +835,56 @@ namespace pbrt
             MultiScatterOther(glass, "MultiScatterDielectric with a film, GGX 0.5 eta 1.5", 200000, true, false);
             RandomPairReciprocity(glass, "MultiScatterDielectric with a film, GGX 0.5 eta 1.5", 60, 300000);
         }
+
+        // The layered BxDFs return the same light whether directions are sampled (Sample_f) or evaluated (f). They did not
+        // with a rough coat: f weighted its two ways of reaching the exit interface with the density of the wrong pair of
+        // directions (that of going from the path to wi, where the exit interface was sampled from wi to the path), and
+        // returned about 4% too much. A smooth coat has one way only and was not affected.
+        [TEST("BxDFCheck", "LayeredSampledAgainstEvaluated")]
+        public static void BxDFCheck_LayeredSampledAgainstEvaluated()
+        {
+            SampledSpectrum eta = new SampledSpectrum(0.2f), k = new SampledSpectrum(3.9f);
+            MicrofacetDistribution coat = new TrowbridgeReitzDistribution(0.1f, 0.1f), rougher = new TrowbridgeReitzDistribution(0.3f, 0.3f);
+            BxDF[] layered = new BxDF[]
+            {
+                new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, coat), new DiffuseBxDF(new SampledSpectrum(0.7f)), 0.01f, new SampledSpectrum(0f), 0, 10, 1),
+                new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, rougher), new DiffuseBxDF(new SampledSpectrum(0.7f)), 0.1f, new SampledSpectrum(0.5f), 0.3f, 10, 1),
+                new CoatedConductorBxDF(new DielectricBxDF(1.5f, coat), new ConductorBxDF(rougher, eta, k), 0.01f, new SampledSpectrum(0f), 0, 10, 1)
+            };
+            string[] names = new string[] { "coated diffuse, coat 0.1", "coated diffuse, coat 0.3, scattering medium", "coated conductor, coat 0.1 on 0.3" };
+            for (int b = 0; b < layered.Length; ++b)
+            {
+                foreach (Float cosine in new Float[] { 0.9f, 0.5f, 0.2f })
+                {
+                    Vector3f wo = new Vector3f(SafeSqrt(1 - cosine * cosine), 0, cosine);
+                    RNG rng = new RNG(5);
+                    int n = 400000;
+                    double sampled = 0, sampled2 = 0, evaluated = 0, evaluated2 = 0;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        pstd.optional<BSDFSample> bs = layered[b].Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
+                                                                           TransportMode.Radiance, BxDFReflTransFlags.All);
+                        if ((bool)bs && bs.value().pdf > 0)
+                        {
+                            double w = bs.value().f.Average() * AbsCosTheta(bs.value().wi) / bs.value().pdf;
+                            sampled += w;
+                            sampled2 += w * w;
+                        }
+                        Vector3f wi = SampleCosineHemisphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                        double e = layered[b].f(wo, wi, TransportMode.Radiance).Average() * Pi;
+                        evaluated += e;
+                        evaluated2 += e * e;
+                    }
+                    sampled /= n;
+                    evaluated /= n;
+                    double error = Math.Sqrt((sampled2 / n - sampled * sampled + evaluated2 / n - evaluated * evaluated) / n);
+                    double sigmas = Math.Abs(sampled - evaluated) / error;
+                    Console.Error.WriteLine(pbrt.StringPrintf("MEASURE bxdf layered %s, cos %.1f: albedo sampled %.4f, evaluated %.4f (%.1f sigma, %.2f%%)", names[b],
+                                                              cosine, sampled, evaluated, sigmas, 100 * Math.Abs(sampled - evaluated) / evaluated));
+                    EXPECT_LT(sigmas, 4.0, names[b]);
+                    EXPECT_LT(Math.Abs(sampled - evaluated), 0.01 * evaluated, names[b]);
+                }
+            }
+        }
     }
 }

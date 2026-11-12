@@ -2635,7 +2635,9 @@ namespace pbrt
                                 SampledSpectrum fExit = exitInterface.f(-w, wi, mode);
                                 if ((bool)fExit)
                                 {
-                                    Float exitPDF = exitInterface.PDF(-w, wi, mode, BxDFReflTransFlags.Transmission);
+                                    // The density with which the exit interface, sampled from wi, gives the direction of this path (wis): from wi to
+                                    // -w, with the mode of that sampling
+                                    Float exitPDF = exitInterface.PDF(wi, -w, !mode, BxDFReflTransFlags.Transmission);
                                     Float wt2 = PowerHeuristic(1, ps.value().pdf, 1, exitPDF);
                                     SampledSpectrum through = beta * Tr(zp - exitZ, ps.value().wi) * fExit * wt2;
                                     f += through;
@@ -2710,7 +2712,9 @@ namespace pbrt
                                 Float wt = 1;
                                 if (!IsSpecular(nonExitInterface.Flags()))
                                 {
-                                    Float exitPDF = exitInterface.PDF(-w, wi, mode, BxDFReflTransFlags.Transmission);
+                                    // The density with which the exit interface, sampled from wi, gives the direction of this path (wis): from wi to
+                                    // -w, with the mode of that sampling
+                                    Float exitPDF = exitInterface.PDF(wi, -w, !mode, BxDFReflTransFlags.Transmission);
                                     wt = PowerHeuristic(1, bs.value().pdf, 1, exitPDF);
                                 }
                                 SampledSpectrum through = beta * Tr(thickness, bs.value().wi) * fExit * wt;

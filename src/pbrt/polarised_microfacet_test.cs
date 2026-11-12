@@ -550,7 +550,7 @@ namespace pbrt
         // taken evenly (f). Both estimate one Stokes vector: its degree of polarisation agrees within their noise. (The
         // matrix of a sampled path has no ratio of two estimates in it; a matrix asked for the pair of directions of a
         // sample, scaled by the weight of the sample, does, and gave a polarisation some percent off.)
-        static void SampledAgainstEvaluated(BxDF bxdf, string name, int samples, bool sameIntensity)
+        static void SampledAgainstEvaluated(BxDF bxdf, string name, int samples)
         {
             RNG rng = new RNG(13);
             BSDF bsdf = new BSDF(new Normal3f(0, 0, 1), new Vector3f(1, 0, 0), bxdf);
@@ -589,10 +589,7 @@ namespace pbrt
                                                       sampledIntensity, evaluatedIntensity, sampledS1, evaluatedS1, sigmas, error, sumSampled[2] / samples,
                                                       sumEvaluated[2] / samples, sumSampled[3] / samples, sumEvaluated[3] / samples));
             EXPECT_LT(sigmas, 4.0, name);
-            if (sameIntensity)
-            {
-                EXPECT_LT(Math.Abs(sampledIntensity - evaluatedIntensity), 0.02 * evaluatedIntensity, name);
-            }
+            EXPECT_LT(Math.Abs(sampledIntensity - evaluatedIntensity), 0.02 * evaluatedIntensity, name);
         }
 
         [TEST("PolarisedMicrofacet", "SampledAgainstEvaluated")]
@@ -600,15 +597,12 @@ namespace pbrt
         {
             SampledSpectrum eta = S(0.2f), k = S(3.9f);
             MicrofacetDistribution rough = new TrowbridgeReitzDistribution(0.5f, 0.5f), coat = new TrowbridgeReitzDistribution(0.1f, 0.1f);
-            SampledAgainstEvaluated(new MultiScatterConductorBxDF(rough, new MicrosurfaceHeightUniform(), eta, k, 50), "walk conductor GGX 0.5", 400000, true);
-            SampledAgainstEvaluated(new MultiScatterDielectricBxDF(rough, new MicrosurfaceHeightUniform(), 1.5f, 50), "walk dielectric GGX 0.5", 400000, true);
-            // The layered BxDFs: the scalar Sample_f and f of the layers already disagree by some 4% about the light
-            // they return (BxDFCheck measures the same on the scalar BxDF, at any depth, before any of this), so the
-            // intensities are printed and only the polarised part is held to its noise
+            SampledAgainstEvaluated(new MultiScatterConductorBxDF(rough, new MicrosurfaceHeightUniform(), eta, k, 50), "walk conductor GGX 0.5", 400000);
+            SampledAgainstEvaluated(new MultiScatterDielectricBxDF(rough, new MicrosurfaceHeightUniform(), 1.5f, 50), "walk dielectric GGX 0.5", 400000);
             SampledAgainstEvaluated(new CoatedDiffuseBxDF(new DielectricBxDF(1.5f, coat), new DiffuseBxDF(S(0.7f)), 0.01f, S(0), 0, 10, 1),
-                                    "coated diffuse", 400000, false);
+                                    "coated diffuse", 400000);
             SampledAgainstEvaluated(new CoatedConductorBxDF(new DielectricBxDF(1.5f, coat), new ConductorBxDF(new TrowbridgeReitzDistribution(0.3f, 0.3f), eta, k),
-                                                            0.01f, S(0), 0, 10, 1), "coated conductor", 400000, false);
+                                                            0.01f, S(0), 0, 10, 1), "coated conductor", 400000);
         }
 
         // Thin films on the microfacets of the multiple scattering microsurfaces: with one reflection allowed the matrix is
