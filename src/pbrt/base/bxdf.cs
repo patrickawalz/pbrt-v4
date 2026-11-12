@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // base/bxdf.h
@@ -204,6 +204,18 @@ namespace pbrt
             return Sample_f(wo, uc, u, TransportMode.Radiance, BxDFReflTransFlags.All);
         }
         public abstract Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags);
+
+        // (not in pbrt-v4) The Mueller matrix of the scattering from wi to wo (directions of the local frame), for the polarised
+        // integrators: what PolarisedPathIntegrator.RoughAttenuation asks of a BxDF that it does not know itself. Its first
+        // element is `weight` times the ratio of the polarised reflectance to the scalar one (1 for a single reflection),
+        // and its frames are those of the first and of the last microfacet that the light meets. False when the BxDF
+        // depolarises, or has no polarised form: the scattering is then taken as that of a Lambertian surface.
+        public virtual bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode,
+                                      out PolarisedLightSystem.Attenuation A)
+        {
+            A = default;
+            return false;
+        }
         public Float PDF(Vector3f wo, Vector3f wi, TransportMode mode)
         {
             return PDF(wo, wi, mode, BxDFReflTransFlags.All);

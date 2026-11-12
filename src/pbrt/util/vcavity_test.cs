@@ -236,16 +236,8 @@ namespace pbrt
             }
         }
 
-        // ---- The ground truth of the dielectric groove --------------------------------------------------------------------
-        // One ray followed through one groove, step by step, by the rules of the model and nothing else: no unfolding, no
-        // closed form. The groove is the valley of tilt alpha whose cross section is the plane of t = (cos phi, sin phi, 0) and
-        // z; its walls go from the apex to the aperture at height 1, and the medium of index ior is below them.
-        //  - A ray from outside enters through a point uniform on the aperture; at each wall it reflects with the Fresnel
-        //    reflectance or refracts into the medium, where it ends.
-        //  - A ray from inside meets a wall from below (the wall by the area it shows to the ray, at a point uniform on it); it
-        //    reflects back into the medium, where it ends, or refracts into the valley, where it reflects between the walls,
-        //    refracts back into the medium, or leaves through the aperture.
-        // Returns false when the ray is lost: more wall hits than maxN, or an end direction on the wrong side of the surface.
+        // ---- The reference of a dielectric interface made of grooves -----------------------------------------------------
+        // (docs/vcavity.md, section 5: there is no dielectric V-cavity BxDF yet; this is what one has to match)
         static bool Refract(double[] d, double nx, double ny, double nz, double r, double[] o)
         {
             double c = -(d[0] * nx + d[1] * ny + d[2] * nz);
@@ -265,267 +257,11 @@ namespace pbrt
             return true;
         }
 
-        static bool ReferenceGroove(Vector3f wo, double phi, double alpha, double ior, int maxN, ref RNG rng, out Vector3f wi)
-        {
-            wi = new Vector3f(0, 0, 0);
-            double tx = Math.Cos(phi), ty = Math.Sin(phi);
-            double cot = Math.Cos(alpha) / Math.Sin(alpha);
-            // The walls in the plane (t, z): tips, and normals towards the valley, in 3D
-            double[] tipT = new double[] { -cot, cot };
-            double[] wallNt = new double[] { Math.Sin(alpha), -Math.Sin(alpha) };
-            double wallNz = Math.Cos(alpha);
-            // The travel direction, and the position in the plane
-            double[] d = new double[] { -wo.x, -wo.y, -wo.z };
-            double[] o = new double[3];
-            double pt, pz;
-            int lastWall = -1;
-            int hits = 0;
-            if (wo.z > 0)
-            {
-                pt = -cot + 2 * cot * rng.Uniform<double>();
-                pz = 1;
-            }
-            else
-            {
-                // The wall met from below
-                double c0 = d[0] * wallNt[0] * tx + d[1] * wallNt[0] * ty + d[2] * wallNz;
-                double c1 = d[0] * wallNt[1] * tx + d[1] * wallNt[1] * ty + d[2] * wallNz;
-                double a0 = Math.Max(c0, 0.0), a1 = Math.Max(c1, 0.0);
-                if (!(a0 + a1 > 0))
-                {
-                    return false;
-                }
-                int wall = rng.Uniform<double>() * (a0 + a1) < a0 ? 0 : 1;
-                double cosine = wall == 0 ? c0 : c1;
-                double nx = wallNt[wall] * tx, ny = wallNt[wall] * ty, nz = wallNz;
-                double reflectance = FrDielectric((Float)Math.Min(cosine, 1.0), (Float)(1 / ior));
-                if (rng.Uniform<double>() < reflectance)
-                {
-                    wi = new Vector3f((Float)(d[0] - 2 * cosine * nx), (Float)(d[1] - 2 * cosine * ny), (Float)(d[2] - 2 * cosine * nz));
-                    return wi.z < 0;
-                }
-                if (!Refract(d, -nx, -ny, -nz, ior, o))
-                {
-                    return false;
-                }
-                d[0] = o[0];
-                d[1] = o[1];
-                d[2] = o[2];
-                double along = rng.Uniform<double>();
-                pt = along * tipT[wall];
-                pz = along;
-                lastWall = wall;
-            }
-            for (int step = 0; step < 4 * maxN + 8; ++step)
-            {
-                double dt = d[0] * tx + d[1] * ty, dz = d[2];
-                // The nearest wall ahead in the plane
-                double best = Double.PositiveInfinity;
-                int wall = -1;
-                for (int w = 0; w < 2; ++w)
-                {
-                    if (w == lastWall)
-                    {
-                        continue;
-                    }
-                    // p + l (dt, dz) = s (tipT, 1)
-                    double det = dt * (-1.0) - dz * (-tipT[w]);
-                    if (Math.Abs(det) < 1e-14)
-                    {
-                        continue;
-                    }
-                    double l = (-pt * (-1.0) + pz * (-tipT[w])) / det;
-                    double sAlong = (dt * (-pz) - dz * (-pt)) / det;
-                    if (l > 1e-12 && sAlong > 0 && sAlong < 1 && l < best)
-                    {
-                        best = l;
-                        wall = w;
-                    }
-                }
-                if (wall < 0)
-                {
-                    // Through the aperture
-                    wi = new Vector3f((Float)d[0], (Float)d[1], (Float)d[2]);
-                    return wi.z > 0;
-                }
-                ++hits;
-                if (hits > maxN)
-                {
-                    return false;
-                }
-                pt += best * dt;
-                pz += best * dz;
-                double nx = wallNt[wall] * tx, ny = wallNt[wall] * ty, nz = wallNz;
-                double dn = d[0] * nx + d[1] * ny + d[2] * nz;
-                double reflectance = FrDielectric((Float)Math.Min(-dn, 1.0), (Float)ior);
-                if (rng.Uniform<double>() < reflectance)
-                {
-                    d[0] -= 2 * dn * nx;
-                    d[1] -= 2 * dn * ny;
-                    d[2] -= 2 * dn * nz;
-                    lastWall = wall;
-                    continue;
-                }
-                if (!Refract(d, nx, ny, nz, 1 / ior, o))
-                {
-                    return false;
-                }
-                wi = new Vector3f((Float)o[0], (Float)o[1], (Float)o[2]);
-                return wi.z < 0;
-            }
-            return false;
-        }
-
-        // The directions that Sample_f returns against the directions of the rays followed one by one, for the same
-        // distribution of grooves: a histogram over the sphere of each, and the part of the rays that is kept.
-        static void DielectricAgainstReference(MicrofacetDistribution distribution, string name, Float ior, int maxN)
-        {
-            BxDF bxdf = new VCavityDielectricBxDF(distribution, ior, maxN);
-            RNG rng = new RNG(31);
-            const int ThetaCells = 10, PhiCells = 8;
-            double worst = 0;
-            foreach (Float cosine in new Float[] { 0.9f, 0.5f, 0.15f, -0.9f, -0.5f, -0.15f })
-            {
-                Float sine = SafeSqrt(1 - cosine * cosine);
-                Vector3f wo = new Vector3f(sine * (Float)Math.Cos(0.7), sine * (Float)Math.Sin(0.7), cosine);
-                int samples = 400000;
-                double[] sampled = new double[ThetaCells * PhiCells], sampled2 = new double[ThetaCells * PhiCells];
-                double[] reference = new double[ThetaCells * PhiCells];
-                double keptSampled = 0, keptReference = 0;
-                for (int i = 0; i < samples; ++i)
-                {
-                    // The reference: a groove of the distribution, and a ray through it
-                    Vector3f s = distribution.Sample_wm(new Vector3f(0, 0, 1), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
-                    double sinA = Math.Sqrt((double)s.x * s.x + (double)s.y * s.y);
-                    if (sinA > 1e-9)
-                    {
-                        Vector3f wi;
-                        if (ReferenceGroove(wo, Math.Atan2(s.y, s.x), Math.Atan2(sinA, s.z), ior, maxN, ref rng, out wi))
-                        {
-                            reference[Cell(wi, ThetaCells, PhiCells)] += 1;
-                            keptReference += 1;
-                        }
-                    }
-                    // The BxDF: the weight of a sample is the part of the rays of its groove that is kept
-                    pstd.optional<BSDFSample> bs = bxdf.Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
-                                                                 TransportMode.Importance, BxDFReflTransFlags.All);
-                    if (bs.has_value())
-                    {
-                        double weight = bs.value().f.Average() * AbsCosTheta(bs.value().wi) / bs.value().pdf;
-                        int c = Cell(bs.value().wi, ThetaCells, PhiCells);
-                        sampled[c] += weight;
-                        sampled2[c] += weight * weight;
-                        keptSampled += weight;
-                    }
-                }
-                double worstHere = 0;
-                for (int c = 0; c < sampled.Length; ++c)
-                {
-                    double a = sampled[c] / samples, b = reference[c] / samples;
-                    if (Math.Max(a, b) * samples < 30)
-                    {
-                        continue;
-                    }
-                    double variance = (sampled2[c] / samples - a * a) / samples + b * (1 - b) / samples;
-                    worstHere = Math.Max(worstHere, Math.Abs(a - b) / Math.Sqrt(variance));
-                }
-                worst = Math.Max(worst, worstHere);
-                Console.Error.WriteLine(pbrt.StringPrintf("MEASURE vcavity dielectric %s, cos %.2f: kept %.4f (rays followed one by one %.4f), worst cell %.1f sigma",
-                                                          name, cosine, keptSampled / samples, keptReference / samples, worstHere));
-                EXPECT_LT(Math.Abs(keptSampled - keptReference) / samples, 0.005);
-            }
-            EXPECT_LT(worst, 5.0, name + ": Sample_f does not follow the rays of the groove");
-        }
-
-        static int Cell(Vector3f w, int thetaCells, int phiCells)
-        {
-            double phi = Math.Atan2(w.y, w.x);
-            if (phi < 0)
-            {
-                phi += 2 * Math.PI;
-            }
-            int a = Math.Min(thetaCells - 1, (int)((w.z + 1) / 2 * thetaCells));
-            int b = Math.Min(phiCells - 1, (int)(phi / (2 * Math.PI) * phiCells));
-            return a * phiCells + b;
-        }
-
-        [TEST("VCavity", "DielectricAgainstTracedRays")]
-        public static void VCavity_DielectricAgainstTracedRays()
-        {
-            DielectricAgainstReference(new TrowbridgeReitzDistribution(0.5f, 0.5f), "GGX 0.5 ior 1.5", 1.5f, 16);
-            DielectricAgainstReference(new TrowbridgeReitzDistribution(0.2f, 0.2f), "GGX 0.2 ior 1.5", 1.5f, 16);
-            DielectricAgainstReference(new BeckmannDistribution(0.5f, 0.3f), "Beckmann 0.5 0.3 ior 1.33", 1.33f, 16);
-        }
-
-        // The density of the BxDF (PDF, the root finding) against its own sampling, by cells of the sphere
-        [TEST("VCavity", "DielectricDensityAgainstSampling")]
-        public static void VCavity_DielectricDensityAgainstSampling()
-        {
-            BxDF bxdf = new VCavityDielectricBxDF(new TrowbridgeReitzDistribution(0.5f, 0.5f), 1.5f, 8);
-            RNG rng = new RNG(51);
-            const int ThetaCells = 10, PhiCells = 8;
-            foreach (Float cosine in new Float[] { 0.8f, 0.3f, -0.8f, -0.3f })
-            {
-                Float sine = SafeSqrt(1 - cosine * cosine);
-                Vector3f wo = new Vector3f(sine * (Float)Math.Cos(0.7), sine * (Float)Math.Sin(0.7), cosine);
-                int samples = 400000;
-                double[] sampled = new double[ThetaCells * PhiCells];
-                for (int i = 0; i < samples; ++i)
-                {
-                    pstd.optional<BSDFSample> bs = bxdf.Sample_f(wo, rng.Uniform<Float>(), new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()),
-                                                                 TransportMode.Importance, BxDFReflTransFlags.All);
-                    if (bs.has_value())
-                    {
-                        sampled[Cell(bs.value().wi, ThetaCells, PhiCells)] += bs.value().f.Average() * AbsCosTheta(bs.value().wi) / bs.value().pdf / samples;
-                    }
-                }
-                double sumSampledUp = 0, sumSampledDown = 0, sumDensityUp = 0, sumDensityDown = 0;
-                string line = "";
-                for (int a = 0; a < ThetaCells; ++a)
-                {
-                    double rowSampled = 0, rowDensity = 0;
-                    for (int b = 0; b < PhiCells; ++b)
-                    {
-                        // The integral of the density over the cell: the cells have the same solid angle, 4 pi / cells
-                        double sum = 0;
-                        int evaluations = 150;
-                        for (int e = 0; e < evaluations; ++e)
-                        {
-                            double z = -1 + 2 * (a + rng.Uniform<double>()) / ThetaCells;
-                            double phi = 2 * Math.PI * (b + rng.Uniform<double>()) / PhiCells;
-                            double r = Math.Sqrt(Math.Max(0.0, 1 - z * z));
-                            Vector3f wi = new Vector3f((Float)(r * Math.Cos(phi)), (Float)(r * Math.Sin(phi)), (Float)z);
-                            Float pdf = bxdf.PDF(wo, wi, TransportMode.Importance, BxDFReflTransFlags.All);
-                            sum += pdf > 2e-6f ? pdf : 0;
-                        }
-                        double density = sum / evaluations * 4 * Math.PI / (ThetaCells * PhiCells);
-                        rowSampled += sampled[a * PhiCells + b];
-                        rowDensity += density;
-                    }
-                    if (a < ThetaCells / 2)
-                    {
-                        sumSampledDown += rowSampled;
-                        sumDensityDown += rowDensity;
-                    }
-                    else
-                    {
-                        sumSampledUp += rowSampled;
-                        sumDensityUp += rowDensity;
-                    }
-                    line += pbrt.StringPrintf(" %.3f/%.3f", rowSampled, rowDensity);
-                }
-                Console.Error.WriteLine(pbrt.StringPrintf("MEASURE vcavity dielectric density, cos %.1f: below sampled %.4f density %.4f; above sampled %.4f density %.4f",
-                                                          cosine, sumSampledDown, sumDensityDown, sumSampledUp, sumDensityUp));
-                Console.Error.WriteLine("MEASURE   by band of z (sampled/density):" + line);
-            }
-        }
-
         // ---- The periodic profile -----------------------------------------------------------------------------------------
         // The surface that the grooves stand for when they are side by side: a triangle wave of tilt alpha in the plane (t, z),
         // valleys at height 0 and ridges at height 1, air above and the medium below. A ray is followed through it until it
         // leaves upwards (above the ridges) or downwards (below the valleys): what it meets on the way, in the air of a valley
-        // or in the medium of a ridge, is the same Fresnel interface. Nothing is dropped. This is not what VCavityDielectricBxDF
-        // computes (it knows one valley, and ends a ray that enters the medium): it is what it is measured against.
+        // or in the medium of a ridge, is the same Fresnel interface. Nothing is dropped.
         static bool ReferencePeriodic(Vector3f wo, double phi, double alpha, double ior, ref RNG rng, out Vector3f wi)
         {
             wi = new Vector3f(0, 0, 0);
@@ -636,7 +372,7 @@ namespace pbrt
         // part that it sends from B into A, times ior^2 and the ratio of the projected solid angles of the patches:
         //     Omega_A P(A to B) / ior^2 = Omega_B P(B to A).
         // (For two patches on the same side there is no ior^2.) The patches are caps about two directions.
-        static void PatchTransfer(bool periodic, MicrofacetDistribution distribution, double ior, Vector3f a, Vector3f b, double capCosine, ref RNG rng,
+        static void PatchTransfer(MicrofacetDistribution distribution, double ior, Vector3f a, Vector3f b, double capCosine, ref RNG rng,
                                   int samples, out double fromA, out double fromB, out double errorA, out double errorB, out double kept)
         {
             double hitsA = 0, hitsB = 0, keptRays = 0;
@@ -659,9 +395,7 @@ namespace pbrt
                         continue;
                     }
                     Vector3f wi;
-                    bool ok = periodic ? ReferencePeriodic(wo, Math.Atan2(s.y, s.x), Math.Atan2(sinA, s.z), ior, ref rng, out wi)
-                                       : ReferenceGroove(wo, Math.Atan2(s.y, s.x), Math.Atan2(sinA, s.z), ior, 32, ref rng, out wi);
-                    if (!ok)
+                    if (!ReferencePeriodic(wo, Math.Atan2(s.y, s.x), Math.Atan2(sinA, s.z), ior, ref rng, out wi))
                     {
                         continue;
                     }
@@ -687,11 +421,10 @@ namespace pbrt
             kept = keptRays / samples;
         }
 
-        // The model of VCavityDielectricBxDF (one valley) and the periodic profile, by the same measure: the reciprocity of
-        // patches, and the part of the rays that is kept. The first is not reciprocal and loses rays from inside; the second
-        // is reciprocal and keeps everything. Printed, and asserted for the periodic profile.
-        [TEST("VCavity", "DielectricModelReciprocity")]
-        public static void VCavity_DielectricModelReciprocity()
+        // The periodic profile is reciprocal and keeps every ray: the two properties a dielectric V-cavity BxDF has to have, and
+        // that the one-valley model that was tried first did not (docs/vcavity.md)
+        [TEST("VCavity", "PeriodicDielectricReferenceIsReciprocal")]
+        public static void VCavity_PeriodicDielectricReferenceIsReciprocal()
         {
             RNG rng = new RNG(61);
             MicrofacetDistribution distribution = new TrowbridgeReitzDistribution(0.5f, 0.5f);
@@ -700,37 +433,30 @@ namespace pbrt
                                                 Normalize(new Vector3f(0.1f, 0.8f, 0.5f)) };
             Vector3f[] below = new Vector3f[] { Normalize(new Vector3f(-0.2f, -0.1f, -0.95f)), Normalize(new Vector3f(0.5f, -0.3f, -0.7f)),
                                                 Normalize(new Vector3f(-0.6f, 0.5f, -0.55f)) };
-            for (int model = 0; model < 2; ++model)
+            double worst = 0, worstSigma = 0, keptLeast = 1;
+            for (int i = 0; i < above.Length; ++i)
             {
-                bool periodic = model == 1;
-                double worst = 0, worstSigma = 0, keptLeast = 1;
-                for (int i = 0; i < above.Length; ++i)
+                for (int j = 0; j < 4; ++j)
                 {
-                    for (int j = 0; j < 4; ++j)
+                    // Transmission pairs, and one reflection pair inside the medium
+                    Vector3f a = j < 3 ? above[i] : below[i], b = j < 3 ? below[j] : below[(i + 1) % 3];
+                    double factor = j < 3 ? ior * ior : 1;
+                    double fromA, fromB, errorA, errorB, kept;
+                    PatchTransfer(distribution, ior, a, b, capCosine, ref rng, 300000, out fromA, out fromB, out errorA, out errorB, out kept);
+                    double left = fromA / factor, right = fromB;
+                    double error = Math.Sqrt(Sqr(errorA / factor) + Sqr(errorB));
+                    if (Math.Max(left, right) > 20 * error)
                     {
-                        // Transmission pairs, and one reflection pair inside the medium
-                        Vector3f a = j < 3 ? above[i] : below[i], b = j < 3 ? below[j] : below[(i + 1) % 3];
-                        double factor = j < 3 ? ior * ior : 1;
-                        double fromA, fromB, errorA, errorB, kept;
-                        PatchTransfer(periodic, distribution, ior, a, b, capCosine, ref rng, 300000, out fromA, out fromB, out errorA, out errorB, out kept);
-                        double left = fromA / factor, right = fromB;
-                        double error = Math.Sqrt(Sqr(errorA / factor) + Sqr(errorB));
-                        if (Math.Max(left, right) > 20 * error)
-                        {
-                            worst = Math.Max(worst, Math.Abs(left - right) / Math.Max(left, right));
-                            worstSigma = Math.Max(worstSigma, Math.Abs(left - right) / error);
-                        }
-                        keptLeast = Math.Min(keptLeast, kept);
+                        worst = Math.Max(worst, Math.Abs(left - right) / Math.Max(left, right));
+                        worstSigma = Math.Max(worstSigma, Math.Abs(left - right) / error);
                     }
-                }
-                Console.Error.WriteLine(pbrt.StringPrintf("MEASURE vcavity dielectric model, %s: reciprocity of 12 pairs of patches, worst relative difference %.3f (%.1f sigma); " +
-                                                          "rays kept, at least %.4f", periodic ? "periodic profile" : "one valley (the BxDF)", worst, worstSigma, keptLeast));
-                if (periodic)
-                {
-                    EXPECT_LT(worstSigma, 4.5, "the periodic profile is not reciprocal");
-                    EXPECT_GT(keptLeast, 0.999, "the periodic profile loses rays");
+                    keptLeast = Math.Min(keptLeast, kept);
                 }
             }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE vcavity periodic dielectric reference: reciprocity of 12 pairs of patches, worst relative difference %.3f " +
+                                                      "(%.1f sigma); rays kept, at least %.4f", worst, worstSigma, keptLeast));
+            EXPECT_LT(worstSigma, 4.5, "the periodic profile is not reciprocal");
+            EXPECT_GT(keptLeast, 0.999, "the periodic profile loses rays");
         }
     }
 }

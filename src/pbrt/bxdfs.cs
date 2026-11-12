@@ -11,6 +11,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Attenuation = pbrt.PolarisedLightSystem.Attenuation;
 
 namespace pbrt
 {
@@ -473,6 +474,79 @@ namespace pbrt
         private Float roughness;
     }
 
+    // PolarisedFacet Definition
+    // (not in pbrt-v4) The Mueller matrices of the microfacets, for the BxDFs whose light meets several of them (BxDF.Polarised).
+    // A microfacet is a mirror or a smooth interface: its matrix is that of the Fresnel equations at its normal, and its
+    // Stokes frames are those of the plane of that normal (Attenuation.Scattered). The matrices are not normalised: the
+    // first element of a product is the reflectance of the chain for the polarisation that the light has when it reaches
+    // each microfacet, which is not the product of the scalar reflectances.
+    //
+    // The directions are those of a walk that starts against the first argument of BxDF.Polarised: a points from the
+    // microfacet to where the walk came from, b to where it goes, and `side` is -1 when the walk was mirrored to the upper
+    // side of the surface. For a path from the camera (the radiance mode) the light goes the other way, from b to a.
+    public static unsafe class PolarisedFacet
+    {
+        public static Attenuation Conductor(BSDF bsdf, Float side, Vector3f a, Vector3f b, Vector3f m, SampledSpectrum eta, SampledSpectrum k,
+                                            bool fromCamera)
+        {
+            Float cosine = AbsDot(a, m);
+            SampledSpectrum Fs = new SampledSpectrum(0f), Fp = new SampledSpectrum(0f), Ds = new SampledSpectrum(0f), Dp = new SampledSpectrum(0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float fs, fp, ds, dp;
+                FrComplexPolarised(cosine, new pstd.complex(eta[i], k[i]), out fs, out fp, out ds, out dp);
+                Fs[i] = fs;
+                Fp[i] = fp;
+                Ds[i] = ds;
+                Dp[i] = dp;
+            }
+            return Attenuation.Fresnel(new SampledSpectrum(1f), Fs, Fp, Ds, Dp)
+                .Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+        }
+
+        // cosine is that of a with the normal m of the side of a, and eta the index of the other side over that of the side
+        // of a. `scalar` is the reflectance (or the transmittance) of unpolarised light, the factor of the scalar BxDF.
+        public static Attenuation Dielectric(BSDF bsdf, Float side, Vector3f a, Vector3f b, Vector3f m, Float cosine, Float eta, bool reflect,
+                                             bool fromCamera, out Float scalar)
+        {
+            Float fs, fp, ds, dp;
+            FrDielectricPolarised(cosine, eta, out fs, out fp, out ds, out dp);
+            Float reflectance = 0.5f * (fs + fp);
+            scalar = reflect ? reflectance : 1 - reflectance;
+            Attenuation matrix = reflect ? Attenuation.Fresnel(new SampledSpectrum(1f), fs, fp, ds, dp)
+                                         : Attenuation.Fresnel(new SampledSpectrum(1f), 1 - fs, 1 - fp, 0, 0);
+            return matrix.Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+        }
+
+        // The matrix of the walk so far with one more microfacet. From the camera the light meets the new microfacet first.
+        public static Attenuation Compose(Attenuation chain, bool hasChain, Attenuation next, bool fromCamera)
+        {
+            if (!hasChain)
+            {
+                return next;
+            }
+            return fromCamera ? chain * next : next * chain;
+        }
+
+        // weight sum / scalar: the sum of the matrices of the paths, over the sum of their scalar reflectances. False where the
+        // BxDF is next to nothing (the far tail of a distribution): the ratio of two numbers that underflow is not a matrix.
+        public static bool Normalise(Attenuation sum, SampledSpectrum scalar, SampledSpectrum weight, out Attenuation A)
+        {
+            A = default;
+            SampledSpectrum scale = new SampledSpectrum(0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                if (!(scalar[i] > 1e-20f))
+                {
+                    return false;
+                }
+                scale[i] = weight[i] / scalar[i];
+            }
+            A = sum * scale;
+            return !A.HasNaNs();
+        }
+    }
+
     // MultiScatterConductorBxDF Definition
     // (not in pbrt-v4) A rough conductor with the multiple scattering of its microsurface: the random walk of Heitz, Hanika,
     // d'Eon and Dachsbacher, "Multiple-Scattering Microfacet BSDFs with the Smith Model" (SIGGRAPH 2016), as in the tutorial
@@ -577,6 +651,77 @@ namespace pbrt
             Walk(wo, wi, ref rng, out sum, out density);
             // Strictly positive: the integrator divides by it
             return std.max<Float>(density, 1e-6f);
+        }
+
+        // The walk of f for this pair of directions, with the Mueller matrix of every microfacet kept: what each microfacet
+        // would send to wi is the matrix of the microfacets before it times that of the reflection towards wi. The matrix
+        // is an estimate, as f is; its first element over the scalar estimate of the same walk scales `weight`.
+        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
+        {
+            A = default;
+            if (!SameHemisphere(wo, wi) || wo.z == 0 || wi.z == 0)
+            {
+                return false;
+            }
+            Float side = 1;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+                side = -1;
+            }
+            bool fromCamera = mode == TransportMode.Radiance;
+            RNG rng = new RNG(Hash(wo), Hash(wi));
+            SampledSpectrum scalar = new SampledSpectrum(0f);
+            Attenuation sum = default, chain = default;
+            bool hasSum = false, hasChain = false;
+            Vector3f wr = -wo;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            SampledSpectrum energy = new SampledSpectrum(1f);
+            for (int order = 0; order < maxOrder; ++order)
+            {
+                h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left)
+                {
+                    break;
+                }
+                Vector3f incoming = -wr;
+                Vector3f wh = Normalize(incoming + wi);
+                if (wh.z > 0)
+                {
+                    Float cosine = Dot(incoming, wh);
+                    Float term = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine) * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                    if (!IsNaN(term) && !IsInf(term) && term > 0)
+                    {
+                        scalar += energy * FrComplex(cosine, eta, k) * term;
+                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, incoming, wi, wh, eta, k, fromCamera),
+                                                                          fromCamera) * new SampledSpectrum(term);
+                        if (hasSum)
+                        {
+                            sum += contribution;
+                        }
+                        else
+                        {
+                            sum = contribution;
+                            hasSum = true;
+                        }
+                    }
+                }
+                Vector3f wm = mfDistrib.Sample_wm_SingleSided(incoming, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                energy *= FrComplex(AbsDot(incoming, wm), eta, k);
+                wr = Reflect(incoming, wm);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    break;
+                }
+                chain = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, incoming, wr, wm, eta, k, fromCamera), fromCamera);
+                hasChain = true;
+            }
+            if (!hasSum)
+            {
+                return false;
+            }
+            return PolarisedFacet.Normalise(sum, scalar, weight, out A);
         }
 
         public static string Name() { return "MultiScatterConductorBxDF"; }
@@ -872,7 +1017,9 @@ namespace pbrt
                 {
                     break;
                 }
-                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng);
+                Vector3f wm;
+                bool reflected;
+                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng, out wm, out reflected);
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     return default;
@@ -928,27 +1075,28 @@ namespace pbrt
         }
 
         // The power per solid angle that a microfacet met from the direction wi (pointing away from it), on the side
-        // `outside`, sends to wo on the side `woOutside`
-        private Float EvalPhase(Vector3f wi, Vector3f wo, Float etaAbove, bool outside, bool woOutside)
+        // `outside`, sends to wo on the side `woOutside`. wh is the normal of the microfacet that does it and cosine that of
+        // wi with it (for the Fresnel equations); zero when there is none.
+        private Float EvalPhase(Vector3f wi, Vector3f wo, Float etaAbove, bool outside, bool woOutside, out Vector3f wh, out Float cosine)
         {
             Float etaLocal = outside ? etaAbove : 1 / etaAbove;
             Float side = outside ? 1 : -1;
             if (outside == woOutside)
             {
                 // Reflection
-                Vector3f wh = Normalize(wi + wo);
-                Float cosine = Dot(wi, wh);
+                wh = Normalize(wi + wo);
+                cosine = Dot(wi, wh);
                 return 0.25f * mfDistrib.PDF_SingleSided(side * wi, side * wh) / cosine * FrDielectric(cosine, etaLocal);
             }
             else
             {
                 // Transmission
-                Vector3f wh = -Normalize(wi + wo * etaLocal);
+                wh = -Normalize(wi + wo * etaLocal);
                 if ((wh.z < 0) == outside)
                 {
                     wh = -wh;
                 }
-                Float cosine = Dot(wi, wh);
+                cosine = Dot(wi, wh);
                 if (cosine < 0)
                 {
                     return 0;
@@ -958,21 +1106,107 @@ namespace pbrt
             }
         }
 
-        // The direction in which a microfacet met from wi sends the walk, and the side it is then on
-        private Vector3f SamplePhase(Vector3f wi, Float etaAbove, ref bool outside, ref RNG rng)
+        // The direction in which a microfacet met from wi sends the walk, and the side it is then on. wm is the normal of
+        // the microfacet, on the side of wi, and reflected tells what it did.
+        private Vector3f SamplePhase(Vector3f wi, Float etaAbove, ref bool outside, ref RNG rng, out Vector3f wm, out bool reflected)
         {
             Float etaLocal = outside ? etaAbove : 1 / etaAbove;
             Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
-            Vector3f wm = outside ? mfDistrib.Sample_wm_SingleSided(wi, u) : -mfDistrib.Sample_wm_SingleSided(-wi, u);
+            wm = outside ? mfDistrib.Sample_wm_SingleSided(wi, u) : -mfDistrib.Sample_wm_SingleSided(-wi, u);
             Float cosine = Dot(wi, wm);
             Float reflectance = FrDielectric(cosine, etaLocal);
-            if (rng.Uniform<Float>() < reflectance)
+            reflected = rng.Uniform<Float>() < reflectance;
+            if (reflected)
             {
                 return -wi + 2 * cosine * wm;
             }
             outside = !outside;
             Float cosTransmitted = -SafeSqrt(1 - (1 - cosine * cosine) / Sqr(etaLocal));
             return Normalize(wm * (cosine / etaLocal + cosTransmitted) - wi / etaLocal);
+        }
+
+        // The walk of f for this pair of directions with the Mueller matrix of every microfacet kept. A microfacet that the
+        // walk reflected from, or went through, with the probability of the scalar reflectance (or transmittance) has its
+        // matrix divided by that probability.
+        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
+        {
+            A = default;
+            if (wo.z == 0 || wi.z == 0)
+            {
+                return false;
+            }
+            Float etaAbove = eta;
+            Float side = 1;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+                etaAbove = 1 / eta;
+                side = -1;
+            }
+            bool fromCamera = mode == TransportMode.Radiance;
+            RNG rng = new RNG(Hash(wo), Hash(wi));
+            Float scalar = 0;
+            Attenuation sum = default, chain = default;
+            bool hasSum = false, hasChain = false;
+            Vector3f wr = -wo;
+            Float h = MicrosurfaceWalk.StartHeight(height);
+            bool outside = true;
+            bool wiOutside = wi.z > 0;
+            for (int order = 0; order < maxOrder; ++order)
+            {
+                h = NextHeight(wr, h, outside, rng.Uniform<Float>());
+                if (h == MicrosurfaceWalk.Left || h == -MicrosurfaceWalk.Left)
+                {
+                    break;
+                }
+                Vector3f incoming = -wr;
+                Float etaLocal = outside ? etaAbove : 1 / etaAbove;
+                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
+                Vector3f wh;
+                Float cosine;
+                Float term = EvalPhase(incoming, wi, etaAbove, outside, wiOutside, out wh, out cosine) * shadowing;
+                if (!IsNaN(term) && !IsInf(term) && term > 0)
+                {
+                    Float probability;
+                    Attenuation facet = PolarisedFacet.Dielectric(bsdf, side, incoming, wi, wh, cosine, etaLocal, outside == wiOutside, fromCamera,
+                                                                  out probability);
+                    if (probability > 0)
+                    {
+                        scalar += term;
+                        Attenuation contribution = PolarisedFacet.Compose(chain, hasChain, facet, fromCamera) * new SampledSpectrum(term / probability);
+                        if (hasSum)
+                        {
+                            sum += contribution;
+                        }
+                        else
+                        {
+                            sum = contribution;
+                            hasSum = true;
+                        }
+                    }
+                }
+                Vector3f wm;
+                bool reflected;
+                wr = SamplePhase(incoming, etaAbove, ref outside, ref rng, out wm, out reflected);
+                if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
+                {
+                    break;
+                }
+                Float chosen;
+                Attenuation step = PolarisedFacet.Dielectric(bsdf, side, incoming, wr, wm, Dot(incoming, wm), etaLocal, reflected, fromCamera, out chosen);
+                if (!(chosen > 0))
+                {
+                    break;
+                }
+                chain = PolarisedFacet.Compose(chain, hasChain, step * new SampledSpectrum(1 / chosen), fromCamera);
+                hasChain = true;
+            }
+            if (!hasSum)
+            {
+                return false;
+            }
+            return PolarisedFacet.Normalise(sum, new SampledSpectrum(scalar), weight, out A);
         }
 
         // One walk from wo above the surface: the estimate of the power per solid angle sent to wi (f cos(theta_i), without
@@ -992,12 +1226,15 @@ namespace pbrt
                     break;
                 }
                 Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
-                Float term = EvalPhase(-wr, wi, etaAbove, outside, wiOutside) * shadowing;
+                Vector3f wh, wm;
+                Float cosine;
+                bool reflected;
+                Float term = EvalPhase(-wr, wi, etaAbove, outside, wiOutside, out wh, out cosine) * shadowing;
                 if (!IsNaN(term) && !IsInf(term) && term > 0)
                 {
                     sum += term;
                 }
-                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng);
+                wr = SamplePhase(-wr, etaAbove, ref outside, ref rng, out wm, out reflected);
                 if (IsNaN(wr.x + wr.y + wr.z) || IsNaN(h))
                 {
                     break;
@@ -1232,6 +1469,76 @@ namespace pbrt
             return std.max<Float>((Float)sum, 1e-6f);
         }
 
+        // The grooves that send one direction to the other, each with the matrices of its reflections in their order: the two
+        // facets of a groove are known, so the matrix of a path is exact.
+        public override bool Polarised(BSDF bsdf, Vector3f wo, Vector3f wi, SampledSpectrum weight, TransportMode mode, out Attenuation A)
+        {
+            A = default;
+            if (wo.z * wi.z <= 0)
+            {
+                return false;
+            }
+            Float side = wo.z < 0 ? -1 : 1;
+            Vector3f i = side * wo, o = side * wi;
+            bool fromCamera = mode == TransportMode.Radiance;
+            VCavityHit* hits = stackalloc VCavityHit[VCavityGrooves.kMaxHits];
+            double ell;
+            double* thI = stackalloc double[2];
+            int nh = VCavityGrooves.Enumerate(distrib, maxN, i, o, hits, out ell, thI);
+            double hx = (double)i.x + o.x, hy = (double)i.y + o.y;
+            double L = Math.Sqrt(hx * hx + hy * hy);
+            if (nh == 0 || !(L > 1e-9))
+            {
+                return false;
+            }
+            SampledSpectrum scalar = new SampledSpectrum(0f);
+            Attenuation sum = default;
+            bool hasSum = false;
+            for (int h = 0; h < nh; ++h)
+            {
+                // The facets of the groove: the left one is tilted towards the azimuth of the groove
+                double sg = hits[h].axis == 0 ? 1.0 : -1.0;
+                double sa = Math.Sin(hits[h].alpha), ca = Math.Cos(hits[h].alpha);
+                Vector3f left = new Vector3f((Float)(sa * sg * hx / L), (Float)(sa * sg * hy / L), (Float)ca);
+                Vector3f right = new Vector3f(-left.x, -left.y, left.z);
+                Attenuation chain = default;
+                bool hasChain = false;
+                SampledSpectrum reflectance = new SampledSpectrum(1f);
+                Vector3f from = i;
+                for (int j = 1; j <= hits[h].n; ++j)
+                {
+                    bool leftWall = (hits[h].first == 0) ? ((j & 1) != 0) : ((j & 1) == 0);
+                    Vector3f m = leftWall ? left : right;
+                    Vector3f to = Reflect(from, m);
+                    reflectance *= FrComplex(AbsDot(from, m), eta, k);
+                    chain = PolarisedFacet.Compose(chain, hasChain, PolarisedFacet.Conductor(bsdf, side, from, to, m, eta, k, fromCamera), fromCamera);
+                    hasChain = true;
+                    from = -to;
+                }
+                // The path ends along o, or it is not the path of this groove
+                if (!hasChain || Length(-from - o) > 1e-3f)
+                {
+                    continue;
+                }
+                scalar += (Float)hits[h].w * reflectance;
+                Attenuation contribution = chain * new SampledSpectrum((Float)hits[h].w);
+                if (hasSum)
+                {
+                    sum += contribution;
+                }
+                else
+                {
+                    sum = contribution;
+                    hasSum = true;
+                }
+            }
+            if (!hasSum)
+            {
+                return false;
+            }
+            return PolarisedFacet.Normalise(sum, scalar, weight, out A);
+        }
+
         public static string Name() { return "VCavityConductorBxDF"; }
 
         public override void Regularize()
@@ -1261,855 +1568,6 @@ namespace pbrt
         // VCavityConductorBxDF Private Members
         private MicrofacetDistribution distrib;
         private SampledSpectrum eta, k;
-        private int maxN = 16;
-    }
-
-    // VCavityDielectricBxDF Definition
-    // (not in pbrt-v4) A rough dielectric interface made of symmetric V grooves, with the reflections and refractions of a
-    // groove followed exactly. Not part of Lee et al. 2018 (reflection only): ours, derived with the same groove model, and
-    // described in docs/vcavity.md.
-    //
-    // EXPERIMENTAL, and no material uses it. It does what its model says (its sampling is that of rays followed one by one
-    // through a groove, util/vcavity_test.cs), but the model is not a correct interface: it knows one valley, so the medium
-    // side of the surface is not treated as the air side is. With a direction in the medium it is not reciprocal (patches
-    // of directions exchange up to 40% more one way than the other), and it loses up to 17% of the rays that start in the
-    // medium. Its reflection above the surface is that of VCavityConductorBxDF and is exact. docs/vcavity.md has the
-    // measurements, and the periodic profile that a correct version has to follow.
-    //
-    // Geometry: a V groove (valley, air wedge) cut into the dense medium (index ior) that fills
-    // the half space below the walls.
-    //  * wo.z > 0 (outside): the beam fills the aperture. At each wall hit the ray reflects (R) or refracts into the medium
-    //    (T, the path ends: the medium is the complement of a convex wedge).
-    //  * wo.z < 0 (inside): the ray hits one wall from the medium (wall k with probability proportional to its projected
-    //    length) and reflects (R, leaves the groove) or refracts into the wedge (T). In the wedge it reflects between the
-    //    walls (R, air side) or refracts back into the medium (T), or leaves through the aperture; the topology fractions of
-    //    the parallel beam entering a wall are exact (unfolded fan, VCavity.WedgeBeam).
-    // Every path is a deterministic function o(alpha, phi) of the groove tilt and azimuth. The groove-axis tangential
-    // component gives n_s i_u + n_e o_u = 0, so the azimuth is fixed by t || (n_s i + n_e o)_xy; the tilt alpha solves one
-    // scalar equation (bracketed numerically, boundaries of feasibility bisected); the Jacobian |do/dalpha x do/dphi| is a
-    // central difference of the exact forward map. Density = sum w D(m) sin(alpha) cos(alpha) / J.
-    // Energy dropped by the isolated-groove model: reflections off the medium side that would point out of the surface
-    // hemisphere, refractions into the medium that point toward the macro-surface side (grazing, steep walls), and paths
-    // longer than maxBounces.
-    public sealed unsafe class VCavityDielectricBxDF : BxDF
-    {
-        // VCavityDielectricBxDF Public Methods
-        public VCavityDielectricBxDF() { }
-        public VCavityDielectricBxDF(MicrofacetDistribution distrib, Float ior, int maxBounces)
-        {
-            this.distrib = distrib;
-            iorV = ior;
-            maxN = Math.Max(1, Math.Min(maxBounces, 64));
-        }
-
-        public override BxDFFlags Flags()
-        {
-            return BxDFFlags.GlossyReflection | BxDFFlags.GlossyTransmission;
-        }
-
-        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
-        {
-            double d = TransDensity(wo, wi);
-            if (!(d > 0))
-            {
-                return new SampledSpectrum(0f);
-            }
-            double v = d / Math.Abs((double)wi.z);
-            if (wo.z * wi.z < 0 && mode == TransportMode.Radiance)
-            {
-                double etap = wo.z > 0 ? (double)iorV : 1.0 / iorV;
-                v /= etap * etap;
-            }
-            return new SampledSpectrum((Float)v);
-        }
-
-        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            if (wo.z == 0 || wi.z == 0)
-            {
-                return 0;
-            }
-            bool reflection = wo.z * wi.z > 0;
-            if ((sampleFlags & (reflection ? BxDFReflTransFlags.Reflection : BxDFReflTransFlags.Transmission)) == 0)
-            {
-                return 0;
-            }
-            return std.max<Float>((Float)TransDensity(wo, wi), 1e-6f);
-        }
-
-        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
-        {
-            if (wo.z == 0)
-            {
-                return default;
-            }
-            bool wantR = (sampleFlags & BxDFReflTransFlags.Reflection) != 0, wantT = (sampleFlags & BxDFReflTransFlags.Transmission) != 0;
-            if (!wantR && !wantT)
-            {
-                return default;
-            }
-            double ior = iorV;
-            bool inside = wo.z < 0;
-            Vector3f s = distrib.Sample_wm(new Vector3f(0, 0, 1), u);
-            double sinA = Math.Sqrt((double)s.x * s.x + (double)s.y * s.y);
-            if (!(sinA > 1e-9))
-            {
-                return default;
-            }
-            double alpha = Math.Atan2(sinA, s.z);
-            double tx = s.x / sinA, ty = s.y / sinA, phi = Math.Atan2(ty, tx);
-            double* iv = stackalloc double[3];
-            iv[0] = wo.x;
-            iv[1] = wo.y;
-            iv[2] = wo.z;
-            Candidate* cand = stackalloc Candidate[kMaxCand];
-            int nc = 0;
-            double* o = stackalloc double[3];
-            double w;
-            if (!inside)
-            {
-                double a_i = iv[0] * tx + iv[1] * ty, b_i = iv[2], i_u = -iv[0] * ty + iv[1] * tx;
-                double ell = Math.Sqrt(a_i * a_i + b_i * b_i), thI = Math.Atan2(a_i, b_i);
-                if (wantR)
-                {
-                    VCavityOutcome* outcomes = stackalloc VCavityOutcome[VCavity.kMaxOutcomes];
-                    int cnt = VCavity.Trace(thI, alpha, -alpha, maxN, outcomes);
-                    for (int j = 0; j < cnt; ++j)
-                    {
-                        double F = PathFD(thI, alpha, outcomes[j].first, outcomes[j].n, ell, ior);
-                        double st = Math.Sin(outcomes[j].thetaO), ct = Math.Cos(outcomes[j].thetaO);
-                        o[0] = ell * st * tx + i_u * ty;
-                        o[1] = ell * st * ty - i_u * tx;
-                        o[2] = ell * ct;
-                        Add(cand, ref nc, outcomes[j].prob * F, o, false);
-                    }
-                }
-                if (wantT)
-                {
-                    for (int first = 0; first < 2; ++first)
-                    {
-                        for (int n = 1; n <= maxN; ++n)
-                        {
-                            if (EvalPath(iv, phi, alpha, new Path(0, first, n), o, true, out w))
-                            {
-                                Add(cand, ref nc, w, o, true);
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                for (int wall = 0; wall < 2; ++wall)
-                {
-                    if (wantR && EvalPath(iv, phi, alpha, new Path(1, wall, 0), o, true, out w))
-                    {
-                        Add(cand, ref nc, w, o, false);
-                    }
-                    if (wantT)
-                    {
-                        for (int j = 0; j <= maxN; ++j)
-                        {
-                            if (EvalPath(iv, phi, alpha, new Path(2, wall, j), o, true, out w))
-                            {
-                                Add(cand, ref nc, w, o, true);
-                            }
-                        }
-                    }
-                    if (wantR)
-                    {
-                        for (int j = 1; j <= maxN; ++j)
-                        {
-                            if (EvalPath(iv, phi, alpha, new Path(3, wall, j), o, true, out w))
-                            {
-                                Add(cand, ref nc, w, o, false);
-                            }
-                        }
-                    }
-                }
-            }
-            double tot = 0;
-            for (int j = 0; j < nc; ++j)
-            {
-                tot += cand[j].e;
-            }
-            if (!(tot > 0))
-            {
-                return default;
-            }
-            double target = (double)uc * tot, acc = 0;
-            int pick = nc - 1;
-            for (int j = 0; j < nc; ++j)
-            {
-                acc += cand[j].e;
-                if (target < acc)
-                {
-                    pick = j;
-                    break;
-                }
-            }
-            Vector3f wi = new Vector3f((Float)cand[pick].ox, (Float)cand[pick].oy, (Float)cand[pick].oz);
-            if (wi.z == 0 || IsNaN(wi.x + wi.y + wi.z))
-            {
-                return default;
-            }
-            bool transmitted = cand[pick].t;
-            Float weight = (Float)tot;
-            if (transmitted && mode == TransportMode.Radiance)
-            {
-                double etap = inside ? 1.0 / ior : ior;
-                weight = (Float)(tot / (etap * etap));
-            }
-            return new BSDFSample(new SampledSpectrum(weight / AbsCosTheta(wi)), wi, 1,
-                                  transmitted ? BxDFFlags.GlossyTransmission : BxDFFlags.GlossyReflection,
-                                  transmitted ? (Float)(inside ? 1.0 / ior : ior) : 1f, true);
-        }
-
-        public static string Name() { return "VCavityDielectricBxDF"; }
-
-        public override void Regularize()
-        {
-            distrib.Regularize();
-        }
-
-        public override string ToString()
-        {
-            return StringPrintf("[ VCavityDielectricBxDF distrib: %s ior: %f maxBounces: %d ]", distrib, iorV, maxN);
-        }
-
-        // VCavityDielectricBxDF Private Methods
-        private const int kMaxCand = 600;
-
-        private struct Candidate
-        {
-            public double e;
-            public double ox, oy, oz;
-            public bool t;
-        }
-
-        // kind 0: valley, refracted out at hit b (first wall a). kinds 1 to 3 start inside, a is the entry wall (0 left, 1
-        // right): 1 reflected at the entry wall; 2 refracted in, b reflections, out through the aperture; 3 refracted in,
-        // refracted back out at hit b
-        private struct Path
-        {
-            public Path(int kind, int a, int b)
-            {
-                this.kind = kind;
-                this.a = a;
-                this.b = b;
-            }
-
-            public int kind, a, b;
-        }
-
-        private struct Group
-        {
-            public Group(int kind, int a, int jlo, int jhi)
-            {
-                this.kind = kind;
-                this.a = a;
-                this.jlo = jlo;
-                this.jhi = jhi;
-            }
-
-            public int kind, a, jlo, jhi;
-        }
-
-        private static void Add(Candidate* cand, ref int nc, double e, double* o, bool t)
-        {
-            if (e > 0 && nc < kMaxCand)
-            {
-                cand[nc].e = e;
-                cand[nc].ox = o[0];
-                cand[nc].oy = o[1];
-                cand[nc].oz = o[2];
-                cand[nc].t = t;
-                ++nc;
-            }
-        }
-
-        private static double RfD(double c, double eta)
-        {
-            return FrDielectric((Float)Math.Min(Math.Max(c, 0.0), 1.0), (Float)eta);
-        }
-
-        private static double PathFD(double thI, double alpha, int first, int n, double ell, double eta)
-        {
-            double* c2 = stackalloc double[64];
-            VCavity.PathCosines(thI, alpha, -alpha, first, n, c2);
-            double F = 1;
-            for (int j = 0; j < n; ++j)
-            {
-                F *= RfD(ell * c2[j], eta);
-            }
-            return F;
-        }
-
-        // n: unit normal on the incident side, d: unit travel direction, r = n_i / n_t
-        private static bool RefractTravel(double* d, double* n, double r, double* output)
-        {
-            double c = -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
-            if (!(c > 1e-12))
-            {
-                return false;
-            }
-            double s2 = r * r * Math.Max(0.0, 1 - c * c);
-            if (!(s2 < 1))
-            {
-                return false;
-            }
-            double ct = Math.Sqrt(1 - s2);
-            for (int q = 0; q < 3; ++q)
-            {
-                output[q] = r * (d[q] + c * n[q]) - ct * n[q];
-            }
-            return true;
-        }
-
-        // Direction (and, when wantWeight, the path weight without the groove density) of one path for groove azimuth phi and
-        // tilt alpha. iv = wo. false if the path does not exist.
-        private bool EvalPath(double* iv, double phi, double alpha, Path p, double* o, bool wantWeight, out double wgt)
-        {
-            wgt = 0;
-            double ior = iorV;
-            double tx = Math.Cos(phi), ty = Math.Sin(phi);
-            double sa = Math.Sin(alpha), ca = Math.Cos(alpha);
-            if (p.kind == 0)
-            {
-                if (!FwdTrans(iv, phi, alpha, p.a, p.b, ior, o) || !(o[2] < 0))
-                {
-                    return false;
-                }
-                if (wantWeight)
-                {
-                    double a_i = iv[0] * tx + iv[1] * ty, b_i = iv[2];
-                    double ell = Math.Sqrt(a_i * a_i + b_i * b_i), thi = Math.Atan2(a_i, b_i);
-                    double* rl = stackalloc double[66];
-                    double* rr = stackalloc double[66];
-                    VCavity.ReachAll(thi, alpha, -alpha, p.b, rl, rr);
-                    double reach = p.a == 0 ? rl[p.b - 1] : rr[p.b - 1];
-                    if (!(reach > 0))
-                    {
-                        return false;
-                    }
-                    double* cs = stackalloc double[64];
-                    VCavity.PathCosines(thi, alpha, -alpha, p.a, p.b, cs);
-                    double fac = reach;
-                    for (int j = 0; j < p.b - 1; ++j)
-                    {
-                        fac *= RfD(ell * cs[j], ior);
-                    }
-                    fac *= 1 - RfD(ell * cs[p.b - 1], ior);
-                    wgt = fac;
-                }
-                return true;
-            }
-            // inside paths
-            double* N = stackalloc double[6];
-            N[0] = sa * tx;
-            N[1] = sa * ty;
-            N[2] = ca;
-            N[3] = -sa * tx;
-            N[4] = -sa * ty;
-            N[5] = ca;
-            double* d0 = stackalloc double[3];
-            d0[0] = -iv[0];
-            d0[1] = -iv[1];
-            d0[2] = -iv[2];
-            int k = p.a;
-            double* Nk = N + 3 * k;
-            double* Nother = N + 3 * (1 - k);
-            double c0 = d0[0] * Nk[0] + d0[1] * Nk[1] + d0[2] * Nk[2];
-            if (!(c0 > 1e-12))
-            {
-                return false;
-            }
-            double c1 = d0[0] * Nother[0] + d0[1] * Nother[1] + d0[2] * Nother[2];
-            double Rin = RfD(c0, 1.0 / ior);
-            double pk = c0 / (c0 + Math.Max(0.0, c1));
-            if (p.kind == 1)
-            {
-                for (int q = 0; q < 3; ++q)
-                {
-                    o[q] = d0[q] - 2 * c0 * Nk[q];
-                }
-                if (!(o[2] < 0))
-                {
-                    return false;
-                }
-                if (wantWeight)
-                {
-                    wgt = pk * Rin;
-                }
-                return true;
-            }
-            double* nm = stackalloc double[3];
-            nm[0] = -Nk[0];
-            nm[1] = -Nk[1];
-            nm[2] = -Nk[2];
-            double* d = stackalloc double[3];
-            if (!RefractTravel(d0, nm, ior, d))
-            {
-                return false;
-            }
-            double dp0 = d[0], dp1 = d[1], dp2 = d[2];
-            double Rprod = 1;
-            int hmax = p.kind == 2 ? p.b : p.b - 1;
-            for (int h = 1; h <= hmax; ++h)
-            {
-                double* Nw = ((h & 1) != 0) ? Nother : Nk;
-                double dn = d[0] * Nw[0] + d[1] * Nw[1] + d[2] * Nw[2];
-                if (!(dn < -1e-12))
-                {
-                    return false;
-                }
-                Rprod *= RfD(-dn, ior);
-                for (int q = 0; q < 3; ++q)
-                {
-                    d[q] -= 2 * dn * Nw[q];
-                }
-            }
-            double Tout = 1;
-            if (p.kind == 2)
-            {
-                for (int q = 0; q < 3; ++q)
-                {
-                    o[q] = d[q];
-                }
-                if (!(o[2] > 0))
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                double* Nw = ((p.b & 1) != 0) ? Nother : Nk;
-                double dn = d[0] * Nw[0] + d[1] * Nw[1] + d[2] * Nw[2];
-                if (!(dn < -1e-12))
-                {
-                    return false;
-                }
-                Tout = 1 - RfD(-dn, ior);
-                if (!RefractTravel(d, Nw, 1.0 / ior, o) || !(o[2] < 0))
-                {
-                    return false;
-                }
-            }
-            if (wantWeight)
-            {
-                double dt = dp0 * tx + dp1 * ty, dz = dp2;
-                double* exitM = stackalloc double[70];
-                double* reachM = stackalloc double[70];
-                VCavity.WedgeBeam(alpha, k == 1 ? dt : -dt, dz, p.b, exitM, reachM);
-                double meas = p.kind == 2 ? exitM[p.b] : reachM[p.b];
-                if (!(meas > 0))
-                {
-                    return false;
-                }
-                wgt = pk * (1 - Rin) * meas * Rprod * Tout;
-            }
-            return true;
-        }
-
-        // forward map: groove (azimuth phi, tilt alpha) -> refracted direction after n-1 reflections and a transmission at wall
-        // n (outside start); false when infeasible.
-        private static bool FwdTrans(double* iv, double phi, double alpha, int first, int n, double eta, double* o)
-        {
-            const double PI = VCavity.kPi;
-            double tx = Math.Cos(phi), ty = Math.Sin(phi), ux = -ty, uy = tx;
-            double a_i = iv[0] * tx + iv[1] * ty, u_i = iv[0] * ux + iv[1] * uy, b_i = iv[2];
-            double ell = Math.Sqrt(a_i * a_i + b_i * b_i);
-            double psiL = PI - alpha, psiR = alpha;
-            double psi = -PI / 2 - Math.Atan2(a_i, b_i);
-            for (int j = 1; j < n; ++j)
-            {
-                bool left = (first == 0) ? ((j & 1) != 0) : ((j & 1) == 0);
-                psi = 2 * (left ? psiL : psiR) - psi;
-            }
-            double eps = -psi - PI / 2;
-            double et = ell * Math.Sin(eps), ez = ell * Math.Cos(eps);
-            bool leftN = (first == 0) ? ((n & 1) != 0) : ((n & 1) == 0);
-            double nu = leftN ? alpha : -alpha;
-            double Nt = Math.Sin(nu), Nz = Math.Cos(nu);
-            double c = et * Nt + ez * Nz;
-            if (!(c > 1e-12))
-            {
-                return false;
-            }
-            double sin2t = Math.Max(0.0, 1 - c * c) / (eta * eta);
-            if (!(sin2t < 1))
-            {
-                return false;
-            }
-            double ct = Math.Sqrt(1 - sin2t);
-            double k1 = c / eta - ct;
-            double ex = et * tx + u_i * ux, ey = et * ty + u_i * uy;
-            o[0] = -ex / eta + k1 * (Nt * tx);
-            o[1] = -ey / eta + k1 * (Nt * ty);
-            o[2] = -ez / eta + k1 * Nz;
-            return true;
-        }
-
-        // Directions of all paths of one family (kind, wall a, j = jlo..jhi) at once (shared chain). o holds 3 values per j.
-        private void FamilyDirs(double* iv, double phi, double alpha, Group g, double* o, bool* ok)
-        {
-            double ior = iorV;
-            const double PI = VCavity.kPi;
-            double tx = Math.Cos(phi), ty = Math.Sin(phi);
-            double sa = Math.Sin(alpha), ca = Math.Cos(alpha);
-            for (int j = g.jlo; j <= g.jhi; ++j)
-            {
-                ok[j] = false;
-            }
-            if (g.kind == 0)
-            {
-                double ux = -ty, uy = tx;
-                double a_i = iv[0] * tx + iv[1] * ty, u_i = iv[0] * ux + iv[1] * uy, b_i = iv[2];
-                double ell = Math.Sqrt(a_i * a_i + b_i * b_i);
-                double psiL = PI - alpha, psiR = alpha;
-                double psi = -PI / 2 - Math.Atan2(a_i, b_i);
-                for (int n = 1; n <= g.jhi; ++n)
-                {
-                    bool leftN = (g.a == 0) ? ((n & 1) != 0) : ((n & 1) == 0);
-                    double eps = -psi - PI / 2;
-                    double et = ell * Math.Sin(eps), ez = ell * Math.Cos(eps);
-                    double nu = leftN ? alpha : -alpha;
-                    double Nt = Math.Sin(nu), Nz = Math.Cos(nu);
-                    double c = et * Nt + ez * Nz;
-                    if (c > 1e-12)
-                    {
-                        double sin2t = Math.Max(0.0, 1 - c * c) / (ior * ior);
-                        if (sin2t < 1)
-                        {
-                            double ct = Math.Sqrt(1 - sin2t), k1 = c / ior - ct;
-                            double ex = et * tx + u_i * ux, ey = et * ty + u_i * uy;
-                            double oo0 = -ex / ior + k1 * (Nt * tx), oo1 = -ey / ior + k1 * (Nt * ty), oo2 = -ez / ior + k1 * Nz;
-                            if (n >= g.jlo && oo2 < 0)
-                            {
-                                o[3 * n] = oo0;
-                                o[3 * n + 1] = oo1;
-                                o[3 * n + 2] = oo2;
-                                ok[n] = true;
-                            }
-                        }
-                    }
-                    psi = 2 * (leftN ? psiL : psiR) - psi;
-                }
-                return;
-            }
-            double* N = stackalloc double[6];
-            N[0] = sa * tx;
-            N[1] = sa * ty;
-            N[2] = ca;
-            N[3] = -sa * tx;
-            N[4] = -sa * ty;
-            N[5] = ca;
-            double* d0 = stackalloc double[3];
-            d0[0] = -iv[0];
-            d0[1] = -iv[1];
-            d0[2] = -iv[2];
-            int k = g.a;
-            double* Nk = N + 3 * k;
-            double* Nother = N + 3 * (1 - k);
-            double c0 = d0[0] * Nk[0] + d0[1] * Nk[1] + d0[2] * Nk[2];
-            if (!(c0 > 1e-12))
-            {
-                return;
-            }
-            if (g.kind == 1)
-            {
-                for (int q = 0; q < 3; ++q)
-                {
-                    o[q] = d0[q] - 2 * c0 * Nk[q];
-                }
-                ok[0] = o[2] < 0;
-                return;
-            }
-            double* nm = stackalloc double[3];
-            nm[0] = -Nk[0];
-            nm[1] = -Nk[1];
-            nm[2] = -Nk[2];
-            double* d = stackalloc double[3];
-            double* oo = stackalloc double[3];
-            if (!RefractTravel(d0, nm, ior, d))
-            {
-                return;
-            }
-            if (g.kind == 2 && g.jlo == 0)
-            {
-                for (int q = 0; q < 3; ++q)
-                {
-                    o[q] = d[q];
-                }
-                ok[0] = d[2] > 0;
-            }
-            for (int h = 1; h <= g.jhi; ++h)
-            {
-                double* Nw = ((h & 1) != 0) ? Nother : Nk;
-                double dn = d[0] * Nw[0] + d[1] * Nw[1] + d[2] * Nw[2];
-                if (!(dn < -1e-12))
-                {
-                    return;
-                }
-                if (g.kind == 3)
-                {
-                    if (RefractTravel(d, Nw, 1.0 / ior, oo) && oo[2] < 0 && h >= g.jlo)
-                    {
-                        o[3 * h] = oo[0];
-                        o[3 * h + 1] = oo[1];
-                        o[3 * h + 2] = oo[2];
-                        ok[h] = true;
-                    }
-                }
-                for (int q = 0; q < 3; ++q)
-                {
-                    d[q] -= 2 * dn * Nw[q];
-                }
-                if (g.kind == 2 && h >= g.jlo && d[2] > 0)
-                {
-                    for (int q = 0; q < 3; ++q)
-                    {
-                        o[3 * h + q] = d[q];
-                    }
-                    ok[h] = true;
-                }
-            }
-        }
-
-        // The equation of the tilt: the component of o(alpha) - ov along the azimuth of the groove
-        private double Residual(double* iv, double* ov, double phi, double al, Path p, double tx, double ty, out bool ok)
-        {
-            double* oo = stackalloc double[3];
-            double unused;
-            ok = EvalPath(iv, phi, al, p, oo, false, out unused);
-            return ok ? (oo[0] - ov[0]) * tx + (oo[1] - ov[1]) * ty : 0.0;
-        }
-
-        // Sum over the path families of w D sin(alpha) cos(alpha) / |J| for the pair (iv, ov).
-        private double PathSum(double* iv, double* ov, double nS, double nE, Group* groups, int ng)
-        {
-            double hx = nS * iv[0] + nE * ov[0], hy = nS * iv[1] + nE * ov[1];
-            double L = Math.Sqrt(hx * hx + hy * hy);
-            if (!(L > 1e-9))
-            {
-                return 0;
-            }
-            const double HP = VCavity.kPi / 2;
-            const int M = 128;
-            double total = 0;
-            double* alg = stackalloc double[M + 1];
-            for (int s = 0; s <= M; ++s)
-            {
-                double x = (double)s / M;
-                alg[s] = 1e-7 + (HP - 2e-7) * x * Math.Sqrt(x);
-            }
-            double* oc = stackalloc double[72 * 3];
-            double* op = stackalloc double[72 * 3];
-            bool* kc = stackalloc bool[72];
-            bool* kp = stackalloc bool[72];
-            double* gp = stackalloc double[72];
-            double* o1 = stackalloc double[3];
-            for (int axis = 0; axis < 2; ++axis)
-            {
-                double sg = axis == 0 ? 1.0 : -1.0;
-                double tx = sg * hx / L, ty = sg * hy / L;
-                double phi = Math.Atan2(ty, tx);
-                for (int gi = 0; gi < ng; ++gi)
-                {
-                    Group grp = groups[gi];
-                    FamilyDirs(iv, phi, alg[0], grp, op, kp);
-                    for (int j = grp.jlo; j <= grp.jhi; ++j)
-                    {
-                        gp[j] = kp[j] ? (op[3 * j] - ov[0]) * tx + (op[3 * j + 1] - ov[1]) * ty : 0.0;
-                    }
-                    for (int s = 1; s <= M; ++s)
-                    {
-                        FamilyDirs(iv, phi, alg[s], grp, oc, kc);
-                        for (int j = grp.jlo; j <= grp.jhi; ++j)
-                        {
-                            double gcur = kc[j] ? (oc[3 * j] - ov[0]) * tx + (oc[3 * j + 1] - ov[1]) * ty : 0.0;
-                            double gprev = gp[j];
-                            bool okPrev = kp[j], okCur = kc[j];
-                            if (okPrev || okCur)
-                            {
-                                Path p = new Path(grp.kind, grp.a, j);
-                                double lo = alg[s - 1], hi = alg[s], glo = gprev, ghi = gcur;
-                                bool have = okPrev && okCur;
-                                double wfe;
-                                if (okPrev != okCur && EvalPath(iv, phi, okPrev ? alg[s - 1] : alg[s], p, o1, true, out wfe) && wfe > 0)
-                                {
-                                    // the path exists on one side of the interval only: bisect the boundary of its existence
-                                    double fa = okPrev ? alg[s - 1] : alg[s], ia = okPrev ? alg[s] : alg[s - 1];
-                                    for (int it = 0; it < 30; ++it)
-                                    {
-                                        double mid = 0.5 * (fa + ia);
-                                        bool okm;
-                                        Residual(iv, ov, phi, mid, p, tx, ty, out okm);
-                                        if (okm)
-                                        {
-                                            fa = mid;
-                                        }
-                                        else
-                                        {
-                                            ia = mid;
-                                        }
-                                    }
-                                    bool okb;
-                                    double gb = Residual(iv, ov, phi, fa, p, tx, ty, out okb);
-                                    if (okb)
-                                    {
-                                        if (okPrev)
-                                        {
-                                            lo = alg[s - 1];
-                                            glo = gprev;
-                                            hi = fa;
-                                            ghi = gb;
-                                        }
-                                        else
-                                        {
-                                            lo = fa;
-                                            glo = gb;
-                                            hi = alg[s];
-                                            ghi = gcur;
-                                        }
-                                        have = true;
-                                    }
-                                }
-                                if (have && ((glo < 0) != (ghi < 0) || ghi == 0))
-                                {
-                                    // roots of zero-measure paths (the n-th wall is never struck at this tilt) carry no
-                                    // weight: skip them before the expensive refinement
-                                    double w1, w2;
-                                    bool a1 = EvalPath(iv, phi, lo, p, o1, true, out w1) && w1 > 0;
-                                    bool a2 = EvalPath(iv, phi, hi, p, o1, true, out w2) && w2 > 0;
-                                    if (a1 || a2)
-                                    {
-                                        total += RootContribution(iv, ov, phi, p, lo, hi, glo, tx, ty);
-                                    }
-                                }
-                            }
-                            gp[j] = gcur;
-                            kp[j] = okCur;
-                        }
-                    }
-                }
-            }
-            return total;
-        }
-
-        private double RootContribution(double* iv, double* ov, double phi, Path p, double lo, double hi, double glo, double tx, double ty)
-        {
-            double* oo = stackalloc double[3];
-            double unused;
-            for (int it = 0; it < 80; ++it)
-            {
-                double mid = 0.5 * (lo + hi);
-                if (!EvalPath(iv, phi, mid, p, oo, false, out unused))
-                {
-                    break;
-                }
-                double gm = (oo[0] - ov[0]) * tx + (oo[1] - ov[1]) * ty;
-                if ((gm < 0) == (glo < 0))
-                {
-                    lo = mid;
-                    glo = gm;
-                }
-                else
-                {
-                    hi = mid;
-                }
-            }
-            double al = 0.5 * (lo + hi);
-            double* of = stackalloc double[3];
-            double wgt;
-            if (!EvalPath(iv, phi, al, p, of, true, out wgt) ||
-                !(Math.Abs(of[0] - ov[0]) + Math.Abs(of[1] - ov[1]) + Math.Abs(of[2] - ov[2]) < 1e-5))
-            {
-                return 0;
-            }
-            double ha = 1e-6 * Math.Max(al, 1e-3), hp = 1e-6;
-            double* oa1 = stackalloc double[3];
-            double* oa0 = stackalloc double[3];
-            double* op1 = stackalloc double[3];
-            double* op0 = stackalloc double[3];
-            if (!(EvalPath(iv, phi, al + ha, p, oa1, false, out unused) && EvalPath(iv, phi, al - ha, p, oa0, false, out unused) &&
-                  EvalPath(iv, phi + hp, al, p, op1, false, out unused) && EvalPath(iv, phi - hp, al, p, op0, false, out unused)))
-            {
-                return 0;
-            }
-            double* da = stackalloc double[3];
-            double* dpp = stackalloc double[3];
-            for (int q = 0; q < 3; ++q)
-            {
-                da[q] = (oa1[q] - oa0[q]) / (2 * ha);
-                dpp[q] = (op1[q] - op0[q]) / (2 * hp);
-            }
-            double cx = da[1] * dpp[2] - da[2] * dpp[1];
-            double cy = da[2] * dpp[0] - da[0] * dpp[2];
-            double cz = da[0] * dpp[1] - da[1] * dpp[0];
-            double J = Math.Sqrt(cx * cx + cy * cy + cz * cz);
-            if (!(J > 1e-14))
-            {
-                return 0;
-            }
-            return wgt * Math.Sin(al) * Math.Cos(al) * VCavityGrooves.DAt(distrib, al, Math.Cos(phi), Math.Sin(phi)) / J;
-        }
-
-        // The density of wi for the walk of the groove that starts against wo (power per solid angle)
-        private double TransDensity(Vector3f wo, Vector3f wi)
-        {
-            if (wo.z == 0 || wi.z == 0)
-            {
-                return 0;
-            }
-            double ior = iorV;
-            double* iv = stackalloc double[3];
-            double* ov = stackalloc double[3];
-            iv[0] = wo.x;
-            iv[1] = wo.y;
-            iv[2] = wo.z;
-            ov[0] = wi.x;
-            ov[1] = wi.y;
-            ov[2] = wi.z;
-            if (wo.z > 0 && wi.z > 0)
-            {
-                VCavityHit* hits = stackalloc VCavityHit[VCavityGrooves.kMaxHits];
-                double ell;
-                double* thI = stackalloc double[2];
-                int nh = VCavityGrooves.Enumerate(distrib, maxN, wo, wi, hits, out ell, thI);
-                double sum = 0;
-                for (int h = 0; h < nh; ++h)
-                {
-                    sum += hits[h].w * PathFD(thI[hits[h].axis], hits[h].alpha, hits[h].first, hits[h].n, ell, ior);
-                }
-                return sum;
-            }
-            Group* groups = stackalloc Group[4];
-            int ng = 0;
-            if (wo.z > 0)
-            {
-                // outside -> inside
-                groups[ng++] = new Group(0, 0, 1, maxN);
-                groups[ng++] = new Group(0, 1, 1, maxN);
-                return PathSum(iv, ov, 1.0, ior, groups, ng);
-            }
-            if (wi.z > 0)
-            {
-                // inside -> outside
-                groups[ng++] = new Group(2, 0, 0, maxN);
-                groups[ng++] = new Group(2, 1, 0, maxN);
-                return PathSum(iv, ov, ior, 1.0, groups, ng);
-            }
-            groups[ng++] = new Group(1, 0, 0, 0);
-            groups[ng++] = new Group(1, 1, 0, 0);
-            groups[ng++] = new Group(3, 0, 1, maxN);
-            groups[ng++] = new Group(3, 1, 1, maxN);
-            return PathSum(iv, ov, ior, ior, groups, ng);
-        }
-
-        // VCavityDielectricBxDF Private Members
-        private MicrofacetDistribution distrib;
-        private Float iorV = 1.5f;
         private int maxN = 16;
     }
 
@@ -2426,6 +1884,9 @@ namespace pbrt
     {
         // ThinDielectricBxDF Public Methods
         public ThinDielectricBxDF() { }
+        // (not in pbrt-v4) For the polarised integrator
+        public Float Eta() { return eta; }
+
         public ThinDielectricBxDF(Float eta) { this.eta = eta; }
 
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)

@@ -3,7 +3,7 @@
 This document describes the V-cavity work on the `pbr-materials` branch: what was implemented, how each part was
 verified, and what is known to be wrong. The code is in `src/pbrt/util/vcavity.cs` (the groove solver),
 `src/pbrt/util/scattering.cs` (the V-cavity functions of `MicrofacetDistribution`) and `src/pbrt/bxdfs.cs`
-(`VCavityConductorBxDF`, `VCavityDielectricBxDF`). The tests are `util/vcavity_test.cs`,
+(`VCavityConductorBxDF`). The tests are `util/vcavity_test.cs`,
 `util/scattering_microfacet_test.cs` and `bxdfcheck_test.cs`.
 
 Status in one table:
@@ -13,10 +13,11 @@ Status in one table:
 | Groove solver (`VCavity.Trace`) | our C++ fork, after Lee et al. 2018 | verified exact |
 | `VCavityConductorBxDF` | our C++ fork, after Lee et al. 2018 | verified: reciprocal, energy conserving |
 | V-cavity visible normals below the horizon | Tokuyoshi 2021; Student-t is our extension | verified |
-| `VCavityDielectricBxDF` | ours | **experimental: not reciprocal, loses energy** |
-| Periodic-profile reference | ours | reciprocal, energy conserving; the target for a correct dielectric |
+| Dielectric V-cavity | ours | **removed**: the one-valley model was not reciprocal and lost energy (section 5) |
+| Periodic-profile reference | ours | reciprocal, energy conserving; the model a dielectric has to follow |
+| Polarised `VCavityConductorBxDF` | ours | verified (`docs/polarised-microfacets.md`) |
 
-No material uses any of these BxDFs yet.
+No material uses these BxDFs yet.
 
 ## 1. The model
 
@@ -45,9 +46,6 @@ the tilts of the two facet normals (the groove may be non-symmetric), and return
 first, the number of reflections, the exit elevation, and the fraction of the incident beam that takes that outcome.
 The fractions are exact areas of the beam, found by unfolding the groove into a fan of mirror images in which a ray is
 a straight line; nothing is estimated.
-
-`ReachLeftFirst`, `ReachAll` and `WedgeBeam` give the related fractions that the dielectric needs: the part of the beam
-that strikes a j-th wall, and the fate of a parallel beam that enters through a wall.
 
 **Verification** (`VCavity.SolverAgainstTracedRays`). Rays are traced one at a time through the groove cross section,
 with no unfolding. Seven grooves (symmetric and non-symmetric, tilts from 0.3 to 1.45 rad) at six elevations, 200,000
@@ -123,96 +121,116 @@ for GGX and Beckmann only; this form reproduces both and also covers Student-t, 
 No BxDF calls these yet. They take effect once `BSDF` is given the geometric normal, so that a back-facing shading
 normal can be told from the underside of a surface.
 
-## 5. The dielectric: what was built, and why it is not correct
+## 5. The dielectric: removed, and how to implement it properly
 
-`VCavityDielectricBxDF(distribution, ior, maxBounces)` is our extension of the groove model to a refracting interface.
-It is ported from the fork, where it was marked as not validated.
+A transmissive V-cavity BxDF was ported from our C++ fork, tested, and removed. This section records what was
+learned, so that the next attempt starts from the right model.
 
-**Its model.** One valley (an air wedge) cut into a medium that fills everything below the walls.
+### 5.1 What was tried
 
-- From outside, the beam fills the aperture. At each wall the ray reflects or refracts by the Fresnel reflectance. A
-  ray that refracts into the medium ends there.
-- From inside, the ray meets one wall from below, chosen by the area it shows to the ray, at a point uniform on the
-  wall. It reflects back into the medium and ends, or refracts into the valley, where it reflects between the walls,
-  refracts back into the medium, or leaves through the aperture.
+The fork's model was one valley (an air wedge) cut into a medium that fills everything below the walls. From outside,
+a ray that refracts into the medium ends there. From inside, a ray meets one wall from below at a point uniform on it,
+and either reflects back into the medium and ends, or refracts into the valley and is followed until it leaves.
 
-Every path is a deterministic function of the groove tilt and azimuth. The azimuth is fixed by the conservation of the
-index times the component along the groove axis; the tilt solves one scalar equation, bracketed on a grid and bisected;
-the Jacobian is a central difference of the forward map.
+Two references were written that follow rays one at a time with explicit intersections and Fresnel coin flips: one
+for that single valley, and one for a periodic profile (a triangle wave of valleys and ridges, air above and medium
+below, a ray followed until it leaves upwards or downwards).
 
-**Ground truth.** Two references were written, both in `util/vcavity_test.cs`, both following rays one at a time with
-explicit intersections and Fresnel coin flips:
+| Question | Result (GGX roughness 0.5, index 1.5) |
+|---|---|
+| Did the BxDF's sampling follow its model? | Yes: exit-direction histograms matched the one-valley reference in 18 cases (worst cell 2.9 standard deviations). |
+| Is the one-valley model reciprocal? | No. Patches of directions exchanged up to 42 percent more one way than the other (15 standard deviations); pair by pair, transmission differed by a median of 70 to 79 percent. |
+| Does it conserve energy? | No. From inside the medium it kept as little as 83 percent of the rays. |
+| Is the periodic profile reciprocal, and does it conserve energy? | Yes: reciprocal within noise (1.6 standard deviations), at least 99.97 percent of rays kept. |
 
-1. `ReferenceGroove`: one valley, by exactly the rules above.
-2. `ReferencePeriodic`: a triangle wave of valleys and ridges, air above and medium below, where a ray is followed
-   until it leaves upwards or downwards. A ridge of the medium is treated exactly as a valley of air is.
-
-**What the references show.**
-
-| Question | Test | Result |
-|---|---|---|
-| Does the BxDF's sampling do what its model says? | `VCavity.DielectricAgainstTracedRays` | yes: histograms of exit directions agree with reference 1 in 18 cases (worst cell 2.9 standard deviations), and the fraction of rays kept agrees to 0.001 |
-| Is the BxDF's density consistent with its sampling? | `VCavity.DielectricDensityAgainstSampling` | broadly: band by band they agree within the noise of the test, with the density a few percent high in some bands (not resolved) |
-| Is the model reciprocal? | `VCavity.DielectricModelReciprocity`, `BxDFCheck.VCavityDielectricReciprocityByCase` | **no** |
-| Does the model conserve energy? | same | **no** |
-
-The numbers, for GGX roughness 0.5 and index 1.5:
-
-- Reflection with both directions above the surface: reciprocal to 2e-6. This is the conductor's code path.
-- Transmission, pair by pair: the two directions of a pair differ by a median of 70 to 79 percent.
-- Reflection with both directions in the medium: median difference 25 percent.
-- Patches of directions (caps of 20 degrees), from rays alone with no density code: the one-valley model exchanges up
-  to 42 percent more one way than the other (15 standard deviations). The periodic profile is reciprocal within noise
-  (1.6 standard deviations).
-- Rays kept: from outside 99.99 percent; from inside as low as 83 percent. The periodic profile keeps 99.97 percent or
-  more.
-
-**Why.** The model treats the two sides of the surface differently. Seen from the medium, the surface is a row of
-ridges, and a ridge is a wedge of medium with the same angle as a valley. Three things follow that the one-valley
-model leaves out:
+The port was faithful; the model was the problem. Seen from the medium the surface is a row of ridges, and a ridge is
+a wedge of medium with the same angle as a valley. The one-valley model left out three things:
 
 1. A ray refracted into the medium can strike the other face of its ridge from inside, where it is totally reflected
-   or refracts into the next valley. The model ends the ray instead.
-2. A ray that arrives from the medium at a shallow angle sees a ridge partly hidden by the next one. The lit part of
-   the wall is the part near the tip of the ridge; the model spreads the ray over the whole wall.
-3. A ray reflected off the medium side of a wall towards the surface stays inside its ridge and reflects again. The
-   model drops it, which is most of the lost energy.
+   or refracts into the next valley.
+2. A ray arriving from the medium at a shallow angle sees a ridge partly hidden by the next one, and lights only the
+   part of the wall near the tip of the ridge.
+3. A ray reflected off the medium side of a wall towards the surface stays inside its ridge and reflects again.
 
 The reflection-only model of Lee et al. is unaffected: a mirror never lets a ray through a wall, so one valley and a
 row of valleys are the same thing.
 
-## 6. Improving the dielectric
+The periodic reference and its reciprocity test are kept in `util/vcavity_test.cs`
+(`VCavity.PeriodicDielectricReferenceIsReciprocal`). The BxDF, the single-valley reference and the solver routines
+that only it used (`ReachLeftFirst`, `ReachAll`, `WedgeBeam`) are gone; they are in the history at commit `116c6d4`.
 
-The periodic profile is the model to implement: reference 2 shows it is reciprocal and keeps all the energy, and it
-reduces to the verified conductor when nothing is transmitted.
+### 5.2 The model to implement
 
-- **Sampling** is straightforward: follow one ray through the periodic profile, as the reference does.
-- **Evaluation** is the work. The azimuth of the groove is still fixed by the pair of directions, and the tilt is
-  still one unknown, but the paths are now sequences of reflections and refractions through alternating valleys and
-  ridges. The plan is to compute, for one groove tilt, the complete list of outcomes (direction and probability) by
-  splitting the beam at every wall, exactly as the solver does for a mirror groove, and then to find the tilts at
-  which an outcome's direction passes through the wanted direction, as the current code does for its four path
-  families.
-- **Acceptance** is already written: the periodic reference, the patch reciprocity test, and the harness checks used
-  for every other BxDF.
+The periodic profile: grooves of one tilt side by side, so that the cross section is a triangle wave. Each groove
+tilt is still drawn with the density `D(s) (s . n)`, and a patch of surface has one tilt. A ray in the profile is
+always in one of two kinds of wedge, a valley of air or a ridge of medium, and the two have the same angle. Crossing a
+wall moves the ray from one kind to the other.
 
-Until that is done the dielectric stays experimental and unused.
+Two facts carry over from the mirror groove and make the problem tractable:
 
-Smaller open items:
+- **The groove azimuth is fixed by the pair of directions.** Every wall is parallel to the groove axis, so the index
+  times the component of the direction along the axis is conserved through any number of reflections and refractions:
+  `n_o o_u + n_i i_u = 0`, with `n` the index on the side of each direction. The axis is perpendicular to
+  `(n_o wo + n_i wi)` projected on the surface, which leaves two orientations.
+- **The tilt is one unknown.** For a given sequence of events (which wall, reflect or refract), the exit direction is a
+  smooth function of the tilt, and the density of the exit direction is the density of the tilt divided by the
+  Jacobian of that function.
 
-- The density of `VCavityDielectricBxDF` reads a few percent above its sampling in some bands. This may be noise or a
-  root counted twice; it was not resolved because the model itself is to be replaced.
+### 5.3 Sampling
+
+Follow one ray through the periodic profile, as `ReferencePeriodic` does: draw a groove, enter at a point uniform over
+one period, and at each wall reflect or refract by the Fresnel reflectance until the ray leaves the band between the
+valley bottoms and the ridge tops. The weight is 1 (times `1 / eta^2` for radiance carried across the interface).
+This part can be taken from the reference almost as it is.
+
+### 5.4 Evaluation
+
+This is the work. For a pair of directions the value is
+
+    f cos = sum over orientations, over event sequences q, over roots alpha of o_q(alpha) = wi of
+            P_q(alpha) D(alpha) sin(alpha) cos(alpha) / |J_q(alpha)|
+
+where `P_q(alpha)` is the probability that a ray in a groove of tilt `alpha` takes the sequence `q`: the fraction of
+entry positions that produce that sequence of walls, times the Fresnel factors of its events.
+
+1. **Outcome list for one tilt.** Write `Outcomes(alpha, wo)`, which returns every sequence with its direction and
+   probability. It splits the beam at every wall: the entry positions that reach a wall form intervals, and each
+   interval continues as a reflected beam and a refracted beam with the Fresnel weights. A beam that enters a ridge or
+   a valley through a wall is a parallel beam uniform on an interval of that wall, which is what the removed
+   `WedgeBeam` handled for a whole wall; it has to take an interval. Stop a branch when its probability falls below a
+   threshold or its depth passes `maxBounces`.
+   *Check:* the outcomes of one tilt against `ReferencePeriodic` for that tilt (probabilities and directions), the
+   same way `VCavity.SolverAgainstTracedRays` checks the mirror solver.
+2. **Roots in the tilt.** Scan the tilt on a grid. A sequence is identified by its string of events, so the same
+   sequence can be followed from one grid point to the next; where the residual `(o_q(alpha) - wi) . t` changes sign,
+   bisect. Where a sequence exists on one side of an interval only, bisect the boundary of its existence first. This is
+   what the removed code did for its four families; here the families are whatever `Outcomes` returns.
+3. **Jacobian.** A central difference of `o_q` in the tilt and in the azimuth, as before, or the analytic derivative
+   (each event is a reflection or a refraction about a normal that turns with the tilt).
+4. **Cost control.** The number of sequences grows with depth. Most of the energy is in short ones; order the
+   branches by probability and cut the tail, and measure what the cut loses with the reference.
+
+### 5.5 Acceptance
+
+A dielectric V-cavity BxDF is correct when all of these hold:
+
+- its sampled directions match `ReferencePeriodic` (histogram test, as was done for the single valley);
+- its density integrates to the fraction of rays kept, which is 1 up to the depth cut;
+- its density matches its sampling cell by cell;
+- `f(wo, wi, Radiance) = f(wi, wo, Importance)` pair by pair, for reflection on both sides and for transmission;
+- with a mirror in place of the dielectric it reproduces `VCavityConductorBxDF`.
+
+### 5.6 Open items elsewhere
+
 - The non-symmetric groove mode of the conductor is not ported.
-- Evaluation cost, estimated from the run times of the tests and not profiled: roughly 20 microseconds for the
-  conductor at 24 bounces and roughly 200 microseconds for the dielectric at 8. Both are far slower than the stock
-  microfacet BxDFs.
+- Evaluation cost of the conductor, estimated from the run times of the tests and not profiled: roughly 20
+  microseconds at 24 bounces.
 
-## 7. Running the checks
+## 6. Running the checks
 
     dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "VCavity.*"
     dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "MicrofacetDistribution.*"
     dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "BxDFCheck.VCavityConductor"
-    dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "BxDFCheck.VCavityDielectric"
-    dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "BxDFCheck.VCavityDielectricReciprocityByCase"
+    dotnet cmd/bin/Release/net10.0/pbrt_test.dll --test-filter "PolarisedMicrofacet.*"
 
 Each test prints its measurements on lines that start with `MEASURE`.

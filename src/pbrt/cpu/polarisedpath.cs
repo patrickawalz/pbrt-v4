@@ -1,4 +1,4 @@
-// (not in pbrt-v4) cpu/polarisedpath.cs
+﻿// (not in pbrt-v4) cpu/polarisedpath.cs
 //
 // PolarisedPathIntegrator: PathIntegrator that carries the polarisation of the light along the path with the light system of
 // PolarisedUPBP (polarisedlightsystem.cs): the throughput of the camera path is a Mueller matrix (Attenuation) and the
@@ -115,7 +115,7 @@ namespace pbrt
         }
 
         // The Mueller matrix of a specular interface for a sampled direction, or false when the scattering depolarises
-        internal static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode,
+        public static bool SpecularAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, BSDFSample bs, TransportMode mode,
                                                  out Attenuation A)
         {
             A = default;
@@ -143,6 +143,52 @@ namespace pbrt
                     // index of the side that is entered
                     A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T / Sqr(bs.eta) : 1 / T), 1 - Fs, 1 - Fp, 0, 0);
                 }
+            }
+            else if (bxdf is ThinDielectricBxDF thin)
+            {
+                // (not in pbrt-v4) A slab: the light that is reflected is the sum of what the first interface reflects and of
+                // what comes back after 1, 3, 5... reflections inside, and the light that goes through of 0, 2, 4... of them.
+                // The orders add without interference, each with its own matrix; all are in the same plane of incidence. With
+                // r_s and r_p the signed amplitudes of the outer reflection (those inside are -r, and the two transmissions
+                // of a path multiply to 1 - r^2), the reflectances of the two polarisations are R' = 2 R / (1 + R) and
+                // T' = (1 - R) / (1 + R) each for its own R, and the term that keeps the polarisation between them is
+                //     r_s r_p + (1 - R_s)(1 - R_p) r_s r_p / (1 - R_s R_p)   for the reflection,
+                //     (1 - R_s)(1 - R_p) / (1 - R_s R_p)                     for the transmission.
+                // It is smaller than sqrt(R'_s R'_p): the slab depolarises a little. The weight of the sample is 1, by the
+                // scalar reflectance of pbrt (ThinDielectricBxDF.Sample_f), so the matrix is divided by it.
+                pbrt.FrDielectricPolarised(AbsCosTheta(woLocal), thin.Eta(), out Float Fs, out Float Fp, out Float Ds, out Float Dp);
+                Float R = 0.5f * (Fs + Fp), T = 1 - R;
+                if (R < 1)
+                {
+                    R += Sqr(T) * R / (1 - Sqr(R));
+                    T = 1 - R;
+                }
+                Float rs = std.sqrt(Fs) * std.cos(Ds), rp = std.sqrt(Fp) * std.cos(Dp);
+                Float between = 1 - Fs * Fp;
+                Float Is, Ip, C, scalar;
+                if (bs.IsReflection())
+                {
+                    Is = 2 * Fs / (1 + Fs);
+                    Ip = 2 * Fp / (1 + Fp);
+                    C = rs * rp + (between > 0 ? (1 - Fs) * (1 - Fp) * rs * rp / between : 0);
+                    scalar = R;
+                }
+                else
+                {
+                    Is = (1 - Fs) / (1 + Fs);
+                    Ip = (1 - Fp) / (1 + Fp);
+                    C = between > 0 ? (1 - Fs) * (1 - Fp) / between : 0;
+                    scalar = T;
+                }
+                if (scalar <= 0)
+                    return false;
+                SampledSpectrum a = new SampledSpectrum(0.5f * (Is + Ip) / scalar), b = new SampledSpectrum(0.5f * (Is - Ip) / scalar);
+                SampledSpectrum c = new SampledSpectrum(C / scalar), zero = new SampledSpectrum(0.0f);
+                A = new Attenuation(new MuellerMatrix(
+                    a, b, zero, zero,
+                    b, a, zero, zero,
+                    zero, zero, c, zero,
+                    zero, zero, zero, c));
             }
             else if (bxdf is ThinFilmBxDF film)
             {
@@ -251,7 +297,10 @@ namespace pbrt
                 A = reflect ? Attenuation.Fresnel(scale, fs, fp, ds, dp) : Attenuation.Fresnel(scale, 1 - fs, 1 - fp, 0, 0);
             }
             else
-                return false;
+            {
+                // The BxDFs whose light meets more than one microfacet build their own matrix, frames included
+                return bxdf.Polarised(bsdf, woL, wiL, weight, mode, out A);
+            }
 
             A = A.Scattered(wo, wi, bsdf.LocalToRender(wm), mode == TransportMode.Radiance);
             return true;
