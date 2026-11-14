@@ -1173,6 +1173,18 @@ namespace pbrt
                                                               new Normal3f(), new Normal3f(), time, flipNormal);
             // Compute norm of triangle...
             isect.faceIndex = mesh.faceIndices != null ? mesh.faceIndices[triIndex] : 0;
+            // (not in pbrt-v4) The edges of the triangle, for the wireframe texture
+            isect.edgeKind = 1;
+            isect.edgeCoordinates = new Point2f(ti.b1, ti.b2);
+            isect.edgeU = p1 - p0;
+            isect.edgeV = p2 - p0;
+            if (mesh.uvChannels != null)
+            {
+                // (not in pbrt-v4) Where the hit is, for the texture coordinate sets after the first
+                isect.uvTriangleMesh = mesh;
+                isect.uvPrimitive = triIndex;
+                isect.uvParameter = new Point2f(ti.b0, ti.b1);
+            }
 
             // Set final surface normal and shading geometry for triangle
             // Override surface normal in _isect_ for triangle
@@ -1561,10 +1573,12 @@ namespace pbrt
                 faceIndices = new List<int>();
             }
 
-            return new TriangleMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(vi),
-                                    new pstd.vector<Point3f>(P), new pstd.vector<Vector3f>(S),
-                                    new pstd.vector<Normal3f>(N), new pstd.vector<Point2f>(uvs),
-                                    new pstd.vector<int>(faceIndices), alloc);
+            TriangleMesh mesh = new TriangleMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(vi),
+                                                 new pstd.vector<Point3f>(P), new pstd.vector<Vector3f>(S),
+                                                 new pstd.vector<Normal3f>(N), new pstd.vector<Point2f>(uvs),
+                                                 new pstd.vector<int>(faceIndices), alloc);
+            mesh.uvChannels = UVChannels.Create(parameters, P.Count, "triangle mesh", loc);
+            return mesh;
         }
 
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
@@ -2241,6 +2255,18 @@ namespace pbrt
             bool flipNormal = mesh.reverseOrientation ^ mesh.transformSwapsHandedness;
             SurfaceInteraction isect = new SurfaceInteraction(new Point3fi(p, pError), st, wo, dpdu, dpdv, dndu, dndv,
                                                               time, flipNormal, faceIndex);
+            // (not in pbrt-v4) The edges of the patch, for the wireframe texture
+            isect.edgeKind = 2;
+            isect.edgeCoordinates = uv;
+            isect.edgeU = pbrt.Lerp(uv[1], p10, p11) - pbrt.Lerp(uv[1], p00, p01);
+            isect.edgeV = pbrt.Lerp(uv[0], p01, p11) - pbrt.Lerp(uv[0], p00, p10);
+            if (mesh.uvChannels != null)
+            {
+                // (not in pbrt-v4) Where the hit is, for the texture coordinate sets after the first
+                isect.uvPatchMesh = mesh;
+                isect.uvPrimitive = blpIndex;
+                isect.uvParameter = uv;
+            }
 
             // Compute bilinear patch shading normal if necessary
             if (mesh.n != null)
@@ -2388,10 +2414,12 @@ namespace pbrt
                 }
             }
 
-            return new BilinearPatchMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(vertexIndices),
-                                         new pstd.vector<Point3f>(P), new pstd.vector<Normal3f>(N),
-                                         new pstd.vector<Point2f>(uv), new pstd.vector<int>(faceIndices), imageDist,
-                                         alloc);
+            BilinearPatchMesh mesh = new BilinearPatchMesh(renderFromObject, reverseOrientation, new pstd.vector<int>(vertexIndices),
+                                                           new pstd.vector<Point3f>(P), new pstd.vector<Normal3f>(N),
+                                                           new pstd.vector<Point2f>(uv), new pstd.vector<int>(faceIndices), imageDist,
+                                                           alloc);
+            mesh.uvChannels = UVChannels.Create(parameters, P.Count, "bilinear patch mesh", loc);
+            return mesh;
         }
 
         public static pstd.vector<Shape> CreatePatches(BilinearPatchMesh mesh, Allocator alloc)

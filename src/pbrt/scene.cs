@@ -663,7 +663,15 @@ namespace pbrt
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
                     FloatTexture volumeScale = texDict.GetFloatTextureOrNull("volumescale", alloc);
+                    // (before the material: it reports the parameters that nobody read)
+                    SurfgradParams surfgrad = ParseSurfgradParams(mtl.parameters, ResolveFilename, alloc);
+                    NormalMapParams normalMapModel = NormalMapParams.Create(mtl.parameters);
                     Material m = Material.Create(type, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
+                    if (surfgrad != null)
+                    {
+                        m.SetSurfgrad(surfgrad);
+                    }
+                    m.normalMapModel = normalMapModel;
                     m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority, volumeScale);
                     namedMaterialsOut[name] = m;
                 }
@@ -686,7 +694,15 @@ namespace pbrt
 
                     TextureParameterDictionary texDict = new TextureParameterDictionary(mtl.parameters, textures);
                     FloatTexture volumeScale = texDict.GetFloatTextureOrNull("volumescale", alloc);
+                    // (before the material: it reports the parameters that nobody read)
+                    SurfgradParams surfgrad = ParseSurfgradParams(mtl.parameters, ResolveFilename, alloc);
+                    NormalMapParams normalMapModel = NormalMapParams.Create(mtl.parameters);
                     Material m = Material.Create(mtl.name, texDict, normalMap, namedMaterialsOut, mtl.loc, alloc);
+                    if (surfgrad != null)
+                    {
+                        m.SetSurfgrad(surfgrad);
+                    }
+                    m.normalMapModel = normalMapModel;
                     m.SetVolume(volumeName, volumePriority, volumeOverlap, volumeOverlapPriority, volumeScale);
                     materialsOut.Add(m);
                 }
@@ -1962,6 +1978,16 @@ namespace pbrt
                     ErrorExitDeferred(loc, StringPrintf("%s: expected quoted string for option value", value));
                 else
                     OSLSystem.AddSearchPath(value.Substring(1, value.Length - 2));
+            }
+            else if (nName == "texturederivatives")
+            {
+                // (not in pbrt-v4) how textures are differentiated: "analytic" (default: closed forms where there are) or "finite"
+                if (value == "\"analytic\"")
+                    pbrt.GetOptions().finiteTextureDerivatives = false;
+                else if (value == "\"finite\"")
+                    pbrt.GetOptions().finiteTextureDerivatives = true;
+                else
+                    ErrorExitDeferred(loc, StringPrintf("%s: expected \"analytic\" or \"finite\"", value));
             }
             else if (nName == "oslspectral")
             {

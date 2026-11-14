@@ -57,7 +57,7 @@ namespace pbrt
     }
 
     // FloatAddTexture Definition
-    public sealed unsafe class FloatAddTexture : FloatTexture
+    public sealed unsafe partial class FloatAddTexture : FloatTexture
     {
         public FloatAddTexture(FloatTexture tex1, FloatTexture tex2) { this.tex1 = tex1; this.tex2 = tex2; }
 
@@ -87,7 +87,7 @@ namespace pbrt
     }
 
     // FloatSubtractTexture Definition
-    public sealed unsafe class FloatSubtractTexture : FloatTexture
+    public sealed unsafe partial class FloatSubtractTexture : FloatTexture
     {
         public FloatSubtractTexture(FloatTexture tex1, FloatTexture tex2) { this.tex1 = tex1; this.tex2 = tex2; }
 
@@ -117,7 +117,7 @@ namespace pbrt
     }
 
     // FloatAbsTexture Definition
-    public sealed unsafe class FloatAbsTexture : FloatTexture
+    public sealed unsafe partial class FloatAbsTexture : FloatTexture
     {
         public FloatAbsTexture(FloatTexture tex) { this.tex = tex; }
 
@@ -163,7 +163,7 @@ namespace pbrt
     }
 
     // FloatClampTexture Definition
-    public sealed unsafe class FloatClampTexture : FloatTexture
+    public sealed unsafe partial class FloatClampTexture : FloatTexture
     {
         public FloatClampTexture(FloatTexture tex, Float minValue, Float maxValue)
         {
@@ -202,7 +202,7 @@ namespace pbrt
     }
 
     // FloatDivideTexture Definition
-    public sealed unsafe class FloatDivideTexture : FloatTexture
+    public sealed unsafe partial class FloatDivideTexture : FloatTexture
     {
         public FloatDivideTexture(FloatTexture tex1, FloatTexture tex2) { this.tex1 = tex1; this.tex2 = tex2; }
 
@@ -247,7 +247,7 @@ namespace pbrt
     }
 
     // FloatPowerTexture Definition
-    public sealed unsafe class FloatPowerTexture : FloatTexture
+    public sealed unsafe partial class FloatPowerTexture : FloatTexture
     {
         public FloatPowerTexture(FloatTexture baseTexture, FloatTexture exponent)
         {
@@ -296,7 +296,7 @@ namespace pbrt
 
     // FloatRemapTexture Definition
     // Maps the value from [sourcemin, sourcemax] to [targetmin, targetmax] and clamps it to the target range
-    public sealed unsafe class FloatRemapTexture : FloatTexture
+    public sealed unsafe partial class FloatRemapTexture : FloatTexture
     {
         public FloatRemapTexture(FloatTexture value, FloatTexture sourceMin, FloatTexture sourceMax, FloatTexture targetMin,
                                  FloatTexture targetMax)
@@ -351,7 +351,7 @@ namespace pbrt
 
     // FloatRoundingTexture Definition
     // Rounds the value to the nearest multiple of the increment
-    public sealed unsafe class FloatRoundingTexture : FloatTexture
+    public sealed unsafe partial class FloatRoundingTexture : FloatTexture
     {
         public FloatRoundingTexture(FloatTexture tex, FloatTexture increment) { this.tex = tex; this.increment = increment; }
 
@@ -393,7 +393,7 @@ namespace pbrt
     }
 
     // FloatModuloTexture Definition
-    public sealed unsafe class FloatModuloTexture : FloatTexture
+    public sealed unsafe partial class FloatModuloTexture : FloatTexture
     {
         public FloatModuloTexture(FloatTexture tex, FloatTexture modulo) { this.tex = tex; this.modulo = modulo; }
 
@@ -438,7 +438,7 @@ namespace pbrt
 
     // FloatCompareTexture Definition
     // 1 where texture1 is greater than (or less than) texture2, else 0
-    public sealed unsafe class FloatCompareTexture : FloatTexture
+    public sealed unsafe partial class FloatCompareTexture : FloatTexture
     {
         public FloatCompareTexture(FloatTexture tex1, FloatTexture tex2, bool greater)
         {
@@ -493,7 +493,7 @@ namespace pbrt
     // mapping, perturbed by turbulence. Its value is in [0,1]. Note that LuxCore's scene parser passes the properties to
     // the constructor in a different order than the constructor declares them, so its "variability", "baseflatness" and
     // "spheres" do not reach the parameters of those names; this port gives each property its own meaning.
-    public sealed unsafe class FloatCloudTexture : FloatTexture
+    public sealed unsafe partial class FloatCloudTexture : FloatTexture
     {
         public FloatCloudTexture(TextureMapping3D mapping, Float radius, Float noiseScale, Float turbulence, Float sharpness,
                                  Float variability, Float baseFlatness, int octaves, Float omega, Float noiseOffset,

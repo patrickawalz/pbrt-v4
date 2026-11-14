@@ -44,6 +44,13 @@ namespace pbrt
                 attenuation = attenuation.Scattered(wo, wi, fromCamera);
                 return true;
             }
+            PearlescentPhaseFunction pearlescent = phase as PearlescentPhaseFunction;
+            if (pearlescent != null)
+            {
+                // The reflection by a platelet, or the ray that goes on between them
+                attenuation = pearlescent.MuellerMatrix(wo, wi, fromCamera);
+                return true;
+            }
             HGPhaseFunction hg = phase as HGPhaseFunction;
             if (hg == null || hg.Rayleigh() == 0)
                 return false;

@@ -67,11 +67,12 @@ namespace pbrt
         }
     }
 
-    public sealed unsafe class SpectrumVariationTexture : SpectrumTexture
+    public sealed unsafe class SpectrumVariationTexture : SpectrumRGBTexture
     {
         public SpectrumVariationTexture(SpectrumTexture tex, RGB baseColor, Float hue, Float saturation, Float value, int seed, SpectrumType spectrumType,
-                                        RGBColorSpace colorSpace)
+                                        RGBColorSpace colorSpace) : base(spectrumType)
         {
+            rgbTexture = new SourceRGB(this, colorSpace);
             this.tex = tex;
             this.baseColor = baseColor;
             this.hue = hue;
@@ -114,21 +115,6 @@ namespace pbrt
             }
             Float m = std.max(baseColor.r, std.max(baseColor.g, baseColor.b)) * upper;
             return pbrt.RGBSpectrumBound(spectrumType, colorSpace, m);
-        }
-
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            TryEvaluateRGB(ctx, out RGB rgb);
-            rgb = pbrt.ClampZero(rgb);
-            if (spectrumType == SpectrumType.Unbounded)
-            {
-                return new RGBUnboundedSpectrum(colorSpace, rgb).Sample(lambda);
-            }
-            if (spectrumType == SpectrumType.Albedo)
-            {
-                return new RGBAlbedoSpectrum(colorSpace, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
-            }
-            return new RGBIlluminantSpectrum(colorSpace, rgb).Sample(lambda);
         }
 
         public override string ToString() { return pbrt.StringPrintf("[ SpectrumVariationTexture hue: %f saturation: %f value: %f seed: %d ]", hue, saturation, value, seed); }

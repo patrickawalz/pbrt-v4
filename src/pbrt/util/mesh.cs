@@ -218,6 +218,8 @@ namespace pbrt
         public Normal3f[] n = null;
         public Vector3f[] s = null;
         public Point2f[] uv = null;
+        // (not in pbrt-v4) The texture coordinate sets after the first (see uvchannels.cs); null if there is none
+        public UVChannels uvChannels = null;
         public int[] faceIndices = null;
         public bool reverseOrientation, transformSwapsHandedness;
     }
@@ -323,6 +325,8 @@ namespace pbrt
         public Point3f[] p = null;
         public Normal3f[] n = null;
         public Point2f[] uv = null;
+        // (not in pbrt-v4) The texture coordinate sets after the first (see uvchannels.cs); null if there is none
+        public UVChannels uvChannels = null;
         public int[] faceIndices = null;
         public PiecewiseConstant2D imageDistribution;
     }

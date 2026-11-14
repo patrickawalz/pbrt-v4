@@ -77,6 +77,9 @@ namespace pbrt
         public Transform renderFromShader = new Transform();
         public bool hasRenderFromShader = false;
         public string[] outputCandidates = null;
+        /// For a texture whose output OSL differentiates: the number of floats of the output (1 or 3) that the group writes, with its two
+        /// derivatives after it, in the output arena. 0: the group writes nothing there.
+        public int derivativeFloats = 0;
         private bool matrixValid = false;
         private Matrix44 shaderToCommon = Matrix44.identity;
 
@@ -285,6 +288,12 @@ namespace pbrt
                 dpdx = si.dpdx;
                 dpdy = si.dpdy;
                 uv = si.uv;
+                if (object.ReferenceEquals(tex.si, si))
+                {
+                    // The point of the lookup: it is not the one of the intersection when a difference is taken
+                    p = tex.p;
+                    uv = tex.uv;
+                }
                 dudx = si.dudx;
                 dudy = si.dudy;
                 dvdx = si.dvdx;
@@ -381,6 +390,77 @@ namespace pbrt
         {
             ShadingSystem ss = OSLSystem.ShadingSystem;
             return ss.execute(ts.context, group.group, 0, 0, ref sg, null, null);
+        }
+
+        public static bool Execute(OSLShaderGroup group, OSLThreadState ts, ref ShaderGlobals sg, void* outputs)
+        {
+            ShadingSystem ss = OSLSystem.ShadingSystem;
+            return ss.execute(ts.context, group.group, 0, 0, ref sg, null, outputs);
+        }
+
+        /// Runs a group for a texture lookup with OSL's own derivatives: the two differentials that OSL carries through the shader (the "x" and
+        /// the "y" of Dx() and Dy()) are the two directions on the surface instead of the two pixels, so what comes out next to the output is
+        /// its change along them. They keep the size of the pixel (the step of pbrt's BumpMap()), because the shader also filters its texture
+        /// lookups with them; the derivatives are divided by it afterwards.
+        public static bool EvalOutput(OSLShaderGroup group, SurfaceInteraction si, TextureEvalContext tex, ref SampledWavelengths lambda,
+                                      TextureDirections directions, float* result, float* dresultdu, float* dresultdv, int count)
+        {
+            int available = group.derivativeFloats;
+            if (available == 0)
+            {
+                return false;
+            }
+            OSLThreadState ts = OSLThreadState.Current();
+            ShaderGlobals sg = new ShaderGlobals();
+            Vector3f wo = si != null ? si.wo : new Vector3f(0, 0, 1);
+            if (LengthSquared(wo) == 0)
+            {
+                wo = new Vector3f(0, 0, 1);
+            }
+            FillGlobals(ref sg, ts, group, si, tex, wo, si != null && si.rayType > 0 ? si.rayType : OSLRayType.Camera);
+            Float du = .5f * (std.abs(tex.dudx) + std.abs(tex.dudy));
+            if (du == 0)
+            {
+                du = .0005f;
+            }
+            Float dv = .5f * (std.abs(tex.dvdx) + std.abs(tex.dvdy));
+            if (dv == 0)
+            {
+                dv = .0005f;
+            }
+            sg.dPdx = ToWorld(du * directions.dpdu);
+            sg.dudx = du * directions.duvdu.x;
+            sg.dvdx = du * directions.duvdu.y;
+            sg.dPdy = ToWorld(dv * directions.dpdv);
+            sg.dudy = dv * directions.duvdv.x;
+            sg.dvdy = dv * directions.duvdv.y;
+            ts.shade.lambda = lambda;
+            float* arena = stackalloc float[9];
+            for (int i = 0; i < 9; ++i)
+            {
+                arena[i] = 0;
+            }
+            if (!Execute(group, ts, ref sg, arena))
+            {
+                return false;
+            }
+            float* dx = arena + available;
+            float* dy = arena + 2 * available;
+            if (count == 1 && available == 3)
+            {
+                result[0] = (arena[0] + arena[1] + arena[2]) * (1f / 3f);
+                dresultdu[0] = (dx[0] + dx[1] + dx[2]) * (1f / 3f) / du;
+                dresultdv[0] = (dy[0] + dy[1] + dy[2]) * (1f / 3f) / dv;
+                return true;
+            }
+            for (int i = 0; i < count; ++i)
+            {
+                int c = i < available ? i : available - 1;
+                result[i] = arena[c];
+                dresultdu[i] = dx[c] / du;
+                dresultdv[i] = dy[c] / dv;
+            }
+            return true;
         }
 
         // ---------------------------------------------------------------------------------------------------------------------------------

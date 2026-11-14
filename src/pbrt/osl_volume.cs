@@ -880,8 +880,8 @@ namespace pbrt
                     return;
                 }
             }
-            OSLQuery query = new OSLQuery();
-            if (!query.open(layer.shader, string.Join(":", OSLSystem.SearchPaths())) || query.getparam(name) == null)
+            OSLQuery query = OSLSystem.Query(layer.shader);
+            if (query == null || query.getparam(name) == null)
             {
                 return;
             }

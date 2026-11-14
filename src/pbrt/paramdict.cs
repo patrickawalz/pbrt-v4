@@ -172,7 +172,7 @@ namespace pbrt
                 else if (p.type == FloatTraits.typeName || p.type == IntegerTraits.typeName ||
                          p.type == Point2fTraits.typeName || p.type == Vector2fTraits.typeName ||
                          p.type == Point3fTraits.typeName || p.type == Vector3fTraits.typeName ||
-                         p.type == Normal3fTraits.typeName || p.type == "rgb" || p.type == "blackbody")
+                         p.type == Normal3fTraits.typeName || p.type == "rgb" || p.type == "blackbody" || ParametricSpectra.IsType(p.type))
                 {
                     if (p.ints.empty() && p.floats.empty())
                         pbrt.ErrorExit(p.loc, pbrt.StringPrintf("\"%s\": non-numeric values provided for numeric-valued parameter", p.name));
@@ -273,6 +273,12 @@ namespace pbrt
                 {
                     return new BlackbodySpectrum(pp.floats[i]);
                 });
+            else if (ParametricSpectra.IsType(param.type))
+                // (not in pbrt-v4) A spectrum given by a formula: all the values of the parameter are the one spectrum
+                return returnArray<Spectrum>(param.floats.size(), param, (int)param.floats.size(), (ParsedParameter pp, int i) =>
+                {
+                    return ParametricSpectra.Create(pp.type, pp.name, pp.floats, pp.loc, alloc);
+                });
             else if (param.type == "spectrum" && !param.floats.empty())
             {
                 if (param.floats.size() % 2 != 0)
@@ -301,6 +307,10 @@ namespace pbrt
                     Spectrum spd = pbrt.GetNamedSpectrum(s);
                     if (spd != null)
                         return spd;
+
+                    // (not in pbrt-v4) a file of measured n and k (Sopra, luxpop: nkfile.cs)
+                    if (IndexFiles.IsIndexFile(s))
+                        return IndexFiles.Spectrum(s, pp.name, pp.loc, alloc);
 
                     spd = readSpectrumFromFile(s, alloc);
                     if (spd == null)
@@ -420,6 +430,10 @@ namespace pbrt
             remove(name, "spectrum");
             remove(name, "rgb");
             remove(name, "blackbody");
+            foreach (string type in ParametricSpectra.Types)
+            {
+                remove(name, type);
+            }
         }
 
         public void RenameParameter(string before, string after)
@@ -712,7 +726,7 @@ namespace pbrt
                     }
                     return new SpectrumConstantTexture(s);
                 }
-                else if (p.type == "spectrum" || p.type == "blackbody")
+                else if (p.type == "spectrum" || p.type == "blackbody" || ParametricSpectra.IsType(p.type))
                 {
                     Spectrum s = GetOneSpectrum(name, null, spectrumType, alloc);
                     pbrt.CHECK(s != null);

@@ -16,6 +16,18 @@ namespace pbrt
         {
             this.bxdf = bxdf;
             this.shadingFrame = Frame.FromXZ(pbrt.Normalize(dpdus), (Vector3f)ns);
+            this.ng = ns;
+        }
+
+        // (not in pbrt-v4) The same with the geometric normal of the surface (render space, on the side of ns as
+        // SurfaceInteraction.SetShadingGeometry() leaves it): pbrt's BSDF knows the shading frame only, and what an
+        // interpolated or mapped shading normal does to the light (directions on the two sides of the true surface that
+        // the shading frame takes for the same side, and the other way round) cannot be told without it.
+        public BSDF(Normal3f ng, Normal3f ns, Vector3f dpdus, BxDF bxdf)
+        {
+            this.bxdf = bxdf;
+            this.shadingFrame = Frame.FromXZ(pbrt.Normalize(dpdus), (Vector3f)ns);
+            this.ng = ng;
         }
 
         // (not in pbrt-v4) The BSDF of a scattering event in a medium: the phase function in the place of the BxDF and no shading
@@ -25,6 +37,7 @@ namespace pbrt
             this.bxdf = new PhaseBxDF(phase);
             this.shadingFrame = Frame.FromXZ(new Vector3f(1, 0, 0), new Vector3f(0, 0, 1));
             this.isVolume = true;
+            this.ng = new Normal3f(0, 0, 1);
         }
 
         public static implicit operator bool(BSDF b) { return b.bxdf != null; }
@@ -33,6 +46,18 @@ namespace pbrt
 
         // (not in pbrt-v4) For the polarised integrator
         public BxDF GetBxDF() { return bxdf; }
+
+        // (not in pbrt-v4) The same frame around another BxDF: a BxDF that wraps another asks for the matrices of the one inside
+        public BSDF WithBxDF(BxDF other)
+        {
+            BSDF copy = this;
+            copy.bxdf = other;
+            return copy;
+        }
+
+        // (not in pbrt-v4) The geometric normal in render space, and in the shading frame (where the shading normal is +z)
+        public Normal3f GeometricNormal() { return ng; }
+        public Vector3f LocalGeometricNormal() { return shadingFrame.ToLocal((Vector3f)ng); }
 
         public Vector3f RenderToLocal(Vector3f v) { return shadingFrame.ToLocal(v); }
         public Vector3f LocalToRender(Vector3f v) { return shadingFrame.FromLocal(v); }
@@ -136,6 +161,7 @@ namespace pbrt
         private BxDF bxdf;
         private Frame shadingFrame;
         private bool isVolume;
+        private Normal3f ng;
     }
 
 }  // namespace pbrt

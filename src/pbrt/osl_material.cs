@@ -445,13 +445,59 @@ namespace pbrt
         {
             lock (buildMutex)
             {
-                return BuildLocked(spec, kind, worldFromShader, outputs);
+                return BuildLocked(spec, kind, worldFromShader, outputs, false);
+            }
+        }
+
+        /// derivatives: the output of the texture is to come with its derivatives (OSLShaderGroup.derivativeFloats says whether it does)
+        public static OSLShaderGroup Build(OSLGroupSpec spec, string kind, Transform worldFromShader, string[] outputs, bool derivatives)
+        {
+            lock (buildMutex)
+            {
+                return BuildLocked(spec, kind, worldFromShader, outputs, derivatives);
+            }
+        }
+
+        /// Asks OSL for the derivatives of the output of a texture: a renderer output that has a place in the output arena with "derivs" is
+        /// differentiated by the optimizer (the shader is compiled with Dual2 values on whatever the output depends on), and the value and its
+        /// two derivatives are copied to the arena when the layer ends. The type of the place has to be the one of the output, which is known
+        /// from the shader (OSLQuery) and not from the group, whose symbols exist only once it is optimized.
+        private static void RequestDerivatives(OSLShaderGroup g, OSLGroupSpec spec)
+        {
+            if (spec.groupSpec != null || spec.layers.Count == 0)
+            {
+                return;
+            }
+            OSLLayerSpec last = spec.layers[spec.layers.Count - 1];
+            OSLQuery query = OSLSystem.Query(last.shader);
+            if (query == null)
+            {
+                return;
+            }
+            string[] names = OSLTextureOutputs.Parameters(spec);
+            foreach (string name in names)
+            {
+                OSLQuery.Parameter p = query.getparam(name);
+                if (p == null)
+                {
+                    continue;
+                }
+                if (!p.isoutput || p.isclosure || p.isstruct || p.type.basetype != TypeDesc.FLOAT || p.type.arraylen != 0 ||
+                    ((int)p.type.aggregate != 1 && (int)p.type.aggregate != 3))
+                {
+                    return;
+                }
+                List<SymLocationDesc> places = new List<SymLocationDesc>();
+                places.Add(new SymLocationDesc(last.layer + "." + name, p.type, true, SymArena.Outputs, 0));
+                g.group.add_symlocs(places);
+                g.derivativeFloats = (int)p.type.aggregate;
+                return;
             }
         }
 
         private static readonly object buildMutex = new object();
 
-        private static OSLShaderGroup BuildLocked(OSLGroupSpec spec, string kind, Transform worldFromShader, string[] outputs)
+        private static OSLShaderGroup BuildLocked(OSLGroupSpec spec, string kind, Transform worldFromShader, string[] outputs, bool derivatives)
         {
             ShadingSystem ss = OSLSystem.ShadingSystem;
             OSLShaderGroup g = new OSLShaderGroup();
@@ -489,6 +535,10 @@ namespace pbrt
             if (outputs != null && outputs.Length > 0)
             {
                 ss.attribute(g.group, "renderer_outputs", new TypeDesc(TypeDesc.STRING, outputs.Length), outputs);
+                if (derivatives)
+                {
+                    RequestDerivatives(g, spec);
+                }
             }
             ss.ShaderGroupEnd(g.group);
             return g;
@@ -602,7 +652,7 @@ namespace pbrt
             OSLShadeResult r = OSLShading.ShadeSurface(group, si, ctx.ns, ctx.dpdus, ref lambda);
             // A shader without lobes (an emitter) absorbs the path: a BSDF with no lobes
             OSLClosureBxDF bxdf = r.bxdf != null ? r.bxdf : new OSLClosureBxDF();
-            return new BSDF(ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
+            return new BSDF(ctx.n, ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
         }
 
         /// The emission at a point of a shape that is an area light (only the position, the normal and the uv are known there; the tangents are made up)
@@ -672,6 +722,55 @@ namespace pbrt
             return v;
         }
 
+        // The group that OSL differentiates is a second one, built when a derivative is first asked for: a texture that is only ever
+        // evaluated keeps the shader without derivatives.
+        private OSLShaderGroup derivativeGroup;
+        private bool derivativeGroupBuilt = false;
+        private readonly object derivativeMutex = new object();
+
+        private OSLShaderGroup DerivativeGroup()
+        {
+            if (!derivativeGroupBuilt)
+            {
+                lock (derivativeMutex)
+                {
+                    if (!derivativeGroupBuilt)
+                    {
+                        derivativeGroup = OSLTextureOutputs.Differentiated(spec, "floattexture", group);
+                        derivativeGroupBuilt = true;
+                    }
+                }
+            }
+            return derivativeGroup;
+        }
+
+        public override bool HasAnalyticDerivatives()
+        {
+            return DerivativeGroup() != null;
+        }
+
+        protected override Float ValueAndDerivatives(TextureEvalContext ctx, TextureDirections directions, Float* dfdu, Float* dfdv)
+        {
+            OSLShaderGroup d = DerivativeGroup();
+            float v, du, dv;
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            if (d == null || !OSLShading.EvalOutput(d, ctx.si, ctx, ref lambda, directions, &v, &du, &dv, 1))
+            {
+                Float value = Evaluate(ctx);
+                FiniteDifferences(ctx, value, directions, dfdu, dfdv);
+                return value;
+            }
+            if (dfdu != null)
+            {
+                *dfdu = du;
+            }
+            if (dfdv != null)
+            {
+                *dfdv = dv;
+            }
+            return v;
+        }
+
         public override Float MinValue()
         {
             return 0;
@@ -719,6 +818,84 @@ namespace pbrt
             return new OSLSpectrumTexture(spec, group, spectrumType);
         }
 
+        private OSLShaderGroup derivativeGroup;
+        private bool derivativeGroupBuilt = false;
+        private readonly object derivativeMutex = new object();
+
+        private OSLShaderGroup DerivativeGroup()
+        {
+            if (!derivativeGroupBuilt)
+            {
+                lock (derivativeMutex)
+                {
+                    if (!derivativeGroupBuilt)
+                    {
+                        derivativeGroup = OSLTextureOutputs.Differentiated(spec, "spectrumtexture", group);
+                        derivativeGroupBuilt = true;
+                    }
+                }
+            }
+            return derivativeGroup;
+        }
+
+        public override bool HasAnalyticDerivatives()
+        {
+            return DerivativeGroup() != null;
+        }
+
+        private SampledSpectrum Convert(float* v, SampledWavelengths lambda)
+        {
+            switch (spectrumType)
+            {
+                case SpectrumType.Albedo:
+                    return OSLSystem.ToSpectrum(Clamp(v[0], 0f, 1f), Clamp(v[1], 0f, 1f), Clamp(v[2], 0f, 1f), lambda);
+                case SpectrumType.Illuminant:
+                    return OSLSystem.ToEmissionSpectrum(v[0], v[1], v[2], lambda);
+                default:
+                    return OSLSystem.ToSpectrum(v[0], v[1], v[2], lambda);
+            }
+        }
+
+        private SampledSpectrum ConvertDerivative(float* v, float* d, SampledWavelengths lambda)
+        {
+            switch (spectrumType)
+            {
+                case SpectrumType.Albedo:
+                    // A channel held at 1 does not move
+                    return OSLSystem.ToSpectrumDerivative(Clamp(v[0], 0f, 1f), Clamp(v[1], 0f, 1f), Clamp(v[2], 0f, 1f), v[0] < 1 ? d[0] : 0,
+                                                          v[1] < 1 ? d[1] : 0, v[2] < 1 ? d[2] : 0, lambda);
+                case SpectrumType.Illuminant:
+                    return OSLSystem.ToEmissionSpectrumDerivative(v[0], v[1], v[2], d[0], d[1], d[2], lambda);
+                default:
+                    return OSLSystem.ToSpectrumDerivative(v[0], v[1], v[2], d[0], d[1], d[2], lambda);
+            }
+        }
+
+        // The derivatives of the color are OSL's; the spectrum follows through the conversion
+        protected override SampledSpectrum ValueAndDerivatives(TextureEvalContext ctx, SampledWavelengths lambda, TextureDirections directions,
+                                                               SampledSpectrum* dfdu, SampledSpectrum* dfdv)
+        {
+            OSLShaderGroup d = DerivativeGroup();
+            float* v = stackalloc float[3];
+            float* du = stackalloc float[3];
+            float* dv = stackalloc float[3];
+            if (d == null || !OSLShading.EvalOutput(d, ctx.si, ctx, ref lambda, directions, v, du, dv, 3))
+            {
+                SampledSpectrum value = Evaluate(ctx, lambda);
+                FiniteDifferences(ctx, lambda, value, directions, dfdu, dfdv);
+                return value;
+            }
+            if (dfdu != null)
+            {
+                *dfdu = ConvertDerivative(v, du, lambda);
+            }
+            if (dfdv != null)
+            {
+                *dfdv = ConvertDerivative(v, dv, lambda);
+            }
+            return Convert(v, lambda);
+        }
+
         public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
         {
             float* v = stackalloc float[3];
@@ -752,6 +929,36 @@ namespace pbrt
     public static class OSLTextureOutputs
     {
         private static readonly string[] fallbacks = new string[] { "Cout", "Fout", "Color", "Fac", "Out", "out", "result" };
+
+        /// The names of the output without the layer, in the order in which they are looked for
+        public static string[] Parameters(OSLGroupSpec spec)
+        {
+            List<string> names = new List<string>();
+            names.Add(spec.outputParam);
+            foreach (string f in fallbacks)
+            {
+                if (f != spec.outputParam)
+                {
+                    names.Add(f);
+                }
+            }
+            return names.ToArray();
+        }
+
+        /// The group of a texture that also gives the derivatives of its output; null if OSL cannot give them (a group given as one string,
+        /// an output that is not one float or three)
+        public static OSLShaderGroup Differentiated(OSLGroupSpec spec, string kind, OSLShaderGroup group)
+        {
+            OSLShaderGroup d = OSLGroupBuilder.Build(spec, kind, new Transform(), Names(spec), true);
+            if (d.derivativeFloats == 0)
+            {
+                return null;
+            }
+            d.renderFromShader = group.renderFromShader;
+            d.hasRenderFromShader = group.hasRenderFromShader;
+            Resolve(d, spec);
+            return d;
+        }
 
         public static string[] Names(OSLGroupSpec spec)
         {

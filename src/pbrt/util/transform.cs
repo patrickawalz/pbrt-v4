@@ -448,7 +448,15 @@ namespace pbrt
             ret.areaLight = si.areaLight;
             ret.shading.n = FaceForward(ret.shading.n, ret.n);
             ret.faceIndex = si.faceIndex;
+            ret.edgeKind = si.edgeKind;
+            ret.edgeCoordinates = si.edgeCoordinates;
+            ret.edgeU = t.Apply(si.edgeU);
+            ret.edgeV = t.Apply(si.edgeV);
             ret.objectId = si.objectId;
+            ret.uvTriangleMesh = si.uvTriangleMesh;
+            ret.uvPatchMesh = si.uvPatchMesh;
+            ret.uvPrimitive = si.uvPrimitive;
+            ret.uvParameter = si.uvParameter;
             return ret;
         }
 
@@ -548,7 +556,15 @@ namespace pbrt
             ret.areaLight = si.areaLight;
             ret.shading.n = FaceForward(ret.shading.n, ret.n);
             ret.faceIndex = si.faceIndex;
+            ret.edgeKind = si.edgeKind;
+            ret.edgeCoordinates = si.edgeCoordinates;
+            ret.edgeU = t.Apply(si.edgeU);
+            ret.edgeV = t.Apply(si.edgeV);
             ret.objectId = si.objectId;
+            ret.uvTriangleMesh = si.uvTriangleMesh;
+            ret.uvPatchMesh = si.uvPatchMesh;
+            ret.uvPrimitive = si.uvPrimitive;
+            ret.uvParameter = si.uvParameter;
             return ret;
         }
 

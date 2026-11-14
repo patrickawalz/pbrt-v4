@@ -371,6 +371,20 @@ namespace pbrt
             return s(EvaluatePolynomial(lambda, c2, c1, c0));  // c0 * lambda^2 + c1 * lambda + c2
         }
 
+        // (not in pbrt-v4) The change of the value at a wavelength for a change (dc0, dc1, dc2) of the coefficients
+        public Float EvaluateDerivative(Float lambda, double dc0, double dc1, double dc2)
+        {
+            // In double: the terms of both polynomials are large and cancel
+            double l = lambda;
+            double x = ((double)c0 * l + c1) * l + c2;
+            if (double.IsInfinity(x))
+            {
+                return 0;
+            }
+            double root = Math.Sqrt(1 + x * x);
+            return (Float)(((dc0 * l + dc1) * l + dc2) / (2 * root * root * root));
+        }
+
         // RGBSigmoidPolynomial Private Methods
         private static Float s(Float x)
         {
@@ -439,6 +453,66 @@ namespace pbrt
             }
 
             return new RGBSigmoidPolynomial(c0, c1, c2);
+        }
+
+        // (not in pbrt-v4) The change of the coefficients of Apply(rgb) when the colour moves along drgb: the derivative of
+        // the trilinear interpolation of the table (and, for a grey colour that stays grey, of the closed form that
+        // Apply() has for those)
+        public unsafe void ApplyDerivative(RGB rgb, RGB drgb, double* dc0, double* dc1, double* dc2)
+        {
+            *dc0 = 0;
+            *dc1 = 0;
+            *dc2 = 0;
+            if (rgb[0] == rgb[1] && rgb[1] == rgb[2] && drgb[0] == drgb[1] && drgb[1] == drgb[2])
+            {
+                double q = (double)rgb[0] * (1 - (double)rgb[0]);
+                if (q > 0)
+                {
+                    *dc2 = drgb[0] * 0.25 / (q * Math.Sqrt(q));
+                }
+                return;
+            }
+            int maxc = (rgb[0] > rgb[1]) ? ((rgb[0] > rgb[2]) ? 0 : 2) : ((rgb[1] > rgb[2]) ? 1 : 2);
+            float z = rgb[maxc];
+            if (!(z > 0))
+            {
+                return;
+            }
+            float a = rgb[(maxc + 1) % 3], b = rgb[(maxc + 2) % 3];
+            float x = a * (res - 1) / z, y = b * (res - 1) / z;
+            int xi = std.min((int)x, res - 2), yi = std.min((int)y, res - 2), zi = (int)FindInterval((size_t)res, (int i) => zNodes[i] < z);
+            double dx = x - xi, dy = y - yi, width = zNodes[zi + 1] - zNodes[zi], dz = (z - zNodes[zi]) / width;
+            // How the three coordinates of the table move with the colour
+            double zMove = drgb[maxc];
+            double xMove = (res - 1) * (drgb[(maxc + 1) % 3] * (double)z - a * zMove) / ((double)z * z);
+            double yMove = (res - 1) * (drgb[(maxc + 2) % 3] * (double)z - b * zMove) / ((double)z * z);
+            double dzMove = zMove / width;
+            for (int i = 0; i < 3; ++i)
+            {
+                double c000 = co(maxc, zi, yi, xi, i), c100 = co(maxc, zi, yi, xi + 1, i);
+                double c010 = co(maxc, zi, yi + 1, xi, i), c110 = co(maxc, zi, yi + 1, xi + 1, i);
+                double c001 = co(maxc, zi + 1, yi, xi, i), c101 = co(maxc, zi + 1, yi, xi + 1, i);
+                double c011 = co(maxc, zi + 1, yi + 1, xi, i), c111 = co(maxc, zi + 1, yi + 1, xi + 1, i);
+                double x00 = c100 - c000, x10 = c110 - c010, x01 = c101 - c001, x11 = c111 - c011;
+                double byX = (1 - dz) * ((1 - dy) * x00 + dy * x10) + dz * ((1 - dy) * x01 + dy * x11);
+                double y00 = c010 - c000, y10 = c110 - c100, y01 = c011 - c001, y11 = c111 - c101;
+                double byY = (1 - dz) * ((1 - dx) * y00 + dx * y10) + dz * ((1 - dx) * y01 + dx * y11);
+                double z00 = c001 - c000, z10 = c101 - c100, z01 = c011 - c010, z11 = c111 - c110;
+                double byZ = (1 - dy) * ((1 - dx) * z00 + dx * z10) + dy * ((1 - dx) * z01 + dx * z11);
+                double change = byX * xMove + byY * yMove + byZ * dzMove;
+                if (i == 0)
+                {
+                    *dc0 = change;
+                }
+                else if (i == 1)
+                {
+                    *dc1 = change;
+                }
+                else
+                {
+                    *dc2 = change;
+                }
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

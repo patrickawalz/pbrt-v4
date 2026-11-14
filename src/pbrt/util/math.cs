@@ -1463,19 +1463,15 @@ namespace pbrt
             return (int)((i + p) % l);
         }
 
-        // (not in pbrt-v4) The error function in double precision (C++ has std::erf): its series near 0, and the continued
-        // fraction of the complementary function beyond
+        // (not in pbrt-v4) The error function in double precision (C++ has std::erf): its series near 0, where it is small, and
+        // one less the complementary function beyond
         public static double Erf(double x)
         {
             double a = Math.Abs(x);
-            if (a > 6)
-            {
-                return x > 0 ? 1 : -1;
-            }
-            if (a < 2.5)
+            if (a < 0.5)
             {
                 double sum = x, term = x;
-                for (int n = 1; n < 200; ++n)
+                for (int n = 1; n < 40; ++n)
                 {
                     term *= -x * x / n;
                     double add = term / (2 * n + 1);
@@ -1487,13 +1483,7 @@ namespace pbrt
                 }
                 return 2 / Math.Sqrt(Math.PI) * sum;
             }
-            // erfc(a) = exp(-a^2) / (a sqrt(pi)) * 1 / (1 + 1 / (2 a^2) / (1 + 2 / (2 a^2) / (1 + ...)))
-            double fraction = 1;
-            for (int n = 60; n >= 1; --n)
-            {
-                fraction = 1 + n / (2 * a * a) / fraction;
-            }
-            double erfc = Math.Exp(-a * a) / (a * Math.Sqrt(Math.PI)) / fraction;
+            double erfc = ErfcPositive(a);
             return x > 0 ? 1 - erfc : erfc - 1;
         }
 
@@ -1501,24 +1491,49 @@ namespace pbrt
         // it is small
         public static double Erfc(double x)
         {
-            if (x < 0)
-            {
-                return 2 - Erfc(-x);
-            }
-            if (x < 2.5)
-            {
-                return 1 - Erf(x);
-            }
-            if (x > 27)
+            return x >= 0 ? ErfcPositive(x) : 2 - ErfcPositive(-x);
+        }
+
+        // erfc(z) for z >= 0 by the Chebyshev series of Numerical Recipes (3rd edition, section 6.2.2), in t = 2 / (2 + z): its
+        // relative error is about 1e-16 over the whole range. The Beckmann distribution calls it at every evaluation and at
+        // every step of the inversion of its visible slopes.
+        private static double ErfcPositive(double z)
+        {
+            if (z > 27)
             {
                 return 0;
             }
-            double fraction = 1;
-            for (int n = 60; n >= 1; --n)
-            {
-                fraction = 1 + n / (2 * x * x) / fraction;
-            }
-            return Math.Exp(-x * x) / (x * Math.Sqrt(Math.PI)) / fraction;
+            double t = 2 / (2 + z), ty = 4 * t - 2;
+            double d = 0, dd = 0;
+            d = ty * d - dd + -2.8e-17; dd = 0;
+            double previous;
+            previous = d; d = ty * d - dd + 1.21e-16; dd = previous;
+            previous = d; d = ty * d - dd + -9.4e-17; dd = previous;
+            previous = d; d = ty * d - dd + -1.523e-15; dd = previous;
+            previous = d; d = ty * d - dd + 7.106e-15; dd = previous;
+            previous = d; d = ty * d - dd + 3.81e-16; dd = previous;
+            previous = d; d = ty * d - dd + -1.12708e-13; dd = previous;
+            previous = d; d = ty * d - dd + 3.13092e-13; dd = previous;
+            previous = d; d = ty * d - dd + 8.94487e-13; dd = previous;
+            previous = d; d = ty * d - dd + -6.886027e-12; dd = previous;
+            previous = d; d = ty * d - dd + 2.394038e-12; dd = previous;
+            previous = d; d = ty * d - dd + 9.6467911e-11; dd = previous;
+            previous = d; d = ty * d - dd + -2.27365122e-10; dd = previous;
+            previous = d; d = ty * d - dd + -9.91364156e-10; dd = previous;
+            previous = d; d = ty * d - dd + 5.059343495e-9; dd = previous;
+            previous = d; d = ty * d - dd + 6.529054439e-9; dd = previous;
+            previous = d; d = ty * d - dd + -8.5238095915e-8; dd = previous;
+            previous = d; d = ty * d - dd + 1.5626441722e-8; dd = previous;
+            previous = d; d = ty * d - dd + 1.303655835580e-6; dd = previous;
+            previous = d; d = ty * d - dd + -1.624290004647e-6; dd = previous;
+            previous = d; d = ty * d - dd + -2.0278578112534e-5; dd = previous;
+            previous = d; d = ty * d - dd + 4.2523324806907e-5; dd = previous;
+            previous = d; d = ty * d - dd + 3.66839497852761e-4; dd = previous;
+            previous = d; d = ty * d - dd + -9.46595344482036e-4; dd = previous;
+            previous = d; d = ty * d - dd + -9.561514786808631e-3; dd = previous;
+            previous = d; d = ty * d - dd + 1.9476473204185836e-2; dd = previous;
+            previous = d; d = ty * d - dd + 6.4196979235649026e-1; dd = previous;
+            return t * Math.Exp(-z * z + 0.5 * (-1.3026537197817094 + ty * d) - dd);
         }
 
         // (not in pbrt-v4) The logarithm of the gamma function for a positive argument (Lanczos, g = 7, 9 terms)
@@ -1541,6 +1556,12 @@ namespace pbrt
         // method), which is taken on the side where it converges fast. A small value has its relative precision.
         public static double IncompleteBeta(double a, double b, double x)
         {
+            return IncompleteBeta(a, b, x, LogGamma(a) + LogGamma(b) - LogGamma(a + b));
+        }
+
+        // The same with logBeta = log B(a, b) given: three logarithms of the gamma function that do not depend on x
+        public static double IncompleteBeta(double a, double b, double x, double logBeta)
+        {
             if (!(x > 0))
             {
                 return 0;
@@ -1549,7 +1570,7 @@ namespace pbrt
             {
                 return 1;
             }
-            double front = Math.Exp(LogGamma(a + b) - LogGamma(a) - LogGamma(b) + a * Math.Log(x) + b * Math.Log(1 - x));
+            double front = Math.Exp(a * Math.Log(x) + b * Math.Log(1 - x) - logBeta);
             if (x < (a + 1) / (a + b + 2))
             {
                 return front * IncompleteBetaFraction(a, b, x) / a;

@@ -60,6 +60,24 @@ namespace pbrt
         private static OSLErrorHandler errorHandler = new OSLErrorHandler();
         private static List<string> searchPaths = new List<string>();
         private static Dictionary<string, string> sourceCache = new Dictionary<string, string>();
+        private static Dictionary<string, string> bytecodeCache = new Dictionary<string, string>();
+
+        /// The parameters of a shader: of what was compiled from source here (which has no .oso file to open) or of a .oso file of the search
+        /// paths. null if the shader is not found.
+        public static OSLQuery Query(string shaderName)
+        {
+            OSLQuery query = new OSLQuery();
+            string bytecode = null;
+            lock (bytecodeCache)
+            {
+                bytecodeCache.TryGetValue(shaderName, out bytecode);
+            }
+            if (bytecode != null)
+            {
+                return query.open_bytecode(bytecode) ? query : null;
+            }
+            return query.open(shaderName, string.Join(":", SearchPaths())) ? query : null;
+        }
         private static HashSet<string> loaded = new HashSet<string>();
         private static string stdoslPath = null;
         private static HashSet<string> emitters = new HashSet<string>();
@@ -321,6 +339,10 @@ namespace pbrt
                     return false;
                 }
                 sourceCache[shaderName] = osl;
+                lock (bytecodeCache)
+                {
+                    bytecodeCache[shaderName] = osobuffer;
+                }
                 NoteEmitter(shaderName, osobuffer);
                 loaded.Add(key);
                 return true;
@@ -419,6 +441,76 @@ namespace pbrt
                         return new RGBAlbedoSpectrum(ColorSpace(), new RGB(r, g, b)).Sample(lambda);
                     }
                     return new RGBUnboundedSpectrum(ColorSpace(), new RGB(r, g, b)).Sample(lambda);
+            }
+        }
+
+        /// The change of ToSpectrum() per unit of a step that changes the color by (dr, dg, db)
+        public static SampledSpectrum ToSpectrumDerivative(Float r, Float g, Float b, Float dr, Float dg, Float db, SampledWavelengths lambda)
+        {
+            // A channel held at zero does not move
+            if (!(r > 0))
+            {
+                dr = 0;
+            }
+            if (!(g > 0))
+            {
+                dg = 0;
+            }
+            if (!(b > 0))
+            {
+                db = 0;
+            }
+            r = std.max<Float>(r, 0);
+            g = std.max<Float>(g, 0);
+            b = std.max<Float>(b, 0);
+            if (dr == dg && dg == db && r == g && g == b)
+            {
+                return new SampledSpectrum(dr);
+            }
+            switch (spectralMode)
+            {
+                case OSLSpectralMode.Gray:
+                    return new SampledSpectrum(Luminance(dr, dg, db));
+                case OSLSpectralMode.Unbounded:
+                    return RGBUpsampling.Derivative(new RGB(r, g, b), new RGB(dr, dg, db), ColorSpace(), SpectrumType.Unbounded, lambda);
+                default:
+                    if (r <= 1 && g <= 1 && b <= 1)
+                    {
+                        // Not SpectrumType.Albedo: that one holds a channel that is exactly 1, which here still moves
+                        RGBColorSpace cs = ColorSpace();
+                        RGB rgb = new RGB(r, g, b);
+                        double dc0, dc1, dc2;
+                        RGBSigmoidPolynomial polynomial = cs.ToRGBCoeffs(rgb);
+                        cs.ToRGBCoeffsDerivative(rgb, new RGB(dr, dg, db), &dc0, &dc1, &dc2);
+                        SampledSpectrum result = new SampledSpectrum(0f);
+                        for (int i = 0; i < NSpectrumSamples; ++i)
+                        {
+                            result[i] = polynomial.EvaluateDerivative(lambda[i], dc0, dc1, dc2);
+                        }
+                        return result;
+                    }
+                    return RGBUpsampling.Derivative(new RGB(r, g, b), new RGB(dr, dg, db), ColorSpace(), SpectrumType.Unbounded, lambda);
+            }
+        }
+
+        /// The change of ToEmissionSpectrum() per unit of a step that changes the color by (dr, dg, db)
+        public static SampledSpectrum ToEmissionSpectrumDerivative(Float r, Float g, Float b, Float dr, Float dg, Float db, SampledWavelengths lambda)
+        {
+            UpdatePhotometricScales();
+            RGB rgb = new RGB(r, g, b);
+            RGB drgb = new RGB(dr, dg, db);
+            switch (spectralMode)
+            {
+                case OSLSpectralMode.Gray:
+                    return new SampledSpectrum(Luminance(r > 0 ? dr : 0, g > 0 ? dg : 0, b > 0 ? db : 0) * flatScale);
+                case OSLSpectralMode.Unbounded:
+                    return RGBUpsampling.Derivative(rgb, drgb, ColorSpace(), SpectrumType.Unbounded, lambda) * flatScale;
+                default:
+                    if (emissionIlluminant)
+                    {
+                        return RGBUpsampling.Derivative(rgb, drgb, ColorSpace(), SpectrumType.Illuminant, lambda) * illuminantScale;
+                    }
+                    return RGBUpsampling.Derivative(rgb, drgb, ColorSpace(), SpectrumType.Unbounded, lambda) * flatScale;
             }
         }
 

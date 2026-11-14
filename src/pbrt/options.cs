@@ -38,6 +38,9 @@ namespace pbrt
         public bool quiet = false;
         public bool disablePixelJitter = false, disableWavelengthJitter = false;
         public bool disableTextureFiltering = false;
+        // (not in pbrt-v4) Option "texturederivatives" "finite": every texture is differentiated by finite
+        // differences (stock pbrt), whether it has a closed form or not
+        public bool finiteTextureDerivatives = false;
         public bool disableImageTextures = false;
         public bool forceDiffuse = false;
         public bool useGPU = false;

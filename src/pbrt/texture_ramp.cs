@@ -71,7 +71,7 @@ namespace pbrt
     }
 
     // FloatRampTexture Definition
-    public sealed unsafe class FloatRampTexture : FloatTexture
+    public sealed unsafe partial class FloatRampTexture : FloatTexture
     {
         public FloatRampTexture(FloatTexture tex, Float[] positions, Float[] values, bool step)
         {
@@ -122,11 +122,13 @@ namespace pbrt
 
     // SpectrumRampTexture Definition
     // The stops are RGB colors that are blended in RGB; the blend becomes a spectrum of the requested type
-    public sealed unsafe class SpectrumRampTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumRampTexture : SpectrumRGBTexture
     {
         public SpectrumRampTexture(FloatTexture tex, Float[] positions, RGB[] values, bool step, SpectrumType spectrumType,
-                                   RGBColorSpace colorSpace)
+                                   RGBColorSpace colorSpace) : base(spectrumType)
         {
+            // (not in pbrt-v4) The colour of the ramp is an RGB texture (texture_rgb.cs); the spectrum is its upsampling
+            rgbTexture = new RampRGB(this);
             this.tex = tex;
             this.positions = positions;
             this.step = step;
@@ -160,19 +162,6 @@ namespace pbrt
             return MaxComponent(lo, hi);
         }
 
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            Float x = tex.Evaluate(ctx);
-            RGB rgb = pbrt.ClampZero(new RGB(pbrt.RampEvaluate(positions, channels[0], step, x),
-                                              pbrt.RampEvaluate(positions, channels[1], step, x),
-                                              pbrt.RampEvaluate(positions, channels[2], step, x)));
-            if (spectrumType == SpectrumType.Unbounded)
-                return new RGBUnboundedSpectrum(colorSpace, rgb).Sample(lambda);
-            if (spectrumType == SpectrumType.Albedo)
-                return new RGBAlbedoSpectrum(colorSpace, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
-            return new RGBIlluminantSpectrum(colorSpace, rgb).Sample(lambda);
-        }
-
         public override string ToString() { return pbrt.StringPrintf("[ SpectrumRampTexture tex: %s stops: %d ]", tex, positions.Length); }
 
         public static SpectrumRampTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters,
@@ -202,7 +191,7 @@ namespace pbrt
     // is scaled to a peak of 1 at every temperature, so only the color follows the temperature, as in pbrt-v4. In
     // "physical" mode it is Planck's law divided by the peak of the spectrum at "referencetemperature", so that the
     // brightness also grows with the temperature, roughly as T^4.
-    public sealed unsafe class SpectrumBlackbodyTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumBlackbodyTexture : SpectrumTexture
     {
         public SpectrumBlackbodyTexture(FloatTexture tex, Float temperatureScale, Float temperatureOffset, bool physical,
                                         Float referenceTemperature)

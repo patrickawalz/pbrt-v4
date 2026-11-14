@@ -255,6 +255,8 @@ namespace pbrt
             Integrator integrator = null;
             if (name == "path")
                 integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "featureline")
+                integrator = FeatureLineIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "polpath")
                 integrator = PolarisedPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "simplepath")
@@ -560,6 +562,9 @@ namespace pbrt
                     std.max<Float>(.125f, 1 / std.sqrt((Float)sampler.SamplesPerPixel()));
                 if (!Options.disablePixelJitter)
                     cameraRay.Ref().ray.ScaleDifferentials(rayDiffScale);
+                    // (not in pbrt-v4) What a width in pixels has to be divided by to be a width in these differentials
+                    // (the wireframe texture, the feature lines)
+                    Wireframe.differentialScale = rayDiffScale;
 
                 ++nCameraRays;
                 // Evaluate radiance along camera ray
@@ -5893,8 +5898,13 @@ namespace pbrt
                 fneeOrigin = p;
                 ctx.ray.o = p;
                 ctx.ray.d = ps.wi;
-                specularBounce = false;
-                anyNonSpecularBounces = true;
+                // (not in pbrt-v4) A phase function may let the ray go on undisturbed (PhaseFunctionSample.delta): no light
+                // sampling competes with it, and it is not a bounce
+                specularBounce = ps.IsSpecular();
+                if (specularBounce)
+                    --depth;
+                else
+                    anyNonSpecularBounces = true;
             }
 
             public override bool EndAfterMedium(WalkContext ctx, bool terminated)

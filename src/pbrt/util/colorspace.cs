@@ -80,6 +80,12 @@ namespace pbrt
             return rgbToSpectrumTable.Apply(ClampZero(rgb));
         }
 
+        // (not in pbrt-v4) The change of the coefficients of ToRGBCoeffs(rgb) when the colour moves along drgb
+        public unsafe void ToRGBCoeffsDerivative(RGB rgb, RGB drgb, double* dc0, double* dc1, double* dc2)
+        {
+            rgbToSpectrumTable.ApplyDerivative(ClampZero(rgb), drgb, dc0, dc1, dc2);
+        }
+
         public static RGBColorSpace GetNamed(string n)
         {
             string name = n.ToLowerInvariant();

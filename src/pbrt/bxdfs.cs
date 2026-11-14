@@ -573,6 +573,20 @@ namespace pbrt
             }
             this.layerEta = layerEta;
             this.layerThickness = layerThickness;
+            this.layerEtaAt = null;
+        }
+
+        // Layers that disperse: their indices at each wavelength of the path (layerEtaAt[wavelength][layer])
+        public ThinFilmStack(SampledWavelengths lambda, Float[][] layerEtaAt, Float[] layerThickness)
+        {
+            wavelengths = new SampledSpectrum(0.0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                wavelengths[i] = lambda[i];
+            }
+            this.layerEta = layerEtaAt[0];
+            this.layerThickness = layerThickness;
+            this.layerEtaAt = layerEtaAt;
         }
 
         public int Layers() { return layerEta.Length; }
@@ -586,7 +600,8 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
                 Float fs, fp, ds, dp;
-                pbrt.FrThinFilmPolarised(cosine, 1, layerEta, layerThickness, false, wavelengths[i], new pstd.complex(eta[i], k[i]),
+                pbrt.FrThinFilmPolarised(cosine, 1, layerEtaAt != null ? layerEtaAt[i] : layerEta, layerThickness, false, wavelengths[i],
+                                         new pstd.complex(eta[i], k[i]),
                                          out fs, out fp, out ds, out dp, out Float _, out Float _);
                 Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp;
             }
@@ -606,7 +621,8 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
                 Float fs, fp, ds, dp, dsT, dpT;
-                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, layerEta, layerThickness, inside, wavelengths[i],
+                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, layerEtaAt != null ? layerEtaAt[i] : layerEta, layerThickness, inside,
+                                         wavelengths[i],
                                          new pstd.complex(inside ? 1 : substrateEta), out fs, out fp, out ds, out dp, out dsT, out dpT);
                 Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT;
             }
@@ -614,6 +630,7 @@ namespace pbrt
 
         private SampledSpectrum wavelengths;
         private Float[] layerEta, layerThickness;
+        private Float[][] layerEtaAt;
     }
 
     // MultiScatterConductorBxDF Definition
@@ -784,6 +801,8 @@ namespace pbrt
             Vector3f wr = -wo;
             Float h = MicrosurfaceWalk.StartHeight(height);
             SampledSpectrum energy = new SampledSpectrum(1f);
+            // Lambda of the direction to which every step connects, once for the walk
+            Float lambdaI = MicrosurfaceWalk.Lambda(mfDistrib, wi);
             for (int order = 0; order < maxOrder; ++order)
             {
                 h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
@@ -796,7 +815,7 @@ namespace pbrt
                 if (wh.z > 0)
                 {
                     Float cosine = Dot(incoming, wh);
-                    Float term = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine) * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                    Float term = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine) * MicrosurfaceWalk.G1(height, lambdaI, wi, h);
                     if (!IsNaN(term) && !IsInf(term) && term > 0)
                     {
                         scalar += energy * Reflectance(cosine) * term;
@@ -877,6 +896,8 @@ namespace pbrt
             Vector3f wr = -wo;
             Float h = MicrosurfaceWalk.StartHeight(height);
             SampledSpectrum energy = new SampledSpectrum(1f);
+            // Lambda of the direction to which every step connects, once for the walk
+            Float lambdaI = MicrosurfaceWalk.Lambda(mfDistrib, wi);
             for (int order = 0; order < maxOrder; ++order)
             {
                 h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
@@ -891,7 +912,7 @@ namespace pbrt
                 {
                     Float cosine = Dot(incoming, wh);
                     Float phase = mfDistrib.PDF_SingleSided(incoming, wh) / (4 * cosine);
-                    Float term = phase * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                    Float term = phase * MicrosurfaceWalk.G1(height, lambdaI, wi, h);
                     if (!IsNaN(term) && !IsInf(term) && term > 0)
                     {
                         density += term;
@@ -1050,6 +1071,8 @@ namespace pbrt
             Vector3f wr = -wo;
             Float h = MicrosurfaceWalk.StartHeight(height);
             SampledSpectrum energy = new SampledSpectrum(1f);
+            // Lambda of the direction to which every step connects, once for the walk
+            Float lambdaI = MicrosurfaceWalk.Lambda(mfDistrib, wi);
             for (int order = 0; order < maxOrder; ++order)
             {
                 h = MicrosurfaceWalk.SampleHeight(mfDistrib, height, wr, h, rng.Uniform<Float>());
@@ -1059,7 +1082,7 @@ namespace pbrt
                 }
                 Vector3f wm = mfDistrib.Sample_wm_SingleSided(-wr, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
                 energy *= R;
-                Float term = InvPi * std.max<Float>(Dot(wi, wm), 0) * MicrosurfaceWalk.G1(mfDistrib, height, wi, h);
+                Float term = InvPi * std.max<Float>(Dot(wi, wm), 0) * MicrosurfaceWalk.G1(height, lambdaI, wi, h);
                 if (!IsNaN(term) && !IsInf(term))
                 {
                     density += term;
@@ -1078,6 +1101,733 @@ namespace pbrt
         private MicrosurfaceHeight height;
         private SampledSpectrum R;
         private int maxOrder;
+    }
+
+    // PearlescentBxDF Definition
+    // (not in pbrt-v4) A pearlescent pigment after Guillen et al. 2020: a smooth dielectric interface (the container) over a
+    // slab of platelets (microflakes whose reflectance is the thin-film interference of util/pearlescent.cs; what they do not
+    // reflect goes straight through) over a Lambertian base. The normals of the platelets have a Trowbridge-Reitz
+    // distribution about the normal of the surface (alphaX, alphaY), written out here, or any MicrofacetDistribution (its
+    // D, Sigma and Sample_wm_SingleSided are all that the slab needs: there is no shadowing term, the extinction is it). The slab has thickness 1: kappa, the projected area of
+    // the platelets per unit volume times the thickness of the slab, is its optical depth for a ray along the normal that
+    // every platelet stops.
+    //   Single scattering  : in closed form (one reflection by a platelet, or one by the base).
+    //   Multiple scattering: an unbiased random walk in the slab with next-event estimation. An event is a reflection by a
+    //                        platelet, by the base or by the inside of the interface; maxEvents of 1 leaves the closed form.
+    // No tables. Directions inside the slab have +z up. The interface reflects as a mirror (in Sample_f only).
+    // Polarisation: the mirror reflection and the single reflection by a platelet (refraction in, the thin films, refraction
+    // out) have their Mueller matrices; the base and the paths of more events depolarise.
+    public sealed unsafe class PearlescentBxDF : BxDF
+    {
+        // PearlescentBxDF Public Methods
+        public PearlescentBxDF() { }
+        public PearlescentBxDF(PearlescentStack stack, SampledSpectrum wavelengths, Float kappa, Float alphaX, Float alphaY, SampledSpectrum baseAlbedo,
+                               int quadrature, int maxEvents)
+        {
+            this.stack = stack;
+            this.wavelengths = wavelengths;
+            this.kappa = kappa;
+            this.alphaX = alphaX;
+            this.alphaY = alphaY;
+            this.baseAlbedo = baseAlbedo;
+            this.quadrature = quadrature;
+            this.maxEvents = maxEvents;
+            eta = (Float)stack.containerEta;
+        }
+
+        // The same with the normals of the platelets from any MicrofacetDistribution
+        public PearlescentBxDF(PearlescentStack stack, SampledSpectrum wavelengths, Float kappa, MicrofacetDistribution distribution,
+                               SampledSpectrum baseAlbedo, int quadrature, int maxEvents)
+        {
+            this.stack = stack;
+            this.wavelengths = wavelengths;
+            this.kappa = kappa;
+            this.distribution = distribution;
+            this.baseAlbedo = baseAlbedo;
+            this.quadrature = quadrature;
+            this.maxEvents = maxEvents;
+            eta = (Float)stack.containerEta;
+        }
+
+        public override BxDFFlags Flags()
+        {
+            return BxDFFlags.GlossyReflection | BxDFFlags.SpecularReflection;
+        }
+
+        public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (wo.z * wi.z <= 0 || wo.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            RNG rng = new RNG(Hash(wo, 0x70656172UL), Hash(wi));
+            return Evaluate(wo, wi, ref rng, out SampledSpectrum flake, out Vector3f woInner, out Vector3f wiInner);
+        }
+
+        public override SampledSpectrum f(BSDF bsdf, Vector3f wo, Vector3f wi, TransportMode mode, out bool polarised, out Attenuation matrix)
+        {
+            polarised = false;
+            matrix = default;
+            if (wo.z * wi.z <= 0 || wo.z == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            Float side = 1;
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+                side = -1;
+            }
+            RNG rng = new RNG(Hash(wo, 0x70656172UL), Hash(wi));
+            SampledSpectrum value = Evaluate(wo, wi, ref rng, out SampledSpectrum flake, out Vector3f woInner, out Vector3f wiInner);
+            bool fromCamera = mode == TransportMode.Radiance;
+            Vector3f woRender = bsdf.LocalToRender(side * wo), wiRender = bsdf.LocalToRender(side * wi);
+            Vector3f directionExit = fromCamera ? woRender : wiRender;
+            Vector3f directionEnter = fromCamera ? -wiRender : -woRender;
+            Attenuation sum = default;
+            bool hasSum = false;
+            for (int j = 0; j < NSpectrumSamples; ++j)
+            {
+                flake[j] = std.min<Float>(flake[j], value[j]);
+            }
+            if ((bool)flake)
+            {
+                Vector3f wm = woInner + wiInner;
+                if (LengthSquared(wm) > 0)
+                {
+                    Accumulate(ref sum, ref hasSum, FlakeMatrix(bsdf, side, wo, woInner, Normalize(wm), wiInner, wi, fromCamera), flake, directionExit,
+                               directionEnter);
+                }
+            }
+            SampledSpectrum rest = hasSum ? value - flake : value;
+            if ((bool)rest)
+            {
+                Accumulate(ref sum, ref hasSum, Attenuation.Lambert(new SampledSpectrum(1f)), rest, directionExit, directionEnter);
+            }
+            if (hasSum)
+            {
+                polarised = PolarisedFacet.Normalise(sum, value, new SampledSpectrum(1f), out matrix);
+            }
+            return value;
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            return Sample(default, wo, uc, u, mode, sampleFlags, false, out Attenuation matrix);
+        }
+
+        public override pstd.optional<BSDFSample> Sample_f(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode,
+                                                           BxDFReflTransFlags sampleFlags, out bool polarised, out Attenuation matrix)
+        {
+            polarised = true;
+            return Sample(bsdf, wo, uc, u, mode, sampleFlags, true, out matrix);
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
+        {
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z * wi.z <= 0)
+            {
+                return 0;
+            }
+            if (wo.z < 0)
+            {
+                wo = -wo;
+                wi = -wi;
+            }
+            // A stand-in for the density of the walk, for the weights of multiple importance sampling only (Sample_f returns
+            // a proportional pdf): a cosine lobe and the lobe of a single reflection by a platelet, D(m) / (4 Sigma(wo)) inside
+            // the slab, as a density of the direction outside.
+            Vector3f woInner = Refract(wo), wiInner = Refract(wi);
+            Vector3f wm = woInner + wiInner;
+            Float glossy = 0;
+            if (LengthSquared(wm) > 0)
+            {
+                wm = Normalize(wm);
+                glossy = D(wm) / (4 * std.max<Float>(1e-3f, Sigma(woInner))) * wi.z / (eta * eta * std.max<Float>(1e-3f, wiInner.z));
+            }
+            return std.max<Float>(0.3f * wi.z * InvPi + 0.7f * glossy, 1e-6f);
+        }
+
+        public static string Name() { return "PearlescentBxDF"; }
+
+        public override bool HasMuellerMatrix() { return true; }
+
+        public override void Regularize() { }
+
+        public override string ToString()
+        {
+            return StringPrintf("[ PearlescentBxDF kappa: %f alphaX: %f alphaY: %f baseAlbedo: %s maxEvents: %d ]", kappa, alphaX, alphaY, baseAlbedo,
+                                maxEvents);
+        }
+
+        // PearlescentBxDF Private Methods
+        // --- the distribution of the platelets ----------------------------------------------------------------------------
+        // The projected area of the platelets (both of their sides) along w. For a MicrofacetDistribution: what its
+        // microfacets, which face upwards, show to w and to -w.
+        internal Float Sigma(Vector3f w)
+        {
+            if (distribution != null)
+            {
+                return distribution.Sigma(w) + distribution.Sigma(-w);
+            }
+            return std.sqrt(alphaX * alphaX * w.x * w.x + alphaY * alphaY * w.y * w.y + w.z * w.z);
+        }
+
+        internal Float D(Vector3f m)
+        {
+            if (m.z <= 0)
+            {
+                return 0;
+            }
+            if (distribution != null)
+            {
+                return distribution.D(m);
+            }
+            Float d = m.x * m.x / (alphaX * alphaX) + m.y * m.y / (alphaY * alphaY) + m.z * m.z;
+            return 1 / (Pi * alphaX * alphaY * d * d);
+        }
+
+        // A normal m of the upper hemisphere with the density D(m) |w.m| / Sigma(w), for any direction w
+        internal Vector3f SampleM(Vector3f w, Float u1, Float u2)
+        {
+            if (distribution != null)
+            {
+                // The side of the platelet that w sees, by the area that each side shows, then a normal visible from there
+                Float front = distribution.Sigma(w), back = distribution.Sigma(-w);
+                Float chooseFront = front / (front + back);
+                if (u1 < chooseFront)
+                {
+                    return distribution.Sample_wm_SingleSided(w, new Point2f(std.min<Float>(u1 / chooseFront, OneMinusEpsilon), u2));
+                }
+                return distribution.Sample_wm_SingleSided(-w, new Point2f(std.min<Float>((u1 - chooseFront) / (1 - chooseFront), OneMinusEpsilon), u2));
+            }
+            if (w.z < 0)
+            {
+                w = -w;
+            }
+            Vector3f wh = Normalize(new Vector3f(alphaX * w.x, alphaY * w.y, w.z));
+            Vector3f t1 = wh.z < 0.99999f ? Normalize(Cross(new Vector3f(0, 0, 1), wh)) : new Vector3f(1, 0, 0);
+            Vector3f t2 = Cross(wh, t1);
+            Float r = std.sqrt(u1), phi = 2 * Pi * u2;
+            Float p1 = r * std.cos(phi), p2 = r * std.sin(phi);
+            Float p3 = std.sqrt(std.max<Float>(0, 1 - p1 * p1 - p2 * p2));
+            Vector3f n = p1 * t1 + p2 * t2 + p3 * wh;
+            Vector3f m = Normalize(new Vector3f(alphaX * n.x, alphaY * n.y, n.z));
+            if (m.z < 0)
+            {
+                m = -m;
+            }
+            return m;
+        }
+
+        // The reflectance of a platelet that the light meets at the cosine cosContainer
+        internal SampledSpectrum Rhat(Float cosContainer)
+        {
+            SampledSpectrum r = new SampledSpectrum(0f);
+            for (int j = 0; j < NSpectrumSamples; ++j)
+            {
+                r[j] = (Float)Pearlescent.Reflectance(cosContainer, wavelengths[j], stack);
+            }
+            return r;
+        }
+
+        // The effective extinction: only a reflection stops the light. kappa Sigma(w) times the mean of Rhat over the normals
+        // that w sees, by a fixed quadrature (a Hammersley set). The reflectance climbs to 1 at grazing incidence on a
+        // platelet, as the root of what is left of the first coordinate: the points are even in that root, t, with the
+        // weight 2 t of the change of variable (the weights add up to 1).
+        private SampledSpectrum SigmaEff(Vector3f w)
+        {
+            if (distribution != null)
+            {
+                // The two sides of the platelets apart, each with its share of the points: no point is spent on choosing a side
+                Float front = distribution.Sigma(w), back = distribution.Sigma(-w);
+                int frontPoints = (int)std.round(quadrature * front / (front + back));
+                if (front > 1e-6f * back)
+                {
+                    frontPoints = std.max<int>(frontPoints, 1);
+                }
+                if (back > 1e-6f * front)
+                {
+                    frontPoints = std.min<int>(frontPoints, std.max<int>(quadrature - 1, 1));
+                }
+                int backPoints = back > 1e-6f * front ? std.max<int>(quadrature - frontPoints, 1) : 0;
+                SampledSpectrum total = new SampledSpectrum(0f);
+                if (frontPoints > 0)
+                {
+                    total += SideMean(w, frontPoints) * front;
+                }
+                if (backPoints > 0)
+                {
+                    total += SideMean(-w, backPoints) * back;
+                }
+                return total * kappa;
+            }
+            SampledSpectrum sum = new SampledSpectrum(0f);
+            for (int i = 0; i < quadrature; ++i)
+            {
+                Float t = (i + 0.5f) / quadrature, u2 = 0;
+                Float fraction = 0.5f;
+                for (uint bits = (uint)i; bits != 0; bits >>= 1, fraction *= 0.5f)
+                {
+                    if ((bits & 1) != 0)
+                    {
+                        u2 += fraction;
+                    }
+                }
+                Vector3f m = SampleM(w, 1 - t * t, u2);
+                sum += Rhat(std.min<Float>(1, std.abs(Dot(w, m)))) * (2 * t);
+            }
+            return sum * (kappa * Sigma(w) / quadrature);
+        }
+
+        // The mean of Rhat over the normals of a MicrofacetDistribution that w sees, by the same quadrature
+        private SampledSpectrum SideMean(Vector3f w, int points)
+        {
+            SampledSpectrum sum = new SampledSpectrum(0f);
+            for (int i = 0; i < points; ++i)
+            {
+                Float t = (i + 0.5f) / points, u2 = 0;
+                Float fraction = 0.5f;
+                for (uint bits = (uint)i; bits != 0; bits >>= 1, fraction *= 0.5f)
+                {
+                    if ((bits & 1) != 0)
+                    {
+                        u2 += fraction;
+                    }
+                }
+                Vector3f m = distribution.Sample_wm_SingleSided(w, new Point2f(1 - t * t, u2));
+                sum += Rhat(std.min<Float>(1, std.abs(Dot(w, m)))) * (2 * t);
+            }
+            return sum / points;
+        }
+
+        // The phase function with the reflectance in it, per solid angle: D(m) Rhat / (4 Sigma(wa)); both directions point away
+        private SampledSpectrum PhaseR(Vector3f wa, Vector3f wb)
+        {
+            Vector3f m = wa + wb;
+            if (LengthSquared(m) == 0)
+            {
+                return new SampledSpectrum(0f);
+            }
+            m = Normalize(m);
+            if (m.z < 0)
+            {
+                m = -m;
+            }
+            return Rhat(std.min<Float>(1, std.abs(Dot(wa, m)))) * (D(m) / (4 * Sigma(wa)));
+        }
+
+        // --- single scattering in closed form (the BSDF inside the container) ---------------------------------------------
+        // `flake` is the part of it that the platelets reflect (the rest is the base).
+        private SampledSpectrum SingleScatterInner(Vector3f wo, Vector3f wi, SampledSpectrum extinctionO, SampledSpectrum extinctionI,
+                                                   out SampledSpectrum flake)
+        {
+            Vector3f m = Normalize(wi + wo);
+            if (m.z < 0)
+            {
+                m = -m;
+            }
+            SampledSpectrum rh = Rhat(std.min<Float>(1, std.abs(Dot(wi, m))));
+            Float mui = std.abs(wi.z), muo = std.abs(wo.z), dm = D(m);
+            SampledSpectrum f = new SampledSpectrum(0f);
+            flake = new SampledSpectrum(0f);
+            for (int j = 0; j < NSpectrumSamples; ++j)
+            {
+                Float depth = extinctionI[j] / mui + extinctionO[j] / muo;
+                flake[j] = kappa * dm * rh[j] * (depth > 1e-6f ? (1 - std.exp(-depth)) / depth : 1 - 0.5f * depth) / (4 * mui * muo);
+                f[j] = flake[j] + baseAlbedo[j] * InvPi * std.exp(-depth);
+            }
+            return f;
+        }
+
+        // --- the walk -------------------------------------------------------------------------------------------------------
+        // A platelet reflects or lets through by the reflectance of one of the wavelengths, chosen for the walk with equal
+        // probability. The probability of a walk is then the mean over the wavelengths of the products of what each would
+        // have done (reflectance or 1 - reflectance at every platelet), and the weight of a wavelength is its own product
+        // over that mean: never above the number of wavelengths, however many platelets the walk meets. (With one
+        // probability for all the wavelengths at each platelet, their mean, the weights are a product of ratios that grows
+        // without limit in a dense slab: coloured fireflies.) `share` is that ratio, scaled back to a mean of 1 after every
+        // platelet; beta has the other factors.
+        // An estimate of the BSDF inside the container with next-event estimation towards wo: the connections that make at
+        // least minEvents events (1: with single scattering; 2: multiple scattering only).
+        private SampledSpectrum WalkInner(Vector3f wo, Vector3f wi, ref RNG rng, int minEvents, SampledSpectrum extinctionO)
+        {
+            SampledSpectrum fOut = new SampledSpectrum(0f);
+            Float muo = std.abs(wo.z);
+            // The direction of travel (down at first) and the depth, which grows downwards
+            Vector3f w = -wi;
+            Float z = 0;
+            SampledSpectrum beta = new SampledSpectrum(1f), share = new SampledSpectrum(1f);
+            int events = 0;
+            int hero = std.min<int>((int)(rng.Uniform<Float>() * NSpectrumSamples), NSpectrumSamples - 1);
+            for (int guard = 0; guard < MaxSteps; ++guard)
+            {
+                Float sigmaT = kappa * Sigma(w);
+                Float s = -std.log(1 - rng.Uniform<Float>()) / sigmaT;
+                Float zn = z - w.z * s;
+                if (zn >= 1 && w.z < 0)
+                {
+                    // The base
+                    if (events + 1 >= minEvents && events + 1 <= maxEvents)
+                    {
+                        fOut += beta * share * baseAlbedo * InvPi * Exp(-extinctionO / muo);
+                    }
+                    if (events + 1 >= maxEvents)
+                    {
+                        break;
+                    }
+                    beta *= baseAlbedo;
+                    Float u1 = rng.Uniform<Float>(), u2 = rng.Uniform<Float>();
+                    Float r = std.sqrt(u1), phi = 2 * Pi * u2;
+                    w = new Vector3f(r * std.cos(phi), r * std.sin(phi), std.sqrt(std.max<Float>(0, 1 - u1)));
+                    z = 1;
+                    ++events;
+                }
+                else if (zn <= 0 && w.z > 0)
+                {
+                    // The interface from inside
+                    Float F = FrDielectric(-w.z, eta);
+                    if (events + 1 >= maxEvents)
+                    {
+                        break;
+                    }
+                    beta *= F;
+                    w.z = -w.z;
+                    z = 0;
+                    ++events;
+                    if (F < 1e-6f)
+                    {
+                        break;
+                    }
+                }
+                else if (zn > 0 && zn < 1)
+                {
+                    // A platelet
+                    z = zn;
+                    Vector3f toSource = -w;
+                    Vector3f m = SampleM(toSource, rng.Uniform<Float>(), rng.Uniform<Float>());
+                    SampledSpectrum rh = Rhat(std.min<Float>(1, std.abs(Dot(toSource, m))));
+                    // Next-event estimation towards wo (one more event)
+                    if (events + 1 >= minEvents && events + 1 <= maxEvents)
+                    {
+                        fOut += beta * share * PhaseR(toSource, wo) * Exp(-extinctionO * (z / muo)) / muo;
+                    }
+                    if (rng.Uniform<Float>() < rh[hero])
+                    {
+                        if (events + 1 >= maxEvents)
+                        {
+                            break;
+                        }
+                        share *= rh;
+                        w = Normalize(w - 2 * Dot(w, m) * m);
+                        ++events;
+                    }
+                    else
+                    {
+                        share *= new SampledSpectrum(1f) - rh;
+                    }
+                    Float mean = share.Average();
+                    if (!(mean > 0))
+                    {
+                        break;
+                    }
+                    share /= mean;
+                }
+                else
+                {
+                    // Along the slab: no way out
+                    break;
+                }
+                if (events > 3)
+                {
+                    Float q = std.min<Float>(1, (beta * share).MaxComponentValue());
+                    if (!(rng.Uniform<Float>() < q))
+                    {
+                        break;
+                    }
+                    beta /= q;
+                }
+            }
+            return fOut;
+        }
+
+        // A walk from wo (inside, pointing up) to the direction in which it leaves the slab (inside, pointing up), and its
+        // weight; false where it is absorbed or cut. The refraction on the way in and out is the caller's. `single`: the path
+        // is one reflection by a platelet, with the normal `normal`.
+        private bool SampleInner(Vector3f wo, ref RNG rng, out Vector3f wiOut, out SampledSpectrum weight, out bool single, out Vector3f normal)
+        {
+            wiOut = default;
+            weight = default;
+            single = false;
+            normal = default;
+            Vector3f w = -wo;
+            Float z = 0;
+            SampledSpectrum beta = new SampledSpectrum(1f), share = new SampledSpectrum(1f);
+            int events = 0;
+            int hero = std.min<int>((int)(rng.Uniform<Float>() * NSpectrumSamples), NSpectrumSamples - 1);
+            for (int guard = 0; guard < MaxSteps; ++guard)
+            {
+                Float s = -std.log(1 - rng.Uniform<Float>()) / (kappa * Sigma(w));
+                Float zn = z - w.z * s;
+                if (zn >= 1 && w.z < 0)
+                {
+                    if (events + 1 > maxEvents)
+                    {
+                        return false;
+                    }
+                    beta *= baseAlbedo;
+                    Float u1 = rng.Uniform<Float>(), u2 = rng.Uniform<Float>();
+                    Float r = std.sqrt(u1), phi = 2 * Pi * u2;
+                    w = new Vector3f(r * std.cos(phi), r * std.sin(phi), std.sqrt(std.max<Float>(0, 1 - u1)));
+                    z = 1;
+                    ++events;
+                    single = false;
+                }
+                else if (zn <= 0 && w.z > 0)
+                {
+                    Float F = FrDielectric(-w.z, eta);
+                    if (rng.Uniform<Float>() >= F)
+                    {
+                        wiOut = w;
+                        weight = beta * share;
+                        return true;
+                    }
+                    if (events + 1 > maxEvents)
+                    {
+                        return false;
+                    }
+                    w.z = -w.z;
+                    z = 0;
+                    ++events;
+                    single = false;
+                }
+                else if (zn > 0 && zn < 1)
+                {
+                    z = zn;
+                    Vector3f toSource = -w;
+                    Vector3f m = SampleM(toSource, rng.Uniform<Float>(), rng.Uniform<Float>());
+                    SampledSpectrum rh = Rhat(std.min<Float>(1, std.abs(Dot(toSource, m))));
+                    if (rng.Uniform<Float>() < rh[hero])
+                    {
+                        if (events + 1 > maxEvents)
+                        {
+                            return false;
+                        }
+                        share *= rh;
+                        w = Normalize(w - 2 * Dot(w, m) * m);
+                        single = events == 0;
+                        normal = m;
+                        ++events;
+                    }
+                    else
+                    {
+                        share *= new SampledSpectrum(1f) - rh;
+                    }
+                    Float mean = share.Average();
+                    if (!(mean > 0))
+                    {
+                        return false;
+                    }
+                    share /= mean;
+                }
+                else
+                {
+                    return false;
+                }
+                if (events > 3)
+                {
+                    Float q = std.min<Float>(1, (beta * share).MaxComponentValue());
+                    if (!(rng.Uniform<Float>() < q))
+                    {
+                        return false;
+                    }
+                    beta /= q;
+                }
+            }
+            return false;
+        }
+
+        // --- the BSDF outside (air above the smooth interface) ------------------------------------------------------------
+        // A direction outside (z > 0) to the one inside (pointing up)
+        private Vector3f Refract(Vector3f w)
+        {
+            Float sin2 = (1 - w.z * w.z) / (eta * eta);
+            return new Vector3f(w.x / eta, w.y / eta, std.sqrt(std.max<Float>(0, 1 - sin2)));
+        }
+
+        // A direction inside (pointing up) to the one outside; without total reflection
+        private Vector3f RefractOut(Vector3f w)
+        {
+            Float sin2 = (1 - w.z * w.z) * eta * eta;
+            return new Vector3f(w.x * eta, w.y * eta, std.sqrt(std.max<Float>(0, 1 - sin2)));
+        }
+
+        // f without the mirror reflection of the interface, for directions above; the part of the single reflection by a
+        // platelet, and the two directions inside the container
+        private SampledSpectrum Evaluate(Vector3f wo, Vector3f wi, ref RNG rng, out SampledSpectrum flake, out Vector3f woInner, out Vector3f wiInner)
+        {
+            Float Fo = FrDielectric(wo.z, eta), Fi = FrDielectric(wi.z, eta);
+            woInner = Refract(wo);
+            wiInner = Refract(wi);
+            if (!cacheValid || cacheWo.x != wo.x || cacheWo.y != wo.y || cacheWo.z != wo.z)
+            {
+                cacheExtinction = SigmaEff(woInner);
+                cacheWo = wo;
+                cacheValid = true;
+            }
+            SampledSpectrum extinctionO = cacheExtinction;
+            SampledSpectrum f = SingleScatterInner(woInner, wiInner, extinctionO, SigmaEff(wiInner), out flake);
+            if (maxEvents > 1)
+            {
+                f += WalkInner(woInner, wiInner, ref rng, 2, extinctionO);
+            }
+            Float scale = (1 - Fo) * (1 - Fi) / (eta * eta);
+            flake = ClampZero(flake * scale);
+            return ClampZero(f * scale);
+        }
+
+        private pstd.optional<BSDFSample> Sample(BSDF bsdf, Vector3f wo, Float uc, Point2f u, TransportMode mode, BxDFReflTransFlags sampleFlags,
+                                                 bool keep, out Attenuation matrix)
+        {
+            matrix = default;
+            if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || wo.z == 0)
+            {
+                return default;
+            }
+            Float side = wo.z < 0 ? -1 : 1;
+            wo = side * wo;
+            bool fromCamera = mode == TransportMode.Radiance;
+            Float Fo = FrDielectric(wo.z, eta);
+            if (uc < Fo)
+            {
+                // The mirror reflection of the interface, chosen by its reflectance
+                Vector3f wr = new Vector3f(-wo.x, -wo.y, wo.z);
+                if (keep)
+                {
+                    FrDielectricPolarised(wo.z, eta, out Float fs, out Float fp, out Float ds, out Float dp);
+                    Float R = 0.5f * (fs + fp);
+                    matrix = R > 0 ? Attenuation.Fresnel(new SampledSpectrum(1 / R), fs, fp, ds, dp)
+                                                .Scattered(bsdf.LocalToRender(side * wo), bsdf.LocalToRender(side * wr),
+                                                           bsdf.LocalToRender(new Vector3f(0, 0, side)), fromCamera)
+                                   : Attenuation.Lambert(new SampledSpectrum(1f));
+                }
+                wr = side * wr;
+                return new BSDFSample(new SampledSpectrum(1 / AbsCosTheta(wr)), wr, 1, BxDFFlags.SpecularReflection);
+            }
+            RNG rng = new RNG(Hash(wo, 0x73616d70UL), Hash(uc, u));
+            Vector3f woInner = Refract(wo);
+            if (!SampleInner(woInner, ref rng, out Vector3f wiInner, out SampledSpectrum weight, out bool single, out Vector3f normal))
+            {
+                return default;
+            }
+            // The weight of the walk has the transmittances of the interface in it: both were taken by their probability
+            Vector3f wi = RefractOut(wiInner);
+            if (!(wi.z > 1e-5f) || IsNaN(wi.x + wi.y + wi.z))
+            {
+                return default;
+            }
+            if (keep)
+            {
+                matrix = single ? FlakeMatrix(bsdf, side, wo, woInner, normal, wiInner, wi, fromCamera) : Attenuation.Lambert(new SampledSpectrum(1f));
+            }
+            wi = side * wi;
+            return new BSDFSample(weight / AbsCosTheta(wi), wi, 1, BxDFFlags.GlossyReflection, 1, true);
+        }
+
+        // --- polarisation ---------------------------------------------------------------------------------------------------
+        // The matrix of the refraction through the interface between a (the side the path comes from) and b, both pointing
+        // away from the surface, with a first element of 1
+        private Attenuation InterfaceMatrix(BSDF bsdf, Float side, Vector3f a, Vector3f b, bool fromCamera)
+        {
+            FrDielectricPolarised(a.z, eta, out Float fs, out Float fp, out Float ds, out Float dp);
+            Float T = 1 - 0.5f * (fs + fp);
+            if (!(T > 0))
+            {
+                return Attenuation.Lambert(new SampledSpectrum(1f));
+            }
+            return Attenuation.Fresnel(new SampledSpectrum(1 / T), 1 - fs, 1 - fp, 0, 0)
+                              .Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(new Vector3f(0, 0, side)),
+                                         fromCamera);
+        }
+
+        // The matrix of the reflection by a platelet of normal m, with a first element of 1: the thin films, averaged over
+        // the thickness of the substrate
+        private Attenuation PlateletMatrix(BSDF bsdf, Float side, Vector3f a, Vector3f b, Vector3f m, bool fromCamera)
+        {
+            return PlateletMatrix(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
+        }
+
+        // The same with the directions and the normal in render space (the platelets of a medium: PearlescentPhaseFunction)
+        internal Attenuation PlateletMatrix(Vector3f a, Vector3f b, Vector3f m, bool fromCamera)
+        {
+            Float cosContainer = std.min<Float>(1, std.abs(Dot(a, m)));
+            SampledSpectrum zero = new SampledSpectrum(0f), one = new SampledSpectrum(1f);
+            SampledSpectrum B = new SampledSpectrum(0f), C = new SampledSpectrum(0f), S = new SampledSpectrum(0f);
+            for (int j = 0; j < NSpectrumSamples; ++j)
+            {
+                Pearlescent.Reflectance(cosContainer, wavelengths[j], stack, out double Fs, out double Fp, out double c, out double s);
+                double mean = 0.5 * (Fs + Fp);
+                if (!(mean > 0))
+                {
+                    return Attenuation.Lambert(one);
+                }
+                B[j] = (Float)(0.5 * (Fs - Fp) / mean);
+                C[j] = (Float)(c / mean);
+                S[j] = (Float)(s / mean);
+            }
+            Attenuation matrix = new Attenuation(new MuellerMatrix(one, B, zero, zero, B, one, zero, zero, zero, zero, C, S, zero, zero, -S, C));
+            return matrix.Scattered(a, b, m, fromCamera);
+        }
+
+        // The path of a single reflection by a platelet: in through the interface, the platelet, out through the interface
+        private Attenuation FlakeMatrix(BSDF bsdf, Float side, Vector3f wo, Vector3f woInner, Vector3f m, Vector3f wiInner, Vector3f wi, bool fromCamera)
+        {
+            Attenuation chain = InterfaceMatrix(bsdf, side, wo, -woInner, fromCamera);
+            chain = PolarisedFacet.Compose(chain, true, PlateletMatrix(bsdf, side, woInner, wiInner, m, fromCamera), fromCamera);
+            return PolarisedFacet.Compose(chain, true, InterfaceMatrix(bsdf, side, -wiInner, wi, fromCamera), fromCamera);
+        }
+
+        // Adds a matrix times its scalar contribution to the sum
+        private static void Accumulate(ref Attenuation sum, ref bool hasSum, Attenuation matrix, SampledSpectrum contribution, Vector3f directionExit,
+                                       Vector3f directionEnter)
+        {
+            matrix *= contribution;
+            if (!matrix.WithFrames(directionExit, directionEnter) || matrix.HasNaNs())
+            {
+                return;
+            }
+            if (hasSum)
+            {
+                sum += matrix;
+            }
+            else
+            {
+                sum = matrix;
+                hasSum = true;
+            }
+        }
+
+        // PearlescentBxDF Private Members
+        // The free flights of a walk at most. Platelets that stand on edge (a distribution with most of its normals near
+        // the horizon) reflect a ray that travels along the slab without turning it up or down: thousands of flights.
+        private const int MaxSteps = 1 << 18;
+        private PearlescentStack stack;
+        private SampledSpectrum wavelengths;
+        private Float kappa, alphaX, alphaY, eta;
+        // The distribution of the normals of the platelets; null: Trowbridge-Reitz with alphaX and alphaY, written out
+        private MicrofacetDistribution distribution;
+        private SampledSpectrum baseAlbedo;
+        private int quadrature, maxEvents;
+        // The effective extinction along the last wo
+        private bool cacheValid;
+        private Vector3f cacheWo;
+        private SampledSpectrum cacheExtinction;
     }
 
     // MultiScatterDielectricBxDF Definition
@@ -1436,6 +2186,8 @@ namespace pbrt
             Float h = MicrosurfaceWalk.StartHeight(height);
             bool outside = true;
             bool wiOutside = wi.z > 0;
+            // Lambda of the direction to which every step connects, once for the walk
+            Float lambdaI = MicrosurfaceWalk.Lambda(mfDistrib, wiOutside ? wi : -wi);
             for (int order = 0; order < maxOrder; ++order)
             {
                 h = NextHeight(wr, h, outside, rng.Uniform<Float>());
@@ -1444,7 +2196,7 @@ namespace pbrt
                     break;
                 }
                 Vector3f incoming = -wr;
-                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
+                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(height, lambdaI, wi, h) : MicrosurfaceWalk.G1(height, lambdaI, -wi, -h);
                 Vector3f wh;
                 Float cosine, probability;
                 SampledSpectrum fresnel;
@@ -1509,6 +2261,8 @@ namespace pbrt
             Float h = MicrosurfaceWalk.StartHeight(height);
             bool outside = true;
             bool wiOutside = wi.z > 0;
+            // Lambda of the direction to which every step connects, once for the walk
+            Float lambdaI = MicrosurfaceWalk.Lambda(mfDistrib, wiOutside ? wi : -wi);
             for (int order = 0; order < maxOrder; ++order)
             {
                 h = NextHeight(wr, h, outside, rng.Uniform<Float>());
@@ -1516,7 +2270,7 @@ namespace pbrt
                 {
                     break;
                 }
-                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(mfDistrib, height, wi, h) : MicrosurfaceWalk.G1(mfDistrib, height, -wi, -h);
+                Float shadowing = wiOutside ? MicrosurfaceWalk.G1(height, lambdaI, wi, h) : MicrosurfaceWalk.G1(height, lambdaI, -wi, -h);
                 Vector3f wh, wm;
                 Float cosine, probability;
                 bool reflected;
@@ -1641,6 +2395,9 @@ namespace pbrt
         public bool IsSpecular() { return eta == 1 || mfDistrib.EffectivelySmooth(); }
 
         public Float Eta() { return eta; }
+
+        // (not in pbrt-v4) For the lobes that are made of this one
+        public MicrofacetDistribution Distribution() { return mfDistrib; }
 
         public override BxDFFlags Flags()
         {
@@ -1988,6 +2745,16 @@ namespace pbrt
                             SampledSpectrum conductorEta, SampledSpectrum conductorK, bool conductor, MicrofacetDistribution mfDistrib)
         {
             this.film = new ThinFilmStack(lambda, layerEta, layerThickness);
+            this.substrateEta = substrateEta;
+            this.conductorEta = conductorEta; this.conductorK = conductorK; this.conductor = conductor;
+            this.mfDistrib = mfDistrib;
+        }
+
+        // The same with the layers as they are at the point (ThinFilmLayers.Stack())
+        public ThinFilmBxDF(ThinFilmStack film, Float substrateEta, SampledSpectrum conductorEta, SampledSpectrum conductorK, bool conductor,
+                            MicrofacetDistribution mfDistrib)
+        {
+            this.film = film;
             this.substrateEta = substrateEta;
             this.conductorEta = conductorEta; this.conductorK = conductorK; this.conductor = conductor;
             this.mfDistrib = mfDistrib;

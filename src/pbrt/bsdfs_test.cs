@@ -764,5 +764,41 @@ namespace pbrt
                     EXPECT_LT(err, 0.05);
                 }
         }
+
+        // (not in pbrt-v4) The geometric normal of a BSDF: what the constructor was given, in render space and in the shading
+        // frame (its z there is the cosine between the two normals); the shading normal where none was given; and a
+        // material hands the geometric normal of its context on.
+        [TEST("BSDF", "GeometricNormal")]
+        public static void BSDF_GeometricNormal()
+        {
+            Normal3f ng = (Normal3f)Normalize(new Vector3f(0.1f, -0.2f, 1));
+            Normal3f ns = (Normal3f)Normalize(new Vector3f(-0.3f, 0.25f, 1));
+            Vector3f dpdus = Normalize(Cross((Vector3f)ns, new Vector3f(0, 1, 0)));
+            BxDF bxdf = new DiffuseBxDF(new SampledSpectrum(0.5f));
+
+            BSDF both = new BSDF(ng, ns, dpdus, bxdf);
+            EXPECT_EQ(ng.x, both.GeometricNormal().x);
+            EXPECT_EQ(ng.y, both.GeometricNormal().y);
+            EXPECT_EQ(ng.z, both.GeometricNormal().z);
+            Vector3f local = both.LocalGeometricNormal();
+            EXPECT_LT(Math.Abs(local.z - Dot((Vector3f)ng, (Vector3f)ns)), 1e-6);
+            EXPECT_LT(Math.Abs(Length(local) - 1), 1e-6);
+            EXPECT_LT(Length(both.LocalToRender(local) - (Vector3f)ng), 1e-6);
+            // The shading frame is what it was
+            EXPECT_LT(Length(both.RenderToLocal((Vector3f)ns) - new Vector3f(0, 0, 1)), 1e-6);
+
+            BSDF shadingOnly = new BSDF(ns, dpdus, bxdf);
+            EXPECT_LT(Length(shadingOnly.LocalGeometricNormal() - new Vector3f(0, 0, 1)), 1e-6);
+
+            DiffuseMaterial material = new DiffuseMaterial(new SpectrumConstantTexture(new ConstantSpectrum(0.5f)), null, null);
+            MaterialEvalContext ctx = new MaterialEvalContext();
+            ctx.n = ng;
+            ctx.ns = ns;
+            ctx.dpdus = dpdus;
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.5f);
+            BSDF fromMaterial = material.GetBSDF(new UniversalTextureEvaluator(), ctx, ref lambda, new ScratchBuffer());
+            EXPECT_LT(Length((Vector3f)fromMaterial.GeometricNormal() - (Vector3f)ng), 1e-6);
+            EXPECT_LT(Length(fromMaterial.RenderToLocal((Vector3f)ns) - new Vector3f(0, 0, 1)), 1e-6);
+        }
     }
 }

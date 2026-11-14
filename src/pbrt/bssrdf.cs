@@ -379,7 +379,7 @@ namespace pbrt
         {
             NormalizedFresnelBxDF bxdf = scratchBuffer.Alloc(new NormalizedFresnelBxDF(eta));
             Vector3f wo = (Vector3f)si.ns;
-            BSDF bsdf = new BSDF(si.ns, si.dpdus, bxdf);
+            BSDF bsdf = new BSDF(si.n, si.ns, si.dpdus, bxdf);
             return new BSSRDFSample { Sp = Sp(si.p()), pdf = PDF_Sp(si.p(), si.n), Sw = bsdf, wo = wo };
         }
 

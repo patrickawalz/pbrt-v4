@@ -150,6 +150,16 @@ namespace pbrt
         }
 
         // The Student's t distribution is the Trowbridge-Reitz one at gamma = 2, and tends to the Beckmann one as gamma grows
+        // The sheen distribution: the tabulated cross section and the rejection sampling of the visible normals, held to the
+        // limits of the closed forms of the others
+        [TEST("MicrofacetDistribution", "Charlie")]
+        public static void MicrofacetDistribution_Charlie()
+        {
+            Check(new CharlieDistribution(0.5f), "Charlie alpha 0.5");
+            Check(new CharlieDistribution(0.2f), "Charlie alpha 0.2");
+            Check(new CharlieDistribution(1f), "Charlie alpha 1");
+        }
+
         [TEST("MicrofacetDistribution", "StudentTLimits")]
         public static void MicrofacetDistribution_StudentTLimits()
         {
@@ -189,7 +199,8 @@ namespace pbrt
         {
             MicrofacetDistribution[] distributions = new MicrofacetDistribution[]
             {
-                new TrowbridgeReitzDistribution(0.3f, 0.3f), new BeckmannDistribution(0.3f, 0.3f), new StudentTDistribution(0.3f, 0.3f, 3f)
+                new TrowbridgeReitzDistribution(0.3f, 0.3f), new BeckmannDistribution(0.3f, 0.3f), new StudentTDistribution(0.3f, 0.3f, 3f),
+                new CharlieDistribution(0.5f)
             };
             foreach (MicrofacetDistribution distribution in distributions)
             {

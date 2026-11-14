@@ -225,6 +225,10 @@ namespace pbrt
             this.faceIndex = faceIndex;
         }
 
+        // (not in pbrt-v4) The normal of the coat of the surface-gradient framework ("coat.normalmode" inherit or
+        // independent); zero if there is none
+        public Vector3f coatN;
+
         public void SetShadingGeometry(Normal3f ns, Vector3f dpdus, Vector3f dpdvs, Normal3f dndus, Normal3f dndvs,
                                        bool orientationIsAuthoritative)
         {
@@ -394,9 +398,13 @@ namespace pbrt
             ComputeDifferentials(ray, camera, sampler.SamplesPerPixel());
 
             // Resolve _MixMaterial_ if necessary
+            // (not in pbrt-v4) The model of the normal map of a mix is the one of the materials in it that have none
+            NormalMapParams mixNormalMapModel = null;
             while (material is MixMaterial)
             {
                 MixMaterial mix = (MixMaterial)material;
+                if (mix.normalMapModel != null)
+                    mixNormalMapModel = mix.normalMapModel;
                 material = mix.ChooseMaterial(new UniversalTextureEvaluator(), this);
             }
 
@@ -408,10 +416,37 @@ namespace pbrt
             if (coat != null && coat.PassesThrough(this, ray.d))
                 return default;
 
+            Vector3f unperturbedN = (Vector3f)shading.n;
             // Evaluate normal or bump map, if present
             FloatTexture displacement = material.GetDisplacement();
             Image normalMap = material.GetNormalMap();
-            if (displacement != null || normalMap != null)
+            SurfgradParams sgp = material.surfgrad;
+            coatN = new Vector3f(0, 0, 0);
+            if (sgp != null && (displacement != null || normalMap != null || sgp.nm2 != null || sgp.coatNm != null))
+            {
+                // (not in pbrt-v4) Surface-gradient framework: every layer (base normal map, second normal map with a
+                // Section 4.2 blend, bump texture) accumulates into one gradient, resolved once.
+                NormalBumpEvalContext bctx = new NormalBumpEvalContext(this);
+                BumpStack stack = sgp.stack;
+                SurfgradUVSet* sets = stackalloc SurfgradUVSet[BumpStack.MaxUVSets];
+                SurfgradFrame frame = pbrt.InitSurfgrad(bctx, stack, sets);
+                Vector3f grad = pbrt.AccumulateSurfaceGradient(stack, frame, sets, (TextureEvalContext)bctx);
+                if (sgp.coatStack != null)
+                {
+                    Vector3f cgrad = pbrt.AccumulateSurfaceGradient(sgp.coatStack, frame, sets, (TextureEvalContext)bctx);
+                    if (sgp.coatMode == CoatNormalMode.Inherit)
+                        cgrad += grad;
+                    coatN = (Vector3f)pbrt.ResolveNormalFromSurfaceGradient(cgrad, frame);
+                }
+                if (!stack.empty())
+                {
+                    Normal3f ns = pbrt.ResolveNormalFromSurfaceGradient(grad, frame);
+                    Vector3f dpdu, dpdv;
+                    pbrt.ResolveShadingGeometry(ns, frame, &dpdu, &dpdv);
+                    SetShadingGeometry(ns, dpdu, dpdv, shading.dndu, shading.dndv, false);
+                }
+            }
+            else if (displacement != null || normalMap != null)
             {
                 // Get shading $\dpdu$ and $\dpdv$ using normal or bump map
                 Vector3f dpdu, dpdv;
@@ -428,12 +463,22 @@ namespace pbrt
 
             // Return BSDF for surface interaction
             BSDF bsdf = material.GetBSDF(new UniversalTextureEvaluator(), new MaterialEvalContext(this), ref lambda, scratchBuffer);
+            NormalMapParams normalMapModel = material.normalMapModel != null ? material.normalMapModel : mixNormalMapModel;
+            if (bsdf && normalMapModel != null)
+            {
+                // (not in pbrt-v4) Microfacet-based normal mapping: the BxDF of the material on the two facets under the mapped
+                // normal, whose mean normal is the one from before the map
+                Vector3f reference = normalMapModel.geometric ? (Vector3f)n : unperturbedN;
+                MicrofacetNormalMapBxDF nm = new MicrofacetNormalMapBxDF(normalMapModel, bsdf.RenderToLocal(reference), bsdf.GetBxDF());
+                if (nm.Valid())
+                    bsdf = new BSDF(n, shading.n, shading.dpdu, scratchBuffer.Alloc(nm));
+            }
             if (bsdf && pbrt.GetOptions().forceDiffuse)
             {
                 // Override _bsdf_ with diffuse equivalent
                 SampledSpectrum r = bsdf.rho(wo, new pstd.span<Float>(new Float[] { sampler.Get1D() }),
                                              new pstd.span<Point2f>(new Point2f[] { sampler.Get2D() }));
-                bsdf = new BSDF(shading.n, shading.dpdu, scratchBuffer.Alloc(new DiffuseBxDF(r)));
+                bsdf = new BSDF(n, shading.n, shading.dpdu, scratchBuffer.Alloc(new DiffuseBxDF(r)));
             }
             return bsdf;
         }
@@ -480,11 +525,137 @@ namespace pbrt
         // (C++ copies SurfaceInteraction objects by value)
         public new SurfaceInteraction Clone() { return (SurfaceInteraction)MemberwiseClone(); }
 
+        // (not in pbrt-v4) The texture coordinates of a channel of the mesh (see uvchannels.cs) at the hit, and where
+        // a pointer is given its tangents: the change of the point per unit of that channel's u and v. The channel is
+        // the one with the name nameId, or without a name (nameId < 0) the one with the number `channel`. Channel 0, a
+        // channel that the mesh does not have and a shape that is not a mesh give uv, dpdu and dpdv.
+        //
+        // On a triangle (and at a point of a bilinear patch) a channel is an affine function of channel 0, so its
+        // tangents are those of channel 0 through the inverse of that function's matrix: nothing of the mesh but its
+        // texture coordinates is read, and the tangents are in the space that dpdu and dpdv are in, whatever instance
+        // transformation the interaction has gone through.
+        public Point2f UVChannel(int channel, int nameId, Vector3f* dpduChannel, Vector3f* dpdvChannel)
+        {
+            if (dpduChannel != null)
+            {
+                *dpduChannel = dpdu;
+            }
+            if (dpdvChannel != null)
+            {
+                *dpdvChannel = dpdv;
+            }
+            if (channel == 0 && nameId < 0)
+            {
+                return uv;
+            }
+            // The texture coordinates of the channel, and the change of both sets along two directions of the primitive
+            Point2f uvChannel;
+            Vector2f d0a, d0b, dka, dkb;
+            if (uvTriangleMesh != null)
+            {
+                Point2f[] values = uvTriangleMesh.uvChannels.Find(channel, nameId);
+                if (values == null)
+                {
+                    return uv;
+                }
+                int v0 = uvTriangleMesh.vertexIndices[3 * uvPrimitive], v1 = uvTriangleMesh.vertexIndices[3 * uvPrimitive + 1],
+                    v2 = uvTriangleMesh.vertexIndices[3 * uvPrimitive + 2];
+                Float b0 = uvParameter[0], b1 = uvParameter[1], b2 = 1 - b0 - b1;
+                uvChannel = b0 * values[v0] + b1 * values[v1] + b2 * values[v2];
+                dka = values[v0] - values[v2];
+                dkb = values[v1] - values[v2];
+                if (uvTriangleMesh.uv != null)
+                {
+                    d0a = uvTriangleMesh.uv[v0] - uvTriangleMesh.uv[v2];
+                    d0b = uvTriangleMesh.uv[v1] - uvTriangleMesh.uv[v2];
+                }
+                else
+                {
+                    // The coordinates that Triangle gives a mesh without any: (0, 0), (1, 0), (1, 1)
+                    d0a = new Vector2f(-1, -1);
+                    d0b = new Vector2f(0, -1);
+                }
+            }
+            else if (uvPatchMesh != null)
+            {
+                Point2f[] values = uvPatchMesh.uvChannels.Find(channel, nameId);
+                if (values == null)
+                {
+                    return uv;
+                }
+                int vi = 4 * uvPrimitive;
+                int v00 = uvPatchMesh.vertexIndices[vi], v10 = uvPatchMesh.vertexIndices[vi + 1], v01 = uvPatchMesh.vertexIndices[vi + 2],
+                    v11 = uvPatchMesh.vertexIndices[vi + 3];
+                Float u = uvParameter[0], v = uvParameter[1];
+                uvChannel = pbrt.Lerp(u, pbrt.Lerp(v, values[v00], values[v01]), pbrt.Lerp(v, values[v10], values[v11]));
+                dka = pbrt.Lerp(v, values[v10], values[v11]) - pbrt.Lerp(v, values[v00], values[v01]);
+                dkb = pbrt.Lerp(u, values[v01], values[v11]) - pbrt.Lerp(u, values[v00], values[v10]);
+                if (uvPatchMesh.uv != null)
+                {
+                    Point2f[] first = uvPatchMesh.uv;
+                    d0a = pbrt.Lerp(v, first[v10], first[v11]) - pbrt.Lerp(v, first[v00], first[v01]);
+                    d0b = pbrt.Lerp(u, first[v01], first[v11]) - pbrt.Lerp(u, first[v00], first[v10]);
+                }
+                else
+                {
+                    d0a = new Vector2f(1, 0);
+                    d0b = new Vector2f(0, 1);
+                }
+            }
+            else
+            {
+                return uv;
+            }
+            if (dpduChannel == null && dpdvChannel == null)
+            {
+                return uvChannel;
+            }
+            // J = d(uv0) / d(uvk) = [d0a d0b] [dka dkb]^-1, and the tangents of the channel are [dpdu dpdv] J
+            Float determinant = pbrt.DifferenceOfProducts(dka[0], dkb[1], dka[1], dkb[0]);
+            if (std.abs(determinant) < 1e-12f)
+            {
+                // The channel does not change over the primitive (or along one direction of it): no tangents of its own
+                return uvChannel;
+            }
+            Float inverse = 1 / determinant;
+            Float j00 = pbrt.DifferenceOfProducts(d0a[0], dkb[1], d0b[0], dka[1]) * inverse;
+            Float j01 = pbrt.DifferenceOfProducts(d0b[0], dka[0], d0a[0], dkb[0]) * inverse;
+            Float j10 = pbrt.DifferenceOfProducts(d0a[1], dkb[1], d0b[1], dka[1]) * inverse;
+            Float j11 = pbrt.DifferenceOfProducts(d0b[1], dka[0], d0a[1], dkb[0]) * inverse;
+            Vector3f tangentU = j00 * dpdu + j10 * dpdv, tangentV = j01 * dpdu + j11 * dpdv;
+            if (pbrt.LengthSquared(pbrt.Cross(tangentU, tangentV)) == 0)
+            {
+                return uvChannel;
+            }
+            if (dpduChannel != null)
+            {
+                *dpduChannel = tangentU;
+            }
+            if (dpdvChannel != null)
+            {
+                *dpdvChannel = tangentV;
+            }
+            return uvChannel;
+        }
+
         // SurfaceInteraction Public Members
         public Vector3f dpdu, dpdv;
         public Normal3f dndu, dndv;
         public Shading shading;
         public int faceIndex = 0;
+        // (not in pbrt-v4) The edges of the face that was hit, for the wireframe texture (wireframe.cs). edgeKind 1: a
+        // triangle, the point is its first vertex + edgeCoordinates[0] edgeU + edgeCoordinates[1] edgeV with edgeU and edgeV
+        // its two edges from that vertex; 2: a bilinear patch, the same with its coordinates in [0,1]^2 and the derivatives
+        // of the point with respect to them; 0: a shape without edges.
+        public int edgeKind = 0;
+        public Point2f edgeCoordinates;
+        public Vector3f edgeU, edgeV;
+        // (not in pbrt-v4) The primitive of a mesh with more than one set of texture coordinates that the hit is on, and
+        // where on it (the first two barycentric coordinates of a triangle, the (u, v) of a bilinear patch): UVChannel()
+        public TriangleMesh uvTriangleMesh = null;
+        public BilinearPatchMesh uvPatchMesh = null;
+        public int uvPrimitive = 0;
+        public Point2f uvParameter;
         // A number that identifies the object of the hit (the shape of the scene file, mixed with the instance): the seed of the variation of a texture by object
         public int objectId = 0;
         // (not in pbrt-v4) The ray type of the ray that found the point (OSLRayType bits; 0: a camera ray), for the raytype() of OSL shaders

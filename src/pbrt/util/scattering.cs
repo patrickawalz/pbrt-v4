@@ -136,7 +136,8 @@ namespace pbrt
     {
         TrowbridgeReitz,
         Beckmann,
-        StudentT
+        StudentT,
+        Charlie
     }
 
     // MicrofacetDistribution Definition
@@ -155,7 +156,7 @@ namespace pbrt
     // The two agree for a direction above the horizon, where Sigma(w) = cos(theta) (1 + Lambda(w)).
     public abstract unsafe class MicrofacetDistribution
     {
-        // "ggx" (or "trowbridgereitz"), "beckmann", "studentt"
+        // "ggx" (or "trowbridgereitz"), "beckmann", "studentt", "charlie"
         public static MicrofacetDistributionType ParseType(string name, FileLoc loc)
         {
             if (name == "ggx" || name == "trowbridgereitz")
@@ -170,15 +171,22 @@ namespace pbrt
             {
                 return MicrofacetDistributionType.StudentT;
             }
-            ErrorExit(loc, StringPrintf("%s: microfacet distribution unknown (\"ggx\", \"beckmann\" and \"studentt\" are known).", name));
+            if (name == "charlie")
+            {
+                return MicrofacetDistributionType.Charlie;
+            }
+            ErrorExit(loc, StringPrintf("%s: microfacet distribution unknown (\"ggx\", \"beckmann\", \"studentt\" and \"charlie\" are known).", name));
             return MicrofacetDistributionType.TrowbridgeReitz;
         }
 
-        // gamma is the shape of the Student's t distribution, and is not used by the others
+        // gamma is the shape of the Student's t distribution, and is not used by the others. The Charlie distribution has one
+        // roughness (the mean of the two), which is not the alpha of the others: it is meant without "remaproughness".
         public static MicrofacetDistribution Create(MicrofacetDistributionType type, Float ax, Float ay, Float gamma)
         {
             switch (type)
             {
+            case MicrofacetDistributionType.Charlie:
+                return new CharlieDistribution(std.sqrt(ax * ay));
             case MicrofacetDistributionType.Beckmann:
                 return new BeckmannDistribution(ax, ay);
             case MicrofacetDistributionType.StudentT:
@@ -383,7 +391,20 @@ namespace pbrt
                 double cosPsi = Math.Cos(psi);
                 double derivative = UnitSlopeDensity(x) / (cosPsi * cosPsi);
                 double next = derivative > 0 ? psi - value / derivative : low - 1;
-                psi = (next > low && next < top) ? next : 0.5 * (low + top);
+                if (next > low && next < top)
+                {
+                    // Newton has arrived when it no longer moves (the bracket closes from one side only)
+                    bool arrived = Math.Abs(next - psi) < 1e-9 * (1 + Math.Abs(psi));
+                    psi = next;
+                    if (arrived)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    psi = 0.5 * (low + top);
+                }
             }
             return Math.Tan(psi);
         }
@@ -412,7 +433,20 @@ namespace pbrt
                 double cosPsi = Math.Cos(psi);
                 double derivative = (cosTheta - x * sinTheta) * UnitSlopeDensity(x) / (cosPsi * cosPsi);
                 double next = derivative > 0 ? psi - value / derivative : low - 1;
-                psi = (next > low && next < top) ? next : 0.5 * (low + top);
+                if (next > low && next < top)
+                {
+                    // Newton has arrived when it no longer moves (the bracket closes from one side only)
+                    bool arrived = Math.Abs(next - psi) < 1e-9 * (1 + Math.Abs(psi));
+                    psi = next;
+                    if (arrived)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    psi = 0.5 * (low + top);
+                }
             }
             return Math.Tan(psi);
         }
@@ -562,7 +596,20 @@ namespace pbrt
                 double cosPsi = Math.Cos(psi);
                 double derivative = 2 * cosPsi * cosPsi / Math.PI;
                 double next = derivative > 0 ? psi - value / derivative : low - 1;
-                psi = (next > low && next < high) ? next : 0.5 * (low + high);
+                if (next > low && next < high)
+                {
+                    // Newton has arrived when it no longer moves (the bracket closes from one side only)
+                    bool arrived = Math.Abs(next - psi) < 1e-9 * (1 + Math.Abs(psi));
+                    psi = next;
+                    if (arrived)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    psi = 0.5 * (low + high);
+                }
             }
             return Math.Sqrt(1 + x * x) * Math.Tan(psi);
         }
@@ -574,9 +621,9 @@ namespace pbrt
     // BeckmannDistribution Definition
     // (not in pbrt-v4) The Beckmann distribution of pbrt-v3, with two changes that the single sided normalisation asks for. Its
     // Lambda is the exact one (pbrt-v3 has a rational approximation, with which the visible normals do not integrate to 1), and
-    // its visible slopes are sampled by solving their cumulative distribution (Heitz and d'Eon 2014, as Jakob 2014 and Tokuyoshi
-    // 2021 do, by a guarded Newton iteration), which holds for a direction below the horizon. In double precision: below the
-    // horizon the cross section is the difference of two nearly equal terms.
+    // its visible slopes are sampled exactly for any direction, below the horizon too, by a rejection that needs neither the
+    // error function nor an inversion (Sample_wm_SingleSided). In double precision: below the horizon the cross section is the
+    // difference of two nearly equal terms.
     public sealed unsafe class BeckmannDistribution : MicrofacetDistribution
     {
         // BeckmannDistribution Public Methods
@@ -632,6 +679,13 @@ namespace pbrt
             return (Float)((w.z * Erfc(-z) + rootB / Math.Sqrt(Math.PI) * Math.Exp(-z * z)) / 2);
         }
 
+        // The visible slopes, exactly and without an inversion. With the direction stretched to the unit distribution, at the
+        // angle theta, the slope x along it has the density (cos(theta) - x sin(theta)) P2(x) where that is positive
+        // (P2(x) = exp(-x^2) / sqrt(pi)). Above the horizon that is cos(theta) P2(x) + sin(theta) |x| P2(x) for the slopes
+        // below 0, and less than cos(theta) P2(x) above 0: a slope is taken from P2 (a Gaussian variate) or from |x| P2 below 0
+        // (-sqrt(-log(u))), in the proportion of the two terms, and one above 0 is kept with the probability
+        // 1 - x tan(theta). Below the horizon only the slopes below cot(theta) are visible, with a density under
+        // sin(theta) |x| P2(x): one is taken from that, and kept with the probability 1 - cot(theta) / x.
         public override Vector3f Sample_wm_SingleSided(Vector3f w, Point2f u)
         {
             // Stretch the direction: the slopes are then those of the distribution with alpha = 1
@@ -640,11 +694,55 @@ namespace pbrt
             dx /= length;
             dy /= length;
             dz /= length;
-            double sinTheta = Math.Sqrt(dx * dx + dy * dy);
+            double sinTheta = Math.Sqrt(dx * dx + dy * dy), cosTheta = dz;
+            if (cosTheta < 0 && sinTheta < 1e-9)
+            {
+                // Straight from below nothing is visible
+                return new Vector3f(0, 0, 1);
+            }
 
-            // The slope along the direction, by its cumulative distribution; the slope across is Gaussian
-            double slopeX = SampleVisibleSlope(sinTheta, dz, u[0]);
-            double slopeY = ErfInv(2 * Clamp(u[1], 1e-6f, OneMinusEpsilon) - 1);
+            // The first proposal uses the number given; the others come from a generator started from the two
+            RNG rng = new RNG(Hash(u[0], u[1]));
+            double xi = u[0], slopeX = 0;
+            if (cosTheta >= 0)
+            {
+                // The integral of |x| P2(x) over the slopes below 0 is 1 / (2 sqrt(pi))
+                double second = sinTheta / (2 * Math.Sqrt(Math.PI));
+                double chooseFirst = cosTheta / (cosTheta + second);
+                for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+                {
+                    if (xi < chooseFirst)
+                    {
+                        slopeX = Math.Sqrt(-Math.Log(Math.Max(1e-300, 1 - xi / chooseFirst))) * Math.Cos(2 * Math.PI * rng.Uniform<Float>());
+                        if (slopeX <= 0 || rng.Uniform<Float>() * cosTheta < cosTheta - slopeX * sinTheta)
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        slopeX = -Math.Sqrt(-Math.Log(Math.Max(1e-300, (xi - chooseFirst) / (1 - chooseFirst))));
+                        break;
+                    }
+                    xi = rng.Uniform<Float>();
+                }
+            }
+            else
+            {
+                double limit = cosTheta / sinTheta;
+                for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+                {
+                    slopeX = -Math.Sqrt(limit * limit - Math.Log(Math.Max(1e-300, xi)));
+                    // Kept with the probability 1 - limit / slopeX (both are negative)
+                    if (rng.Uniform<Float>() * slopeX > slopeX - limit)
+                    {
+                        break;
+                    }
+                    xi = rng.Uniform<Float>();
+                }
+            }
+            // The slope across is Gaussian (Box and Muller)
+            double slopeY = Math.Sqrt(-Math.Log(Math.Max(1e-300, 1.0 - rng.Uniform<Float>()))) * Math.Cos(2 * Math.PI * u[1]);
 
             // Rotate to the azimuth of the direction, unstretch, and take the normal of the slope
             double cosPhi = sinTheta > 0 ? dx / sinTheta : 1, sinPhi = sinTheta > 0 ? dy / sinTheta : 0;
@@ -666,49 +764,7 @@ namespace pbrt
             return $"[ BeckmannDistribution alpha_x: {alpha_x} alpha_y: {alpha_y} ]";
         }
 
-        // BeckmannDistribution Private Methods
-        // The integral of (cos(theta) - s sin(theta)) exp(-s^2) / sqrt(pi) over the slopes s below x: the part of the cross
-        // section of the unit distribution that the slopes below x make
-        private static double VisibleSlopeCdf(double sinTheta, double cosTheta, double x)
-        {
-            return (cosTheta * Erfc(-x) + sinTheta / Math.Sqrt(Math.PI) * Math.Exp(-x * x)) / 2;
-        }
-
-        // A slope with the density (cos(theta) - x sin(theta)) exp(-x^2), over the slopes that face the direction (x below
-        // cot(theta))
-        private static double SampleVisibleSlope(double sinTheta, double cosTheta, double u)
-        {
-            // The slopes that matter: 6 standard deviations around 0 and, below the horizon, under cot(theta)
-            double upper = sinTheta > 1e-12 * Math.Abs(cosTheta) ? cosTheta / sinTheta : (cosTheta > 0 ? 6 : -6);
-            double high = Math.Min(upper, 6);
-            double low = Math.Min(upper, 0) - 6;
-            double cdfLow = VisibleSlopeCdf(sinTheta, cosTheta, low), cdfHigh = VisibleSlopeCdf(sinTheta, cosTheta, high);
-            double target = cdfLow + u * (cdfHigh - cdfLow);
-
-            double x = 0.5 * (low + high);
-            for (int i = 0; i < 60; ++i)
-            {
-                double value = VisibleSlopeCdf(sinTheta, cosTheta, x) - target;
-                if (value > 0)
-                {
-                    high = x;
-                }
-                else
-                {
-                    low = x;
-                }
-                if (high - low < 1e-9)
-                {
-                    break;
-                }
-                // Newton, kept inside the bracket
-                double derivative = (cosTheta - x * sinTheta) * Math.Exp(-x * x) / Math.Sqrt(Math.PI);
-                double next = derivative > 0 ? x - value / derivative : low - 1;
-                x = (next > low && next < high) ? next : 0.5 * (low + high);
-            }
-            return x;
-        }
-
+        // BeckmannDistribution V-Cavity Methods
         // The slopes of the unit distribution: P2(x) = exp(-x^2) / sqrt(pi)
         public override Float AlphaX() { return alpha_x; }
         public override Float AlphaY() { return alpha_y; }
@@ -735,8 +791,10 @@ namespace pbrt
         }
 
         // BeckmannDistribution Private Members
+        private const int MaxAttempts = 256;
         private Float alpha_x, alpha_y;
     }
+
     // StudentTDistribution Definition
     // (not in pbrt-v4) The Student's t distribution of slopes (STD) of Ribardiere, Bringier, Meneveaux and Simonot, "STD:
     // Student's t-Distribution of Slopes for Microfacet Based BSDFs" (Computer Graphics Forum 36(2), 2017), in the
@@ -751,8 +809,8 @@ namespace pbrt
     // the slope x along it has the marginal P2(x) = c (1 + x^2 / (gamma - 1))^(1/2 - gamma), a Student's t distribution, and
     //     S(x) = cos(theta) F(x) + sin(theta) c (gamma - 1) / (2 gamma - 3) (1 + x^2 / (gamma - 1))^(3/2 - gamma)
     // is the integral of (cos(theta) - s sin(theta)) P2(s) over the slopes s below x (F is the cumulative distribution of P2,
-    // an incomplete beta function). S(cot(theta)) is the cross section, and S is the cumulative distribution of the visible
-    // slope, which is inverted. The slope across is a Student's t distribution again, inverted in the same way.
+    // an incomplete beta function). S(cot(theta)) is the cross section. The visible slopes are sampled exactly by a
+    // rejection that needs neither S nor an inversion (Sample_wm_SingleSided).
     public sealed unsafe class StudentTDistribution : MicrofacetDistribution
     {
         // StudentTDistribution Public Methods
@@ -769,6 +827,8 @@ namespace pbrt
             // c: the marginal integrates to 1. The integral of (1 + x^2 / (gamma - 1))^(1/2 - gamma) is
             // sqrt(gamma - 1) sqrt(pi) Gamma(gamma - 1) / Gamma(gamma - 1/2)
             marginal = Math.Exp(LogGamma(this.gamma - 0.5) - LogGamma(this.gamma - 1)) / Math.Sqrt(Math.PI * (this.gamma - 1));
+            // The logarithm of the beta function B(gamma - 1, 1/2), for the incomplete beta function of the cross section
+            logBeta = LogGamma(this.gamma - 1) + LogGamma(0.5) - LogGamma(this.gamma - 0.5);
             // The slope across: the density proportional to (1 + t^2)^(-gamma) integrates to sqrt(pi) Gamma(gamma - 1/2) / Gamma(gamma)
             across = Math.Exp(LogGamma(this.gamma) - LogGamma(this.gamma - 0.5)) / Math.Sqrt(Math.PI);
         }
@@ -817,9 +877,63 @@ namespace pbrt
             dz /= length;
             double sinTheta = Math.Sqrt(dx * dx + dy * dy);
 
-            // The slope along the direction, by its cumulative distribution, and the slope across given it
-            double slopeX = SampleVisibleSlope(sinTheta, dz, u[0]);
-            double slopeY = Math.Sqrt((gamma - 1) + slopeX * slopeX) * SampleAcross(u[1]);
+            // The slope along the direction, exactly and without an inversion, as for the Beckmann distribution: with
+            // P2(x) = c (1 + x^2 / (gamma - 1))^(1/2 - gamma), a slope is taken from P2 (a Student's t variate, by the polar
+            // method of Bailey 1994, the Box-Muller method of that distribution) or from |x| P2 below 0, whose cumulative
+            // distribution K (1 + x^2 / (gamma - 1))^(3/2 - gamma) is inverted in closed form. Below the horizon the second
+            // only, below cot(theta).
+            double cosTheta = dz;
+            if (cosTheta < 0 && sinTheta < 1e-9)
+            {
+                return new Vector3f(0, 0, 1);
+            }
+            RNG rng = new RNG(Hash(u[0], u[1]));
+            double xi = u[0], slopeX = 0;
+            double degrees = 2 * gamma - 2, tail = 1 / (gamma - 1.5);
+            if (cosTheta >= 0)
+            {
+                double second = sinTheta * marginal * (gamma - 1) / (2 * gamma - 3);
+                double chooseFirst = cosTheta / (cosTheta + second);
+                for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+                {
+                    if (xi < chooseFirst)
+                    {
+                        double radius = Math.Max(1e-300, 1 - xi / chooseFirst);
+                        slopeX = Math.Sqrt((gamma - 1) * Math.Max(0.0, Math.Pow(radius, -2 / degrees) - 1)) * Math.Cos(2 * Math.PI * rng.Uniform<Float>());
+                        if (slopeX <= 0 || rng.Uniform<Float>() * cosTheta < cosTheta - slopeX * sinTheta)
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        double fraction = Math.Max(1e-300, (xi - chooseFirst) / (1 - chooseFirst));
+                        slopeX = -Math.Sqrt((gamma - 1) * Math.Max(0.0, Math.Pow(fraction, -tail) - 1));
+                        break;
+                    }
+                    xi = rng.Uniform<Float>();
+                }
+            }
+            else
+            {
+                double limit = cosTheta / sinTheta;
+                double atLimit = 1 + limit * limit / (gamma - 1);
+                for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+                {
+                    slopeX = -Math.Sqrt((gamma - 1) * Math.Max(0.0, atLimit * Math.Pow(Math.Max(1e-300, xi), -tail) - 1));
+                    // Kept with the probability 1 - limit / slopeX (both are negative)
+                    if (rng.Uniform<Float>() * slopeX > slopeX - limit)
+                    {
+                        break;
+                    }
+                    xi = rng.Uniform<Float>();
+                }
+            }
+            // The slope across is a Student's t variate again: sqrt(U^(-2 / nu) - 1) cos(2 pi V) has the density proportional
+            // to (1 + t^2)^(-(nu + 1) / 2), here with nu = 2 gamma - 1
+            double radial = Math.Max(1e-300, 1.0 - rng.Uniform<Float>());
+            double across = Math.Sqrt(Math.Max(0.0, Math.Pow(radial, -2 / (2 * gamma - 1)) - 1)) * Math.Cos(2 * Math.PI * u[1]);
+            double slopeY = Math.Sqrt((gamma - 1) + slopeX * slopeX) * across;
 
             // Rotate to the azimuth of the direction, unstretch, and take the normal of the slope
             double cosPhi = sinTheta > 0 ? dx / sinTheta : 1, sinPhi = sinTheta > 0 ? dy / sinTheta : 0;
@@ -846,7 +960,7 @@ namespace pbrt
         // I_z(gamma - 1, 1/2) / 2.
         private double MarginalCdf(double x)
         {
-            double tail = 0.5 * IncompleteBeta(gamma - 1, 0.5, 1 / (1 + x * x / (gamma - 1)));
+            double tail = 0.5 * IncompleteBeta(gamma - 1, 0.5, 1 / (1 + x * x / (gamma - 1)), logBeta);
             return x < 0 ? tail : 1 - tail;
         }
 
@@ -855,42 +969,6 @@ namespace pbrt
         {
             double a = 1 + x * x / (gamma - 1);
             return cosTheta * MarginalCdf(x) + sinTheta * marginal * (gamma - 1) / (2 * gamma - 3) * Math.Pow(a, 1.5 - gamma);
-        }
-
-        // A slope with the density (cos(theta) - x sin(theta)) P2(x), over the slopes that face the direction (x below
-        // cot(theta)). The slope is sqrt(gamma - 1) tan(psi), and psi is found in its finite interval.
-        private double SampleVisibleSlope(double sinTheta, double cosTheta, double u)
-        {
-            double scale = Math.Sqrt(gamma - 1);
-            double low = -0.5 * Math.PI;
-            double high = sinTheta > 1e-12 * Math.Abs(cosTheta) ? Math.Atan2(cosTheta, sinTheta * scale) : (cosTheta > 0 ? 0.5 * Math.PI : low);
-            double total = sinTheta > 1e-12 * Math.Abs(cosTheta) ? VisibleSlopeCdf(sinTheta, cosTheta, cosTheta / sinTheta) : Math.Max(cosTheta, 0);
-            double target = u * total;
-
-            double psi = 0.5 * (low + high);
-            for (int i = 0; i < 60; ++i)
-            {
-                double x = scale * Math.Tan(psi);
-                double value = VisibleSlopeCdf(sinTheta, cosTheta, x) - target;
-                if (value > 0)
-                {
-                    high = psi;
-                }
-                else
-                {
-                    low = psi;
-                }
-                if (high - low < 1e-10)
-                {
-                    break;
-                }
-                // Newton, kept inside the bracket
-                double cosPsi = Math.Cos(psi);
-                double derivative = (cosTheta - x * sinTheta) * marginal * Math.Pow(1 + x * x / (gamma - 1), 0.5 - gamma) * scale / (cosPsi * cosPsi);
-                double next = derivative > 0 ? psi - value / derivative : low - 1;
-                psi = (next > low && next < high) ? next : 0.5 * (low + high);
-            }
-            return scale * Math.Tan(psi);
         }
 
         // A value t with the density proportional to (1 + t^2)^(-gamma). With t = tan(psi) the tail beyond |t| is
@@ -918,7 +996,20 @@ namespace pbrt
                 }
                 double derivative = across * Math.Pow(cosPsi, 2 * gamma - 2);
                 double next = derivative > 0 ? psi - value / derivative : low - 1;
-                psi = (next > low && next < high) ? next : 0.5 * (low + high);
+                if (next > low && next < high)
+                {
+                    // Newton has arrived when it no longer moves (the bracket closes from one side only)
+                    bool arrived = Math.Abs(next - psi) < 1e-9 * (1 + Math.Abs(psi));
+                    psi = next;
+                    if (arrived)
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    psi = 0.5 * (low + high);
+                }
             }
             return Math.Tan(psi);
         }
@@ -948,10 +1039,240 @@ namespace pbrt
         }
 
         // StudentTDistribution Private Members
+        private const int MaxAttempts = 256;
         private Float alpha_x, alpha_y;
         private double gamma;
+        private double logBeta;
         // The constants of the marginal of the slope along the direction, and of the density of the slope across
         private double marginal, across;
+    }
+
+    // CharlieDistribution Definition
+    // (not in pbrt-v4) The sheen distribution of Estevez and Kulla 2017 ("Production friendly microfacet sheen BRDF"): an
+    // inverted Gaussian, with most of its normals near the horizon,
+    //     D(wm) = (2 + 1 / alpha) sin(theta_m)^(1 / alpha) / (2 pi),      alpha in (0, 1].
+    // The paper gives it a fitted shadowing term. Here it is a distribution like the others, with the exact Smith functions,
+    // so that the multiple scattering walks can use it. The cross section Sigma has no closed form in general and is
+    // tabulated (by quadrature, once for a roughness). The visible normals are sampled exactly, by rejection in two steps: the
+    // polar angle from a density that lies just above its marginal and is cheap to sample (accepted at least 3 times in 4
+    // above the horizon), then the azimuth within the arc that the direction sees.
+    public sealed unsafe class CharlieDistribution : MicrofacetDistribution
+    {
+        // CharlieDistribution Public Methods
+        public CharlieDistribution(Float alpha)
+        {
+            // The tables are kept by roughness, in steps of 1 / 512
+            int key = Math.Clamp((int)Math.Round(alpha * RoughnessSteps), RoughnessSteps / 20, RoughnessSteps);
+            this.alpha = (Float)key / RoughnessSteps;
+            power = 1.0 / this.alpha;
+            table = tables.GetOrAdd(key, BuildTable);
+        }
+
+        public override Float D(Vector3f wm)
+        {
+            double sin2Theta = Math.Max(0.0, 1 - (double)wm.z * wm.z);
+            return (Float)((2 + power) * Math.Pow(sin2Theta, 0.5 * power) / (2 * Math.PI));
+        }
+
+        // It has no smooth limit: a small roughness puts every normal at the horizon
+        public override bool EffectivelySmooth() { return false; }
+
+        public override void Regularize() { }
+
+        public override Float Lambda(Vector3f w)
+        {
+            Float cosine = std.abs(w.z);
+            if (cosine < 1e-6f)
+            {
+                return Float.PositiveInfinity;
+            }
+            return std.max<Float>(0, (Float)(UpperSigma(cosine) / cosine - 1));
+        }
+
+        // The area that the microsurface shows to w. Below the horizon it is that of the opposite direction less its cosine
+        // (the two differ by the area of the plane)
+        public override Float Sigma(Vector3f w)
+        {
+            double upper = UpperSigma(std.abs(w.z));
+            return (Float)(w.z >= 0 ? upper : Math.Max(0.0, upper + w.z));
+        }
+
+        // The density of the visible normals over the polar angle t of the normal and its azimuth phi from that of w is
+        //     sin(t)^(p + 1) max(0, a cos(phi) + b),      a = sin(theta) sin(t),  b = cos(theta) cos(t),  p = 1 / alpha,
+        // to a constant. Over the azimuth it integrates to I(t) = 2 pi b where b >= a, and 2 (b phi0 + a sin(phi0)) with
+        // cos(phi0) = -b / a elsewhere (nothing where b <= -a). I(t) lies below an envelope that is cheap to sample:
+        //   above the horizon   2 pi b + 2 a: the mixture of the densities sin^(p+1) cos (inverted in closed form) and
+        //                       sin^(p+2) (inverted by its table);
+        //   below the horizon   2 a: the density sin^(p+2).
+        // A polar angle of the envelope is accepted with the probability I / envelope; the azimuth is then taken evenly in
+        // [-phi0, phi0] and accepted with the probability (a cos(phi) + b) / (a + b). Only the sine of the polar angle is
+        // ever needed, so a proposal costs a power or a table and an arc cosine.
+        public override Vector3f Sample_wm_SingleSided(Vector3f w, Point2f u)
+        {
+            double cosTheta = Math.Clamp((double)w.z, -1.0, 1.0);
+            double sinTheta = Math.Sqrt(Math.Max(0.0, 1 - cosTheta * cosTheta));
+            if (cosTheta < 0 && sinTheta < 1e-7)
+            {
+                // Straight from below nothing is visible
+                return new Vector3f(0, 0, 1);
+            }
+            // The first proposals use the numbers given; the next ones come from a generator started from them
+            RNG rng = new RNG(Hash(u[0], u[1]));
+            double xi = Math.Min((double)u[0], 0.99999994);
+            double first = cosTheta > 0 ? 2 * Math.PI * cosTheta / (power + 2) : 0, second = 2 * sinTheta * table.total;
+            double chooseFirst = first / (first + second);
+            double envelopeCosine = cosTheta > 0 ? 2 * Math.PI * cosTheta : 0;
+            double sinNormal = 0, cosNormal = 1, a = 0, b = 0, phi0 = Math.PI;
+            for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+            {
+                if (xi < chooseFirst)
+                {
+                    sinNormal = Math.Pow(xi / chooseFirst, 1 / (power + 2));
+                }
+                else
+                {
+                    double position = Math.Min((xi - chooseFirst) / (1 - chooseFirst), 0.99999994) * ThetaSteps;
+                    int index = (int)position;
+                    sinNormal = table.sine[index] + (position - index) * (table.sine[index + 1] - table.sine[index]);
+                }
+                cosNormal = Math.Sqrt(Math.Max(0.0, 1 - sinNormal * sinNormal));
+                a = sinTheta * sinNormal;
+                b = cosTheta * cosNormal;
+                double integral;
+                if (b >= a)
+                {
+                    phi0 = Math.PI;
+                    integral = 2 * Math.PI * b;
+                }
+                else if (b <= -a)
+                {
+                    integral = 0;
+                }
+                else
+                {
+                    double ratio = -b / a;
+                    phi0 = Math.Acos(ratio);
+                    integral = 2 * (b * phi0 + a * Math.Sqrt(Math.Max(0.0, 1 - ratio * ratio)));
+                }
+                if (rng.Uniform<Float>() * (envelopeCosine * cosNormal + 2 * a) < integral)
+                {
+                    break;
+                }
+                xi = rng.Uniform<Float>();
+            }
+
+            // The azimuth from that of w
+            double v = u[1], cosPhi = 1, phi = 0;
+            for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+            {
+                phi = (2 * v - 1) * phi0;
+                cosPhi = Math.Cos(phi);
+                if (rng.Uniform<Float>() * (a + b) <= a * cosPhi + b)
+                {
+                    break;
+                }
+                v = rng.Uniform<Float>();
+            }
+            double sinPhi = Math.Sin(phi);
+            double cx = sinTheta > 1e-9 ? w.x / sinTheta : 1, cy = sinTheta > 1e-9 ? w.y / sinTheta : 0;
+            return new Vector3f((Float)(sinNormal * (cosPhi * cx - sinPhi * cy)), (Float)(sinNormal * (sinPhi * cx + cosPhi * cy)), (Float)cosNormal);
+        }
+
+        public override string ToString()
+        {
+            return $"[ CharlieDistribution alpha: {alpha} ]";
+        }
+
+        // It is not a distribution of slopes stretched by a roughness: the V-cavity functions of the base class do not apply
+        public override double UnitSlopeCdf(double x) { throw new NotSupportedException("CharlieDistribution has no V-cavity form."); }
+        public override double UnitSlopeDensity(double x) { throw new NotSupportedException("CharlieDistribution has no V-cavity form."); }
+        public override double UnitSlopeMoment(double x) { throw new NotSupportedException("CharlieDistribution has no V-cavity form."); }
+        public override double SampleUnitSlopeAcross(double x, double u) { throw new NotSupportedException("CharlieDistribution has no V-cavity form."); }
+        public override Float AlphaX() { return alpha; }
+        public override Float AlphaY() { return alpha; }
+
+        // CharlieDistribution Private Methods
+        private sealed class Table
+        {
+            // sigma[i]: the cross section for the cosine i / SigmaSteps. sine[j]: the sine of the polar angle below which the
+            // fraction j / ThetaSteps of the density sin(t)^(p + 2) lies, and total: the integral of that density.
+            public double[] sigma = new double[SigmaSteps + 1];
+            public double[] sine = new double[ThetaSteps + 1];
+            public double total;
+        }
+
+        private double UpperSigma(double cosine)
+        {
+            double position = Math.Clamp(cosine, 0.0, 1.0) * SigmaSteps;
+            int index = Math.Min((int)position, SigmaSteps - 1);
+            return table.sigma[index] + (position - index) * (table.sigma[index + 1] - table.sigma[index]);
+        }
+
+        private static Table BuildTable(int key)
+        {
+            double power = (double)RoughnessSteps / key;
+            Table result = new Table();
+
+            // The cross section: the integral over the polar angle of the normal of D sin(theta_m) times the integral over its
+            // azimuth of max(0, w . wm), which has a closed form. With a = sin(theta) sin(theta_m), b = cos(theta) cos(theta_m):
+            // 2 pi b when b >= a, and 2 (b phi0 + a sin(phi0)) with cos(phi0) = -b / a otherwise.
+            const int Quadrature = 2048;
+            for (int i = 0; i <= SigmaSteps; ++i)
+            {
+                double cosTheta = (double)i / SigmaSteps, sinTheta = Math.Sqrt(Math.Max(0.0, 1 - cosTheta * cosTheta));
+                double sum = 0;
+                for (int j = 0; j < Quadrature; ++j)
+                {
+                    double thetaM = (j + 0.5) * 0.5 * Math.PI / Quadrature;
+                    double sinM = Math.Sin(thetaM), cosM = Math.Cos(thetaM);
+                    double a = sinTheta * sinM, b = cosTheta * cosM;
+                    double azimuth;
+                    if (b >= a)
+                    {
+                        azimuth = 2 * Math.PI * b;
+                    }
+                    else
+                    {
+                        double phi0 = Math.Acos(Math.Clamp(-b / a, -1.0, 1.0));
+                        azimuth = 2 * (b * phi0 + a * Math.Sin(phi0));
+                    }
+                    sum += Math.Pow(sinM, power + 1) * azimuth;
+                }
+                result.sigma[i] = (2 + power) / (2 * Math.PI) * sum * 0.5 * Math.PI / Quadrature;
+            }
+
+            // The integral of sin(t)^(p + 2), by Simpson's rule on the steps of its table, and the angles at equal steps of it
+            double stepWidth = 0.5 * Math.PI / CumulativeSteps;
+            double[] cumulative = new double[CumulativeSteps + 1];
+            for (int k = 0; k < CumulativeSteps; ++k)
+            {
+                double t0 = k * stepWidth, t1 = t0 + 0.5 * stepWidth, t2 = t0 + stepWidth;
+                cumulative[k + 1] = cumulative[k] + stepWidth / 6 * (Math.Pow(Math.Sin(t0), power + 2) + 4 * Math.Pow(Math.Sin(t1), power + 2) +
+                                                                                 Math.Pow(Math.Sin(t2), power + 2));
+            }
+            int cell = 0;
+            for (int j = 0; j <= ThetaSteps; ++j)
+            {
+                double target = cumulative[CumulativeSteps] * j / ThetaSteps;
+                while (cell < CumulativeSteps - 1 && cumulative[cell + 1] < target)
+                {
+                    ++cell;
+                }
+                double width = cumulative[cell + 1] - cumulative[cell];
+                double fraction = width > 0 ? (target - cumulative[cell]) / width : 0;
+                result.sine[j] = Math.Sin((cell + Math.Clamp(fraction, 0.0, 1.0)) * stepWidth);
+            }
+            result.total = cumulative[CumulativeSteps];
+            return result;
+        }
+
+        // CharlieDistribution Private Members
+        private const int RoughnessSteps = 512, SigmaSteps = 512, CumulativeSteps = 8192, ThetaSteps = 4096, MaxAttempts = 256;
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, Table> tables =
+            new System.Collections.Concurrent.ConcurrentDictionary<int, Table>();
+        private Float alpha;
+        private double power;
+        private Table table;
     }
     // MicrosurfaceHeight Definition
     // (not in pbrt-v4) The distribution of the heights of the microsurface, for the random walk of Heitz, Hanika, d'Eon and
@@ -1025,6 +1346,21 @@ namespace pbrt
             return (Float)Math.Pow(height.C1(h), Lambda(distribution, w));
         }
 
+        // The same with Lambda(distribution, w) given: the direction to which a walk connects at every step does not change,
+        // and its Lambda (a cross section: an error function or an incomplete beta function) is found once
+        public static Float G1(MicrosurfaceHeight height, Float lambda, Vector3f w, Float h)
+        {
+            if (w.z > 0.9999f)
+            {
+                return 1;
+            }
+            if (w.z <= 0)
+            {
+                return 0;
+            }
+            return (Float)Math.Pow(height.C1(h), lambda);
+        }
+
         // The height of the next intersection of the ray from the height h along w, or Left
         public static Float SampleHeight(MicrofacetDistribution distribution, MicrosurfaceHeight height, Vector3f w, Float h, Float u)
         {
@@ -1040,11 +1376,14 @@ namespace pbrt
             {
                 return h;
             }
-            if (u > 1 - G1(distribution, height, w, h))
+            // One Lambda for the probability of leaving and for the height
+            Float lambda = Lambda(distribution, w);
+            Float c1 = height.C1(h);
+            if (w.z > 0 && u > 1 - (Float)Math.Pow(c1, lambda))
             {
                 return Left;
             }
-            return height.InvC1((Float)(height.C1(h) / Math.Pow(1 - u, 1 / Lambda(distribution, w))));
+            return height.InvC1((Float)(c1 / Math.Pow(1 - u, 1 / lambda)));
         }
     }
 }

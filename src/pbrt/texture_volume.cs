@@ -11,7 +11,7 @@ namespace pbrt
     // A 3D grid of samples spanning the unit cube of the texture's 3D mapping, reconstructed with the trilinear
     // interpolation of SampledGrid (sample centers at half-integers), so a medium driven by it behaves like a
     // "uniformgrid" medium. Lookups outside the cube follow the wrap mode (black by default, as in SampledGrid).
-    public sealed unsafe class FloatGridTexture : FloatTexture
+    public sealed unsafe partial class FloatGridTexture : FloatTexture
     {
         public FloatGridTexture(TextureMapping3D mapping, int nx, int ny, int nz, Float[] values, WrapMode wrapMode, Float borderValue = 0, bool nodes = false)
         {
@@ -253,11 +253,12 @@ namespace pbrt
     // SpectrumGridTexture Definition
     // A grid of colors (LuxCore's "densitygrid" read as a spectrum), for coefficients that vary in color through the
     // volume: the red, green and blue channels are three grids that share a mapping, trilinear interpolation and wrap mode
-    public sealed unsafe class SpectrumGridTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumGridTexture : SpectrumRGBTexture
     {
         public SpectrumGridTexture(FloatGridTexture red, FloatGridTexture green, FloatGridTexture blue,
-                                   SpectrumType spectrumType, RGBColorSpace colorSpace)
+                                   SpectrumType spectrumType, RGBColorSpace colorSpace) : base(spectrumType)
         {
+            rgbTexture = new GridRGB(this);
             channels = new FloatGridTexture[] { red, green, blue };
             this.spectrumType = spectrumType;
             this.colorSpace = colorSpace;
@@ -278,16 +279,6 @@ namespace pbrt
                 m = std.max(m, hi);
             }
             return pbrt.RGBSpectrumBound(spectrumType, colorSpace, m);
-        }
-
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            RGB rgb = pbrt.ClampZero(new RGB(channels[0].Evaluate(ctx), channels[1].Evaluate(ctx), channels[2].Evaluate(ctx)));
-            if (spectrumType == SpectrumType.Unbounded)
-                return new RGBUnboundedSpectrum(colorSpace, rgb).Sample(lambda);
-            if (spectrumType == SpectrumType.Albedo)
-                return new RGBAlbedoSpectrum(colorSpace, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
-            return new RGBIlluminantSpectrum(colorSpace, rgb).Sample(lambda);
         }
 
         public override string ToString() { return "[ SpectrumGridTexture ]"; }
@@ -328,7 +319,7 @@ namespace pbrt
     // Projects a 2D texture along the three axes of the texture's 3D mapping and blends the results with fixed weights.
     // The projected texture sees (y,z), (x,z) and (x,y) as the x and y of its points, so it takes a "planar" mapping
     // with its default axes. (Weights that depend on the normal would make the field depend on the view direction.)
-    public sealed unsafe class FloatTriplanarTexture : FloatTexture
+    public sealed unsafe partial class FloatTriplanarTexture : FloatTexture
     {
         public FloatTriplanarTexture(TextureMapping3D mapping, FloatTexture tex, Float wx, Float wy, Float wz)
             : this(mapping, tex, tex, tex, wx, wy, wz)

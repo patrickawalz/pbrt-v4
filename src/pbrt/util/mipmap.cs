@@ -262,6 +262,137 @@ namespace pbrt
         // MIPMap Private Methods
 
         // Texel<Float> / Texel<RGB>
+        // The change of the bilinear interpolation of a level by s and by t (where a pointer is given)
+        private void BilerpSlope(int level, Point2f st, Float* dvds, Float* dvdt)
+        {
+            Point2i resolution = LevelResolution(level);
+            Float x = st[0] * resolution[0] - 0.5f, y = st[1] * resolution[1] - 0.5f;
+            int xi = (int)std.floor(x), yi = (int)std.floor(y);
+            Float dx = x - xi, dy = y - yi;
+            Float t00 = Texel<Float>(level, new Point2i(xi, yi)), t10 = Texel<Float>(level, new Point2i(xi + 1, yi));
+            Float t01 = Texel<Float>(level, new Point2i(xi, yi + 1)), t11 = Texel<Float>(level, new Point2i(xi + 1, yi + 1));
+            if (dvds != null)
+            {
+                *dvds = ((t10 - t00) * (1 - dy) + (t11 - t01) * dy) * resolution[0];
+            }
+            if (dvdt != null)
+            {
+                *dvdt = ((t01 - t00) * (1 - dx) + (t11 - t10) * dx) * resolution[1];
+            }
+        }
+
+        // (not in pbrt-v4) The change of Filter() by s and by t, with the level of the pyramid held: exact for the point,
+        // bilinear and trilinear filters, which are polynomials of the texels. False for the EWA filter (no closed form
+        // here: the caller takes a difference).
+        public bool FilterSlope(Point2f st, Vector2f dst0, Vector2f dst1, Float* dvds, Float* dvdt)
+        {
+            // (a float lookup of an image of several channels is their mean, or the alpha: not what a texel returns)
+            if (options.filter == FilterFunction.EWA || pyramid[0].NChannels() != 1)
+            {
+                return false;
+            }
+            if (dvds != null)
+            {
+                *dvds = 0;
+            }
+            if (dvdt != null)
+            {
+                *dvdt = 0;
+            }
+            Float width = 2 * std.max(std.max(std.abs(dst0[0]), std.abs(dst0[1])), std.max(std.abs(dst1[0]), std.abs(dst1[1])));
+            int nLevels = Levels();
+            Float level = nLevels - 1 + Log2(std.max<Float>(width, 1e-8f));
+            if (level >= Levels() - 1 || options.filter == FilterFunction.Point)
+            {
+                // One texel: flat
+                return true;
+            }
+            int iLevel = std.max(0, (int)std.floor(level));
+            if (options.filter == FilterFunction.Bilinear || iLevel == 0)
+            {
+                BilerpSlope(iLevel, st, dvds, dvdt);
+                return true;
+            }
+            Float s0 = 0, t0 = 0, s1 = 0, t1 = 0;
+            BilerpSlope(iLevel, st, dvds != null ? &s0 : null, dvdt != null ? &t0 : null);
+            BilerpSlope(iLevel + 1, st, dvds != null ? &s1 : null, dvdt != null ? &t1 : null);
+            Float blend = level - iLevel;
+            if (dvds != null)
+            {
+                *dvds = s0 * (1 - blend) + s1 * blend;
+            }
+            if (dvdt != null)
+            {
+                *dvdt = t0 * (1 - blend) + t1 * blend;
+            }
+            return true;
+        }
+
+        // The change of the bilinear interpolation of a level by s and by t (where a pointer is given)
+        private void BilerpSlope(int level, Point2f st, RGB* dvds, RGB* dvdt)
+        {
+            Point2i resolution = LevelResolution(level);
+            Float x = st[0] * resolution[0] - 0.5f, y = st[1] * resolution[1] - 0.5f;
+            int xi = (int)std.floor(x), yi = (int)std.floor(y);
+            Float dx = x - xi, dy = y - yi;
+            RGB t00 = Texel<RGB>(level, new Point2i(xi, yi)), t10 = Texel<RGB>(level, new Point2i(xi + 1, yi));
+            RGB t01 = Texel<RGB>(level, new Point2i(xi, yi + 1)), t11 = Texel<RGB>(level, new Point2i(xi + 1, yi + 1));
+            if (dvds != null)
+            {
+                *dvds = ((t10 - t00) * (1 - dy) + (t11 - t01) * dy) * resolution[0];
+            }
+            if (dvdt != null)
+            {
+                *dvdt = ((t01 - t00) * (1 - dx) + (t11 - t10) * dx) * resolution[1];
+            }
+        }
+
+        // (not in pbrt-v4) The change of Filter() by s and by t, with the level of the pyramid held: exact for the point,
+        // bilinear and trilinear filters, which are polynomials of the texels. False for the EWA filter (no closed form
+        // here: the caller takes a difference).
+        public bool FilterSlope(Point2f st, Vector2f dst0, Vector2f dst1, RGB* dvds, RGB* dvdt)
+        {
+            if (options.filter == FilterFunction.EWA)
+            {
+                return false;
+            }
+            if (dvds != null)
+            {
+                *dvds = new RGB(0, 0, 0);
+            }
+            if (dvdt != null)
+            {
+                *dvdt = new RGB(0, 0, 0);
+            }
+            Float width = 2 * std.max(std.max(std.abs(dst0[0]), std.abs(dst0[1])), std.max(std.abs(dst1[0]), std.abs(dst1[1])));
+            int nLevels = Levels();
+            Float level = nLevels - 1 + Log2(std.max<Float>(width, 1e-8f));
+            if (level >= Levels() - 1 || options.filter == FilterFunction.Point)
+            {
+                // One texel: flat
+                return true;
+            }
+            int iLevel = std.max(0, (int)std.floor(level));
+            if (options.filter == FilterFunction.Bilinear || iLevel == 0)
+            {
+                BilerpSlope(iLevel, st, dvds, dvdt);
+                return true;
+            }
+            RGB s0 = new RGB(0, 0, 0), t0 = new RGB(0, 0, 0), s1 = new RGB(0, 0, 0), t1 = new RGB(0, 0, 0);
+            BilerpSlope(iLevel, st, dvds != null ? &s0 : null, dvdt != null ? &t0 : null);
+            BilerpSlope(iLevel + 1, st, dvds != null ? &s1 : null, dvdt != null ? &t1 : null);
+            Float blend = level - iLevel;
+            if (dvds != null)
+            {
+                *dvds = s0 * (1 - blend) + s1 * blend;
+            }
+            if (dvdt != null)
+            {
+                *dvdt = t0 * (1 - blend) + t1 * blend;
+            }
+            return true;
+        }
+
         private T Texel<T>(int level, Point2i st) where T : struct
         {
             DCHECK(level >= 0 && level < (int)pyramid.size());

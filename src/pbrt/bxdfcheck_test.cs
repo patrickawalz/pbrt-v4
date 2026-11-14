@@ -472,6 +472,94 @@ namespace pbrt
             EXPECT_LT(Math.Abs(result.albedoMin - 1), 5e-3);
         }
 
+        // The error function by its series near 0 and the continued fraction of the complementary function beyond: slow, and
+        // independent of the Chebyshev series that pbrt.Erf and pbrt.Erfc use
+        static double ReferenceErf(double x)
+        {
+            double a = Math.Abs(x);
+            if (a > 6)
+            {
+                return x > 0 ? 1 : -1;
+            }
+            if (a < 2.5)
+            {
+                double sum = x, term = x;
+                for (int n = 1; n < 200; ++n)
+                {
+                    term *= -x * x / n;
+                    double add = term / (2 * n + 1);
+                    sum += add;
+                    if (Math.Abs(add) < 1e-17 * Math.Abs(sum))
+                    {
+                        break;
+                    }
+                }
+                return 2 / Math.Sqrt(Math.PI) * sum;
+            }
+            // erfc(a) = exp(-a^2) / (a sqrt(pi)) * 1 / (1 + 1 / (2 a^2) / (1 + 2 / (2 a^2) / (1 + ...)))
+            double fraction = 1;
+            for (int n = 60; n >= 1; --n)
+            {
+                fraction = 1 + n / (2 * a * a) / fraction;
+            }
+            double erfc = Math.Exp(-a * a) / (a * Math.Sqrt(Math.PI)) / fraction;
+            return x > 0 ? 1 - erfc : erfc - 1;
+        }
+
+        // (not in pbrt-v4) The complementary error function in double precision, without the cancellation of 1 - ReferenceErf(x) where
+        // it is small
+        static double ReferenceErfc(double x)
+        {
+            if (x < 0)
+            {
+                return 2 - ReferenceErfc(-x);
+            }
+            if (x < 2.5)
+            {
+                return 1 - ReferenceErf(x);
+            }
+            if (x > 27)
+            {
+                return 0;
+            }
+            double fraction = 1;
+            for (int n = 60; n >= 1; --n)
+            {
+                fraction = 1 + n / (2 * x * x) / fraction;
+            }
+            return Math.Exp(-x * x) / (x * Math.Sqrt(Math.PI)) / fraction;
+        }
+
+        [TEST("BxDFCheck", "ErfAgainstSeries")]
+        public static void BxDFCheck_ErfAgainstSeries()
+        {
+            double worstErf = 0, worstErfc = 0;
+            for (int i = -6000; i <= 6000; ++i)
+            {
+                double x = i / 1000.0;
+                worstErf = Math.Max(worstErf, Math.Abs(pbrt.Erf(x) - ReferenceErf(x)));
+            }
+            // The complementary function to its relative precision, as far as its reference keeps it (the series loses it
+            // where 1 - erf is small: the continued fraction takes over at 2.5)
+            for (int i = -6000; i <= 26000; ++i)
+            {
+                double x = i / 1000.0;
+                double reference = ReferenceErfc(x), value = pbrt.Erfc(x);
+                if (x < 2.5)
+                {
+                    worstErf = Math.Max(worstErf, Math.Abs(value - reference));
+                }
+                else if (reference > 1e-300)
+                {
+                    worstErfc = Math.Max(worstErfc, Math.Abs(value - reference) / reference);
+                }
+            }
+            Console.Error.WriteLine(pbrt.StringPrintf("MEASURE erf against its series and continued fraction: absolute %.1e, erfc beyond 2.5 relative %.1e",
+                                                      worstErf, worstErfc));
+            EXPECT_LT(worstErf, 1e-14);
+            EXPECT_LT(worstErfc, 1e-12);
+        }
+
         // The error function against the values of a table (Abramowitz and Stegun 7.1)
         [TEST("BxDFCheck", "Erf")]
         public static void BxDFCheck_Erf()
@@ -651,6 +739,31 @@ namespace pbrt
                               "MultiScatterDiffuse Beckmann 0.5", 30000, false);
             MultiScatterOther(new MultiScatterDiffuseBxDF(new StudentTDistribution(0.5f, 0.5f, 3f), new MicrosurfaceHeightUniform(), white, 200),
                               "MultiScatterDiffuse StudentT 0.5 gamma 3", 20000, false);
+        }
+
+        // The sheen distribution (Charlie) under the walks: with microfacets that absorb nothing the microsurface returns all
+        // the light, mirror or diffuse, and stays reciprocal, at the limits of the other distributions. The single scattering
+        // BxDF with the same distribution is measured beside it: what the walk recovers.
+        [TEST("BxDFCheck", "MultiScatterCharlie")]
+        public static void BxDFCheck_MultiScatterCharlie()
+        {
+            SampledSpectrum white = new SampledSpectrum(1f), one = new SampledSpectrum(1f), mirror = new SampledSpectrum(1e4f);
+            foreach (Float alpha in new Float[] { 0.5f, 0.25f })
+            {
+                MicrofacetDistribution charlie = new CharlieDistribution(alpha);
+                BxDFCheckOptions options = new BxDFCheckOptions();
+                options.cosines = new Float[] { 0.9f, 0.5f, 0.2f };
+                options.pairs = 100;
+                options.repeats = 4;
+                options.samples = 20000;
+                options.bothSides = false;
+                BxDFCheckResult single = BxDFCheck.Run(new ConductorBxDF(charlie, one, mirror), "Conductor (single scattering) Charlie " + alpha, options);
+                EXPECT_LT(single.albedoMax, 1.005);
+                MultiScatterOther(new MultiScatterConductorBxDF(charlie, new MicrosurfaceHeightUniform(), one, mirror, 400),
+                                  "MultiScatterConductor Charlie " + alpha, 20000, false);
+                MultiScatterOther(new MultiScatterDiffuseBxDF(charlie, new MicrosurfaceHeightUniform(), white, 400),
+                                  "MultiScatterDiffuse Charlie " + alpha, 20000, false);
+            }
         }
 
         // The estimate of a refraction has a heavy tail (single estimates of 10000 times the mean occur), and the variance of a

@@ -205,6 +205,10 @@ namespace pbrt
         public int objectId;
         // (not in pbrt-v4) the interaction the context was made from (null if made from other data); OSL shaders read the whole interaction
         public SurfaceInteraction si;
+        // (not in pbrt-v4) How far along the surface the context has been moved from the point of `si` (zero, but for
+        // the contexts of a finite difference: p and uv are moved too). A mapping that reads another set of texture
+        // coordinates from `si` moves them by what this step changes of them.
+        public Vector3f shift;
     }
 
     // TexCoord2D Definition
@@ -237,6 +241,29 @@ namespace pbrt
         public abstract TexCoord2D Map(TextureEvalContext ctx);
         public abstract override string ToString();
 
+        // (not in pbrt-v4) The change of (s, t) along the two directions (where a pointer is given). A mapping computes
+        // the change of (s, t) over a pixel from the differentials of the context: here the two directions stand in for
+        // the pixel.
+        public virtual void MapDerivatives(TextureEvalContext ctx, TextureDirections directions, Vector2f* dstdu, Vector2f* dstdv)
+        {
+            TextureEvalContext along = ctx;
+            along.dpdx = directions.dpdu;
+            along.dpdy = directions.dpdv;
+            along.dudx = directions.duvdu.x;
+            along.dvdx = directions.duvdu.y;
+            along.dudy = directions.duvdv.x;
+            along.dvdy = directions.duvdv.y;
+            TexCoord2D c = Map(along);
+            if (dstdu != null)
+            {
+                *dstdu = new Vector2f(c.dsdx, c.dtdx);
+            }
+            if (dstdv != null)
+            {
+                *dstdv = new Vector2f(c.dsdy, c.dtdy);
+            }
+        }
+
         // (not in pbrt-v4) Rectangle of (s,t) that the points in _region_ (in the space of TextureEvalContext::p, with
         // no uv) map to, or false if there is no bound better than the whole plane
         public virtual bool RegionST(Bounds3f region, out Bounds2f st)
@@ -255,6 +282,13 @@ namespace pbrt
                 Float sv = parameters.GetOneFloat("vscale", 1f);
                 Float du = parameters.GetOneFloat("udelta", 0f);
                 Float dv = parameters.GetOneFloat("vdelta", 0f);
+                // (not in pbrt-v4) "integer uvchannel" or "string uvchannel": another set of texture coordinates
+                int channel = parameters.GetOneInt("uvchannel", 0);
+                string channelName = parameters.GetOneString("uvchannel", "");
+                if (channel != 0 || channelName != "")
+                {
+                    return new UVMapping(su, sv, du, dv, channel, channelName != "" ? UVChannelNames.Id(channelName) : -1);
+                }
                 return new UVMapping(su, sv, du, dv);
             }
             else if (type == "spherical")
@@ -283,8 +317,33 @@ namespace pbrt
             this.su = su; this.sv = sv; this.du = du; this.dv = dv;
         }
 
+        // (not in pbrt-v4) The same on another set of texture coordinates of the mesh (see uvchannels.cs): the one with
+        // the name channelName, or without a name (channelName < 0) the one with the number `channel`
+        public UVMapping(Float su, Float sv, Float du, Float dv, int channel, int channelName)
+        {
+            this.su = su; this.sv = sv; this.du = du; this.dv = dv;
+            this.channel = channel;
+            this.channelName = channelName;
+        }
+
+        // Whether the mapping reads a set of texture coordinates other than the first, at a hit that can have one
+        private bool OtherChannel(TextureEvalContext ctx)
+        {
+            return (channel != 0 || channelName >= 0) && ctx.si != null && (ctx.si.uvTriangleMesh != null || ctx.si.uvPatchMesh != null);
+        }
+
         public override TexCoord2D Map(TextureEvalContext ctx)
         {
+            if (OtherChannel(ctx))
+            {
+                // The texture coordinates of the channel, and their differentials from its own tangents
+                Vector3f dpdu, dpdv;
+                Point2f uv = ctx.si.UVChannel(channel, channelName, &dpdu, &dpdv);
+                uv += UVChannels.TangentToUV(dpdu, dpdv, ctx.shift);
+                Vector2f ddx = UVChannels.TangentToUV(dpdu, dpdv, ctx.dpdx), ddy = UVChannels.TangentToUV(dpdu, dpdv, ctx.dpdy);
+                return new TexCoord2D { st = new Point2f(su * uv[0] + du, sv * uv[1] + dv), dsdx = su * ddx[0], dsdy = su * ddy[0],
+                                        dtdx = sv * ddx[1], dtdy = sv * ddy[1] };
+            }
             // Compute texture differentials for 2D $(u,v)$ mapping
             Float dsdx = su * ctx.dudx, dsdy = su * ctx.dudy;
             Float dtdx = sv * ctx.dvdx, dtdy = sv * ctx.dvdy;
@@ -307,6 +366,7 @@ namespace pbrt
         }
 
         private Float su, sv, du, dv;
+        private int channel = 0, channelName = -1;
     }
 
     // SphericalMapping Definition
@@ -341,6 +401,28 @@ namespace pbrt
         public override string ToString()
         {
             return pbrt.StringPrintf("[ SphericalMapping textureFromRender: %s ]", textureFromRender);
+        }
+
+        // (not in pbrt-v4) Map() returns s = theta / pi and t = phi / (2 pi) with the differentials of the other one
+        // each (dsdp above is that of phi): fine for the size of a filter, not for a derivative. Here each has its own.
+        public override void MapDerivatives(TextureEvalContext ctx, TextureDirections directions, Vector2f* dstdu, Vector2f* dstdv)
+        {
+            Point3f pt = textureFromRender.Apply(ctx.p);
+            Float x2y2 = pbrt.Sqr(pt.x) + pbrt.Sqr(pt.y);
+            Float sqrtx2y2 = std.sqrt(x2y2);
+            Vector3f dphidp = new Vector3f(-pt.y, pt.x, 0) / (2 * pbrt.Pi * x2y2);
+            Vector3f dthetadp = 1 / (pbrt.Pi * (x2y2 + pbrt.Sqr(pt.z))) *
+                                new Vector3f(pt.x * pt.z / sqrtx2y2, pt.y * pt.z / sqrtx2y2, -sqrtx2y2);
+            if (dstdu != null)
+            {
+                Vector3f d = textureFromRender.Apply(directions.dpdu);
+                *dstdu = new Vector2f(pbrt.Dot(dthetadp, d), pbrt.Dot(dphidp, d));
+            }
+            if (dstdv != null)
+            {
+                Vector3f d = textureFromRender.Apply(directions.dpdv);
+                *dstdv = new Vector2f(pbrt.Dot(dthetadp, d), pbrt.Dot(dphidp, d));
+            }
         }
 
         // SphericalMapping Private Members
@@ -446,6 +528,23 @@ namespace pbrt
         public abstract TexCoord3D Map(TextureEvalContext ctx);
         public abstract override string ToString();
 
+        // (not in pbrt-v4) The change of the mapped point along the two directions (where a pointer is given)
+        public virtual void MapDerivatives(TextureEvalContext ctx, TextureDirections directions, Vector3f* dpdu, Vector3f* dpdv)
+        {
+            TextureEvalContext along = ctx;
+            along.dpdx = directions.dpdu;
+            along.dpdy = directions.dpdv;
+            TexCoord3D c = Map(along);
+            if (dpdu != null)
+            {
+                *dpdu = c.dpdx;
+            }
+            if (dpdv != null)
+            {
+                *dpdv = c.dpdy;
+            }
+        }
+
         public static TextureMapping3D Create(ParameterDictionary parameters, Transform renderFromTexture, FileLoc loc,
                                               Allocator alloc)
         {
@@ -474,7 +573,7 @@ namespace pbrt
     }
 
     // FloatConstantTexture Definition
-    public sealed unsafe class FloatConstantTexture : FloatTexture
+    public sealed unsafe partial class FloatConstantTexture : FloatTexture
     {
         public FloatConstantTexture(Float value) { this.value = value; }
         public override Float Evaluate(TextureEvalContext ctx) { return value; }
@@ -493,7 +592,7 @@ namespace pbrt
     }
 
     // SpectrumConstantTexture Definition
-    public sealed unsafe class SpectrumConstantTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumConstantTexture : SpectrumTexture
     {
         // SpectrumConstantTexture Public Methods
         public SpectrumConstantTexture(Spectrum value) { this.value = value; }
@@ -518,7 +617,7 @@ namespace pbrt
     }
 
     // FloatBilerpTexture Definition
-    public sealed unsafe class FloatBilerpTexture : FloatTexture
+    public sealed unsafe partial class FloatBilerpTexture : FloatTexture
     {
         public FloatBilerpTexture(TextureMapping2D mapping, Float v00, Float v01, Float v10, Float v11)
         {
@@ -564,7 +663,7 @@ namespace pbrt
     }
 
     // SpectrumBilerpTexture Definition
-    public sealed unsafe class SpectrumBilerpTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumBilerpTexture : SpectrumTexture
     {
         public SpectrumBilerpTexture(TextureMapping2D mapping, Spectrum v00, Spectrum v01, Spectrum v10, Spectrum v11)
         {
@@ -610,7 +709,7 @@ namespace pbrt
         private Spectrum v00, v01, v10, v11;
     }
 
-    public sealed unsafe class FloatCheckerboardTexture : FloatTexture
+    public sealed unsafe partial class FloatCheckerboardTexture : FloatTexture
     {
         public FloatCheckerboardTexture(TextureMapping2D map2D, TextureMapping3D map3D, FloatTexture tex1, FloatTexture tex2)
         {
@@ -677,7 +776,7 @@ namespace pbrt
     }
 
     // SpectrumCheckerboardTexture Definition
-    public sealed unsafe class SpectrumCheckerboardTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumCheckerboardTexture : SpectrumTexture
     {
         // SpectrumCheckerboardTexture Public Methods
         public SpectrumCheckerboardTexture(TextureMapping2D map2D, TextureMapping3D map3D, SpectrumTexture tex1,
@@ -742,7 +841,7 @@ namespace pbrt
         private SpectrumTexture[] tex;
     }
 
-    public sealed unsafe class FloatDotsTexture : FloatTexture
+    public sealed unsafe partial class FloatDotsTexture : FloatTexture
     {
         public FloatDotsTexture(TextureMapping2D mapping, FloatTexture outsideDot, FloatTexture insideDot)
         {
@@ -787,7 +886,7 @@ namespace pbrt
     }
 
     // SpectrumDotsTexture Definition
-    public sealed unsafe class SpectrumDotsTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumDotsTexture : SpectrumTexture
     {
         // SpectrumDotsTexture Public Methods
         public SpectrumDotsTexture(TextureMapping2D mapping, SpectrumTexture outsideDot, SpectrumTexture insideDot)
@@ -827,7 +926,7 @@ namespace pbrt
     }
 
     // FBmTexture Definition
-    public sealed unsafe class FBmTexture : FloatTexture
+    public sealed unsafe partial class FBmTexture : FloatTexture
     {
         // FBmTexture Public Methods
         public FBmTexture(TextureMapping3D mapping, int octaves, Float omega)
@@ -1004,7 +1103,7 @@ namespace pbrt
     }
 
     // FloatImageTexture Definition
-    public sealed unsafe class FloatImageTexture : FloatTexture
+    public sealed unsafe partial class FloatImageTexture : FloatTexture
     {
         // (C++ inherits from ImageTextureBase; FloatTexture is already the base class here, so the
         // ImageTextureBase part is held by composition.)
@@ -1146,7 +1245,7 @@ namespace pbrt
     }
 
     // SpectrumImageTexture Definition
-    public sealed unsafe class SpectrumImageTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumImageTexture : SpectrumRGBTexture
     {
         private ImageTextureBase b;
         private TextureMapping2D mapping;
@@ -1159,16 +1258,23 @@ namespace pbrt
         // SpectrumImageTexture Public Methods
         public SpectrumImageTexture(TextureMapping2D mapping, string filename, MIPMapFilterOptions filterOptions,
                                     WrapMode wrapMode, Float scale, bool invert, ColorEncoding encoding,
-                                    SpectrumType spectrumType, Allocator alloc)
+                                    SpectrumType spectrumType, Allocator alloc) : base(spectrumType)
         {
             b = new ImageTextureBase(mapping, filename, filterOptions, wrapMode, scale, invert, encoding, alloc);
             this.mapping = mapping; this.filename = filename; this.scale = scale; this.invert = invert;
             mipmap = pbrt.GetImageTextureMIPMap(b);
             this.spectrumType = spectrumType;
+            // (not as in pbrt-v4) The colour of the image is an RGB texture (texture_rgb.cs); the spectrum is its upsampling
+            rgbTexture = new ImageRGB(this);
         }
 
         public void MultiplyScale(Float s) { scale *= s; }
-        public SpectrumImageTexture Clone() { return (SpectrumImageTexture)MemberwiseClone(); }
+        public SpectrumImageTexture Clone()
+        {
+            SpectrumImageTexture clone = (SpectrumImageTexture)MemberwiseClone();
+            clone.rgbTexture = new ImageRGB(clone);
+            return clone;
+        }
 
         // (see FloatImageTexture.MinValue/MaxValue for the texel range argument)
         public override Float MaxValue()
@@ -1188,32 +1294,6 @@ namespace pbrt
             rgb = scale * mipmap.Filter<RGB>(c.st, new Vector2f(c.dsdx, c.dtdx), new Vector2f(c.dsdy, c.dtdy));
             rgb = pbrt.ClampZero(invert ? (new RGB(1, 1, 1) - rgb) : rgb);
             return mipmap.GetRGBColorSpace() != null;
-        }
-
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            // Apply texture mapping and flip $t$ coordinate for image texture lookup
-            TexCoord2D c = mapping.Map(ctx);
-            c.st.y = 1 - c.st.y;
-
-            // Lookup filtered RGB value in _MIPMap_
-            RGB rgb = scale * mipmap.Filter<RGB>(c.st, new Vector2f(c.dsdx, c.dtdx), new Vector2f(c.dsdy, c.dtdy));
-            rgb = pbrt.ClampZero(invert ? (new RGB(1, 1, 1) - rgb) : rgb);
-
-            // Return _SampledSpectrum_ for RGB image texture value
-            RGBColorSpace cs = mipmap.GetRGBColorSpace();
-            if (cs != null)
-            {
-                if (spectrumType == SpectrumType.Unbounded)
-                    return new RGBUnboundedSpectrum(cs, rgb).Sample(lambda);
-                else if (spectrumType == SpectrumType.Albedo)
-                    return new RGBAlbedoSpectrum(cs, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
-                else
-                    return new RGBIlluminantSpectrum(cs, rgb).Sample(lambda);
-            }
-            // otherwise it better be a one-channel texture
-            pbrt.DCHECK(rgb[0] == rgb[1] && rgb[1] == rgb[2]);
-            return new SampledSpectrum(rgb[0]);
         }
 
         public override string ToString()
@@ -1257,12 +1337,14 @@ namespace pbrt
     }
 
     // MarbleTexture Definition
-    public sealed unsafe class MarbleTexture : SpectrumTexture
+    public sealed unsafe partial class MarbleTexture : SpectrumRGBTexture
     {
         // MarbleTexture Public Methods
-        public MarbleTexture(TextureMapping3D mapping, int octaves, Float omega, Float scale, Float variation)
+        public MarbleTexture(TextureMapping3D mapping, int octaves, Float omega, Float scale, Float variation) : base(SpectrumType.Albedo)
         {
             this.mapping = mapping; this.octaves = octaves; this.omega = omega; this.scale = scale; this.variation = variation;
+            // (not as in pbrt-v4) The colour of the marble is an RGB texture (texture_rgb.cs); the spectrum is its upsampling
+            rgbTexture = new MarbleRGB(this);
         }
 
         private static readonly RGB[] colors = {
@@ -1273,29 +1355,6 @@ namespace pbrt
 
         // the result is an RGBAlbedoSpectrum, which is <= 1
         public override Float MaxValue() { return 1; }
-
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            TexCoord3D c = mapping.Map(ctx);
-            c.p *= scale;
-            Float marble = c.p.y + variation * pbrt.FBm(c.p, scale * c.dpdx, scale * c.dpdy, omega, octaves);
-            Float t = .5f + .5f * std.sin(marble);
-            // Evaluate marble spline at $t$ to compute color _rgb_
-            int nSeg = colors.Length - 3;
-            int first = std.min<int>((int)std.floor(t * nSeg), nSeg - 1);
-            t = t * nSeg - first;
-            // (EvaluateCubicBezier() is applied per channel; it is a componentwise blossom.)
-            Float[] ch = new Float[4];
-            RGB rgb = new RGB();
-            for (int k = 0; k < 3; ++k)
-            {
-                for (int i = 0; i < 4; ++i)
-                    ch[i] = colors[first + i][k];
-                rgb[k] = 1.5f * pbrt.EvaluateCubicBezier(new pstd.span<Float>(ch), t);
-            }
-
-            return new RGBAlbedoSpectrum(RGBColorSpace.sRGB, rgb).Sample(lambda);
-        }
 
         public override string ToString()
         {
@@ -1319,7 +1378,7 @@ namespace pbrt
     }
 
     // FloatMixTexture Definition
-    public sealed unsafe class FloatMixTexture : FloatTexture
+    public sealed unsafe partial class FloatMixTexture : FloatTexture
     {
         // FloatMixTexture Public Methods
         public FloatMixTexture(FloatTexture tex1, FloatTexture tex2, FloatTexture amount)
@@ -1377,7 +1436,7 @@ namespace pbrt
     }
 
     // FloatDirectionMixTexture Definition
-    public sealed unsafe class FloatDirectionMixTexture : FloatTexture
+    public sealed unsafe partial class FloatDirectionMixTexture : FloatTexture
     {
         // FloatDirectionMixTexture Public Methods
         public FloatDirectionMixTexture(FloatTexture tex1, FloatTexture tex2, Vector3f dir)
@@ -1427,7 +1486,7 @@ namespace pbrt
     }
 
     // SpectrumMixTexture Definition
-    public sealed unsafe class SpectrumMixTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumMixTexture : SpectrumTexture
     {
         public SpectrumMixTexture(SpectrumTexture tex1, SpectrumTexture tex2, FloatTexture amount)
         {
@@ -1470,7 +1529,7 @@ namespace pbrt
     }
 
     // SpectrumDirectionMixTexture Definition
-    public sealed unsafe class SpectrumDirectionMixTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumDirectionMixTexture : SpectrumTexture
     {
         // SpectrumDirectionMixTexture Public Methods
         public SpectrumDirectionMixTexture(SpectrumTexture tex1, SpectrumTexture tex2, Vector3f dir)
@@ -1618,7 +1677,7 @@ namespace pbrt
         private Float scale;
     }
 
-    public sealed unsafe class FloatPtexTexture : FloatTexture
+    public sealed unsafe partial class FloatPtexTexture : FloatTexture
     {
         private PtexTextureBase b;
         public FloatPtexTexture(string filename, ColorEncoding encoding, Float scale)
@@ -1651,7 +1710,7 @@ namespace pbrt
         private string BaseToStringPublic() { return b.BaseToStringInternal(); }
     }
 
-    public sealed unsafe class SpectrumPtexTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumPtexTexture : SpectrumTexture
     {
         private PtexTextureBase b;
         private SpectrumType spectrumType;
@@ -1690,7 +1749,7 @@ namespace pbrt
     }
 
     // FloatScaledTexture Definition
-    public sealed unsafe class FloatScaledTexture : FloatTexture
+    public sealed unsafe partial class FloatScaledTexture : FloatTexture
     {
         // FloatScaledTexture Public Methods
         public FloatScaledTexture(FloatTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
@@ -1762,7 +1821,7 @@ namespace pbrt
     }
 
     // SpectrumScaledTexture Definition
-    public sealed unsafe class SpectrumScaledTexture : SpectrumTexture
+    public sealed unsafe partial class SpectrumScaledTexture : SpectrumTexture
     {
         // SpectrumScaledTexture Public Methods
         public SpectrumScaledTexture(SpectrumTexture tex, FloatTexture scale) { this.tex = tex; this.scale = scale; }
@@ -1812,7 +1871,7 @@ namespace pbrt
     }
 
     // WindyTexture Definition
-    public sealed unsafe class WindyTexture : FloatTexture
+    public sealed unsafe partial class WindyTexture : FloatTexture
     {
         // WindyTexture Public Methods
         public WindyTexture(TextureMapping3D mapping) { this.mapping = mapping; }
@@ -1846,7 +1905,7 @@ namespace pbrt
     }
 
     // WrinkledTexture Definition
-    public sealed unsafe class WrinkledTexture : FloatTexture
+    public sealed unsafe partial class WrinkledTexture : FloatTexture
     {
         // WrinkledTexture Public Methods
         public WrinkledTexture(TextureMapping3D mapping, int octaves, Float omega)
@@ -1914,6 +1973,8 @@ namespace pbrt
             }
             else if (name == "checkerboard")
                 tex = FloatCheckerboardTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "wireframe")
+                tex = FloatWireframeTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "dots")
                 tex = FloatDotsTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "fbm")
@@ -1973,6 +2034,8 @@ namespace pbrt
 
             ++pbrt.nTextures;
 
+            // (not in pbrt-v4) "bool analyticderivatives" false: finite differences for this texture, closed form or not
+            tex.finiteDifferences = !parameters.GetOneBool("analyticderivatives", true);
             parameters.ReportUnused();
             return tex;
         }
@@ -2005,6 +2068,8 @@ namespace pbrt
             }
             else if (name == "checkerboard")
                 tex = SpectrumCheckerboardTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "wireframe")
+                tex = SpectrumWireframeTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "dots")
                 tex = SpectrumDotsTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "marble")
@@ -2019,6 +2084,16 @@ namespace pbrt
                 tex = SpectrumRampTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "blackbody")
                 tex = SpectrumBlackbodyTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "gaussian")
+                tex = SpectrumGaussianTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "frequency")
+                tex = SpectrumFrequencyTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "cauchy")
+                tex = SpectrumCauchyTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "sellmeier")
+                tex = SpectrumSellmeierTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
+            else if (name == "longpass")
+                tex = SpectrumEdgeTexture.Create(renderFromTexture, parameters, spectrumType, loc, alloc);
             else if (name == "ptex")
             {
                 if (gpu)
@@ -2034,6 +2109,7 @@ namespace pbrt
 
             ++pbrt.nTextures;
 
+            tex.finiteDifferences = !parameters.GetOneBool("analyticderivatives", true);
             parameters.ReportUnused();
 
             return tex;

@@ -568,6 +568,10 @@ namespace pbrt
             SampledSpectrum sigma_a = sigma_a_spec.Sample(lambda);
             SampledSpectrum sigma_s = sigma_s_spec.Sample(lambda);
             SampledSpectrum Le = Le_spec.Sample(lambda);
+            if (pearlescent != null)
+            {
+                return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = new PearlescentPhaseFunction(pearlescent, lambda), Le = Le };
+            }
             return new MediumProperties { sigma_a = sigma_a, sigma_s = sigma_s, phase = phase, Le = Le };
         }
 
@@ -615,13 +619,26 @@ namespace pbrt
 
             Float sigmaScale = parameters.GetOneFloat("scale", 1f);
             Float g = parameters.GetOneFloat("g", 0.0f);
+            PearlescentPhaseParameters pearlescent = null;
+            if (parameters.GetOneString("phase", "") == "pearlescent")
+            {
+                // (not in pbrt-v4) gray collision rate = majorant; flake hit / null-forward is decided inside the phase function
+                pearlescent = PearlescentPhaseParameters.Create(parameters);
+                sig_a = new ConstantSpectrum(0f);
+                sig_s = new ConstantSpectrum(pearlescent.kappaMaj);
+                sigmaScale = 1;
+            }
 
-            return new HomogeneousMedium(sig_a, sig_s, sigmaScale, Le, LeScale, g, alloc);
+            HomogeneousMedium medium = new HomogeneousMedium(sig_a, sig_s, sigmaScale, Le, LeScale, g, alloc);
+            medium.pearlescent = pearlescent;
+            return medium;
         }
 
         // HomogeneousMedium Private Data
         private DenselySampledSpectrum sigma_a_spec, sigma_s_spec, Le_spec;
         private HGPhaseFunction phase;
+        // (not in pbrt-v4) "string phase" "pearlescent": the phase function is made for the wavelengths of each lookup
+        private PearlescentPhaseParameters pearlescent;
 
         public override string ToString()
         {

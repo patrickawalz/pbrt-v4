@@ -147,6 +147,133 @@ namespace pbrt
             return 6 * Pow5(t) - 15 * Pow4(t) + 10 * Pow3(t);
         }
 
+        // (not in pbrt-v4) Noise() with its gradient in closed form: the lattice gradients are constant in a cell, and the
+        // interpolation weights are polynomials
+        private static Vector3f GradVector(int x, int y, int z)
+        {
+            int h = NoisePerm[NoisePerm[NoisePerm[x] + y] + z];
+            h &= 15;
+            bool uIsX = h < 8 || h == 12 || h == 13;
+            bool vIsY = h < 4 || h == 12 || h == 13;
+            Float su = ((h & 1) != 0) ? -1 : 1, sv = ((h & 2) != 0) ? -1 : 1;
+            Vector3f g = new Vector3f(0, 0, 0);
+            if (uIsX)
+            {
+                g.x += su;
+            }
+            else
+            {
+                g.y += su;
+            }
+            if (vIsY)
+            {
+                g.y += sv;
+            }
+            else
+            {
+                g.z += sv;
+            }
+            return g;
+        }
+
+        private static Float NoiseWeightDerivative(Float t)
+        {
+            return 30 * Sqr(t) * Sqr(t - 1);
+        }
+
+        public static Float Noise(Point3f p, Vector3f* gradient)
+        {
+            Float x = std.fmod(p.x, (Float)(1 << 30));
+            Float y = std.fmod(p.y, (Float)(1 << 30));
+            Float z = std.fmod(p.z, (Float)(1 << 30));
+            int ix = (int)std.floor(x), iy = (int)std.floor(y), iz = (int)std.floor(z);
+            Float dx = x - ix, dy = y - iy, dz = z - iz;
+            ix &= NoisePermSize - 1;
+            iy &= NoisePermSize - 1;
+            iz &= NoisePermSize - 1;
+            Vector3f g000 = GradVector(ix, iy, iz), g100 = GradVector(ix + 1, iy, iz);
+            Vector3f g010 = GradVector(ix, iy + 1, iz), g110 = GradVector(ix + 1, iy + 1, iz);
+            Vector3f g001 = GradVector(ix, iy, iz + 1), g101 = GradVector(ix + 1, iy, iz + 1);
+            Vector3f g011 = GradVector(ix, iy + 1, iz + 1), g111 = GradVector(ix + 1, iy + 1, iz + 1);
+            Float w000 = Dot(g000, new Vector3f(dx, dy, dz)), w100 = Dot(g100, new Vector3f(dx - 1, dy, dz));
+            Float w010 = Dot(g010, new Vector3f(dx, dy - 1, dz)), w110 = Dot(g110, new Vector3f(dx - 1, dy - 1, dz));
+            Float w001 = Dot(g001, new Vector3f(dx, dy, dz - 1)), w101 = Dot(g101, new Vector3f(dx - 1, dy, dz - 1));
+            Float w011 = Dot(g011, new Vector3f(dx, dy - 1, dz - 1)), w111 = Dot(g111, new Vector3f(dx - 1, dy - 1, dz - 1));
+            Float wx = NoiseWeight(dx), wy = NoiseWeight(dy), wz = NoiseWeight(dz);
+            Float x00 = Lerp(wx, w000, w100), x10 = Lerp(wx, w010, w110), x01 = Lerp(wx, w001, w101), x11 = Lerp(wx, w011, w111);
+            Float y0 = Lerp(wy, x00, x10), y1 = Lerp(wy, x01, x11);
+            if (gradient != null)
+            {
+                Float dwx = NoiseWeightDerivative(dx), dwy = NoiseWeightDerivative(dy), dwz = NoiseWeightDerivative(dz);
+                Vector3f gx00 = (1 - wx) * g000 + wx * g100, gx10 = (1 - wx) * g010 + wx * g110;
+                Vector3f gx01 = (1 - wx) * g001 + wx * g101, gx11 = (1 - wx) * g011 + wx * g111;
+                gx00.x += dwx * (w100 - w000);
+                gx10.x += dwx * (w110 - w010);
+                gx01.x += dwx * (w101 - w001);
+                gx11.x += dwx * (w111 - w011);
+                Vector3f gy0 = (1 - wy) * gx00 + wy * gx10, gy1 = (1 - wy) * gx01 + wy * gx11;
+                gy0.y += dwy * (x10 - x00);
+                gy1.y += dwy * (x11 - x01);
+                Vector3f g = (1 - wz) * gy0 + wz * gy1;
+                g.z += dwz * (y1 - y0);
+                *gradient = g;
+            }
+            return Lerp(wz, y0, y1);
+        }
+
+        // (not in pbrt-v4) FBm() and Turbulence() with their gradients by p; the number of octaves follows the size of
+        // the pixel (dpdx, dpdy), which is held while p moves, as it is in a finite difference
+        public static Float FBm(Point3f p, Vector3f dpdx, Vector3f dpdy, Float omega, int maxOctaves, Vector3f* gradient)
+        {
+            Float len2 = std.max(LengthSquared(dpdx), LengthSquared(dpdy));
+            Float n = Clamp(-1 - Log2(len2) / 2, 0, maxOctaves);
+            int nInt = (int)std.floor(n);
+            Float sum = 0, lambda = 1, o = 1;
+            Vector3f total = new Vector3f(0, 0, 0), g;
+            for (int i = 0; i < nInt; ++i)
+            {
+                sum += o * Noise(lambda * p, &g);
+                total += (o * lambda) * g;
+                lambda *= 1.99f;
+                o *= omega;
+            }
+            Float nPartial = n - nInt;
+            Float partial = o * SmoothStep(nPartial, .3f, .7f);
+            sum += partial * Noise(lambda * p, &g);
+            total += (partial * lambda) * g;
+            *gradient = total;
+            return sum;
+        }
+
+        public static Float Turbulence(Point3f p, Vector3f dpdx, Vector3f dpdy, Float omega, int maxOctaves, Vector3f* gradient)
+        {
+            Float len2 = std.max(LengthSquared(dpdx), LengthSquared(dpdy));
+            Float n = Clamp(-1 - Log2(len2) / 2, 0, maxOctaves);
+            int nInt = (int)std.floor(n);
+            Float sum = 0, lambda = 1, o = 1;
+            Vector3f total = new Vector3f(0, 0, 0), g;
+            for (int i = 0; i < nInt; ++i)
+            {
+                Float noise = Noise(lambda * p, &g);
+                sum += o * std.abs(noise);
+                total += (noise < 0 ? -o * lambda : o * lambda) * g;
+                lambda *= 1.99f;
+                o *= omega;
+            }
+            Float nPartial = n - nInt;
+            Float weight = SmoothStep(nPartial, .3f, .7f);
+            Float last = Noise(lambda * p, &g);
+            sum += o * Lerp(weight, (Float)0.2, std.abs(last));
+            total += (last < 0 ? -o * weight * lambda : o * weight * lambda) * g;
+            for (int i = nInt; i < maxOctaves; ++i)
+            {
+                sum += o * 0.2f;
+                o *= omega;
+            }
+            *gradient = total;
+            return sum;
+        }
+
         public static Vector3f DNoise(Point3f p)
         {
             Float delta = .01f;
@@ -215,6 +342,37 @@ namespace pbrt
                 worst = std.max(worst, sum);
             }
             return worst;
+        }
+
+        // (not in pbrt-v4) Bounds on Turbulence() over a box, with every octave in (no size of a pixel): each octave is
+        // the size of a noise whose bounds over the box are known, and the term that stands for the octaves left out is
+        // 0.2 times the weight after the last
+        public static void TurbulenceBounds(Bounds3f box, Float omega, int octaves, out Float lo, out Float hi)
+        {
+            lo = 0;
+            hi = 0;
+            Float lambda = 1, o = 1;
+            for (int i = 0; i < octaves; ++i)
+            {
+                Bounds3f scaled = new Bounds3f(lambda * box.pMin, lambda * box.pMax);
+                NoiseBounds(scaled, out Float termLo, out Float termHi);
+                Float sizeLo = termLo > 0 ? termLo : (termHi < 0 ? -termHi : 0);
+                Float sizeHi = std.max(std.abs(termLo), std.abs(termHi));
+                if (o >= 0)
+                {
+                    lo += o * sizeLo;
+                    hi += o * sizeHi;
+                }
+                else
+                {
+                    lo += o * sizeHi;
+                    hi += o * sizeLo;
+                }
+                lambda *= 1.99f;
+                o *= omega;
+            }
+            lo += o * 0.2f;
+            hi += o * 0.2f;
         }
 
         // (not in pbrt-v4) Rigorous bounds on Noise() over a box. Noise() is a fixed function of the

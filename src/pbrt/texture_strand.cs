@@ -91,13 +91,14 @@ namespace pbrt
         private static Float largest;
     }
 
-    public sealed unsafe class SpectrumStrandColorTexture : SpectrumTexture
+    public sealed unsafe class SpectrumStrandColorTexture : SpectrumRGBTexture
     {
         // global: the colors of the texture along every strand that uses it (null: none); local: the colors of the strand of the hit ("rgb Cs" of its shape), multiplied
         // with the global ones when both are present. bezier is the basis of the global colors: the chain of cubic Bezier curves of the rocap (3n + 1 points), or
         // the quadratic B-spline of the ribbon (n points, n - 2 segments, the ends clamped).
-        public SpectrumStrandColorTexture(RGB[] global, bool bezier, bool local, SpectrumType spectrumType, RGBColorSpace colorSpace)
+        public SpectrumStrandColorTexture(RGB[] global, bool bezier, bool local, SpectrumType spectrumType, RGBColorSpace colorSpace) : base(spectrumType)
         {
+            rgbTexture = new SourceRGB(this, colorSpace);
             this.global = global;
             this.bezier = bezier;
             this.local = local;
@@ -138,20 +139,6 @@ namespace pbrt
         {
             Float m = globalLargest * (local ? StrandColors.Largest : 1);
             return pbrt.RGBSpectrumBound(spectrumType, colorSpace, m);
-        }
-
-        public override SampledSpectrum Evaluate(TextureEvalContext ctx, SampledWavelengths lambda)
-        {
-            RGB rgb = pbrt.ClampZero(Color(ctx.uv[0], ctx.faceIndex));
-            if (spectrumType == SpectrumType.Unbounded)
-            {
-                return new RGBUnboundedSpectrum(colorSpace, rgb).Sample(lambda);
-            }
-            if (spectrumType == SpectrumType.Albedo)
-            {
-                return new RGBAlbedoSpectrum(colorSpace, pbrt.Clamp(rgb, 0, 1)).Sample(lambda);
-            }
-            return new RGBIlluminantSpectrum(colorSpace, rgb).Sample(lambda);
         }
 
         public override string ToString() { return pbrt.StringPrintf("[ SpectrumStrandColorTexture global: %s local: %s ]", global != null, local); }

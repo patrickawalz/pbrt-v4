@@ -18,6 +18,12 @@ namespace pbrt
         public Float p;
         public Vector3f wi;
         public Float pdf;
+        // (not in pbrt-v4) A phase function that is not the same at every wavelength may return the value at each of them with
+        // the sample (the weight of the path is then spec / pdf), and a sample may be the ray going on undisturbed (delta: wi is
+        // -wo, no MIS, and it does not count as a bounce)
+        public SampledSpectrum spec;
+        public bool hasSpec;
+        public bool delta;
     }
 
     // PhaseFunction Definition

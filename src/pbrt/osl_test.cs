@@ -50,6 +50,14 @@ namespace pbrt
             { "fnoise", "shader fnoise(float scale = 6, float lo = 0.1, float hi = 0.6, output float Fout = 0) " +
                         "{ point Po = transform(\"object\", P) * scale; Fout = lo + (hi - lo) * (0.5 + 0.5 * noise(Po)); }" },
             { "constcolor", "shader constcolor(color value = color(0.5, 0.5, 0.5), output color Cout = 0) { Cout = value; }" },
+            { "dwave", "shader dwave(float freq = 3, output float Fout = 0) " +
+                       "{ Fout = 0.5 + 0.3 * sin(freq * u) * cos(freq * v) + 0.1 * sin(2 * P[0] + P[1] * P[2]); }" },
+            { "dcolor", "shader dcolor(float freq = 2, output color Cout = 0) { Cout = color(0.7 + 0.2 * sin(freq * u + P[0]), " +
+                        "0.3 + 0.15 * cos(3 * v), 0.25 + 0.15 * sin(u * v + P[2])); }" },
+            { "dwarp", "shader dwarp(float amount = 0.4, output point Out = 0) { Out = P + amount * (vector)snoise(P * 1.7); }" },
+            { "dstripes", "shader dstripes(point Pin = P, float Fin = 0, output float Fout = 0) { Fout = 0.5 + 0.4 * sin(5 * Pin[0] + 2 * Pin[1]) * " +
+                          "cos(3 * Pin[2]) + 0.5 * Fin; }" },
+            { "dint", "shader dint(output int Fout = 0) { Fout = int(4 * u); }" },
             { "tint", "shader tint(color Cin = color(1, 1, 1), color gain = color(1, 1, 1), output color Cout = 0) { Cout = Cin * gain; }" },
             { "probe",
               "shader probe(int mode = 0, output color Cout = 0, output float Fout = 0) { " +
