@@ -62,6 +62,15 @@ namespace pbrt
         public Vector3f RenderToLocal(Vector3f v) { return shadingFrame.ToLocal(v); }
         public Vector3f LocalToRender(Vector3f v) { return shadingFrame.FromLocal(v); }
 
+        // (not in pbrt-v4) The same BSDF with its frame turned over (every axis negated), for a BxDF that is evaluated from the
+        // other side of the surface: LocalToRender(v) of the result is LocalToRender(-v) of this
+        public BSDF TurnedOver()
+        {
+            BSDF turned = this;
+            turned.shadingFrame = new Frame(-shadingFrame.x, -shadingFrame.y, -shadingFrame.z);
+            return turned;
+        }
+
         public SampledSpectrum f(Vector3f woRender, Vector3f wiRender, TransportMode mode)
         {
             Vector3f wi = RenderToLocal(wiRender), wo = RenderToLocal(woRender);

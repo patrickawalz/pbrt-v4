@@ -203,6 +203,8 @@ namespace pbrt
         }
 
         public static string Name() { return "DielectricMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
         {
@@ -259,6 +261,7 @@ namespace pbrt
             DielectricMaterial dielectric = new DielectricMaterial(uRoughness, vRoughness, eta, displacement, normalMap, remapRoughness, distribution, gamma);
             dielectric.retroreflectivity = Clamp(parameters.GetOneFloat("retroreflectivity", 0f), 0, 1);
             dielectric.etaTexture = etaTexture;
+            dielectric.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
             return dielectric;
         }
 
@@ -292,7 +295,7 @@ namespace pbrt
                 urough = TrowbridgeReitzDistribution.RoughnessToAlpha(urough);
                 vrough = TrowbridgeReitzDistribution.RoughnessToAlpha(vrough);
             }
-            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, urough, vrough, gamma);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, urough, vrough, gamma), texEval, ctx, remapRoughness);
 
             // Return BSDF for dielectric material
             return new DielectricBxDF(sampledEta, distrib);
@@ -432,7 +435,7 @@ namespace pbrt
                 uRough = TrowbridgeReitzDistribution.RoughnessToAlpha(uRough);
                 vRough = TrowbridgeReitzDistribution.RoughnessToAlpha(vRough);
             }
-            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, uRough, vRough, gamma), texEval, ctx, remapRoughness);
             // The index of a dielectric substrate at the point: the light that goes through disperses if it depends on the
             // wavelength. The layers cost no wavelength (thinfilmlayers.cs).
             Float sampledEta = conductor ? 1.5f : ParametricSpectra.SampleIndex(substrateEta, substrateEtaTexture, texEval, ctx, ref lambda);
@@ -440,6 +443,8 @@ namespace pbrt
         }
 
         public static string Name() { return "ThinFilmMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
@@ -498,6 +503,7 @@ namespace pbrt
             ThinFilmMaterial film = new ThinFilmMaterial(layers, substrateEta, conductorEta, conductorK, displacement, normalMap, uRoughness, vRoughness,
                                                          remapRoughness, distribution, gamma);
             film.substrateEtaTexture = substrateEtaTexture;
+            film.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
             return film;
         }
 
@@ -1103,6 +1109,8 @@ namespace pbrt
         }
 
         public static string Name() { return "MicrosurfaceMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
@@ -1193,6 +1201,11 @@ namespace pbrt
             MicrosurfaceMaterial microsurface = new MicrosurfaceMaterial(kind, eta, k, reflectance, dielectricEta, uRoughness, vRoughness, displacement, normalMap, remapRoughness,
                                             distribution, gamma, depth, layers);
             microsurface.dielectricEtaTexture = dielectricEtaTexture;
+            microsurface.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
+            if (microsurface.blend != null && microsurface.blend.layered)
+            {
+                pbrt.ErrorExit(loc, "the walk of this material does not follow strata: \"layering\" \"asymmetric\" with every reflection is the \"facetforge\" material");
+            }
             return microsurface;
         }
 
@@ -1205,7 +1218,7 @@ namespace pbrt
                 uRough = TrowbridgeReitzDistribution.RoughnessToAlpha(uRough);
                 vRough = TrowbridgeReitzDistribution.RoughnessToAlpha(vRough);
             }
-            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, uRough, vRough, gamma), texEval, ctx, remapRoughness);
             MicrosurfaceHeight height = new MicrosurfaceHeightUniform();
             switch (kind)
             {
@@ -1331,6 +1344,8 @@ namespace pbrt
         }
 
         public static string Name() { return "PearlescentMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
@@ -1390,6 +1405,7 @@ namespace pbrt
             // follows them over the surface
             pearl.coatingThickness = parameters.GetFloatTexture("coatthickness", 60f, alloc);
             pearl.substrateThickness = parameters.GetFloatTexture("substratethickness", 500f, alloc);
+            pearl.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
             return pearl;
         }
 
@@ -1409,7 +1425,7 @@ namespace pbrt
             stack.substrateThickness = std.max<Float>(0, texEval.Apply(substrateThickness, ctx));
             if (general)
             {
-                return new PearlescentBxDF(stack, wavelengths, kappa, MicrofacetDistribution.Create(distribution, alphaX, alphaY, gamma), r, quadrature,
+                return new PearlescentBxDF(stack, wavelengths, kappa, DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, alphaX, alphaY, gamma), texEval, ctx, false), r, quadrature,
                                            maxEvents);
             }
             return new PearlescentBxDF(stack, wavelengths, kappa, alphaX, alphaY, r, quadrature, maxEvents);
@@ -1470,7 +1486,7 @@ namespace pbrt
                 etas = new SampledSpectrum(1f);
                 ks = 2 * pbrt.Sqrt(r) / pbrt.Sqrt(pbrt.ClampZero(new SampledSpectrum(1f) - r));
             }
-            MicrofacetDistribution distrib = MicrofacetDistribution.Create(distribution, uRough, vRough, gamma);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, uRough, vRough, gamma), texEval, ctx, remapRoughness);
             return new ConductorBxDF(distrib, etas, ks);
         }
 
@@ -1501,6 +1517,8 @@ namespace pbrt
         }
 
         public static string Name() { return "ConductorMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
 
         public override FloatTexture GetDisplacement() { return displacement; }
         public override Image GetNormalMap() { return normalMap; }
@@ -1553,6 +1571,7 @@ namespace pbrt
             ConductorMaterial conductor = new ConductorMaterial(eta, k, reflectance, uRoughness, vRoughness, displacement, normalMap, remapRoughness,
                                                                 distribution, gamma);
             conductor.retroreflectivity = Clamp(parameters.GetOneFloat("retroreflectivity", 0f), 0, 1);
+            conductor.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
             return conductor;
         }
 
@@ -1582,6 +1601,12 @@ namespace pbrt
         }
 
         public static string Name() { return "CoatedDiffuseMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
+        public MicrofacetDistributionType distribution = MicrofacetDistributionType.TrowbridgeReitz;
+        public Float gamma = 2;
+        // (not in pbrt-v4) "integer scatterdepth": the reflections on the microsurface of the coat that are followed (1: pbrt)
+        public int scatterDepth = 1;
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
         {
@@ -1605,7 +1630,7 @@ namespace pbrt
                 urough = TrowbridgeReitzDistribution.RoughnessToAlpha(urough);
                 vrough = TrowbridgeReitzDistribution.RoughnessToAlpha(vrough);
             }
-            TrowbridgeReitzDistribution distrib = new TrowbridgeReitzDistribution(urough, vrough);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, urough, vrough, gamma), texEval, ctx, remapRoughness);
 
             Float thick = texEval.Apply(thickness, ctx);
 
@@ -1618,9 +1643,39 @@ namespace pbrt
             return new CoatedDiffuseBxDF(new DielectricBxDF(sampledEta, distrib), new DiffuseBxDF(r), thick, a, gg, maxDepth, nSamples);
         }
 
+        // (not in pbrt-v4) The same with every reflection on the microsurface of the coat followed (MultiScatterDielectricBxDF):
+        // a rough coat then loses no energy
+        public MultiScatterCoatedDiffuseBxDF GetMultiScatterBxDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
+                                                                                    ref SampledWavelengths lambda)
+            where TextureEvaluator : ITextureEvaluator
+        {
+            SampledSpectrum r = pbrt.Clamp(texEval.Apply(reflectance, ctx, lambda), 0, 1);
+            Float urough = texEval.Apply(uRoughness, ctx);
+            Float vrough = texEval.Apply(vRoughness, ctx);
+            if (remapRoughness)
+            {
+                urough = TrowbridgeReitzDistribution.RoughnessToAlpha(urough);
+                vrough = TrowbridgeReitzDistribution.RoughnessToAlpha(vrough);
+            }
+            // (the walk has no specular case)
+            urough = std.max<Float>(urough, 1e-3f);
+            vrough = std.max<Float>(vrough, 1e-3f);
+            MicrofacetDistribution distrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(distribution, urough, vrough, gamma), texEval, ctx, remapRoughness);
+            Float thick = texEval.Apply(thickness, ctx);
+            Float sampledEta = ParametricSpectra.SampleIndex(eta, etaTexture, texEval, ctx, ref lambda);
+            SampledSpectrum a = pbrt.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
+            Float gg = pbrt.Clamp(texEval.Apply(g, ctx), -1, 1);
+            return new MultiScatterCoatedDiffuseBxDF(new MultiScatterDielectricBxDF(distrib, new MicrosurfaceHeightUniform(), sampledEta, scatterDepth),
+                                                     new DiffuseBxDF(r), thick, a, gg, maxDepth, nSamples);
+        }
+
         public override BSDF GetBSDF<TextureEvaluator>(TextureEvaluator texEval, MaterialEvalContext ctx,
                                                        ref SampledWavelengths lambda, ScratchBuffer buf)
         {
+            if (scatterDepth > 1)
+            {
+                return new BSDF(ctx.n, ctx.ns, ctx.dpdus, buf.Alloc(GetMultiScatterBxDF(texEval, ctx, ref lambda)));
+            }
             CoatedDiffuseBxDF bxdf = GetBxDF(texEval, ctx, ref lambda);
             return new BSDF(ctx.n, ctx.ns, ctx.dpdus, buf.Alloc(bxdf));
         }
@@ -1679,6 +1734,14 @@ namespace pbrt
             CoatedDiffuseMaterial coated = new CoatedDiffuseMaterial(reflectance, uRoughness, vRoughness, thickness, albedo, g, eta, displacement,
                                                                      normalMap, remapRoughness, maxDepth, nSamples);
             coated.etaTexture = etaTexture;
+            coated.distribution = MicrofacetDistribution.ParseType(parameters.GetOneString("distribution", "ggx"), loc);
+            coated.gamma = parameters.GetOneFloat("gamma", 2f);
+            coated.blend = DistributionBlend.Parse(parameters, "", loc, alloc);
+            coated.scatterDepth = parameters.GetOneInt("scatterdepth", 1);
+            if (coated.scatterDepth > 1 && coated.blend != null && coated.blend.layered)
+            {
+                pbrt.ErrorExit(loc, "\"scatterdepth\" does not follow strata: \"layering\" \"asymmetric\" with every reflection is the \"facetcoateddiffuse\" material");
+            }
             return coated;
         }
 
@@ -1715,6 +1778,11 @@ namespace pbrt
         }
 
         public static string Name() { return "CoatedConductorMaterial"; }
+        // (not in pbrt-v4) The other distributions of a blend ("distribution1", ...: distributionblend.cs), null without
+        public DistributionBlend blend;
+        public DistributionBlend conductorBlend;
+        public MicrofacetDistributionType interfaceDistribution = MicrofacetDistributionType.TrowbridgeReitz, conductorDistribution = MicrofacetDistributionType.TrowbridgeReitz;
+        public Float interfaceGamma = 2, conductorGamma = 2;
 
         public override bool CanEvaluateTextures<TextureEvaluator>(TextureEvaluator texEval)
         {
@@ -1734,7 +1802,8 @@ namespace pbrt
                 iurough = TrowbridgeReitzDistribution.RoughnessToAlpha(iurough);
                 ivrough = TrowbridgeReitzDistribution.RoughnessToAlpha(ivrough);
             }
-            TrowbridgeReitzDistribution interfaceDistrib = new TrowbridgeReitzDistribution(iurough, ivrough);
+            MicrofacetDistribution interfaceDistrib = DistributionBlend.Create(blend, MicrofacetDistribution.Create(interfaceDistribution, iurough, ivrough, interfaceGamma),
+                                                                                texEval, ctx, remapRoughness);
 
             Float thick = texEval.Apply(thickness, ctx);
 
@@ -1764,7 +1833,8 @@ namespace pbrt
                 curough = TrowbridgeReitzDistribution.RoughnessToAlpha(curough);
                 cvrough = TrowbridgeReitzDistribution.RoughnessToAlpha(cvrough);
             }
-            TrowbridgeReitzDistribution conductorDistrib = new TrowbridgeReitzDistribution(curough, cvrough);
+            MicrofacetDistribution conductorDistrib = DistributionBlend.Create(conductorBlend, MicrofacetDistribution.Create(conductorDistribution, curough, cvrough, conductorGamma),
+                                                                                texEval, ctx, remapRoughness);
 
             SampledSpectrum a = pbrt.Clamp(texEval.Apply(albedo, ctx, lambda), 0, 1);
             Float gg = pbrt.Clamp(texEval.Apply(g, ctx), -1, 1);
@@ -1859,6 +1929,13 @@ namespace pbrt
                                                                          conductorURoughness, conductorVRoughness, conductorEta, k, reflectance,
                                                                          displacement, normalMap, remapRoughness, maxDepth, nSamples);
             coated.interfaceEtaTexture = interfaceEtaTexture;
+            // (not in pbrt-v4) "string interface.distribution" and "string conductor.distribution", with their "gamma", and their blends
+            coated.interfaceDistribution = MicrofacetDistribution.ParseType(parameters.GetOneString("interface.distribution", "ggx"), loc);
+            coated.interfaceGamma = parameters.GetOneFloat("interface.gamma", 2f);
+            coated.blend = DistributionBlend.Parse(parameters, "interface.", loc, alloc);
+            coated.conductorDistribution = MicrofacetDistribution.ParseType(parameters.GetOneString("conductor.distribution", "ggx"), loc);
+            coated.conductorGamma = parameters.GetOneFloat("conductor.gamma", 2f);
+            coated.conductorBlend = DistributionBlend.Parse(parameters, "conductor.", loc, alloc);
             return coated;
         }
 
@@ -2245,6 +2322,10 @@ namespace pbrt
                 material = OSLMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "facetforge")
+                material = FacetForgeMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "facetcoateddiffuse")
+                material = FacetCoatedDiffuseMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "hazygloss")
                 material = HazyGlossMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "sggxsheen")

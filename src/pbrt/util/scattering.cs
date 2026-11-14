@@ -220,12 +220,20 @@ namespace pbrt
             return G1(w) / AbsCosTheta(w) * D(wm) * AbsDot(w, wm);
         }
 
-        public Float PDF(Vector3f w, Vector3f wm)
+        // (not in pbrt-v4) PDF, Sample_wm and DG are what a microfacet BxDF asks of its distribution, and a distribution whose
+        // normals depend on the height overrides them (LayeredDistribution)
+        public virtual Float PDF(Vector3f w, Vector3f wm)
         {
             return D(w, wm);
         }
 
-        public Vector3f Sample_wm(Vector3f w, Point2f u)
+        // D times the masking and shadowing of one scattering from wo to wi (on the same side or through the surface)
+        public virtual Float DG(Vector3f wo, Vector3f wi, Vector3f wm)
+        {
+            return D(wm) * G(wo, wi);
+        }
+
+        public virtual Vector3f Sample_wm(Vector3f w, Point2f u)
         {
             return Sample_wm_SingleSided(w.z < 0 ? -w : w, u);
         }

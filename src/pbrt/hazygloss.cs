@@ -97,62 +97,136 @@ namespace pbrt
     {
         public MixtureDistribution(MicrofacetDistribution narrow, MicrofacetDistribution wide, Float b)
         {
-            this.narrow = narrow;
-            this.wide = wide;
-            this.b = Clamp(b, 0, 1);
+            b = Clamp(b, 0, 1);
+            parts = new MicrofacetDistribution[] { narrow, wide };
+            shares = new Float[] { 1 - b, b };
         }
+
+        // Any number of distributions, with their shares (normalised here)
+        public MixtureDistribution(MicrofacetDistribution[] parts, Float[] shares)
+        {
+            this.parts = parts;
+            this.shares = new Float[parts.Length];
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                sum += shares[i];
+            }
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                this.shares[i] = sum > 0 ? shares[i] / sum : 1f / parts.Length;
+            }
+        }
+
+        public int Count() { return parts.Length; }
+        public MicrofacetDistribution Part(int i) { return parts[i]; }
+        public Float Share(int i) { return shares[i]; }
 
         public override Float D(Vector3f wm)
         {
-            return (1 - b) * narrow.D(wm) + b * wide.D(wm);
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (shares[i] > 0)
+                {
+                    sum += shares[i] * parts[i].D(wm);
+                }
+            }
+            return sum;
         }
 
         public override Float Lambda(Vector3f w)
         {
-            return (1 - b) * narrow.Lambda(w) + b * wide.Lambda(w);
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (shares[i] > 0)
+                {
+                    sum += shares[i] * parts[i].Lambda(w);
+                }
+            }
+            return sum;
         }
 
         public override Float Sigma(Vector3f w)
         {
-            return (1 - b) * narrow.Sigma(w) + b * wide.Sigma(w);
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (shares[i] > 0)
+                {
+                    sum += shares[i] * parts[i].Sigma(w);
+                }
+            }
+            return sum;
         }
 
+        // A distribution chosen by its share of the projected area, and a visible normal of it
         public override Vector3f Sample_wm_SingleSided(Vector3f w, Point2f u)
         {
-            Float sn = (1 - b) * narrow.Sigma(w), sw = b * wide.Sigma(w);
-            Float sum = sn + sw;
-            if (!(sum > 0))
+            Float total = Sigma(w);
+            if (!(total > 0))
             {
                 return new Vector3f(0, 0, 1);
             }
-            Float pn = sn / sum;
-            if (u[0] < pn)
+            Float target = u[0] * total, below = 0;
+            int last = -1;
+            for (int i = 0; i < parts.Length; ++i)
             {
-                return narrow.Sample_wm_SingleSided(w, new Point2f(std.min<Float>(u[0] / pn, OneMinusEpsilon), u[1]));
+                if (!(shares[i] > 0))
+                {
+                    continue;
+                }
+                Float area = shares[i] * parts[i].Sigma(w);
+                last = i;
+                if (target < below + area && area > 0)
+                {
+                    return parts[i].Sample_wm_SingleSided(w, new Point2f(std.min<Float>((target - below) / area, OneMinusEpsilon), u[1]));
+                }
+                below += area;
             }
-            return wide.Sample_wm_SingleSided(w, new Point2f(std.min<Float>((u[0] - pn) / (1 - pn), OneMinusEpsilon), u[1]));
+            return parts[last].Sample_wm_SingleSided(w, new Point2f(OneMinusEpsilon, u[1]));
         }
 
         public override bool EffectivelySmooth()
         {
-            return (b == 1 || narrow.EffectivelySmooth()) && (b == 0 || wide.EffectivelySmooth());
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                if (shares[i] > 0 && !parts[i].EffectivelySmooth())
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         public override void Regularize()
         {
-            narrow.Regularize();
-            wide.Regularize();
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                parts[i].Regularize();
+            }
         }
 
         // (the mixture has no roughness of its own: the root of the mean of the squares, which is that of the mean slope variance)
         public override Float AlphaX()
         {
-            return std.sqrt((1 - b) * Sqr(narrow.AlphaX()) + b * Sqr(wide.AlphaX()));
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                sum += shares[i] * Sqr(parts[i].AlphaX());
+            }
+            return std.sqrt(sum);
         }
 
         public override Float AlphaY()
         {
-            return std.sqrt((1 - b) * Sqr(narrow.AlphaY()) + b * Sqr(wide.AlphaY()));
+            Float sum = 0;
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                sum += shares[i] * Sqr(parts[i].AlphaY());
+            }
+            return std.sqrt(sum);
         }
 
         // (the V-cavity masking is written for the slopes of one distribution)
@@ -163,11 +237,16 @@ namespace pbrt
 
         public override string ToString()
         {
-            return StringPrintf("[ MixtureDistribution b: %f narrow: %s wide: %s ]", b, narrow, wide);
+            string text = "[ MixtureDistribution";
+            for (int i = 0; i < parts.Length; ++i)
+            {
+                text += StringPrintf(" %f: %s", shares[i], parts[i]);
+            }
+            return text + " ]";
         }
 
-        private MicrofacetDistribution narrow, wide;
-        private Float b;
+        private MicrofacetDistribution[] parts;
+        private Float[] shares;
     }
 
     // HazyGlossBxDF Definition

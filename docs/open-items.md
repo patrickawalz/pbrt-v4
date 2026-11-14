@@ -75,3 +75,23 @@ thin-film iridescence of Belcour and Barla on the standard materials (perhaps no
 ## Housekeeping
 - The whole test suite has not been run since the changes to the integrators and the materials: only the suites near each
   change were run.
+
+## Facet Forge (not committed yet)
+
+Done: the direct port (`util/facetforge.cs`, `facetforge.cs`: materials `facetforge`, `facetcoateddiffuse`), the two fixes of the
+fork to `LayeredBxDF.f` that it needs (proportional pdfs in the MIS weights, a failed exit sample), blends of any number of
+distributions on every material with a `distribution` (`distributionblend.cs`, `MixtureDistribution`), `LayeredDistribution`
+(strata, one scattering in closed form through `DG` / `PDF` / `Sample_wm` of `MicrofacetDistribution`), `distribution` on
+`coateddiffuse` and `coatedconductor`, `scatterdepth` on `coateddiffuse`.
+
+Left:
+- strata in the walk of Heitz (`multiscatterconductor`, `multiscatterdielectric`, `scatterdepth`): they refuse
+  `layering asymmetric`; every reflection on strata is the `facetforge` material only
+- facets of their own for each stratum, and two scales (a walk over any facet BxDF), outside `facetforge`
+- the rest of the fork's `LayeredBxDF` (the direct transmission term, `ExitJacobian`): `HazyTransmissionBxDF` has its own
+  straight term for now
+- `facetforge`: its `f` and `PDF` are estimates (one walk per evaluation). It has Mueller matrices
+  (`util/facetforge_polarised.cs`), except with `retroreflectivity`; a layered BxDF takes the matrices of a walked interface
+  from the interface's own walk, at the cost of walking it twice in a polarised render
+- the estimate of the transmission that starts in the rarer medium has a heavy tail (`densestart false`, the order of the fork)
+- pearlescent, hazy gloss: the blend syntax is read by pearlescent only with a `distribution`; hazy gloss keeps its own two lobes
