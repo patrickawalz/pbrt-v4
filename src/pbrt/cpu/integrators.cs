@@ -255,6 +255,8 @@ namespace pbrt
             Integrator integrator = null;
             if (name == "path")
                 integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "production")
+                integrator = ProductionPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "featureline")
                 integrator = FeatureLineIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "polpath")

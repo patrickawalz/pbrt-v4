@@ -2270,7 +2270,30 @@ namespace pbrt
             this.overlapPriority = overlapPriority;
         }
 
-        public bool HasVolume() { return volumeName.Length != 0; }
+        public bool HasVolume() { return volumeName.Length != 0 || ownVolume != null; }
+
+        // A volume that the material makes from its own parameters (the depth and the colour of the transmission of OpenPBR, the
+        // attenuation of a Maxwell BSDF), where the scene names none
+        public void SetOwnVolume(Medium medium) { ownVolume = medium; }
+
+        // The homogeneous medium of the coefficients given as functions of the wavelength, with the integrator named
+        // ("multiple", "single", "absorption": productionvolume.cs)
+        public static Medium MakeHomogeneousVolume(Func<Float, Float> sigma_a, Func<Float, Float> sigma_s, Float g, string scattering, FileLoc loc, Allocator alloc)
+        {
+            HomogeneousMedium medium = new HomogeneousMedium(DenselySampledSpectrum.SampleFunction(sigma_a), DenselySampledSpectrum.SampleFunction(sigma_s), 1,
+                                                             new ConstantSpectrum(0f), 1, g, alloc);
+            if (scattering != "multiple")
+            {
+                if (scattering != "single" && scattering != "absorption")
+                {
+                    ErrorExit(loc, StringPrintf("%s: the scattering of a volume must be \"multiple\", \"single\" or \"absorption\"", scattering));
+                }
+                VolumeIntegrator integrator = new VolumeIntegrator(VolumeIntegrator.Default.tracker, VolumeIntegrator.Default.transmittance);
+                integrator.scattering = scattering == "single" ? VolumeScattering.Single : VolumeScattering.Absorption;
+                medium.volumeIntegrator = integrator;
+            }
+            return medium;
+        }
 
         public int VolumePriority() { return volumePriority; }
 
@@ -2284,7 +2307,7 @@ namespace pbrt
         // The volume of the material, found by name among the media of the scene
         public Medium ResolveVolume(Func<string, FileLoc, Medium> findMedium, FileLoc loc)
         {
-            volume = HasVolume() ? findMedium(volumeName, loc) : null;
+            volume = volumeName.Length != 0 ? findMedium(volumeName, loc) : ownVolume;
             return volume;
         }
 
@@ -2300,6 +2323,7 @@ namespace pbrt
             return new ScaledMedium(volume, Math.Max(0, volumeScale.Evaluate(new TextureEvalContext(ctx))));
         }
 
+        Medium ownVolume;
         string volumeName = "";
         int volumePriority;
         bool canOverlap;
@@ -2322,6 +2346,14 @@ namespace pbrt
                 material = OSLMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "diffuse")
                 material = DiffuseMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "maxwell")
+                material = MaxwellMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "materialx")
+                material = MaterialXMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "openpbr")
+                material = OpenPBRMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "polygrain")
+                material = PolyGrainMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "facetforge")
                 material = FacetForgeMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "facetcoateddiffuse")

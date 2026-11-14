@@ -269,6 +269,8 @@ namespace pbrt
     {
         public readonly VolumeTracker tracker;
         public readonly TransmittanceEstimator transmittance;
+        // Which of the integrators of Fong et al. the volume is given by the "production" path tracer (productionvolume.cs)
+        public VolumeScattering scattering = VolumeScattering.Multiple;
 
         public VolumeIntegrator(VolumeTracker tracker, TransmittanceEstimator transmittance)
         {
@@ -291,7 +293,8 @@ namespace pbrt
             return "[ VolumeIntegrator tracker: " + tracker.Name() + " transmittance: " + transmittance.Name() + " ]";
         }
 
-        // "string tracker" ("majorant" | "global"), "string transmittance" ("ratio" | "analytic" | "tracklength" | "residual")
+        // "string tracker" ("majorant" | "global"), "string transmittance" ("ratio" | "analytic" | "tracklength" | "residual"),
+        // "string scattering" ("multiple" | "single" | "absorption")
         public static VolumeIntegrator Create(ParameterDictionary parameters, FileLoc loc)
         {
             string trackerName = parameters.GetOneString("tracker", "majorant");
@@ -310,9 +313,19 @@ namespace pbrt
                 estimator = residualEstimator;
             else if (transmittanceName != "ratio")
                 ErrorExit(loc, $"{transmittanceName}: transmittance estimator unknown.");
-            if (tracker == majorantTracker && estimator == ratioEstimator)
+            string scatteringName = parameters.GetOneString("scattering", "multiple");
+            VolumeScattering scattering = VolumeScattering.Multiple;
+            if (scatteringName == "single")
+                scattering = VolumeScattering.Single;
+            else if (scatteringName == "absorption")
+                scattering = VolumeScattering.Absorption;
+            else if (scatteringName != "multiple")
+                ErrorExit(loc, $"{scatteringName}: \"scattering\" must be \"multiple\", \"single\" or \"absorption\".");
+            if (tracker == majorantTracker && estimator == ratioEstimator && scattering == VolumeScattering.Multiple)
                 return Default;
-            return new VolumeIntegrator(tracker, estimator);
+            VolumeIntegrator made = new VolumeIntegrator(tracker, estimator);
+            made.scattering = scattering;
+            return made;
         }
     }
 

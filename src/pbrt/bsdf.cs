@@ -64,6 +64,14 @@ namespace pbrt
 
         // (not in pbrt-v4) The same BSDF with its frame turned over (every axis negated), for a BxDF that is evaluated from the
         // other side of the surface: LocalToRender(v) of the result is LocalToRender(-v) of this
+        // (not in pbrt-v4) The same frame around another BxDF: a lobe that this one holds
+        public BSDF With(BxDF other)
+        {
+            BSDF copy = this;
+            copy.bxdf = other;
+            return copy;
+        }
+
         public BSDF TurnedOver()
         {
             BSDF turned = this;

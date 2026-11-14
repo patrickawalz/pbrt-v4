@@ -3229,8 +3229,18 @@ namespace pbrt
             return flags;
         }
 
+        // (not in pbrt-v4) The walk of pbrt estimates f from the side of wo, and its estimate from the side of wi is another
+        // (by a percent or two of f where an interface is smooth: combine_test.cs). With `reciprocal`, f is the mean of the two,
+        // which is reciprocal; Sample_f still follows the walk from wo, whose mean differs from f by half that difference.
+        public bool reciprocal = false;
+
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
+            if (reciprocal)
+            {
+                return 0.5f * (Evaluate(wo, wi, mode, default, false, out Attenuation _, out bool _) +
+                               Evaluate(wi, wo, !mode, default, false, out Attenuation _, out bool _));
+            }
             return Evaluate(wo, wi, mode, default, false, out Attenuation _, out bool _);
         }
 
@@ -3244,6 +3254,28 @@ namespace pbrt
             polarised = false;
             matrix = default;
             SampledSpectrum value = Evaluate(wo, wi, mode, bsdf, true, out Attenuation sum, out bool hasSum);
+            if (reciprocal)
+            {
+                // the same light path walked from its other end: the same frames, the events in the other order
+                SampledSpectrum back = Evaluate(wi, wo, !mode, bsdf, true, out Attenuation sumBack, out bool hasBack);
+                if (hasBack)
+                {
+                    if (hasSum)
+                    {
+                        sum += sumBack;
+                    }
+                    else
+                    {
+                        sum = sumBack;
+                        hasSum = true;
+                    }
+                }
+                if (hasSum)
+                {
+                    polarised = PolarisedFacet.Normalise(sum, (value + back) * nSamples, new SampledSpectrum(1f), out matrix);
+                }
+                return 0.5f * (value + back);
+            }
             if (hasSum)
             {
                 polarised = PolarisedFacet.Normalise(sum, value * nSamples, new SampledSpectrum(1f), out matrix);
@@ -3352,6 +3384,7 @@ namespace pbrt
                 Float z = enteredTop ? thickness : 0;
                 Vector3f w = wos.value().wi;
                 HGPhaseFunction phase = new HGPhaseFunction(g);
+                int mediumEvents = 0;
 
                 for (int depth = 0; depth < maxDepth; ++depth)
                 {
@@ -3370,7 +3403,7 @@ namespace pbrt
                     {
                         // Advance to next layer boundary and update _beta_ for transmittance
                         z = (z == thickness) ? 0 : thickness;
-                        beta *= Tr(thickness, w);
+                        beta *= Through(w);
                     }
                     else
                     {
@@ -3384,6 +3417,8 @@ namespace pbrt
                         if (0 < zp && zp < thickness)
                         {
                             // Handle scattering event in layered BSDF medium
+                            if (++mediumEvents > mediumOrder)
+                                break;
                             // Account for scattering through _exitInterface_ using _wis_
                             Float wt = 1;
                             if (haveWis && !IsSpecular(exitInterface.Flags()))
@@ -3465,7 +3500,7 @@ namespace pbrt
                             if (!IsSpecular(exitInterface.Flags()))
                                 wt = PowerHeuristic(1, wisPdf, 1, nonExitInterface.PDF(-w, -wis.value().wi, mode));
                             SampledSpectrum connected = beta * nonExitInterface.f(-w, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * wt *
-                                                        Tr(thickness, wis.value().wi) * wis.value().f / wis.value().pdf;
+                                                        Through(wis.value().wi) * wis.value().f / wis.value().pdf;
                             f += connected;
                             if (polarised && (bool)connected)
                             {
@@ -3505,7 +3540,7 @@ namespace pbrt
                                     Float exitPDF = exitInterface.PDF(wi, -w, !mode, BxDFReflTransFlags.Transmission);
                                     wt = PowerHeuristic(1, SamplePdf(bs.value(), nonExitInterface, woNonExit, mode, BxDFReflTransFlags.Reflection), 1, exitPDF);
                                 }
-                                SampledSpectrum through = beta * Tr(thickness, bs.value().wi) * fExit * wt;
+                                SampledSpectrum through = beta * Through(bs.value().wi) * fExit * wt;
                                 f += through;
                                 if (polarised)
                                     Accumulate(ref sum, ref hasSum,
@@ -3539,7 +3574,9 @@ namespace pbrt
         {
             polarised = false;
             matrix = default;
-            CHECK(sampleFlags == BxDFReflTransFlags.All);  // for now
+            // (pbrt: sampleFlags == All only. A layered BxDF that is a layer of another one is asked for its reflection or its
+            // transmission alone: the walk is the same and a sample of the other kind is dropped, which is that part of the
+            // BxDF sampled with a part of the walks.)
             // Set _wo_ for layered BSDF sampling
             bool flipWi = false;
             if (twoSided && wo.z < 0)
@@ -3561,6 +3598,8 @@ namespace pbrt
                 chain = SampledMatrix(bsdf, side, enteredTop ? top : bottom, wo, bs.wi, uc, u, mode, BxDFReflTransFlags.All, fromCamera, false);
             if (bs.IsReflection())
             {
+                if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0)
+                    return default;
                 if (flipWi)
                     bs.wi = -bs.wi;
                 bs.pdfIsProportional = true;
@@ -3580,6 +3619,7 @@ namespace pbrt
             Float pdf = bs.pdf;
             Float z = enteredTop ? thickness : 0;
             HGPhaseFunction phase = new HGPhaseFunction(g);
+            int mediumEvents = 0;
 
             for (int depth = 0; depth < maxDepth; ++depth)
             {
@@ -3608,6 +3648,8 @@ namespace pbrt
                     if (0 < zp && zp < thickness)
                     {
                         // Update path state for valid scattering event between interfaces
+                        if (++mediumEvents > mediumOrder)
+                            return default;
                         Point2f up = default;
                         up.x = r();
                         up.y = r();
@@ -3616,6 +3658,12 @@ namespace pbrt
                             return default;
                         f *= albedo * ps.value().p;
                         pdf *= ps.value().pdf;
+                        // (not in pbrt: see below; a long walk in the medium underflows)
+                        if (pdf > 1e8f || pdf < 1e-8f)
+                        {
+                            f /= pdf;
+                            pdf = 1;
+                        }
                         specularPath = false;
                         w = ps.value().wi;
                         z = zp;
@@ -3635,7 +3683,7 @@ namespace pbrt
                 {
                     // Advance to the other layer interface
                     z = (z == thickness) ? 0 : thickness;
-                    f *= Tr(thickness, w);
+                    f *= Through(w);
                 }
                 // Initialize _interface_ for current interface surface
                 BxDF iface;
@@ -3655,6 +3703,13 @@ namespace pbrt
                 BSDFSample bsi = bs1.value();
                 f *= bsi.f;
                 pdf *= bsi.pdf;
+                // (not in pbrt) Interfaces that are nearly smooth have large values and densities, and their product over a long
+                // walk overflows: the pair is kept as its ratio, which is all that the sample is used for (pdfIsProportional)
+                if (pdf > 1e8f || pdf < 1e-8f)
+                {
+                    f /= pdf;
+                    pdf = 1;
+                }
                 specularPath &= bsi.IsSpecular();
                 if (keep)
                     chain = PolarisedFacet.Compose(chain, true, SampledMatrix(bsdf, side, iface, -w, bsi.wi, uc2, u2, mode, BxDFReflTransFlags.All, fromCamera, false), fromCamera);
@@ -3664,6 +3719,8 @@ namespace pbrt
                 if (bsi.IsTransmission())
                 {
                     BxDFFlags flags = SameHemisphere(wo, w) ? BxDFFlags.Reflection : BxDFFlags.Transmission;
+                    if ((sampleFlags & (SameHemisphere(wo, w) ? BxDFReflTransFlags.Reflection : BxDFReflTransFlags.Transmission)) == 0)
+                        return default;
                     flags |= specularPath ? BxDFFlags.Specular : BxDFFlags.Glossy;
                     if (flipWi)
                         w = -w;
@@ -3686,8 +3743,18 @@ namespace pbrt
         // An interface that is a walk (a multiple scattering microsurface, Facet Forge) has the matrix of each of its walks: the
         // one scattering at a half vector is not what happened on it. Its value and its sample depend on the directions and
         // the numbers only, so the walk that gave the scalar value is made again with its matrix.
+        private static BxDF Unwrap(BxDF iface)
+        {
+            while (iface is AnyBxDF any)
+            {
+                iface = any.inner;
+            }
+            return iface;
+        }
+
         private static bool Walked(BxDF iface)
         {
+            iface = Unwrap(iface);
             return !(iface is DielectricBxDF) && !(iface is ConductorBxDF) && iface.HasMuellerMatrix();
         }
 
@@ -3715,8 +3782,9 @@ namespace pbrt
             return polarised ? matrix : Attenuation.Lambert(new SampledSpectrum(1f));
         }
 
-        private static Attenuation EventMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, bool fromCamera)
+        internal static Attenuation EventMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, bool fromCamera)
         {
+            iface = Unwrap(iface);
             Vector3f m;
             if (iface is DielectricBxDF dielectric)
             {
@@ -3791,6 +3859,23 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) What a layer that only absorbs lets through along w: with `absorption` set, its coefficient by
+        // wavelength for the unit of thickness, exp(-absorption thickness / |cos|), so that a coat has a colour that deepens
+        // towards grazing; without, the grey extinction of pbrt.
+        public SampledSpectrum absorption;
+        public bool hasAbsorption = false;
+        // (not in pbrt-v4) The scatterings in the medium of the layer that a walk may make: 1 is single scattering
+        public int mediumOrder = Int32.MaxValue;
+
+        private SampledSpectrum Through(Vector3f w)
+        {
+            if (!hasAbsorption)
+            {
+                return new SampledSpectrum(Tr(thickness, w));
+            }
+            return Exp(-absorption * std.abs(thickness / w.z));
+        }
+
         private static Float Tr(Float dz, Vector3f w)
         {
             if (std.abs(dz) <= FloatMinNormal)
@@ -3800,7 +3885,7 @@ namespace pbrt
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
-            CHECK(sampleFlags == BxDFReflTransFlags.All);  // for now
+            // (pbrt: sampleFlags == All only; the density of the whole walk is returned for a part of it too)
             // Set _wo_ and _wi_ for layered BSDF evaluation
             if (twoSided && wo.z < 0)
             {

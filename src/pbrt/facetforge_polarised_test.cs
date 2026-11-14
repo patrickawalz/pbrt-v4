@@ -32,7 +32,7 @@ namespace pbrt
             return s;
         }
 
-        static bool Matrix(BxDF bxdf, Vector3f wo, Vector3f wi, TransportMode mode, out MuellerMatrix matrix)
+        internal static bool Matrix(BxDF bxdf, Vector3f wo, Vector3f wi, TransportMode mode, out MuellerMatrix matrix)
         {
             BSDF bsdf = new BSDF(new Normal3f(0, 0, 1), new Vector3f(1, 0, 0), bxdf);
             Attenuation A;
@@ -41,7 +41,7 @@ namespace pbrt
             return ok;
         }
 
-        static double Difference(MuellerMatrix a, MuellerMatrix b)
+        internal static double Difference(MuellerMatrix a, MuellerMatrix b)
         {
             double worst = 0;
             for (int row = 0; row < 4; ++row)
@@ -54,7 +54,7 @@ namespace pbrt
             return worst;
         }
 
-        static Vector3f Upper(ref RNG rng)
+        internal static Vector3f Upper(ref RNG rng)
         {
             Vector3f w = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
             w.z = 0.15f + 0.8f * Math.Abs(w.z);
@@ -310,7 +310,7 @@ namespace pbrt
             EXPECT_LT(worst, 4.5);
         }
 
-        static void SampledAgainstEvaluated(BxDF bxdf, string name, int samples)
+        internal static void SampledAgainstEvaluated(BxDF bxdf, string name, int samples)
         {
             RNG rng = new RNG(13);
             BSDF bsdf = new BSDF(new Normal3f(0, 0, 1), new Vector3f(1, 0, 0), bxdf);
