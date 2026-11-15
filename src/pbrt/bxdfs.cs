@@ -3386,6 +3386,24 @@ namespace pbrt
                 HGPhaseFunction phase = new HGPhaseFunction(g);
                 int mediumEvents = 0;
 
+                // (not in pbrt) The light that crosses the layers without an event between the two interfaces. pbrt's walk has no
+                // term for it (its layered BxDFs have a base that does not transmit): the walk only connects to wi after a
+                // scattering in the medium or a reflection at the other interface. Where the exit interface is not specular the
+                // term is added when the walk first reaches it (below); where it is specular and the entrance is not, here, by
+                // the direction sampled from wi.
+                bool direct = true;
+                if (!SameHemisphere(wo, wi) && haveWis && IsSpecular(exitInterface.Flags()) && !IsSpecular(enterInterface.Flags()))
+                {
+                    SampledSpectrum across = (bool)albedo ? new SampledSpectrum(Tr(thickness, wis.value().wi)) : Through(wis.value().wi);
+                    SampledSpectrum straight = enterInterface.f(wo, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * across * wis.value().f / wis.value().pdf;
+                    f += straight;
+                    if (polarised && (bool)straight)
+                    {
+                        Attenuation entered = EvaluatedMatrix(bsdf, side, enterInterface, wo, -wis.value().wi, mode);
+                        Accumulate(ref sum, ref hasSum, PolarisedFacet.Compose(entered, true, exitMatrix, fromCamera), straight, directionExit, directionEnter);
+                    }
+                }
+
                 for (int depth = 0; depth < maxDepth; ++depth)
                 {
                     // Sample next event for layered BSDF evaluation random walk
@@ -3419,6 +3437,7 @@ namespace pbrt
                             // Handle scattering event in layered BSDF medium
                             if (++mediumEvents > mediumOrder)
                                 break;
+                            direct = false;
                             // Account for scattering through _exitInterface_ using _wis_
                             Float wt = 1;
                             if (haveWis && !IsSpecular(exitInterface.Flags()))
@@ -3476,6 +3495,21 @@ namespace pbrt
                     // Account for scattering at appropriate interface
                     if (z == exitZ)
                     {
+                        if (direct && !IsSpecular(exitInterface.Flags()))
+                        {
+                            // (not in pbrt) straight from the entrance to the exit interface, and through it to wi
+                            SampledSpectrum fStraight = exitInterface.f(-w, wi, mode);
+                            if ((bool)fStraight)
+                            {
+                                SampledSpectrum straight = beta * fStraight;
+                                f += straight;
+                                if (polarised)
+                                    Accumulate(ref sum, ref hasSum,
+                                               PolarisedFacet.Compose(chain, true, EvaluatedMatrix(bsdf, side, exitInterface, -w, wi, mode), fromCamera),
+                                               straight, directionExit, directionEnter);
+                            }
+                        }
+                        direct = false;
                         // Account for reflection at _exitInterface_
                         Float uc2 = r();
                         Point2f u2 = default;
@@ -3492,6 +3526,7 @@ namespace pbrt
                     }
                     else
                     {
+                        direct = false;
                         // Account for scattering at _nonExitInterface_
                         if (haveWis && !IsSpecular(nonExitInterface.Flags()))
                         {

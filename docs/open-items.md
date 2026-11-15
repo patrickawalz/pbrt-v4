@@ -325,3 +325,110 @@ Open:
   second) would shorten the tail.
 - trials are capped at 262144 (11 of 54850 roots reached it; their contribution is dropped)
 - chains longer than 8 mirrors are dropped
+
+
+## Opacity as traced presence (uncommitted after e96c794)
+
+How LuxCore does it (read from its source; the history could not be searched in the partial clone):
+`Material::GetPassThroughTransparency` compares one random number of the ray with the front or back
+transparency texture, and `Scene::Intersect` goes on past the hit when it passes; a separate
+`transparency.shadow` lets shadow rays through (LuxCore's own notes call that one biased). Its
+`TriangleLight::Illuminate` returns the full radiance with the density 1 / triangle area and never asks
+the transparency, while a ray that meets the emitter sees it only when the surface is there: the two
+strategies estimate different things.
+
+pbrt-v4 has the same kind of fault for a fractional alpha, measured here before the change: the primitive
+hashed the ray and the light hashed the point, so a ray saw an emitter of alpha 0.5 at 0.25 of its
+radiance (2.38 against 4.77), while the light sampler gave 0.5.
+
+Now:
+
+- `Material.GetOpacity()` (OpenPBR: `geometry_opacity`, with `"bool opacity_traced"` true by default; false
+  is the old pass-through lobe of the BSDF). The scene multiplies it with the alpha of the shape; the
+  product is the presence of the surface for camera, scattered and shadow rays alike.
+- one test per point (a hash of the point) in the primitive and in the light.
+- `DiffuseAreaLight.SetPresence`: the mean presence over the shape (1024 points) enters the power and the
+  light sampler; a light given by its power keeps that power.
+
+Measured (renders of the check scenes; tests Opacity.*, 3):
+
+- emitter L 10 with opacity 0.5 against L 5 fully present: seen directly 4.6652 / 4.6652, floor 0.0591 / 0.0592
+- power 100 with opacity or alpha 0.25 against fully present: floor 0.1878 / 0.1885, seen 14.90 / 14.85
+- floor under a black sheet of opacity 0.5, small area light: expected 0.0510, traced 0.0510, BSDF lobe 0.0590
+  (noise or bias not separated); point light: expected 0.0804, traced 0.0811, BSDF lobe 0.0010 (no light at all)
+
+Open:
+
+- a surface that is not thin walled: entry may be present and exit absent, so the interior medium is
+  entered and never left (the paper: opacity below 1 only makes strict sense for thin walls)
+- shadow rays are stochastic (unbiased, noisy); the paper's transparent-shadow transmittance is not used
+- Mix and other wrapping materials do not forward the opacity of their members
+- emission of OpenPBR itself is still the area light of the shape
+- bdpt, mlt, sppm and the production integrator were not run with it
+
+
+## Thin-walled mode brought to section 7 of the OpenPBR paper (uncommitted after e96c794)
+
+thinwall.cs (ThinSheetBxDF, TranslucentEonBxDF, LeavingBxDF, OrientedBxDF), thinwall_test.cs (6 tests).
+
+Done:
+
+- the wall is the same from either side (OrientedBxDF: the directions are mirrored when wo is below; the
+  paper's approximation, coat and fuzz on the side of wo, the light leaves from the base)
+- thin dielectric: the ladder with the absorption inside, a = transmission_color^(1 / cos theta_t); checked
+  against light followed bounce by bounce (9 cases, e.g. colour 0.5 at the normal: 0.0492 / 0.4610)
+- rough thin dielectric: microfacet lobes; the transmitted one a reflection lobe mirrored below with the
+  roughness times (eta - 1) / sqrt(2) (a small-slope derivation of ours; the paper says no model is settled)
+- thin subsurface: Eq. 94, the shares by subsurface_scatter_anisotropy, EON lobes of base_diffuse_roughness
+
+Two faults found on the way, both in committed code:
+
+- light that left through the base of a stack kept the 1 / eta^2 of the dielectric interfaces above it
+  (pbrt undoes it at the interface on the way out; a thin wall has none): thin-walled subsurface transmitted
+  0.296 where 0.666 was due (white paper under a clear gloss: 0.3345 + 0.2954 = 0.63, now 0.3345 + 0.6655)
+- LayeredBxDF.f had no term for light that crosses the layers with no event between the interfaces (pbrt's
+  own bases do not transmit): transmission by values was 0.105 where the samples gave 0.481. This is not
+  only thin walls: any OpenPBR or Maxwell stack over a transmitting base (coated glass) was short in f(),
+  so in everything lit by light sampling. Now 0.4799 against 0.4807 and the like (ThinWall.SamplesAgreeWithValues).
+
+Open:
+
+- transmission through a wall with layers is not reciprocal (12.8 % mean, 31 % worst for paper; 16.4 % and
+  37 % coated): the light meets the gloss and the coat on the side of wo only. The bare sheet is exact.
+- the paper wants the albedo of the thin subsurface unaffected by the inter-reflections under its gloss; here
+  they shift light from reflection to transmission (white, g 0: 0.33 / 0.67)
+- emission from both sides is not in the material
+- the rough glass cases of SamplesAgreeWithValues have error bars of 0.05 to 0.07 (uniform directions on a
+  narrow lobe): they do not test much
+- LayeredBxDF.PDF was not looked at for the same missing term
+- two-sided thin walls (different properties per side) are future work in the paper and not done
+
+
+### Polarisation of the thin wall
+
+- ThinSheetBxDF has its Mueller matrix: the ladder for each polarisation (they keep to themselves between the
+  faces) and the terms that keep the phase between them, with the absorption inside. The scalar sheet is now the
+  mean of the two ladders (pbrt's thin dielectric takes the ladder of the mean reflectance; e.g. colour 0.5,
+  cosine 0.2: 0.3595 / 0.1870 against 0.3631 / 0.1783 before).
+- The light that a rough sheet lets through: the frame at wi is that of the reflection mirrored below the sheet
+  (`Attenuation.Scattered` with a normal for each end). A choice that goes with the heuristic lobe.
+- LeavingBxDF and OrientedBxDF pass the matrices of what they hold (`BSDF.Mirrored` for the mirrored directions).
+  TranslucentEonBxDF depolarises, as every diffuse lobe.
+- Nothing of this runs in a scalar render: the matrices are only built by the overloads that the polarised
+  integrator calls.
+
+Measured (ThinWall.Polarised): smooth clear sheet against the integrator's matrix for pbrt's thin dielectric,
+worst element 2.4e-7 over 4000 samples; sampled against evaluated for the rough coloured sheet (s1 0.01899 /
+0.01909), oriented (0.01564 / 0.01574), the OpenPBR wall of rough glass (-0.00887 / -0.00861) and of rough-coated
+paper (-0.02396 / -0.02171, 1.2 sigma). polpath renders of three thin-walled scenes: no NaN, intensity equal to
+the scalar renders.
+
+Not opt-in (they are corrections, there is no switch back): the straight-through term of LayeredBxDF.f, the
+1 / eta^2 of light leaving a thin wall, one presence test per point, the section 7 lobes inside thin-walled mode.
+Opt-in or switchable: geometry_thin_walled itself (false by default), "bool opacity_traced" (true by default).
+
+`"string thin_walled_lobes"`: "paper" (default, section 7) or "legacy" (pbrt's thin dielectric with
+transmission_color as a tint, an even diffuse sheet that does not hear the anisotropy, the wall not the same from
+below). The corrections stay in both: the straight-through term and the radiance factor of light that leaves through
+the base (which, for the legacy wall seen from below, is the inverse: before, that side gained energy).
+ThinWall.TheLobesBefore: legacy transmitted 0.4815 and 0.4830 with anisotropy 0.6, the paper's lobes 0.6550.

@@ -72,6 +72,15 @@ namespace pbrt
             return copy;
         }
 
+        // (not in pbrt-v4) The same BSDF with its frame mirrored in the surface (the normal negated), for a BxDF that is evaluated
+        // with its directions mirrored: LocalToRender(x, y, z) of the result is LocalToRender(x, y, -z) of this
+        public BSDF Mirrored()
+        {
+            BSDF mirrored = this;
+            mirrored.shadingFrame = new Frame(shadingFrame.x, shadingFrame.y, -shadingFrame.z);
+            return mirrored;
+        }
+
         public BSDF TurnedOver()
         {
             BSDF turned = this;

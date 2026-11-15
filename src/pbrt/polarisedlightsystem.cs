@@ -873,6 +873,22 @@ namespace pbrt
                 return this;
             }
 
+            // The same with a normal for each end: a scattering whose two directions are not in one plane with one normal (the
+            // light that a rough thin sheet lets through: the plane of incidence is mirrored below the sheet with the light)
+            public Attenuation Scattered(Vector3f worldDirFix, Vector3f worldDirGen, Vector3f normalFix, Vector3f normalGen, bool fromCamera)
+            {
+                if (!PrepareForFrames())
+                {
+                    return this;
+                }
+
+                Vector3f directionExit = fromCamera ? worldDirFix : worldDirGen;
+                Vector3f directionEnter = fromCamera ? -worldDirGen : -worldDirFix;
+                SetFrames(directionExit, StokesAxis(fromCamera ? normalFix : normalGen, directionExit), directionEnter,
+                          StokesAxis(fromCamera ? normalGen : normalFix, directionEnter));
+                return this;
+            }
+
             // The same for a scattering in a medium: the x axis of the frames is the normal of the plane of the two directions,
             // the axis that the Mueller matrices of scattering are written for
             public Attenuation Scattered(Vector3f worldDirFix, Vector3f worldDirGen, bool fromCamera)

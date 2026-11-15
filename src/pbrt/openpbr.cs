@@ -145,6 +145,12 @@ namespace pbrt
         public int scatterDepth = 16, maxDepth = 32, nSamples = 1;
         // The walks between the layers evaluated from both directions: each evaluation reciprocal, at twice the cost
         public bool reciprocal = false;
+        // geometry_opacity is the presence of the surface for every ray (false: a lobe of the BSDF that lets the ray through)
+        public bool opacityTraced = true;
+        // The lobes of the thin-walled mode: those of section 7 of the paper (thinwall.cs), or the ones before them
+        public bool thinWalledLegacy = false;
+
+        public override FloatTexture GetOpacity() { return opacityTraced ? opacity : null; }
         public int roughnessMapping = 0;  // 0 OpenPBR, 1 pbrt, 2 alpha
         public FloatTexture displacement;
         public Image normalMap;
@@ -437,7 +443,11 @@ namespace pbrt
                             SampledSpectrum c = S(subsurfaceColor, 0.8f);
                             if (thinWalled)
                             {
-                                subsurface = StackBxDF.Absorbing(Gloss(), new DiffuseTransmissionBxDF(c * 0.5f, c * 0.5f), nothing, maxDepth, nSamples, false);
+                                // the paper's Eq. 94: reflected and transmitted by the anisotropy, as EON lobes
+                                BxDF scattering = thinWalledLegacy ? new DiffuseTransmissionBxDF(c * 0.5f, c * 0.5f)
+                                                                   : new TranslucentEonBxDF(c, subsurfaceAnisotropy, Clamp(F(baseDiffuseRoughness, 0), 0, 1));
+                                BxDF sheet = new LeavingBxDF(scattering, relative * outside);
+                                subsurface = StackBxDF.Absorbing(Gloss(), sheet, nothing, maxDepth, nSamples, false);
                             }
                             else if (subsurfaceVolume)
                             {
@@ -456,8 +466,24 @@ namespace pbrt
                     BxDF translucent = null;
                     if (wTransmission > 0)
                     {
-                        BxDF lobe = thinWalled ? new ThinDielectricBxDF(relative) : Specular(p, specular, false, relative, default, default);
-                        translucent = new TintedBxDF(lobe, tintSpecular, tintTransmission);
+                        if (thinWalled && thinWalledLegacy)
+                        {
+                            // pbrt's thin dielectric (smooth, the ladder of the mean reflectance), transmission_color a tint of what goes through
+                            BxDF sheet = new ThinDielectricBxDF(relative);
+                            translucent = new TintedBxDF(outside != 1 ? new LeavingBxDF(sheet, outside) : sheet, tintSpecular, tintTransmission);
+                        }
+                        else if (thinWalled)
+                        {
+                            // the sheet: transmission_color is its transmittance along the normal, inside the ladder of reflections
+                            Float sheetX, sheetY;
+                            Alphas(p.roughness, p.anisotropy, out sheetX, out sheetY);
+                            BxDF sheet = new ThinSheetBxDF(relative, sheetX, sheetY, S(transmissionColor, 1));
+                            translucent = new TintedBxDF(outside != 1 ? new LeavingBxDF(sheet, outside) : sheet, tintSpecular, White());
+                        }
+                        else
+                        {
+                            translucent = new TintedBxDF(Specular(p, specular, false, relative, default, default), tintSpecular, tintTransmission);
+                        }
                     }
                     dielectricBase = MixBxDF.Of(opaque, translucent, wTransmission);
                 }
@@ -501,13 +527,18 @@ namespace pbrt
                                                   twoSided);
                 surface = MixBxDF.Of(surface, fuzzed, wFuzz);
             }
-            if (alpha < 1)
+            if (alpha < 1 && !opacityTraced)
             {
                 surface = MixBxDF.Of(new OSLTransparentBxDF(), surface, alpha);
             }
             if (reciprocal)
             {
                 StackBxDF.SetReciprocal(surface, true);
+            }
+            if (thinWalled && !thinWalledLegacy)
+            {
+                // a thin wall looks the same from either side
+                surface = new OrientedBxDF(surface);
             }
             return surface;
         }
@@ -573,6 +604,16 @@ namespace pbrt
             m.maxDepth = parameters.GetOneInt("maxdepth", 32);
             m.nSamples = parameters.GetOneInt("nsamples", 1);
             m.reciprocal = parameters.GetOneBool("reciprocal", false);
+            m.opacityTraced = parameters.GetOneBool("opacity_traced", true);
+            string thinLobes = parameters.GetOneString("thin_walled_lobes", "paper");
+            if (thinLobes == "legacy")
+            {
+                m.thinWalledLegacy = true;
+            }
+            else if (thinLobes != "paper")
+            {
+                ErrorExit(loc, "\"thin_walled_lobes\" must be \"paper\" or \"legacy\"");
+            }
             string mapping = parameters.GetOneString("roughness_mapping", "openpbr");
             if (mapping == "openpbr")
             {
