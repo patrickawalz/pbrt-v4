@@ -579,6 +579,7 @@ namespace pbrt
         public override Float Evaluate(TextureEvalContext ctx) { return value; }
         public override Float MinValue() { return value; }
         public override Float MaxValue() { return value; }
+        public override Float RegionMean(Bounds3f region) { return value; }
 
         public override string ToString() { return pbrt.StringPrintf("[ FloatConstantTexture value: %f ]", value); }
         // FloatConstantTexture Public Methods
@@ -1979,6 +1980,8 @@ namespace pbrt
                 tex = FloatDotsTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "fbm")
                 tex = FBmTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "cloud")
+                tex = CloudMediumTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "wrinkled")
                 tex = WrinkledTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "windy")
@@ -2036,6 +2039,23 @@ namespace pbrt
 
             // (not in pbrt-v4) "bool analyticderivatives" false: finite differences for this texture, closed form or not
             tex.finiteDifferences = !parameters.GetOneBool("analyticderivatives", true);
+            // (not in pbrt-v4) "string derivatives" "world": the differences along the axes of space (see FloatTexture.worldDerivatives)
+            string derivatives = parameters.GetOneString("derivatives", "surface");
+            Float derivativeStep = parameters.GetOneFloat("derivativestep", 0);
+            if (derivatives == "world")
+            {
+                tex.worldDerivatives = true;
+                tex.finiteDifferences = true;
+                tex.worldStep = derivativeStep;
+            }
+            else if (derivatives != "surface")
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: \"derivatives\" must be \"surface\" or \"world\".", name));
+            }
+            else if (derivativeStep != 0)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: \"derivativestep\" goes with \"derivatives\" \"world\".", name));
+            }
             parameters.ReportUnused();
             return tex;
         }

@@ -63,6 +63,30 @@ namespace pbrt
             hi = MaxValue();
         }
 
+        // (not in pbrt-v4) The mean of the value over a region of the points passed in TextureEvalContext::p (full octaves, as
+        // for the bounds). Here by the values at the centres of a 4 x 4 x 4 division of the region, which is a mean of the
+        // region as far as 64 values tell and always within its bounds; a texture that knows its mean overrides it. A texture
+        // medium takes it as the density that its densities are about in a voxel, the control of residual ratio tracking:
+        // there any value is right, and the nearer it is to the densities met along a ray the less is left to track.
+        public virtual Float RegionMean(Bounds3f region)
+        {
+            const int n = 4;
+            double sum = 0;
+            for (int z = 0; z < n; ++z)
+            {
+                for (int y = 0; y < n; ++y)
+                {
+                    for (int x = 0; x < n; ++x)
+                    {
+                        TextureEvalContext ctx = new TextureEvalContext();
+                        ctx.p = region.Lerp(new Point3f((x + 0.5f) / n, (y + 0.5f) / n, (z + 0.5f) / n));
+                        sum += Evaluate(ctx);
+                    }
+                }
+            }
+            return (Float)(sum / (n * n * n));
+        }
+
         // (not in pbrt-v4) The derivative of the value with respect to the point passed in TextureEvalContext::p. A central
         // difference unless the texture overrides it with the analytic derivative, which bump and normal mapping from a
         // volume prefer.
@@ -104,6 +128,43 @@ namespace pbrt
         // all of them with Option "texturederivatives" "finite" (which is stock pbrt: the whole graph of a texture
         // is evaluated again at the shifted points).
         public bool finiteDifferences = false;
+
+        // "string derivatives" "world": the differences are taken along the three axes of space, the point alone moved (the
+        // texture coordinates held), and the gradient that they give is laid on the two directions of the surface. For a
+        // texture that is a function of the point (cloud, triplanar, SDF, shell map) this does not ask anything of the
+        // parameterisation of the surface, as the bump mapping without UVs of LuxCore's triplanar texture. The step is
+        // the size of the pixel on the surface, or "float derivativestep" in the units of the scene (LuxCore's fixed
+        // sampling distance).
+        public bool worldDerivatives = false;
+        public Float worldStep = 0;
+
+        protected void WorldDifferences(TextureEvalContext ctx, Float value, TextureDirections directions, Float* dfdu, Float* dfdv)
+        {
+            Float h = worldStep;
+            if (!(h > 0))
+            {
+                h = .5f * (pbrt.Length(ctx.dpdx) + pbrt.Length(ctx.dpdy));
+                if (!(h > 0))
+                {
+                    h = .0005f;
+                }
+            }
+            Vector3f gradient = new Vector3f(0, 0, 0);
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                Vector3f step = new Vector3f(0, 0, 0);
+                step[axis] = h;
+                gradient[axis] = (Evaluate(TextureDirections.Shifted(ctx, 1, step, new Vector2f(0, 0))) - value) / h;
+            }
+            if (dfdu != null)
+            {
+                *dfdu = pbrt.Dot(gradient, directions.dpdu);
+            }
+            if (dfdv != null)
+            {
+                *dfdv = pbrt.Dot(gradient, directions.dpdv);
+            }
+        }
 
         public Float Evaluate(TextureEvalContext ctx, TextureDirections directions, Float* dfdu, Float* dfdv)
         {
@@ -156,6 +217,11 @@ namespace pbrt
         // The difference of pbrt's BumpMap(): the context moved by a step the size of the pixel on the surface
         protected void FiniteDifferences(TextureEvalContext ctx, Float value, TextureDirections directions, Float* dfdu, Float* dfdv)
         {
+            if (worldDerivatives)
+            {
+                WorldDifferences(ctx, value, directions, dfdu, dfdv);
+                return;
+            }
             if (dfdu != null)
             {
                 Float du = .5f * (std.abs(ctx.dudx) + std.abs(ctx.dudy));

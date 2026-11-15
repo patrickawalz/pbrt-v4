@@ -77,7 +77,60 @@ namespace pbrt
                         majorantGrid.Set(x, y, z, MaxDensity(majorantGrid.VoxelBounds(x, y, z)));
                 }
             }
+            // The smallest density of each voxel, for decomposition tracking (the voxels that the hierarchy refines keep that of
+            // the whole voxel: a finer grid's segments have none)
+            majorantGrid.minima = new Float[majorantGrid.voxels.Length];
+            for (int z = 0; z < majorantRes; ++z)
+            {
+                for (int y = 0; y < majorantRes; ++y)
+                {
+                    for (int x = 0; x < majorantRes; ++x)
+                    {
+                        Bounds3f unitBox = majorantGrid.VoxelBounds(x, y, z);
+                        Bounds3f renderBox = renderFromMedium.Apply(new Bounds3f(bounds.Lerp(unitBox.pMin), bounds.Lerp(unitBox.pMax)));
+                        texture.RegionBounds(renderBox, out Float lo, out Float hi);
+                        majorantGrid.minima[x + majorantRes * (y + majorantRes * z)] =
+                            std.max<Float>(0, std.min(densityOffset + densityScale * lo, densityOffset + densityScale * hi));
+                    }
+                }
+            }
+            // and the mean of each voxel, for the control of residual ratio tracking: the mean that the texture gives over the
+            // voxel (FloatTexture.RegionMean), as a density, kept between the smallest and the largest of the voxel
+            majorantGrid.averages = new Float[majorantGrid.voxels.Length];
+            for (int z = 0; z < majorantRes; ++z)
+            {
+                for (int y = 0; y < majorantRes; ++y)
+                {
+                    for (int x = 0; x < majorantRes; ++x)
+                    {
+                        int index = x + majorantRes * (y + majorantRes * z);
+                        Bounds3f unitBox = majorantGrid.VoxelBounds(x, y, z);
+                        Bounds3f renderBox = renderFromMedium.Apply(new Bounds3f(bounds.Lerp(unitBox.pMin), bounds.Lerp(unitBox.pMax)));
+                        majorantGrid.averages[index] = Clamp(densityOffset + densityScale * texture.RegionMean(renderBox), majorantGrid.minima[index],
+                                                             majorantGrid.voxels[index]);
+                    }
+                }
+            }
             topNodes = hierarchyDepth > 0 ? RefineMajorantGrid(majorantGrid, 1) : null;
+        }
+
+        // The control of residual ratio tracking as the middle of the bounds of each voxel, in the place of the mean that the
+        // texture gives ("string control" "middle"): the residual then has the smallest majorant that the bounds allow, half
+        // their width, and the fewest lookups, at the price of weights further from one where the densities are not about
+        // the middle
+        public void UseMiddleControl()
+        {
+            for (int i = 0; i < majorantGrid.voxels.Length; ++i)
+            {
+                majorantGrid.averages[i] = 0.5f * (majorantGrid.minima[i] + majorantGrid.voxels[i]);
+            }
+        }
+
+        // The density is the only thing that varies when nothing is emitted
+        public override bool ControlProperties(SampledWavelengths lambda, out MediumProperties unit)
+        {
+            unit = new MediumProperties { sigma_a = sigma_a_spec.Sample(lambda), sigma_s = sigma_s_spec.Sample(lambda), phase = phase, Le = new SampledSpectrum(0f) };
+            return !IsEmissive();
         }
 
         // The volume aggregate: a voxel of a majorant grid whose densities are on average well below its majorant is replaced
@@ -229,7 +282,7 @@ namespace pbrt
         }
 
         // The majorant that the tracking of a ray uses at the render-space point p (the finest grid cell that holds it)
-        public SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time = 0)
+        public override SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time)
         {
             Point3f pMedium = animated != null ? animated.Interpolate(time).ApplyInverse(p) : renderFromMedium.ApplyInverse(p);
             if (!pbrt.Inside(pMedium, bounds))
@@ -251,27 +304,27 @@ namespace pbrt
             }
         }
 
-        // Next event estimation of the emission: the light that samples it, added to the scene's lights by the integrators
-        public void EnableEmissionSampling(int res, bool fnee)
+        // (the light of the emission is Medium.EnableEmissionSampling) What the light asks: the bound over a box of the unit
+        // cube of the medium
+        public override Float EmissionBoundUnit(Bounds3f unitBox)
         {
-            lock (emissionMedia)
-            {
-                if (emissionLight == null)
-                {
-                    emissionLight = new VolumeEmissionLight(this, res);
-                    emissionLight.SetFnee(fnee);
-                    emissionMedia.Add(this);
-                }
-            }
+            return EmissionBound(renderFromMedium.Apply(new Bounds3f(bounds.Lerp(unitBox.pMin), bounds.Lerp(unitBox.pMax))));
         }
 
-        public VolumeEmissionLight EmissionLight() { return emissionLight; }
+        public override bool EmissionRegion(out Bounds3f mediumBounds, out Transform renderFromMedium)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            return true;
+        }
+
+        public bool HasHierarchy() { return topNodes != null; }
 
         // The bidirectional path tracer only finds emission by sampling it, so every medium with emission gets its light
         public static void EnableEmissionSamplingForAll(int res)
         {
             List<TextureMedium> all;
-            lock (emissionMedia)
+            lock (emissiveMedia)
             {
                 all = new List<TextureMedium>(emissiveMedia);
             }
@@ -279,27 +332,12 @@ namespace pbrt
                 medium.EnableEmissionSampling(res, false);
         }
 
-        // The lights plus the emission lights of the media that ask for them
-        public static List<Light> AddEmissionLights(List<Light> lights)
-        {
-            List<Light> all = new List<Light>(lights);
-            lock (emissionMedia)
-            {
-                foreach (TextureMedium medium in emissionMedia)
-                {
-                    if (medium.emissionLight.HasEmission() && !all.Contains(medium.emissionLight))
-                        all.Add(medium.emissionLight);
-                }
-            }
-            return all;
-        }
-
         // Forgets the media that ask for emission sampling, for tests that build several in one process
         public static void ClearEmissionLights()
         {
-            lock (emissionMedia)
+            ClearEmissionRegistry();
+            lock (emissiveMedia)
             {
-                emissionMedia.Clear();
                 emissiveMedia.Clear();
             }
         }
@@ -405,9 +443,14 @@ namespace pbrt
                                                       hierarchyRes, hierarchyDepth, refineThreshold, emissionTextureName,
                                                       emissionScale, alloc);
             created.SetMotion(renderFromMediumAnimated);
+            string control = parameters.GetOneString("control", "mean");
+            if (control == "middle")
+                created.UseMiddleControl();
+            else if (control != "mean")
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: \"control\" must be \"mean\" or \"middle\".", control));
             if (emissionTextureName.Length > 0)
             {
-                lock (emissionMedia)
+                lock (emissiveMedia)
                 {
                     emissiveMedia.Add(created);
                 }
@@ -418,6 +461,20 @@ namespace pbrt
         }
 
         // TextureMedium Private Members
+        // (not in pbrt-v4) What a volume aggregate asks (Medium.AggregateRegion, Medium.AggregateExtinction)
+        public override bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            grid = majorantGrid;
+            return true;
+        }
+
+        public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+        }
+
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private AnimatedTransform animated;
@@ -434,8 +491,6 @@ namespace pbrt
         private string emissionTextureName;
         private Float emissionScale;
         private SpectrumTexture emissionTexture;
-        private VolumeEmissionLight emissionLight;
-        private static readonly List<TextureMedium> emissionMedia = new List<TextureMedium>();
         private static readonly List<TextureMedium> emissiveMedia = new List<TextureMedium>();
     }
 

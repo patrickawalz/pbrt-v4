@@ -47,6 +47,12 @@ namespace pbrt
     {
         public Float tMin, tMax;
         public SampledSpectrum sigma_maj;
+        // (not in pbrt-v4) The fraction of the majorant that the extinction is never below along the segment, for the media
+        // that know it (decomposition tracking takes it as the control component); zero otherwise
+        public Float controlFraction;
+        // (not in pbrt-v4) The fraction of the majorant that the extinction is about along the segment (its mean over the
+        // voxel), for the media that know it (residual ratio tracking takes it as its control); zero otherwise
+        public Float averageFraction;
 
         public override string ToString()
         {

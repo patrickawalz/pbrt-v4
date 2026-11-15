@@ -1,4 +1,8 @@
-// (not in pbrt-v4) Next event estimation for the emission of a texture medium.
+// (not in pbrt-v4) Next event estimation for the emission of a medium: any medium that says where it may emit
+// (Medium.EmissionRegion) and bounds what it emits there (Medium.EmissionBoundUnit): the texture, grid, RGB grid and NanoVDB
+// media, and an aggregate of them. After Villemin and Hery, "Multiple Importance Sampling for Emissive Effects" (2013): a
+// voxel is chosen by its emission, then a point in it; Simon et al., "Line Integration for Rendering Heterogeneous Emissive
+// Volumes" (2017) and Huang et al. (2021): the point gives a direction and the emission is gathered along the whole ray.
 //
 // The volpath integrator gathers the emission of a medium at every collision of a path (Huang et al. 2021 call this
 // the "free-path" estimator). That strategy cannot find emission from small bright regions seen from a scattering
@@ -22,14 +26,30 @@ namespace pbrt
 {
     public sealed unsafe class VolumeEmissionLight : LightBase
     {
-        public VolumeEmissionLight(TextureMedium medium, int res)
+        public VolumeEmissionLight(Medium medium, int res)
             : base(LightType.Area, new Transform(), new MediumInterface(medium))
         {
             this.medium = medium;
+            moving = medium as TextureMedium;
             this.res = std.max(res, 1);
         }
 
-        public TextureMedium Medium() { return medium; }
+        public Medium Medium() { return medium; }
+
+        // The transformation of the medium at a time (only the texture medium moves)
+        private Transform RenderFromMedium(Float time)
+        {
+            return moving != null ? moving.RenderFromMedium(time) : renderFromMedium;
+        }
+
+        private bool IsAnimated() { return moving != null && moving.IsAnimated(); }
+
+        // Emitted radiance per length at the render-space point p: sigma_a Le
+        private SampledSpectrum EmissionAt(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            MediumProperties mp = medium.SamplePoint(p, lambda, time);
+            return mp.sigma_a * mp.Le;
+        }
 
         // Whether the volumetric path tracer samples the emission along lines (see PdfDirection) and not at points
         public bool UsesFnee() { return fnee; }
@@ -44,8 +64,11 @@ namespace pbrt
             {
                 if (cdf != null)
                     return;
-                Bounds3f bounds = medium.MediumBounds();
-                Transform renderFromMedium = medium.RenderFromMedium();
+                Bounds3f bounds;
+                Transform fromMedium;
+                if (!medium.EmissionRegion(out bounds, out fromMedium))
+                    pbrt.ErrorExit("A medium that is sampled as a light has no extent of its own.");
+                renderFromMedium = fromMedium;
                 voxelVolume = VoxelVolume(renderFromMedium, bounds);
                 Float[] weights = new Float[res * res * res];
                 Float[] sums = new Float[res * res * res + 1];
@@ -58,9 +81,8 @@ namespace pbrt
                         {
                             Point3f p0 = new Point3f((Float)x / res, (Float)y / res, (Float)z / res);
                             Point3f p1 = new Point3f((Float)(x + 1) / res, (Float)(y + 1) / res, (Float)(z + 1) / res);
-                            Bounds3f region = new Bounds3f(bounds.Lerp(p0), bounds.Lerp(p1));
-                            // (the bound is asked in render space, in the first pose of the medium)
-                            Float w = std.max<Float>(0, medium.EmissionBound(renderFromMedium.Apply(region)));
+                            // (the bound is asked over a box of the unit cube of the medium, in its first pose)
+                            Float w = std.max<Float>(0, medium.EmissionBoundUnit(new Bounds3f(p0, p1)));
                             if (IsNaN(w) || IsInf(w))
                                 pbrt.ErrorExit("The emission of a medium that is sampled as a light has a non-finite bound.");
                             int index = x + res * (y + res * z);
@@ -79,6 +101,35 @@ namespace pbrt
 
         public bool HasEmission() { EnsureBuilt(); return totalWeight > 0; }
 
+        // The box in render space that holds all of the emission (the voxels that may emit), over the whole shutter for a
+        // medium that moves
+        public Bounds3f RenderBounds()
+        {
+            EnsureBuilt();
+            Bounds3f unit = new Bounds3f();
+            for (int z = 0; z < res; ++z)
+            {
+                for (int y = 0; y < res; ++y)
+                {
+                    for (int x = 0; x < res; ++x)
+                    {
+                        if (weight[x + res * (y + res * z)] > 0)
+                        {
+                            unit = pbrt.Union(unit, new Point3f((Float)x / res, (Float)y / res, (Float)z / res));
+                            unit = pbrt.Union(unit, new Point3f((Float)(x + 1) / res, (Float)(y + 1) / res, (Float)(z + 1) / res));
+                        }
+                    }
+                }
+            }
+            Bounds3f emitting = new Bounds3f(boundsMedium.Lerp(unit.pMin), boundsMedium.Lerp(unit.pMax));
+            if (IsAnimated())
+                return moving.MotionBounds(emitting);
+            Bounds3f b = new Bounds3f();
+            for (int i = 0; i < 8; ++i)
+                b = pbrt.Union(b, renderFromMedium.Apply(emitting.Corner(i)));
+            return b;
+        }
+
         // The volume in render space of a voxel of the grid, for a transformation of the medium
         private Float VoxelVolume(Transform renderFromMedium, Bounds3f bounds)
         {
@@ -92,9 +143,9 @@ namespace pbrt
         // The volume of a voxel at the time (a medium that moves rigidly keeps it; the scale of the motion is followed)
         private Float VoxelVolumeAt(Float time)
         {
-            if (!medium.IsAnimated())
+            if (!IsAnimated())
                 return voxelVolume;
-            return VoxelVolume(medium.RenderFromMedium(time), boundsMedium);
+            return VoxelVolume(RenderFromMedium(time), boundsMedium);
         }
 
         // Probability density, with respect to volume in render space, of sampling the render-space point p
@@ -103,7 +154,7 @@ namespace pbrt
             EnsureBuilt();
             if (!(totalWeight > 0))
                 return 0;
-            Vector3f o = boundsMedium.Offset(medium.RenderFromMedium(time).ApplyInverse(p));
+            Vector3f o = boundsMedium.Offset(RenderFromMedium(time).ApplyInverse(p));
             if (o.x < 0 || o.x >= 1 || o.y < 0 || o.y >= 1 || o.z < 0 || o.z >= 1)
                 return 0;
             int x = std.min((int)(o.x * res), res - 1), y = std.min((int)(o.y * res), res - 1), z = std.min((int)(o.z * res), res - 1);
@@ -135,7 +186,7 @@ namespace pbrt
             Float ux = std.min((target - cdf[index]) / weight[index], OneMinusEpsilon);
             int ix = index % res, iy = (index / res) % res, iz = index / (res * res);
             Point3f pMedium = boundsMedium.Lerp(new Point3f((ix + ux) / res, (iy + u.y) / res, (iz + uz) / res));
-            p = medium.RenderFromMedium(time).Apply(pMedium);
+            p = RenderFromMedium(time).Apply(pMedium);
             pdfPoint = weight[index] / (totalWeight * VoxelVolumeAt(time));
             return true;
         }
@@ -165,15 +216,16 @@ namespace pbrt
             EnsureBuilt();
             if (!(totalWeight > 0))
                 return 0;
-            Transform renderFromMedium = medium.RenderFromMedium(time);
+            Transform renderFromMedium = RenderFromMedium(time);
             // The ray in the units of the grid; the ray parameter is still the distance in render space
             Point3f oMedium = renderFromMedium.ApplyInverse(x);
             Vector3f dMedium = renderFromMedium.ApplyInverse(w);
-            Float[] o = new Float[3], d = new Float[3];
-            Float[] pMin = new Float[] { boundsMedium.pMin.x, boundsMedium.pMin.y, boundsMedium.pMin.z };
-            Float[] pMax = new Float[] { boundsMedium.pMax.x, boundsMedium.pMax.y, boundsMedium.pMax.z };
-            Float[] oWorld = new Float[] { oMedium.x, oMedium.y, oMedium.z };
-            Float[] dWorld = new Float[] { dMedium.x, dMedium.y, dMedium.z };
+            Float* o = stackalloc Float[3];
+            Float* d = stackalloc Float[3];
+            Float* pMin = stackalloc Float[3] { boundsMedium.pMin.x, boundsMedium.pMin.y, boundsMedium.pMin.z };
+            Float* pMax = stackalloc Float[3] { boundsMedium.pMax.x, boundsMedium.pMax.y, boundsMedium.pMax.z };
+            Float* oWorld = stackalloc Float[3] { oMedium.x, oMedium.y, oMedium.z };
+            Float* dWorld = stackalloc Float[3] { dMedium.x, dMedium.y, dMedium.z };
             Float tEnter = 0, tExit = Infinity;
             for (int axis = 0; axis < 3; ++axis)
             {
@@ -199,8 +251,10 @@ namespace pbrt
                     return 0;
             }
 
-            int[] cell = new int[3], step = new int[3];
-            Float[] tNext = new Float[3], tDelta = new Float[3];
+            int* cell = stackalloc int[3];
+            int* step = stackalloc int[3];
+            Float* tNext = stackalloc Float[3];
+            Float* tDelta = stackalloc Float[3];
             for (int axis = 0; axis < 3; ++axis)
             {
                 Float position = o[axis] + d[axis] * tEnter;
@@ -252,7 +306,7 @@ namespace pbrt
             if (!(distance2 > 0))
                 return new pstd.optional<LightLiSample>();
             Vector3f wi = d / std.sqrt(distance2);
-            SampledSpectrum L = medium.EmissionAt(p, lambda, ctx.time);
+            SampledSpectrum L = EmissionAt(p, lambda, ctx.time);
             if (!L)
                 return new pstd.optional<LightLiSample>();
             Interaction pLight = new Interaction(p, new MediumInterface(medium));
@@ -284,9 +338,9 @@ namespace pbrt
                 Point3f p;
                 Float pdfPoint;
                 if (!SamplePointInVolume(new Point2f(RadicalInverse(0, (uint64_t)i), RadicalInverse(1, (uint64_t)i)),
-                                         RadicalInverse(2, (uint64_t)i), medium.StartTime(), out p, out pdfPoint))
+                                         RadicalInverse(2, (uint64_t)i), StartTime(), out p, out pdfPoint))
                     continue;
-                sum += medium.EmissionAt(p, lambda, medium.StartTime()) / pdfPoint;
+                sum += EmissionAt(p, lambda, StartTime()) / pdfPoint;
             }
             return 4 * Pi * sum / (Float)pointCount;
         }
@@ -294,14 +348,13 @@ namespace pbrt
         public override pstd.optional<LightBounds> Bounds()
         {
             EnsureBuilt();
-            Transform renderFromMedium = medium.RenderFromMedium();
             Bounds3f b = new Bounds3f();
             for (int i = 0; i < 8; ++i)
                 b = pbrt.Union(b, renderFromMedium.Apply(boundsMedium.Corner(i)));
             // A medium that moves: the bounds of the box over the whole shutter (the emission goes in all directions, so there is no cone
             // to widen; the light sampler only needs the position, and it is the same at all times, so the probabilities do not depend on it)
-            if (medium.IsAnimated())
-                b = medium.MotionBounds(boundsMedium);
+            if (IsAnimated())
+                b = moving.MotionBounds(boundsMedium);
             Float phi = 4 * Pi * totalWeight * voxelVolume;
             return new LightBounds(b, new Vector3f(0, 0, 1), phi, std.cos(Pi), std.cos(Pi / 2), false);
         }
@@ -314,7 +367,7 @@ namespace pbrt
         {
             if (!SamplePointInVolume(u1, uz, time, out Point3f p, out Float pdfPoint))
                 return new pstd.optional<LightLeSample>();
-            SampledSpectrum L = medium.EmissionAt(p, lambda, time);
+            SampledSpectrum L = EmissionAt(p, lambda, time);
             if (!L)
                 return new pstd.optional<LightLeSample>();
             Vector3f w = pbrt.SampleUniformSphere(u2);
@@ -335,7 +388,11 @@ namespace pbrt
 
         public override string ToString() { return pbrt.StringPrintf("[ VolumeEmissionLight res: %d ]", res); }
 
-        private TextureMedium medium;
+        private Float StartTime() { return moving != null ? moving.StartTime() : 0; }
+
+        private Medium medium;
+        private TextureMedium moving;
+        private Transform renderFromMedium;
         private int res;
         private bool fnee;
         private Float[] weight, cdf;

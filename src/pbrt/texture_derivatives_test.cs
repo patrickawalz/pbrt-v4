@@ -1,4 +1,4 @@
-// (not in pbrt-v4) texture_derivatives_test.cs
+﻿// (not in pbrt-v4) texture_derivatives_test.cs
 //
 // The derivatives of the textures (FloatTexture.Evaluate() with directions, texture_derivatives.cs):
 //   - every closed form against a central difference of the texture itself, over random contexts and directions, on
@@ -191,6 +191,117 @@ namespace pbrt
             Check("spectrum dots", new SpectrumDotsTexture(mappings[0], spectrumA, spectrumB), false);
             Check("constant", new FloatConstantTexture(0.7f), false);
             Check("spectrum constant", new SpectrumConstantTexture(b), false);
+        }
+
+        // A texture that is a function of the point alone, with its gradient in closed form
+        sealed class Solid : FloatTexture
+        {
+            public override Float Evaluate(TextureEvalContext ctx)
+            {
+                return std.sin(1.3f * ctx.p.x + 0.4f * ctx.p.z) * std.cos(0.7f * ctx.p.y);
+            }
+            public static Vector3f Gradient(Point3f p)
+            {
+                Float s = std.sin(1.3f * p.x + 0.4f * p.z), c = std.cos(1.3f * p.x + 0.4f * p.z);
+                return new Vector3f(1.3f * c * std.cos(0.7f * p.y), -0.7f * s * std.sin(0.7f * p.y), 0.4f * c * std.cos(0.7f * p.y));
+            }
+            public override Float MinValue() { return -1; }
+            public override Float MaxValue() { return 1; }
+            public override string ToString() { return "[ Solid ]"; }
+        }
+
+        // "string derivatives" "world": differences along the axes of space, laid on the directions of the surface
+        [TEST("TextureDerivatives", "WorldAxes")]
+        public static void TextureDerivatives_WorldAxes()
+        {
+            RNG rng = new RNG(83);
+            // against the closed form, with a fixed step and with the step of the pixel
+            foreach (Float step in new Float[] { 1e-3f, 0 })
+            {
+                Solid world = new Solid();
+                world.worldDerivatives = true;
+                world.finiteDifferences = true;
+                world.worldStep = step;
+                Solid surface = new Solid();
+                double worstWorld = 0, worstSurface = 0;
+                for (int i = 0; i < 2000; ++i)
+                {
+                    TextureEvalContext ctx = Context(ref rng, true);
+                    TextureDirections directions = Directions(ref rng);
+                    Vector3f gradient = Solid.Gradient(ctx.p);
+                    double du = Dot(gradient, directions.dpdu), dv = Dot(gradient, directions.dpdv);
+                    Float wu, wv, su, sv;
+                    Float value = world.Evaluate(ctx, directions, &wu, &wv);
+                    surface.Evaluate(ctx, directions, &su, &sv);
+                    EXPECT_EQ(value, world.Evaluate(ctx));
+                    worstWorld = Math.Max(worstWorld, Math.Max(Math.Abs(wu - du), Math.Abs(wv - dv)));
+                    worstSurface = Math.Max(worstSurface, Math.Max(Math.Abs(su - du), Math.Abs(sv - dv)));
+                }
+                Console.WriteLine("MEASURE world-axis differences, step {0}: worst error {1:E2} (differences along the surface: {2:E2})",
+                                  step > 0 ? step.ToString() : "of the pixel", worstWorld, worstSurface);
+                // (a forward difference: the error is of the order of the step times the second derivative)
+                EXPECT_LT(worstWorld, step > 0 ? 5e-3 : 0.25);
+            }
+
+            // a surface whose parameterisation says nothing of distances (long dpdu, no texture-coordinate footprint): the
+            // differences along the surface step 0.0005 of the parameter, which is far in space; those of the axes do not ask
+            {
+                Solid world = new Solid();
+                world.worldDerivatives = true;
+                world.finiteDifferences = true;
+                Solid surface = new Solid();
+                double worstWorld = 0, worstSurface = 0, worstOfBound = 0;
+                for (int i = 0; i < 2000; ++i)
+                {
+                    TextureEvalContext ctx = Context(ref rng, true);
+                    ctx.dudx = ctx.dudy = ctx.dvdx = ctx.dvdy = 0;
+                    ctx.dpdx *= 0.02f;
+                    ctx.dpdy *= 0.02f;
+                    TextureDirections directions = Directions(ref rng);
+                    directions.dpdu *= 2000;
+                    directions.dpdv *= 2000;
+                    Vector3f gradient = Solid.Gradient(ctx.p);
+                    double du = Dot(gradient, directions.dpdu), dv = Dot(gradient, directions.dpdv);
+                    // (relative to the slope that the directions could show: their length times the length of the gradient)
+                    double scale = Math.Max(Length(directions.dpdu), Length(directions.dpdv)) * Math.Max(0.1, Length(gradient));
+                    Float wu, wv, su, sv;
+                    world.Evaluate(ctx, directions, &wu, &wv);
+                    surface.Evaluate(ctx, directions, &su, &sv);
+                    worstWorld = Math.Max(worstWorld, Math.Max(Math.Abs(wu - du), Math.Abs(wv - dv)) / scale);
+                    // the error of a forward difference: at most half the step times the second derivative (below 2.4 for this
+                    // texture) on each axis, and what the rounding of the two values leaves
+                    double h = 0.5 * (Length(ctx.dpdx) + Length(ctx.dpdy));
+                    double bound = Math.Sqrt(3.0) * (0.5 * h * 2.4 + 4e-7 / h) * Math.Max(Length(directions.dpdu), Length(directions.dpdv));
+                    worstOfBound = Math.Max(worstOfBound, Math.Max(Math.Abs(wu - du), Math.Abs(wv - dv)) / bound);
+                    worstSurface = Math.Max(worstSurface, Math.Max(Math.Abs(su - du), Math.Abs(sv - dv)) / scale);
+                }
+                Console.WriteLine("MEASURE a parameterisation 2000 times too long and no footprint of texture coordinates: worst relative error {0:E2} along the axes, " +
+                                  "{1:E2} along the surface; the error along the axes is at most {2:F2} of the bound of a forward difference", worstWorld, worstSurface, worstOfBound);
+                EXPECT_LT(worstOfBound, 1);
+                EXPECT_GT(worstSurface, 10 * worstWorld);
+            }
+
+            // a texture of the scene description: fBm, the closed form against the differences along the axes
+            {
+                FloatTexture closed = new FBmTexture(Mapping3D(), 3, 0.6f);
+                FloatTexture world = new FBmTexture(Mapping3D(), 3, 0.6f);
+                world.worldDerivatives = true;
+                world.finiteDifferences = true;
+                world.worldStep = 1e-3f;
+                double worst = 0, largest = 0;
+                for (int i = 0; i < 2000; ++i)
+                {
+                    TextureEvalContext ctx = Context(ref rng, false);
+                    TextureDirections directions = Directions(ref rng);
+                    Float cu, cv, wu, wv;
+                    closed.Evaluate(ctx, directions, &cu, &cv);
+                    world.Evaluate(ctx, directions, &wu, &wv);
+                    worst = Math.Max(worst, Math.Max(Math.Abs(cu - wu), Math.Abs(cv - wv)));
+                    largest = Math.Max(largest, Math.Max(Math.Abs(cu), Math.Abs(cv)));
+                }
+                Console.WriteLine("MEASURE fBm, closed form against differences along the axes (step 1e-3): worst difference {0:E2} (largest derivative {1:F2})", worst, largest);
+                EXPECT_LT(worst, 0.02 * largest);
+            }
         }
 
         [TEST("TextureDerivatives", "Composed")]

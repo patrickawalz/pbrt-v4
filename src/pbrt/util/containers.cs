@@ -324,6 +324,62 @@ namespace pbrt
             return Lerp(d.z, Lerp(d.y, d00, d10), Lerp(d.y, d01, d11));
         }
 
+        // (not in pbrt-v4) The smallest value that Lookup() can return over the bounds: the minimum of the samples that the
+        // interpolation reaches there, zero where it reaches beyond the grid (a lookup outside is zero)
+        public static Float MinValue(this SampledGrid<Float> g, Bounds3f bounds)
+        {
+            int nx = g.XSize();
+            int ny = g.YSize();
+            int nz = g.ZSize();
+            Point3i lo = (Point3i)Floor(new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f, bounds.pMin.z * nz - .5f));
+            Point3i hi = (Point3i)Floor(new Point3f(bounds.pMax.x * nx - .5f, bounds.pMax.y * ny - .5f, bounds.pMax.z * nz - .5f)) + new Vector3i(1, 1, 1);
+            if (lo.x < 0 || lo.y < 0 || lo.z < 0 || hi.x > nx - 1 || hi.y > ny - 1 || hi.z > nz - 1)
+            {
+                return 0;
+            }
+            Float minValue = g.Lookup(lo);
+            for (int z = lo.z; z <= hi.z; ++z)
+            {
+                for (int y = lo.y; y <= hi.y; ++y)
+                {
+                    for (int x = lo.x; x <= hi.x; ++x)
+                    {
+                        Float v = g.Lookup(new Point3i(x, y, z));
+                        if (v < minValue)
+                        {
+                            minValue = v;
+                        }
+                    }
+                }
+            }
+            return std.max<Float>(minValue, 0);
+        }
+
+        // (not in pbrt-v4) The mean of the samples that the interpolation reaches over the bounds
+        public static Float AverageValue(this SampledGrid<Float> g, Bounds3f bounds)
+        {
+            int nx = g.XSize();
+            int ny = g.YSize();
+            int nz = g.ZSize();
+            Point3i lo = Max((Point3i)Floor(new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f, bounds.pMin.z * nz - .5f)), new Point3i(0, 0, 0));
+            Point3i hi = Min((Point3i)Floor(new Point3f(bounds.pMax.x * nx - .5f, bounds.pMax.y * ny - .5f, bounds.pMax.z * nz - .5f)) + new Vector3i(1, 1, 1),
+                             new Point3i(nx - 1, ny - 1, nz - 1));
+            double sum = 0;
+            long count = 0;
+            for (int z = lo.z; z <= hi.z; ++z)
+            {
+                for (int y = lo.y; y <= hi.y; ++y)
+                {
+                    for (int x = lo.x; x <= hi.x; ++x)
+                    {
+                        sum += g.Lookup(new Point3i(x, y, z));
+                        ++count;
+                    }
+                }
+            }
+            return count > 0 ? (Float)(sum / count) : 0;
+        }
+
         public static Float MaxValue(this SampledGrid<Float> g, Bounds3f bounds)
         {
             int nx = g.XSize();
@@ -399,6 +455,39 @@ namespace pbrt
                         if (v > maxValue)
                         {
                             maxValue = v;  // std::max(maxValue, v)
+                        }
+                    }
+                }
+            }
+            return maxValue;
+        }
+
+        // (not in pbrt-v4) The largest value of the voxels that a box of the unit cube touches, without the illuminant
+        public static Float MaxValue(this SampledGrid<RGBIlluminantVoxel> g, Bounds3f bounds)
+        {
+            int nx = g.XSize();
+            int ny = g.YSize();
+            int nz = g.ZSize();
+            Point3f[] ps = {new Point3f(bounds.pMin.x * nx - .5f, bounds.pMin.y * ny - .5f,
+                                        bounds.pMin.z * nz - .5f),
+                            new Point3f(bounds.pMax.x * nx - .5f, bounds.pMax.y * ny - .5f,
+                                        bounds.pMax.z * nz - .5f)};
+            Point3i[] pi = {Max((Point3i)Floor(ps[0]), new Point3i(0, 0, 0)),
+                            Min((Point3i)Floor(ps[1]) + new Vector3i(1, 1, 1),
+                                new Point3i(nx - 1, ny - 1, nz - 1))};
+
+            Float maxValue = 0;
+            for (int z = pi[0].z; z <= pi[1].z; ++z)
+            {
+                for (int y = pi[0].y; y <= pi[1].y; ++y)
+                {
+                    for (int x = pi[0].x; x <= pi[1].x; ++x)
+                    {
+                        RGBIlluminantVoxel voxel = g.Lookup(new Point3i(x, y, z));
+                        Float v = voxel.scale * voxel.rsp.MaxValue();
+                        if (v > maxValue)
+                        {
+                            maxValue = v;
                         }
                     }
                 }

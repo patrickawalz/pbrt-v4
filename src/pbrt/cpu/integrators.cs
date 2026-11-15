@@ -194,7 +194,7 @@ namespace pbrt
                     else
                     {
                         SampledSpectrum T_maj =
-                            lightMedium.volumeIntegrator.tracker.SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
+                            lightMedium.volumeIntegrator.tracker.ForTransmittance().SampleT_maj(lightRay, lightMedium, tMax, uT, ref rng, lambda,
                                         (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj,
                                          SampledSpectrum T_maj_) =>
                                         {
@@ -2293,7 +2293,7 @@ namespace pbrt
                 SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
                 RNG rng = new RNG(Hash(origin, t), Hash(direction));
                 Float uTrack = rng.Uniform<Float>();
-                SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+                SampledSpectrum T_maj = medium.volumeIntegrator.tracker.ForTransmittance().SampleT_maj(
                     new Ray(origin, direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
                     (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
                     {
@@ -2406,7 +2406,7 @@ namespace pbrt
                 // light share the weight (see MISWeight). The emission end is kept next to the subpath: the walk goes on.
                 if (emissionEnds != null && ctx.mode == TransportMode.Radiance && (bool)mp.Le && (bool)ctx.st.beta)
                 {
-                    VolumeEmissionLight emissionLight = (medium as TextureMedium)?.EmissionLight();
+                    VolumeEmissionLight emissionLight = medium?.EmissionLight();
                     if (emissionLight != null)
                     {
                         Float pdfCollision = sigma_maj[0] * T_maj[0];
@@ -5800,7 +5800,7 @@ namespace pbrt
                         // is sigma_maj T_maj per length (hero values), and the light strategy's null
                         // collisions on the way are already in st.r_l, with the tail of T_maj added here
                         SampledSpectrum r_sum = r_e;
-                        VolumeEmissionLight emissionLight = (rayMedium as TextureMedium)?.EmissionLight();
+                        VolumeEmissionLight emissionLight = rayMedium?.EmissionLight();
                         if (emissionLight != null && emissionLight.UsesFnee())
                         {
                             // The strategy that samples the direction toward the emission integrates along the
@@ -6381,7 +6381,7 @@ namespace pbrt
             SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
             RNG rng = new RNG(Hash(segment.origin, t), Hash(segment.direction));
             Float uTrack = rng.Uniform<Float>();
-            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.ForTransmittance().SampleT_maj(
                 new Ray(segment.origin, segment.direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
                 (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
                 {
@@ -6564,7 +6564,7 @@ namespace pbrt
             SampledSpectrum T_seg = new SampledSpectrum(1.0f), rl_seg = new SampledSpectrum(1.0f), ru_seg = new SampledSpectrum(1.0f);
             RNG rng = new RNG(Hash(segment.origin, t), Hash(segment.direction));
             Float uTrack = rng.Uniform<Float>();
-            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.SampleT_maj(
+            SampledSpectrum T_maj = medium.volumeIntegrator.tracker.ForTransmittance().SampleT_maj(
                 new Ray(segment.origin, segment.direction, ctx.ray.time), medium, t, uTrack, ref rng, lambda,
                 (Point3f pp, MediumProperties mpp, SampledSpectrum sigma_maj, SampledSpectrum T_maj_) =>
                 {

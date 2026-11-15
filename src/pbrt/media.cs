@@ -201,6 +201,8 @@ namespace pbrt
             Medium m = rayMedium;
             if (m is HomogeneousMedium)
                 return SampleT_maj<HomogeneousMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is GridMedium adaptive && adaptive.HasHierarchy() && adaptive.adaptiveWalk)
+                return SampleT_maj<GridMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is GridMedium)
                 return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is RGBGridMedium)
@@ -219,6 +221,10 @@ namespace pbrt
                 return SampleT_maj<CompositeMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is AtmosphereMedium)
                 return SampleT_maj<AtmosphereMedium, AtmosphereMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is AggregateMedium)
+                return SampleT_maj<AggregateMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is BoundedMedium)
+                return SampleT_maj<BoundedMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }
@@ -371,6 +377,35 @@ namespace pbrt
         public Bounds3f bounds;
         public Float[] voxels;
         public Point3i res;
+        // (not in pbrt-v4) The smallest density of each voxel, where the medium has computed it (null otherwise)
+        public Float[] minima;
+        // (not in pbrt-v4) A density that the densities of the voxel are about (their mean, or the middle of their bounds),
+        // between the smallest and the largest; null where the medium has not computed it
+        public Float[] averages;
+
+        // (not in pbrt-v4) The emission-aware majorant (Huang et al. 2021, "Unbiased Emission and Scattering Importance
+        // Sampling For Heterogeneous Volumes"): the collisions of a tracker are where the emission is gathered, so a voxel
+        // that emits much and absorbs little is given a larger majorant than its density asks. `emission` is a bound of the
+        // emission of each voxel. A voxel is raised to `amount` times the largest majorant of the grid, in proportion to its
+        // emission over the largest emission: the hottest voxel is then tracked `amount` times as finely as the densest one,
+        // which also bounds what is added. Any majorant above the density is a majorant: nothing else changes.
+        public void RaiseForEmission(Float[] emission, Float amount)
+        {
+            Float largestEmission = 0, largest = 0;
+            for (int i = 0; i < voxels.Length; ++i)
+            {
+                largestEmission = std.max(largestEmission, emission[i]);
+                largest = std.max(largest, voxels[i]);
+            }
+            if (!(largestEmission > 0) || !(largest > 0))
+            {
+                return;
+            }
+            for (int i = 0; i < voxels.Length; ++i)
+            {
+                voxels[i] = std.max(voxels[i], amount * largest * emission[i] / largestEmission);
+            }
+        }
     }
 
     [InlineArray(3)]
@@ -443,6 +478,14 @@ namespace pbrt
             SampledSpectrum sigma_maj = sigma_t * grid.Lookup(voxel[0], voxel[1], voxel[2]);
             RayMajorantSegment seg = new RayMajorantSegment { tMin = tMin, tMax = tVoxelExit, sigma_maj = sigma_maj };
             lastVoxel = voxel[0] + grid.res.x * (voxel[1] + grid.res.y * voxel[2]);
+            if (grid.minima != null && grid.voxels[lastVoxel] > 0)
+            {
+                seg.controlFraction = grid.minima[lastVoxel] / grid.voxels[lastVoxel];
+                if (grid.averages != null)
+                {
+                    seg.averageFraction = grid.averages[lastVoxel] / grid.voxels[lastVoxel];
+                }
+            }
 
             // Advance to next voxel in maximum density grid
             tMin = tVoxelExit;
@@ -648,8 +691,14 @@ namespace pbrt
     }
 
     // GridMedium Definition
-    public sealed unsafe class GridMedium : Medium, IMajorantMedium<DDAMajorantIterator>
+    public sealed unsafe class GridMedium : Medium, IMajorantMedium<DDAMajorantIterator>, IMajorantMedium<RayMajorantIterator>
     {
+        // (the iterator of "adaptivegrid", for the tracking that asks the medium by its type)
+        RayMajorantIterator IMajorantMedium<RayMajorantIterator>.SampleRay(Ray ray, Float tMax, SampledWavelengths lambda)
+        {
+            return SampleRay(ray, tMax, lambda, null);
+        }
+
         // STAT_MEMORY_COUNTER("Memory/Volume grids", volumeGridBytes);
         [ThreadStatic] internal static long volumeGridBytes;
         private static StatRegisterer STATS_REGvolumeGridBytes = new StatRegisterer((StatsAccumulator accum) =>
@@ -670,6 +719,7 @@ namespace pbrt
             p = renderFromMedium.ApplyInverse(p);
             p = (Point3f)bounds.Offset(p);
             Float d = densityGrid.Lookup(p);
+            ++lookups;
             sigma_a *= d;
             sigma_s *= d;
 
@@ -718,8 +768,95 @@ namespace pbrt
 
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
+            if (majorantNodes != null)
+            {
+                // ("adaptivegrid": the majorants of the grid refined where the density varies)
+                Float raytMax = tMax;
+                ray = renderFromMedium.ApplyInverse(ray, &raytMax);
+                Float t0, t1;
+                if (!bounds.IntersectP(ray.o, ray.d, raytMax, &t0, &t1))
+                    return new DDAMajorantIterator();
+                return new HierarchicalMajorantIterator(ray, t0, t1, majorantGrid, majorantNodes, sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda));
+            }
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
+
+        // (not in pbrt-v4) "adaptivegrid": the grid medium as it is (the same data, the same lookups, nothing resampled), with
+        // majorants that adapt to it. The 16^3 grid of majorants stays the first level; a voxel of it is split into
+        // `branching`^3 where the density varies, by the measure of Benyoub and Dupuy, "Adaptive Tetrahedral Grids for
+        // Volumetric Path-Tracing" (2025): (max - min) / mean above `variation`; and so on down to `maxDepth` levels or to the
+        // size of one cell of the data. Every voxel keeps the largest, smallest and mean density: a tighter majorant (fewer
+        // null collisions), and a tighter control for the trackers and estimators that take one (decomposition tracking,
+        // "residuallocal", "residualtracking", the residual emission tracking).
+        public void RefineMajorants(Float variation, int maxDepth, int branching)
+        {
+            adaptiveVoxels = 0;
+            adaptiveLevels = 0;
+            int count = majorantGrid.voxels.Length;
+            MajorantNode[] nodes = new MajorantNode[count];
+            bool any = false;
+            for (int z = 0; z < majorantGrid.res.z; ++z)
+                for (int y = 0; y < majorantGrid.res.y; ++y)
+                    for (int x = 0; x < majorantGrid.res.x; ++x)
+                    {
+                        int index = x + majorantGrid.res.x * (y + majorantGrid.res.y * z);
+                        nodes[index] = RefineVoxel(majorantGrid.VoxelBounds(x, y, z), majorantGrid.voxels[index], majorantGrid.minima[index],
+                                                   majorantGrid.averages[index], variation, maxDepth, branching, 1);
+                        any |= nodes[index] != null;
+                        if (nodes[index] == null)
+                            ++adaptiveVoxels;
+                    }
+            majorantNodes = any ? nodes : null;
+        }
+
+        private MajorantNode RefineVoxel(Bounds3f unitBox, Float largest, Float smallest, Float mean, Float variation, int maxDepth, int branching, int depth)
+        {
+            Vector3f size = unitBox.Diagonal();
+            bool aboveData = size.x * densityGrid.XSize() > 1 || size.y * densityGrid.YSize() > 1 || size.z * densityGrid.ZSize() > 1;
+            if (depth > maxDepth || !aboveData || !(largest > 0) || !(largest - smallest > variation * mean))
+                return null;
+            adaptiveLevels = std.max(adaptiveLevels, depth);
+            MajorantNode node = new MajorantNode();
+            Bounds3f mediumBox = new Bounds3f(bounds.Lerp(unitBox.pMin), bounds.Lerp(unitBox.pMax));
+            node.sub = new MajorantGrid(mediumBox, new Point3i(branching, branching, branching), new Allocator());
+            int count = branching * branching * branching;
+            node.sub.minima = new Float[count];
+            node.sub.averages = new Float[count];
+            MajorantNode[] children = new MajorantNode[count];
+            bool any = false;
+            for (int z = 0; z < branching; ++z)
+                for (int y = 0; y < branching; ++y)
+                    for (int x = 0; x < branching; ++x)
+                    {
+                        Bounds3f inVoxel = node.sub.VoxelBounds(x, y, z);
+                        Bounds3f child = new Bounds3f(unitBox.Lerp(inVoxel.pMin), unitBox.Lerp(inVoxel.pMax));
+                        int index = x + branching * (y + branching * z);
+                        Float childLargest = densityGrid.MaxValue(child);
+                        node.sub.Set(x, y, z, childLargest);
+                        node.sub.minima[index] = std.min(childLargest, std.max<Float>(0, densityGrid.MinValue(child)));
+                        node.sub.averages[index] = std.min(childLargest, std.max(node.sub.minima[index], densityGrid.AverageValue(child)));
+                        children[index] = RefineVoxel(child, childLargest, node.sub.minima[index], node.sub.averages[index], variation, maxDepth, branching, depth + 1);
+                        any |= children[index] != null;
+                        if (children[index] == null)
+                            ++adaptiveVoxels;
+                    }
+            // (the iterator asks for the children of every voxel that it crosses)
+            node.children = children;
+            return node;
+        }
+
+        public bool HasHierarchy() { return majorantNodes != null; }
+
+        // Whether the walk of a path (the default tracking of the collisions and ratio tracking, which ask the medium by
+        // its type) also goes through the refined majorants ("bool adaptivewalk"). Off, it keeps the 16^3 grid, whose
+        // segments are few, and the refined majorants serve what asks for them: the estimators of the transmittance and the
+        // trackers that take a control. On, the walk has fewer null collisions and more segments to step through.
+        public bool adaptiveWalk;
+
+        // The voxels that rays cross (the leaves) and the levels below the first grid
+        public long adaptiveVoxels;
+        public int adaptiveLevels;
+        private MajorantNode[] majorantNodes;
 
         // GridMedium Public Methods
         public GridMedium(Bounds3f bounds, Transform renderFromMedium, Spectrum sigma_a, Spectrum sigma_s, Float sigmaScale,
@@ -757,7 +894,60 @@ namespace pbrt
                         Bounds3f vb = majorantGrid.VoxelBounds(x, y, z);
                         majorantGrid.Set(x, y, z, densityGrid.MaxValue(vb));
                     }
+
+            // (not in pbrt-v4) The smallest density of each voxel, for decomposition tracking
+            majorantGrid.minima = new Float[majorantGrid.voxels.Length];
+            for (int z = 0; z < majorantGrid.res.z; ++z)
+                for (int y = 0; y < majorantGrid.res.y; ++y)
+                    for (int x = 0; x < majorantGrid.res.x; ++x)
+                    {
+                        majorantGrid.minima[x + majorantGrid.res.x * (y + majorantGrid.res.y * z)] = densityGrid.MinValue(majorantGrid.VoxelBounds(x, y, z));
+                    }
+            // and their mean, for the control of residual ratio tracking (kept between the smallest and the largest)
+            majorantGrid.averages = new Float[majorantGrid.voxels.Length];
+            for (int z = 0; z < majorantGrid.res.z; ++z)
+                for (int y = 0; y < majorantGrid.res.y; ++y)
+                    for (int x = 0; x < majorantGrid.res.x; ++x)
+                    {
+                        int index = x + majorantGrid.res.x * (y + majorantGrid.res.y * z);
+                        majorantGrid.averages[index] = Clamp(densityGrid.AverageValue(majorantGrid.VoxelBounds(x, y, z)), majorantGrid.minima[index], majorantGrid.voxels[index]);
+                    }
         }
+
+        // (not in pbrt-v4) The density is the only thing that varies when nothing is emitted
+        public override bool ControlProperties(SampledWavelengths lambda, out MediumProperties unit)
+        {
+            unit = new MediumProperties { sigma_a = sigma_a_spec.Sample(lambda), sigma_s = sigma_s_spec.Sample(lambda), phase = phase, Le = new SampledSpectrum(0f) };
+            return !isEmissive;
+        }
+
+        // (not in pbrt-v4) A bound of sigma_a Le over a box of the unit cube of the medium, over the wavelengths
+        public override Float EmissionBoundUnit(Bounds3f unitBox)
+        {
+            if (!isEmissive)
+            {
+                return 0;
+            }
+            Float scale = LeScale.MaxValue(unitBox);
+            if (!(scale > 0))
+            {
+                return 0;
+            }
+            Float radiance;
+            if (temperatureGrid)
+            {
+                // (a blackbody spectrum of pbrt is 1 at its peak)
+                radiance = (temperatureGrid.value().MaxValue(unitBox) - temperatureOffset) * temperatureScale > 100f ? 1 : 0;
+            }
+            else
+            {
+                radiance = Le_spec.MaxValue();
+            }
+            return densityGrid.MaxValue(unitBox) * sigma_a_spec.MaxValue() * scale * radiance;
+        }
+
+        // (not in pbrt-v4) The number of lookups of the density by this thread, for the comparisons of the trackers
+        [ThreadStatic] public static long lookups;
     
         public static GridMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
                                         Allocator alloc)
@@ -834,6 +1024,20 @@ namespace pbrt
         }
 
         // GridMedium Private Members
+        // (not in pbrt-v4) What a volume aggregate asks (Medium.AggregateRegion, Medium.AggregateExtinction)
+        public override bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            grid = majorantGrid;
+            return true;
+        }
+
+        public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+        }
+
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
@@ -895,6 +1099,17 @@ namespace pbrt
         {
             return buf.Alloc(SampleRay(ray, tMax, lambda));
         }
+        // (not in pbrt-v4) A bound of sigma_a Le over a box of the unit cube of the medium, over the wavelengths
+        public override Float EmissionBoundUnit(Bounds3f unitBox)
+        {
+            if (!(LeGrid && LeScale > 0))
+            {
+                return 0;
+            }
+            Float absorption = sigmaScale * (sigma_aGrid ? sigma_aGrid.value().MaxValue(unitBox) : 1);
+            return absorption * LeScale * LeGrid.value().MaxValue(unitBox) * LeIlluminant.MaxValue();
+        }
+
         // RGBGridMedium Public Methods
         public RGBGridMedium(Bounds3f bounds, Transform renderFromMedium, Float g,
                              pstd.optional<SampledGrid<RGBUnboundedVoxel>> rgbA,
@@ -1006,6 +1221,20 @@ namespace pbrt
         }
 
         // RGBGridMedium Private Members
+        // (not in pbrt-v4) What a volume aggregate asks (Medium.AggregateRegion, Medium.AggregateExtinction)
+        public override bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            grid = majorantGrid;
+            return true;
+        }
+
+        public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return new SampledSpectrum(1f);
+        }
+
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private pstd.optional<SampledGrid<RGBIlluminantVoxel>> LeGrid;
@@ -1149,6 +1378,20 @@ namespace pbrt
         }
 
         // CloudMedium Private Members
+        // (not in pbrt-v4) What a volume aggregate asks (Medium.AggregateRegion, Medium.AggregateExtinction)
+        public override bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            grid = null;
+            return true;
+        }
+
+        public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+        }
+
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private HGPhaseFunction phase;
@@ -1374,6 +1617,7 @@ namespace pbrt
                 temperatureFloatGrid = temperatureGrid.grid<float>();
                 float minTemperature, maxTemperature;
                 temperatureFloatGrid.tree().extrema(out minTemperature, out maxTemperature);
+                largestTemperature = maxTemperature;
                 LOG_VERBOSE("Max temperature: %f", maxTemperature);
 
                 nanovdb.BBox<double> tbbox = temperatureFloatGrid.worldBBox();
@@ -1387,6 +1631,8 @@ namespace pbrt
             LOG_VERBOSE("Starting nanovdb grid GetMaxDensityGrid()");
 
             int gridSize = majorantGrid.res.x * majorantGrid.res.y * majorantGrid.res.z;
+            majorantGrid.minima = new Float[gridSize];
+            majorantGrid.averages = new Float[gridSize];
             nanovdb.NanoGrid<float> dgrid = densityFloatGrid;
             MajorantGrid mg = majorantGrid;
             Bounds3f bnds = bounds;
@@ -1420,21 +1666,45 @@ namespace pbrt
 
                 // (see the FIXME in pbrt's media.cpp about overly conservative majorants)
                 float maxValue = 0;
+                // (not in pbrt-v4) The smallest value too, for decomposition tracking: zero where the box reaches beyond the grid
+                bool whole = (int)(i0[0] - delta) >= ibbox.min()[0] && (int)(i1[0] + delta) <= ibbox.max()[0] &&
+                             (int)(i0[1] - delta) >= ibbox.min()[1] && (int)(i1[1] + delta) <= ibbox.max()[1] &&
+                             (int)(i0[2] - delta) >= ibbox.min()[2] && (int)(i1[2] + delta) <= ibbox.max()[2] &&
+                             i0[0] >= delta && i0[1] >= delta && i0[2] >= delta;
+                float minValue = float.PositiveInfinity;
+                double sumValue = 0;
+                long countValue = 0;
                 nanovdb.ReadAccessor<float> accessor = dgrid.getAccessor();
                 // Apparently nanovdb integer bounding boxes are inclusive on
                 // the upper end...
                 for (int nz = nz0; nz <= nz1; ++nz)
                     for (int ny = ny0; ny <= ny1; ++ny)
                         for (int nx = nx0; nx <= nx1; ++nx)
-                            maxValue = std.max(maxValue, accessor.getValue(new nanovdb.Coord(nx, ny, nz)));
+                        {
+                            float value = accessor.getValue(new nanovdb.Coord(nx, ny, nz));
+                            maxValue = std.max(maxValue, value);
+                            minValue = std.min(minValue, value);
+                            sumValue += value;
+                            ++countValue;
+                        }
 
                 // Only write into maxGrid once when we're done to minimize
                 // cache thrashing..
                 mg.Set(x, y, z, maxValue);
+                mg.minima[index] = whole && !float.IsInfinity(minValue) ? std.max(minValue, 0) : 0;
+                mg.averages[index] = countValue > 0 ? Clamp((Float)(sumValue / countValue), mg.minima[index], maxValue) : 0;
             });
 
             LOG_VERBOSE("Finished nanovdb grid GetMaxDensityGrid()");
+            densities = (Float[])majorantGrid.voxels.Clone();
             GC.KeepAlive(densityGrid);  // (grids are raw memory owned by the handles' buffers)
+        }
+
+        // (not in pbrt-v4) The density is the only thing that varies when nothing is emitted
+        public override bool ControlProperties(SampledWavelengths lambda, out MediumProperties unit)
+        {
+            unit = new MediumProperties { sigma_a = sigma_a_spec.Sample(lambda), sigma_s = sigma_s_spec.Sample(lambda), phase = phase, Le = new SampledSpectrum(0f) };
+            return !IsEmissive();
         }
 
         public override string ToString()
@@ -1481,6 +1751,20 @@ namespace pbrt
         }
 
         // NanoVDBMedium Private Members
+        // (not in pbrt-v4) What a volume aggregate asks (Medium.AggregateRegion, Medium.AggregateExtinction)
+        public override bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = bounds;
+            renderFromMedium = this.renderFromMedium;
+            grid = majorantGrid;
+            return true;
+        }
+
+        public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+        }
+
         private Bounds3f bounds;
         private Transform renderFromMedium;
         private DenselySampledSpectrum sigma_a_spec, sigma_s_spec;
@@ -1491,6 +1775,37 @@ namespace pbrt
         private nanovdb.NanoGrid<float> densityFloatGrid;
         private nanovdb.NanoGrid<float> temperatureFloatGrid;
         private Float LeScale, temperatureOffset, temperatureScale;
+        private Float largestTemperature;
+
+        // (not in pbrt-v4) A bound of sigma_a Le over a box of the unit cube of the medium, over the wavelengths: the largest
+        // density of the cells of the majorant grid that the box touches, where any temperature of the grid emits (the
+        // temperatures are not bounded cell by cell)
+        public override Float EmissionBoundUnit(Bounds3f unitBox)
+        {
+            if (!IsEmissive() || !((largestTemperature - temperatureOffset) * temperatureScale > 100f))
+            {
+                return 0;
+            }
+            MajorantGrid mg = majorantGrid;
+            int x0 = std.min(std.max((int)(unitBox.pMin.x * mg.res.x), 0), mg.res.x - 1), x1 = std.min(std.max((int)(unitBox.pMax.x * mg.res.x), 0), mg.res.x - 1);
+            int y0 = std.min(std.max((int)(unitBox.pMin.y * mg.res.y), 0), mg.res.y - 1), y1 = std.min(std.max((int)(unitBox.pMax.y * mg.res.y), 0), mg.res.y - 1);
+            int z0 = std.min(std.max((int)(unitBox.pMin.z * mg.res.z), 0), mg.res.z - 1), z1 = std.min(std.max((int)(unitBox.pMax.z * mg.res.z), 0), mg.res.z - 1);
+            Float density = 0;
+            for (int z = z0; z <= z1; ++z)
+            {
+                for (int y = y0; y <= y1; ++y)
+                {
+                    for (int x = x0; x <= x1; ++x)
+                    {
+                        density = std.max(density, densities != null ? densities[x + mg.res.x * (y + mg.res.y * z)] : mg.Lookup(x, y, z));
+                    }
+                }
+            }
+            return density * sigma_a_spec.MaxValue() * LeScale;
+        }
+
+        // (the largest densities of the cells, kept apart from the majorants that "emissionmajorant" may raise)
+        private Float[] densities;
     }
 
     // Medium Method Definitions
@@ -1500,9 +1815,189 @@ namespace pbrt
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
 
         // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
+        // (not in pbrt-v4) For decomposition tracking (Kutz et al. 2017): whether the medium is one set of coefficients and one
+        // phase function scaled by a density that alone varies, and then those coefficients for the density 1. A collision of
+        // the control component is made from them without a lookup.
+        public virtual bool ControlProperties(SampledWavelengths lambda, out MediumProperties unit)
+        {
+            unit = default;
+            return false;
+        }
+
         public virtual SampledSpectrum ControlExtinction(SampledWavelengths lambda)
         {
             return new SampledSpectrum(0f);
+        }
+
+        // (not in pbrt-v4) The emission of the medium as a light (media_emission_light.cs). The region that may emit, a box in
+        // the space of the medium; false for a medium that has no extent of its own.
+        public virtual bool EmissionRegion(out Bounds3f mediumBounds, out Transform renderFromMedium)
+        {
+            MajorantGrid grid;
+            return AggregateRegion(out mediumBounds, out renderFromMedium, out grid);
+        }
+
+        // A bound of sigma_a Le over a box of the unit cube of that region, over the wavelengths. It is the density of the
+        // light: it has to be positive wherever the medium emits.
+        public virtual Float EmissionBoundUnit(Bounds3f unitBox)
+        {
+            return 0;
+        }
+
+        // The majorant that the tracking of a ray uses at the point: that of the first segment of a ray that starts there
+        public virtual SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            RayMajorantIterator iter = SampleRay(new Ray(p, new Vector3f(0, 0, 1), time), Infinity, lambda, new ScratchBuffer());
+            pstd.optional<RayMajorantSegment> seg = iter.Next();
+            return seg ? seg.value().sigma_maj : new SampledSpectrum(0f);
+        }
+
+        // The light of the emission, where the medium asks for one ("bool emission_nee"); null otherwise
+        public VolumeEmissionLight emissionLight;
+
+        public VolumeEmissionLight EmissionLight() { return emissionLight; }
+
+        // Next event estimation of the emission: the light that samples it, added to the lights of the scene by the integrators
+        public void EnableEmissionSampling(int res, bool fnee)
+        {
+            lock (emissionLights)
+            {
+                if (emissionLight == null)
+                {
+                    emissionLight = new VolumeEmissionLight(this, res);
+                    emissionLight.SetFnee(fnee);
+                    emissionLights.Add(emissionLight);
+                }
+            }
+        }
+
+        // The lights plus the emission lights of the media that ask for them
+        public static List<Light> AddEmissionLights(List<Light> lights)
+        {
+            List<Light> all = new List<Light>(lights);
+            lock (emissionLights)
+            {
+                foreach (VolumeEmissionLight light in emissionLights)
+                {
+                    if (light.HasEmission() && !all.Contains(light))
+                    {
+                        all.Add(light);
+                    }
+                }
+            }
+            return all;
+        }
+
+        // The emission lights alone
+        public static List<VolumeEmissionLight> EmissionLights()
+        {
+            List<VolumeEmissionLight> all = new List<VolumeEmissionLight>();
+            lock (emissionLights)
+            {
+                foreach (VolumeEmissionLight light in emissionLights)
+                {
+                    if (light.HasEmission())
+                    {
+                        all.Add(light);
+                    }
+                }
+            }
+            return all;
+        }
+
+        // Forgets the media that ask for emission sampling, for tests that build several in one process
+        public static void ClearEmissionRegistry()
+        {
+            lock (emissionLights)
+            {
+                emissionLights.Clear();
+            }
+        }
+
+        private static readonly List<VolumeEmissionLight> emissionLights = new List<VolumeEmissionLight>();
+
+        // The emission-aware majorant ("float emissionmajorant", MajorantGrid.RaiseForEmission)
+        public void RaiseMajorantForEmission(Float amount, FileLoc loc)
+        {
+            Bounds3f mediumBounds;
+            Transform renderFromMedium;
+            MajorantGrid grid;
+            if (!AggregateRegion(out mediumBounds, out renderFromMedium, out grid) || grid == null)
+            {
+                ErrorExit(loc, "\"emissionmajorant\" needs a medium with a grid of majorants.");
+            }
+            Float[] emission = new Float[grid.voxels.Length];
+            for (int z = 0; z < grid.res.z; ++z)
+            {
+                for (int y = 0; y < grid.res.y; ++y)
+                {
+                    for (int x = 0; x < grid.res.x; ++x)
+                    {
+                        emission[x + grid.res.x * (y + grid.res.y * z)] = std.max<Float>(0, EmissionBoundUnit(grid.VoxelBounds(x, y, z)));
+                    }
+                }
+            }
+            grid.RaiseForEmission(emission, amount);
+        }
+
+        // (not in pbrt-v4) What a volume aggregate asks of a volume (Fong et al., "Production Volume Rendering", section 6.9,
+        // listing 25: extinction() at a point is SamplePoint(), extinctionMinMax() over a region is these two). The region
+        // that the medium fills, a box in its own space, with the grid of the largest densities over it (null: the density
+        // is at most 1 everywhere in the box); false for a medium that has no extent of its own. The extinction at a point of
+        // a cell is at most the value of the grid there times AggregateExtinction().
+        public virtual bool AggregateRegion(out Bounds3f mediumBounds, out Transform renderFromMedium, out MajorantGrid grid)
+        {
+            mediumBounds = default;
+            renderFromMedium = default;
+            grid = null;
+            return false;
+        }
+
+        public virtual SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
+        {
+            return new SampledSpectrum(0f);
+        }
+
+        // (not in pbrt-v4) "bool emission_nee", "bool emission_fnee", "integer emission_nee_res": the emission is sampled as a
+        // light; "float emissionmajorant": the emission-aware majorant
+        public void CreateEmissionSampling(ParameterDictionary parameters, FileLoc loc)
+        {
+            Float emissionMajorant = parameters.GetOneFloat("emissionmajorant", 0f);
+            if (emissionMajorant < 0)
+            {
+                ErrorExit(loc, "\"emissionmajorant\" must not be negative.");
+            }
+            if (emissionMajorant > 0)
+            {
+                if ((this is TextureMedium texture && texture.HasHierarchy()) || (this is GridMedium adaptive && adaptive.HasHierarchy()))
+                {
+                    ErrorExit(loc, "\"emissionmajorant\" is for one grid of majorants: not with \"hierarchydepth\".");
+                }
+                RaiseMajorantForEmission(emissionMajorant, loc);
+            }
+            if (this is TextureMedium)
+            {
+                // (the medium reads its own parameters of the light)
+                return;
+            }
+            bool emissionNee = parameters.GetOneBool("emission_nee", false);
+            bool emissionFnee = parameters.GetOneBool("emission_fnee", false);
+            int emissionNeeRes = parameters.GetOneInt("emission_nee_res", 16);
+            if (emissionFnee && !emissionNee)
+            {
+                ErrorExit(loc, "\"emission_fnee\" needs \"emission_nee\" (it chooses how the emission is sampled).");
+            }
+            if (!emissionNee)
+            {
+                return;
+            }
+            Bounds3f mediumBounds;
+            Transform renderFromMedium;
+            if (!IsEmissive() || !EmissionRegion(out mediumBounds, out renderFromMedium))
+            {
+                ErrorExit(loc, "\"emission_nee\" needs a medium that emits and has an extent of its own.");
+            }
+            EnableEmissionSampling(emissionNeeRes, emissionFnee);
         }
 
         public static Medium Create(string name, ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc,
@@ -1516,6 +2011,19 @@ namespace pbrt
             else if (name == "uniformgrid")
             {
                 m = GridMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "adaptivegrid")
+            {
+                // (not in pbrt-v4) The grid medium with adaptive majorants (GridMedium.RefineMajorants)
+                GridMedium grid = GridMedium.Create(parameters, renderFromMedium, loc, alloc);
+                Float variation = parameters.GetOneFloat("variation", 0.5f);
+                int maxDepth = parameters.GetOneInt("maxdepth", 3);
+                int branching = parameters.GetOneInt("branching", 2);
+                if (!(variation >= 0) || maxDepth < 0 || maxDepth > 5 || branching < 2 || branching > 8)
+                    ErrorExit(loc, "\"adaptivegrid\": \"variation\" must not be negative, \"maxdepth\" is 0 to 5 and \"branching\" 2 to 8.");
+                grid.RefineMajorants(variation, maxDepth, branching);
+                grid.adaptiveWalk = parameters.GetOneBool("adaptivewalk", false);
+                m = grid;
             }
             else if (name == "rgbgrid")
             {
@@ -1549,6 +2057,7 @@ namespace pbrt
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
             m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
+            m.CreateEmissionSampling(parameters, loc);
 
             parameters.ReportUnused();
             return m;

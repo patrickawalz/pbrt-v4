@@ -68,7 +68,18 @@ thin-film iridescence of Belcour and Barla on the standard materials (perhaps no
 - Trowbridge-Reitz platelets only; a homogeneous medium and `volpath` only; weak with point lights.
 
 ### Texture derivatives
-- Still by finite differences: float Ptex, cloud, triplanar, shell map, SDF, label, spectrum Ptex.
+- Still by finite differences: float and spectrum Ptex, cloud, triplanar, shell map, SDF, SDF label, the wireframe textures,
+  the MaterialX pattern textures, and of the spectrum textures `variation` and `strand colour` (differences in RGB). Images
+  have a closed form only where the filter of the mip-map gives a slope, the spectrum grid unless it is made of nodes, OSL
+  textures where the shader has a derivative group. (The header of texture_derivatives.cs is out of date on images and OSL.)
+- `"string derivatives" "world"` on any float texture (uncommitted after 6655c0b): the differences are taken along the
+  three axes of space, the point alone moved, and the gradient laid on the two directions of the surface; the step is the
+  size of the pixel on the surface or `"float derivativestep"` (LuxCore's fixed distance). Default "surface", unchanged.
+  Meant for the textures that are functions of the point (cloud, triplanar, SDF, SDF label, shell map). Forward
+  differences, three evaluations. TextureDerivatives.WorldAxes: against a closed form 6.5e-4 with a step of 1e-3; on a
+  parameterisation 2000 times too long with no footprint of texture coordinates 0.028 of the slope where the surface
+  differences are off by 3.95; fBm against its closed form 0.039 of 4.31. Float textures only; not tried in a render on
+  the five textures it is meant for (the render check is fBm on a sphere, where all modes agree).
 - `Texture "name" "rgb"` is not parsed; UV channels are not read from PLY files or generated meshes.
 - The global bound of the bilinear float texture (reported, unchanged).
 
@@ -432,3 +443,479 @@ transmission_color as a tint, an even diffuse sheet that does not hear the aniso
 below). The corrections stay in both: the straight-through term and the radiance factor of light that leaves through
 the base (which, for the legacy wall seen from below, is the inverse: before, that side gained energy).
 ThinWall.TheLobesBefore: legacy transmitted 0.4815 and 0.4830 with anisotropy 0.6, the paper's lobes 0.6550.
+
+
+## Production volumes after the course PDF: the missing volume types and the aggregate (uncommitted after 6655c0b)
+
+The course PDF is now at hand (it was not when productionvolume.cs was written). Against its listings:
+
+| Course | Here |
+|---|---|
+| Listing 1, Volume::Integrate / Transmittance | productionvolume.cs, as before |
+| 2, EmptyVolume | new: `"string scattering" "none"` |
+| 3, BeersLawVolume; 8, BeersLawHeterogeneousVolume | as before (the heterogeneous one by ratio tracking, not the 0 / 1 estimate of listing 8) |
+| 10, 11, SingleScatter...Volume | as before; the light is sampled alone, the phase function is not (the course combines both) |
+| 13, SingleScatterPDFVolume | new: `"string scattering" "singlepdf"`, `"float stepsize"` (0.1): a density marched along the ray from the transmittance, the scattering coefficient and the light without its shadow ray; transmittance and emission by quadrature. Biased by the step, as the course says |
+| 14, 15, MultiScatter...Volume | as before |
+| 16, emission | as before in the tracking volumes; by quadrature in the new one |
+| 17, overlapping volumes | as before: the CompositeMedium of the stack, the collision given to one volume |
+| 18, equiangular sampling with MIS | not done |
+| 19, ratio tracking | the transmittance estimators of the media |
+| 20, bounded subintervals from a k-d tree | pbrt's majorant grids |
+| 24 - 26, the volume aggregate | new: volumeaggregate.cs |
+
+The aggregate (section 6): `MakeNamedMedium "sky" "string type" "aggregate" "string members" [ "a" "b" ] "float threshold" 2
+"integer maxdepth" 6`. An octree over the region of the members; each node lists the volumes that overlap it with the largest
+density of each; divided while (max - min) diag > threshold or while larger than a volume it holds; the iterator of listing
+24. In "production" it is a volume that integrates itself (AggregateVolume, the tracking of listing 26, the collision given
+to one member by its scattering coefficient, ratio tracking for the shadow rays); the other integrators see the sum of the
+members, each within its bounds. The members need no geometry and must have an extent of their own (grid, rgbgrid, nanovdb,
+cloud, texture) and be declared before the aggregate. Media that a camera is in are named before WorldBegin and declared
+after it (before it they would be placed in camera space).
+
+Measured (VolumeAggregate.*, 4; ProductionVolume.*, 5): 29668 points on 4000 rays, none with an extinction above the majorant
+of its interval, no gap between intervals; transmittance against quadrature 0.03236 / 0.03147, 0.04534 / 0.04482, 0.53115 /
+0.53026 (errors 0.0004 to 0.0018); an aggregate of one volume against the volume by itself: scattered 0.67413 / 0.67507, to
+the wall 0.14920 / 0.14870; three volumes against their sum tracked with pbrt's majorants: 0.77682 / 0.77710 and 0.03167 /
+0.03265. The marched density against the closed form of a slab: 0.03166 +- 0.00003 / 0.03172 (1.8 sigma).
+Render (three procedural clouds, 64 spp): cloud region 0.2994 (aggregate, production), 0.3000 (aggregate, volpath), 0.2997 and
+0.2989 (three bounded volumes); 64, 97, 59 and 63 s.
+
+Open:
+
+- no gain in time in that render: the cloud medium has no grid of majorants, so every node is told the same density; and the
+  extinction is 0.19 of the majorant in the mean with the 16^3 grids of the grid media. The minimum over a node is not known
+  (0), so the heuristic is max * diag > threshold
+- built once when the scene is made, not on the fly; no filter widths (pbrt's media are point sampled); animated members use
+  their start transformation
+- the aggregate is for multiple scattering only; it does not look at the "scattering" of its members
+- equiangular sampling (listing 18), the phase-function half of the single-scattering MIS, contrast control (section 3.7),
+  motion blur (section 5)
+- no Mueller matrices in "production"
+- bdpt, mlt and sppm were not run with an aggregate
+
+## Production volumes: section 4 of the course (sampling), emission and contrast (uncommitted after 6655c0b)
+
+All of it is chosen by parameters of the medium; the defaults are what was there before.
+
+| Parameter | Values | What |
+|---|---|---|
+| `"string distancesampling"` | `"density"` (default), `"equiangular"`, `"mis"` | Where along the ray a single scattering volume gathers light (4.2). `EquiangularDensity` about a point of a light, which the renderer gives (`VolumeServices.GenerateLightPoint`: the light sampler's choice for the start of the ray, a point of it by `SampleLi`; none for lights at infinity). |
+| `"string lightsampling"` | `"light"` (default), `"mis"` | The light at the point from the lights, or from the lights and the phase function with the power heuristic (listings 10, 11: `Volume.DirectLighting`, `VolumeServices.EvaluateLightSample`). |
+| `"integer lightsamples"` | 1 | Points lit along one interval (4.1). The march of `singlepdf` is made once for all of them. |
+| `"float contrast"` | 1 | Contrast control (3.7): the shadow rays of a multiple scattering volume use sigma_a + contrast^depth sigma_s. |
+
+- Homogeneous: one of the two densities is drawn with probability 1/2 under `"mis"`, weight 1 / (mean of the two); the densities
+  of the other wavelengths enter `r` as before (the equiangular one is the same for all).
+- Marched (`singlepdf`): the equiangular point takes its transmittance from the march (4.2.4, decoupled ray marching).
+- Tracked: `"equiangular"` is T~ sigma_s L_s / p_o with T~ a ratio-tracking estimate. `"mis"` takes both points, the course's
+  listing 18 with its first weight corrected: sigma_s L_s sigma_t / (sigma_t + p_o) at the tracked point (per unit of its
+  density) and T~ sigma_s L_s / (sigma_t + p_o) at the other. The sigma_t of the weights is the mean over the wavelengths: with
+  the sigma_t of the wavelength that tracked, the weights depended on it and the result was biased for coloured media
+  (0.0804 against 0.0785; found by the test). Without a light point, `"mis"` uses the uniform density (4.2.1).
+- `Volume.Emission(rs, P0, P1)` (3.8) on every volume, the aggregate included. It is called where it adds something that is
+  not counted already: along the direction that `"lightsampling" "mis"` samples from the phase function of a single
+  scattering volume. Paths gather the emission of the volumes they cross in `Integrate()`; adding `Emission()` to the shadow
+  rays, as the course suggests, would count it twice here.
+- `Material.MakeHomogeneousVolume` accepts `"singlepdf"` and `"none"`.
+- `singlepdf` in a homogeneous medium marches a ray without end as far as the transmittance stays above 1e-4 (it scattered
+  nothing along such rays before: 0.113 against 0.157 in the fog render).
+
+Tests (`productionsampling_test.cs`, 5, all pass): the density integrates to one in 7 configurations; point light in fog
+against quadrature (0.078532) for the three volume kinds and three modes; deviation of one sample homogeneous 0.129 / 0.020 /
+0.054 (density / equiangular / mis), tracked 0.139 / 0.090 / 0.072; 8 points lit; ray without end; tracking with uniform
+against the slab's closed form (thin slab: deviation 0.0194 -> 0.0040); lights and phase function under a sky with g = 0.85
+(0.20449 +- 0.00024 against 0.20432; deviation 1.26 -> 0.15); emission and contrast against closed forms.
+
+Renders (`/renders/pbr/equi`, 16 spp, independent sampler; RMSE of the fog around the point light / the sphere light against a
+reference):
+
+| | density | equiangular | mis |
+|---|---|---|---|
+| homogeneous, single | 0.125 / 0.192 | 0.070 / 0.079 | 0.081 / 0.101 |
+| homogeneous, singlepdf | 0.057 / 0.062 | 0.069 / 0.092 | 0.059 / 0.034 |
+| cloud, single (tracked) | 0.152 / 0.289 | 0.128 / 0.309 | 0.085 / 0.173 |
+| cloud, singlepdf | 0.051 / 0.109 | 0.102 / 0.177 | 0.062 / 0.123 |
+
+Equiangular alone gains little in a tracked volume: its transmittance is a ratio-tracking estimate (use `"mis"`, or
+`"transmittance" "residual"`). The marched density already contains the unshadowed light, so equiangular adds little there.
+
+Not done from the course:
+- 4.2.5: the stochastic choice between shading the surface and the volume; transparent surfaces folded into one CDF.
+- 4.3: one CDF over all the segments of a path.
+- 4.4.2 / 6: the aggregate still scatters any number of times only (no single scattering, equiangular or contrast in it).
+- 5: motion blur of volumes (media are sampled at the time of the ray; nothing of sections 5.2 to 5.6 is implemented).
+- 7: Hyperion's light cache points and in-scattering PDF.
+- Emissive volumes are not sampled as lights (3.8, last paragraph).
+- `EvaluateLightSample` reaches area lights only on surfaces that stop the ray; an emitter on an interface surface is skipped.
+
+Found on the way: a camera medium declared after `WorldBegin` is looked up while the scene is still being read, and the render
+fails or not by timing ("fog: medium is not defined"); declared before the camera it is placed without the camera's
+transformation, which is right only for media without a position. Bounded media belong on a shape.
+
+## Unbiased ray-marching transmittance (Kettunen et al. 2021): `"string transmittance" "raymarching"` (uncommitted after 6655c0b)
+
+`RayMarchingEstimator` in `volumeintegrator.cs`, a `TransmittanceEstimator` beside `ratio`, `analytic`, `tracklength` and
+`residual`; algorithm 5 of the paper (combed estimates of the optical depth with endpoint matching from 6 lookups, the
+aggressive Bhanot-Kennedy roulette with p_Z = 0.9 and K = c = 2, every estimate the pivot in its turn through the elementary
+symmetric means, the tuple size of algorithm 4 from the optical depth of the majorant along the ray). The biased variant
+(algorithm 6) is not implemented. It runs through `TryEstimate`, so it serves `Volume.Track()` (the shadow rays of every
+heterogeneous volume; in `SingleScatterHeterogeneousVolume` also the transmittance of the equiangular point and of the beam)
+and the shadow rays of volpath. Not the aggregate (its own ratio tracking), not the shadow rays with `contrast` below 1.
+
+- Every wavelength is estimated from the same lookups by its own series: the path probabilities are untouched.
+- An estimate is not bound to [0, 1]; pixels can come out slightly negative (-0.044 at 16 spp in the cloud render).
+- A homogeneous medium's ray without end gives 0; M is capped at 65536, the order at 24.
+
+Test (`ProductionSampling.RayMarchingTransmittance`): a grid that varies, three rays, extinction x 2 / 12 / 60, every
+wavelength against exp(-tau) by quadrature. Deviation at tau = 3.0: 0.00034 against 0.159 for ratio tracking, at 20.5
+lookups against about 8.5; at tau = 1.5: 0.0013 against 0.334 (13.9 against 4.4 lookups). The equiangular point of the
+tracked volume in the fog test: deviation 0.0905 -> 0.0198, the homogeneous volume's figure.
+
+Cloud render (16 spp; RMSE of the fog left / right, time):
+
+| | density | equiangular | mis |
+|---|---|---|---|
+| ratio | 0.152 / 0.289, 11.8 s | 0.128 / 0.309, 12.7 s | 0.085 / 0.173, 15.8 s |
+| raymarching | 0.148 / 0.271, 29.7 s | 0.099 / 0.188, 33.2 s | 0.078 / 0.135, 40.3 s |
+
+At equal time this is about even in that scene: the cloud medium has one majorant for its whole box, the tuple size follows
+it, and the render is 2.6 times slower. A medium with a majorant grid (or a minorant, which the paper recommends subtracting
+and which media do not give) would do better.
+
+A flaw of the test doubles found on the way: `Volume.Track()` copies `rs.rng` and then asks `rs.GenerateRandomNumber()`;
+services that draw that number from the same generator hand the tracker its first number twice (ratio tracking then read
+0.2353 against 0.2169). The path integrator draws it from the sampler and is not affected; the doubles of
+`productionsampling_test.cs` have their own generator now.
+
+## Spectral and decomposition tracking (Kutz et al. 2017), beside what was there (uncommitted after 6655c0b)
+
+Two switches of the medium; the defaults are unchanged.
+
+- `"string tracker" "decomposition"` (`DecompositionTracker`, `volumeintegrator.cs`). The control component of a majorant
+  segment is the smallest extinction there (`RayMajorantSegment.controlFraction`, from `MajorantGrid.minima`, which
+  `GridMedium` fills with `SampledGrid.MinValue`). A collision of the majorant is the control component's with probability
+  mu_c / mu_bar and is then made without a lookup (`Medium.ControlProperties`: the coefficients at density 1); otherwise it
+  is a collision of the residual with the majorant mu_bar - mu_c. Same distribution as the paper's algorithm 2 (the
+  superposition of two Poisson processes instead of the minimum of two distances). Every consumer of a tracker gets it
+  (the production volumes, volpath's walks); transmittance walks use `ForTransmittance()`, the plain tracker. Only
+  `GridMedium` without emission says what its control component is; any other medium is tracked as by `"majorant"`
+  (extended to the aggregate, texture and NanoVDB media in the next section).
+- `"string spectral" "tracking"` (`MultiScatterHeterogeneousVolume.IntegrateSpectral`): algorithm 4 with the majorant of the
+  largest wavelength, the history-aware average probabilities of 5.1.2 and the reduced termination of 5.1.3 (no absorption
+  event; emission by its expected value at every collision). The probabilities need the throughput of the path
+  (`VolumeContext.throughput`, set by the path tracer): with the weight of the current ray alone a path's value reached 415.
+  (Combined with decomposition, and in the single scattering volume and the aggregate, in the next section.)
+
+Test `ProductionSampling.TrackersSideBySide` (walks into a sphere of smoke on a grid, 200000 each; what leaves unscattered
+agrees with exp(-tau) for all three, what leaves at all agrees between them):
+
+| smoke | | leaves | deviation | lookups a walk |
+|---|---|---|---|---|
+| grey, floor of density | delta | 0.6022 | 0.489 | 4.77 |
+| | decomposition | 0.6036 | 0.489 | 0.81 |
+| | spectral | 0.6030 | 0.248 | 7.48 |
+| coloured, floor | delta | 0.4022 | 0.490 | 3.80 |
+| | decomposition | 0.3999 | 0.490 | 0.64 |
+| | spectral | 0.4013 | 0.249 | 28.8 |
+| coloured, no floor | delta | 0.4646 | 0.499 | 4.77 |
+| | decomposition | 0.4655 | 0.499 | 3.17 |
+| | spectral | 0.4647 | 0.258 | 31.0 |
+
+Render (`/renders/pbr/kutz`, coloured smoke with a floor on a 32^3 grid, 64 spp, RMSE of the ball against 1024 spp):
+delta 0.0753 in 20.7 s; decomposition 0.0758 in 20.3 s; spectral 0.0677 in 27.4 s (RMSE^2 x time 0.117 / 0.117 / 0.126).
+Decomposition saves five lookups in six and no time: a lookup of a small grid in memory costs little next to the rest of a
+collision. Spectral tracking halves the deviation of a walk (it does not end walks by absorption) for 1.6 times the
+lookups in grey smoke and 7 to 8 times in coloured smoke, where its majorant is that of the densest wavelength.
+
+## Kutz et al. 2017: the rest of the paper (uncommitted after 6655c0b)
+
+- **Spectral tracking is one walk**, `Volume.SpectralWalk`, used by `MultiScatterHeterogeneousVolume` and by
+  `SingleScatterHeterogeneousVolume` (the tracked point; with `"distancesampling" "mis"` it is weighed against the other
+  point as before). Options: `"string spectralprobabilities" "average"` (5.1.2, default) or `"maximum"` (5.1.1);
+  `"bool spectralabsorption"` (absorption as an event that ends the walk, in the place of the reduced termination of 5.1.3).
+  A majorant that is exceeded gives a negative null coefficient, which the weights carry with its sign (section 3.4).
+- **Spectral with decomposition** (5.2; weighted decomposition tracking, algorithm 3, by wavelength): `"spectral" "tracking"`
+  with `"tracker" "decomposition"`. The control component is the smallest density of the segment with the smallest absorption
+  and scattering coefficients over the wavelengths; its collisions need no lookup and have the weight one.
+- **Aggregate**: the nodes have the smallest density of each volume that wholly covers them (`AggregateMember.MinDensity`,
+  `Iterator.MinDensity`), so `minExtinction` is no longer 0 (it also enters the subdivision heuristic, as the course has
+  it). `"tracker" "decomposition"` on the aggregate: a control collision belongs to one volume by its share and looks up
+  none. `"spectral" "tracking"` on the aggregate: the events are the scattering by each volume and the null collision; with
+  both, the control component is achromatic as above.
+- **Other media**: `TextureMedium` (minima from the texture's `RegionBounds` per voxel of the majorant grid; the voxels
+  that the hierarchy refines have no control component inside the finer grids) and `NanoVDBMedium` (minimum of the voxels
+  that a cell of the majorant grid reaches, zero where it reaches beyond the grid) give `ControlProperties` when they emit
+  nothing. **The NanoVDB part is untested**: there is no fog volume among the assets here. `CloudMedium`: its density is
+  clamped at zero wherever the noise is negative and has one majorant for its box, so there is no control component to
+  take; `RGBGridMedium`: the coefficients vary by voxel and by wavelength, not by a density, and it is left as it is.
+
+Tests (`productionsampling_test.cs`, now 9, all pass). `TrackersSideBySide`: six settings on four grids;
+`TrackersInAggregateAndTexture`; `SpectralSingleScattering` (0.078532 by quadrature, all within error). Coloured smoke with
+a floor of density (what leaves / deviation / grid lookups a walk):
+
+| | leaves | deviation | lookups |
+|---|---|---|---|
+| delta, one wavelength samples | 0.4022 | 0.490 | 3.80 |
+| decomposition | 0.3999 | 0.490 | 0.64 |
+| spectral (average, reduced termination) | 0.4013 | 0.249 | 28.9 |
+| spectral, absorption events | 0.3999 | 0.490 | 12.4 |
+| spectral with decomposition | 0.4008 | 0.347 | 17.9 |
+| spectral (maximum) | 0.351 +- 0.015 | 6.6 (largest value 2010) | 31.1 |
+
+The maximum scheme does not follow the throughput: in a strongly coloured medium a walk that leaves has a probability of
+the order of 2^-collisions and a weight to match. It is measured and not held to the others there; it is held to them in the
+grey and the faintly coloured smoke (deviation 0.310 against 0.255 for the average). Aggregate of two grids: 7.72 lookups a
+walk with delta, 2.50 with decomposition; spectral 42.4, with decomposition 26.2.
+
+Renders (64 spp, RMSE of the ball, time, RMSE^2 x time):
+
+| | grid | aggregate of two grids |
+|---|---|---|
+| delta | 0.0753, 19.9 s, 0.113 | 0.0817, 26.0 s, 0.174 |
+| decomposition | 0.0758, 19.8 s, 0.114 | 0.0820, 26.5 s, 0.178 |
+| spectral | 0.0677, 28.5 s, 0.131 | 0.0697, 37.3 s, 0.181 |
+| spectral with decomposition | 0.0787, 26.5 s, 0.164 | 0.0773, 37.4 s, 0.223 |
+| spectral, absorption events | 0.0836, 21.2 s, 0.148 | |
+| spectral, maximum | 0.2567, 24.3 s, 1.60 | |
+
+None of the new settings beats delta tracking with one sampling wavelength at equal time in these scenes (small grids in
+memory, where a lookup is cheap).
+
+## Kutz et al. 2017 against procedural media (uncommitted after 6655c0b)
+
+`/renders/pbr/procedural`: a sphere of coloured medium, multiple scattering, 64 spp, independent sampler; RMSE of the ball
+against a reference of 384 spp (192 for the fbm), time, RMSE^2 x time.
+
+| medium | delta (what was there) | decomposition | spectral | spectral with decomposition |
+|---|---|---|---|---|
+| texture, 0.6 + 0.6 turbulence (8 octaves): a floor | 0.0798, 30.2 s, 0.192 | 0.0790, 29.0 s, 0.181 | 0.0656, 54.3 s, 0.234 | 0.0704, 51.1 s, 0.253 |
+| texture, 0.25 + 1.5 fbm (8 octaves), clamped at zero: no floor | 0.0940, 60.6 s, 0.535 | 0.0940, 60.2 s, 0.532 | 0.0745, 110.0 s, 0.610 | 0.0745, 114.3 s, 0.634 |
+| cloud | 0.0828, 27.3 s, 0.187 | 0.0828, 26.4 s, 0.181 | 0.0753, 56.4 s, 0.320 | 0.0753, 54.3 s, 0.308 |
+
+- Decomposition: 4% less time and the same error where there is a floor (6% better in RMSE^2 x time, within what one render
+  can tell). The control component is small here: the majorant comes from the bound of the turbulence, which is far above
+  the values the texture takes, so most collisions are null collisions of the residual and are looked up all the same.
+  Without a floor, and in the cloud (which gives no control component), the image is the same as delta tracking's.
+- Spectral tracking: 10 to 20% less error for twice the time; behind delta tracking at equal time in all three (its majorant
+  is that of the densest wavelength and its walks are not ended by absorption, so it evaluates the density about twice as
+  often, and the evaluation is what costs in a procedural medium).
+- Test: the texture medium of `TrackersInAggregateAndTexture` counts the evaluations of its density: 7.44 a walk with delta,
+  6.77 with decomposition (a floor of 0.1 under a majorant of 1.1); spectral 34.6, with decomposition 32.7.
+
+What would make decomposition pay in a procedural medium is a tighter majorant and minorant by region (the region bounds of
+the noise textures: the improvement proposed earlier and not done), not the tracker.
+
+## Transmittance estimators: next flight, local residual, MIS, power series (uncommitted after 6655c0b)
+
+All `TransmittanceEstimator`s chosen by `"string transmittance"`; the default (`"ratio"`) is unchanged. All unbiased. All use
+one majorant for every wavelength (the largest) with weights by wavelength, and leave the path probabilities alone.
+
+| name | source | what |
+|---|---|---|
+| `nextflight`, `nextflightratio` | Cramer 1978; Novak et al. 2018, eq. 51, 52 | the flight through the majorant from the start and from every tentative collision; the first ends its walk as delta tracking does |
+| `unidirectional` | Georgiev et al. 2019, 5.4 (reference code) | ratio tracking and the next flights of one walk, by the balance heuristic |
+| `bidirectional` | the same | a walk from each end, every connection of the two and each walk alone, by the balance heuristic (`MajorantProfile`: the ray in the depth of its majorant) |
+| `pseriescumulative`, `pseriescmf` | Georgiev et al. 2019, 5.2 (reference code) | prefix sums of the series of exp(tau_n), lookups in proportion to the majorant; left to ratio tracking beyond a majorant depth of 600 |
+| `residuallocal` | Novak et al. 2014, 3.3, 5 | residual ratio tracking with a control for every voxel: the mean density of the voxel (`MajorantGrid.averages`, `RayMajorantSegment.averageFraction`; the middle of the bounds for a texture medium) |
+| `residualtracking` | Novak et al. 2014, 3.2 | the binary form, with the smallest density of the voxel as the control |
+
+Grid, NanoVDB and texture media give the controls (NanoVDB untested: no fog volume here); for any other medium the two
+residual estimators are ratio tracking and the track-length estimator. `"residual"` (one control for the medium) is as it was.
+
+Test `ProductionSampling.TransmittanceEstimators` (a grid ball at three densities and a grid of one density; every wavelength
+against exp(-tau); all pass). Ball, tau = 2.95 (deviation, lookups, deviation^2 x lookups):
+ratio 0.146, 4.3, 9.3e-2; tracklength 0.222, 1.5, 7.2e-2; nextflight 0.127, 4.3, 7.0e-2; nextflightratio 0.070, 9.3, 4.5e-2;
+unidirectional 0.063, 9.3, 3.7e-2; residualtracking 0.058, 3.9, 1.3e-2; bidirectional 0.0152, 18.6, 4.3e-3;
+pseriescumulative 0.0152, 19.1, 4.4e-3; pseriescmf 0.0152, 18.9, 4.4e-3; residuallocal 0.0115, 3.2, 4.2e-4;
+raymarching 0.00017, 20.5, 5.9e-7. In the grid of one density the two residual estimators are exact without a lookup.
+
+Render, coloured smoke on a grid, multiple scattering, 64 spp (RMSE of the ball, time, RMSE^2 x time): ratio 0.0753, 19.9 s,
+0.113; residualtracking 0.0670, 19.8, 0.089; residuallocal 0.0663, 20.5, 0.090; nextflight 0.0697, 19.6, 0.095;
+nextflightratio 0.0679, 21.2, 0.098; pseriescmf 0.0666, 22.0, 0.098; raymarching 0.0663, 22.4, 0.099; unidirectional 0.0674,
+21.7, 0.099; pseriescumulative 0.0664, 22.6, 0.100; bidirectional 0.0673, 25.2, 0.114. On the three procedural scenes
+(texture and cloud media, loose majorants) the next-flight pair and ray marching lowered the error by a few percent and cost
+more time than they saved (ratio tracking 0.192 / 0.535 / 0.187 in RMSE^2 x time; nextflight 0.208 / 0.574 / 0.206).
+
+## Double scattering in the single scattering volumes, joint importance sampling (uncommitted after 6655c0b)
+
+`"string doublescattering" "none" | "plain" | "joint" | "mis"` (`Volume.DoubleScattering`; Georgiev et al. 2013 as in Novak et
+al. 2018, 6.4, the closed forms of the isotropic case; the tables for other phase functions are not made, the phase
+functions are in the weight). New services: `ChooseLight` (replaces `GenerateLightPoint`), `Connect`, `EvaluateLight`;
+`VolumeContext.mayScatterTwice`. Test `ProductionSampling.DoubleScattering`: plain 0.022786 +- 0.000398, joint 0.022615 +-
+0.000050, mis 0.022589 +- 0.000062; deviation 0.502 / 0.025 / 0.034.
+
+Renders, two scatterings at most, 16 spp (RMSE, time): lights inside a homogeneous fog: path tracing 0.125, 5.1 s; plain
+0.166, 6.5 s; joint 0.031, 6.4 s. Lights inside a cloud: 0.211, 9.5 s; 0.391, 17.4 s; 0.159, 15.5 s. With the lights outside
+the medium (the three procedural scenes) "joint" alone is worse than "plain" (it puts the second point near the light, where
+there is no medium); "mis" was added for that and rendered, but **its error there is not measured**: the references that
+match what a single scattering volume gathers (no light that a surface scatters into the volume) were not rendered.
+
+## The cloud medium as a texture: `Texture "name" "float" "cloud"` (`cloudmediumtexture.cs`, uncommitted after 6655c0b)
+
+`CloudMediumTexture`: the density of `CloudMedium` (same parameters: "density", "wispiness", "frequency", "edgefalloff",
+"uniform") with `RegionBounds` over a box: the altitude terms exactly, each octave of the noise by `pbrt.NoiseBounds` over the
+box of its lookup points, grown by the displacement that the wispiness can give (`NoiseSlopeBound` 8.5, the largest slope of
+the noise, derived in the source). A "texture" medium of it is the cloud with a majorant grid, minima and a control per
+voxel, so decomposition tracking and the residual estimators work in it; `CloudMedium` itself is unchanged.
+
+Test `ProductionSampling.CloudMediumTexture` (four settings, unit box): the density equals the cloud medium's at 20000 points
+(difference 0); 0 of 240000 values outside the bounds of 1200 boxes; 43 to 47% of the boxes have a smallest density above
+zero (the lower half of the cloud, where the second term of the density is); majorant depth along rays 1.56 to 1.95 against
+the cloud medium's 1.94 to 1.95, of which 0.88 to 1.16 is the control. The majorant itself is only a little tighter: with
+wispiness the box of the lookup points grows by 0.64 and only the first two octaves keep a bound below 1.
+
+Render, the procedural cloud scene, 64 spp (RMSE of the ball, time, RMSE^2 x time): cloud medium 0.0828, 27.3 s, 0.187;
+texture medium of the cloud texture: ratio 0.0853, 29.4, 0.214; residuallocal 0.0764, 28.1, 0.164; residualtracking 0.0758,
+29.7, 0.171; tracker decomposition 0.0825, 24.3, 0.165; decomposition with residuallocal 0.0767, 26.0, 0.153. (That scene's
+box is from -1 to 1 in height, so its lower part is the dense layer of the cloud.)
+
+## A mean for textures: `FloatTexture.RegionMean` (uncommitted after 6655c0b)
+
+`FloatTexture.RegionMean(Bounds3f region)`: the mean of the texture over a region, by default from the values at the centres
+of a 4 x 4 x 4 division of it (64 evaluations, once per voxel when the medium is made); `FloatConstantTexture` overrides it
+with its value. `TextureMedium` takes it (as a density, clamped between the smallest and the largest of the voxel) for
+`MajorantGrid.averages`, the control of `"transmittance" "residuallocal"`. `"string control" "middle"` on a texture medium
+gives the middle of the bounds back (`TextureMedium.UseMiddleControl`), which is what was there before.
+
+Measured in `ProductionSampling.CloudMediumTexture`, residual ratio tracking through the cloud texture, four settings (the
+same transmittance with both; deviation, lookups, deviation^2 x lookups):
+mean 0.069, 6.8, 0.032 / middle 0.379, 3.9, 0.56; mean 0.058, 5.6, 0.019 / middle 0.630, 3.2, 1.25;
+mean 0.106, 7.1, 0.080 / middle 1.72, 3.9, 11.5; mean 0.128, 6.0, 0.099 / middle 0.558, 3.5, 1.08.
+The middle of the bounds leaves the smallest majorant for the residual and so the fewest lookups, but where the bounds are
+loose the densities are far from it and the weights far from one; the mean costs 1.7 times the lookups and is 11 to 140
+times better by deviation^2 x lookups. Render of the cloud scene (RMSE^2 x time): residuallocal 0.164 with either control
+(0.0750 in 29.2 s with the mean, 0.0764 in 28.1 s with the middle); decomposition with residuallocal 0.143 with the mean
+(0.0753, 25.2 s) against 0.153 with the middle.
+
+## Equiangular sampling beside next-event estimation in the multiple scattering volumes (uncommitted after 6655c0b)
+
+Miller, Georgiev and Jarosz 2019, section 5.2 / figure 7. `"string distancesampling" "mis" | "equiangular"` now also acts on
+`MultiScatterHomogeneousVolume` and `MultiScatterHeterogeneousVolume` (default `"density"`: as before). On every ray the
+volume also lights a point drawn from the equiangular density about a point of a light, from that light
+(`Volume.EquiangularShare`); the collision that it returns carries what weighs the next-event estimation there
+(`VolumeGeometry.direct`, `VolumeDirectWeight`), which the path tracer applies per light in `SampleLd` and to an area light
+that the next ray hits. Weights: the balance heuristic over the path with its null collisions, mu_t W / (mu_t W + p_ea)
+and p_ea / (mu_t W + p_ea), W the product of mu_n / mu_bar before the point (the transmittance itself in a homogeneous
+volume), mu_t W as its mean over the wavelengths; with the decomposition tracker W is left out. Not in the aggregate, not
+with `"spectral" "tracking"`.
+
+- `ChooseLight` now takes the sampler of the lights half of the time and any light alike the other half (the light serves
+  points all along the ray, and what is gathered about it is divided by the probability of the choice). This also applies
+  to the single scattering volumes' equiangular point and to the joint importance sampling.
+- Fixed: `VolumeIntegrator.Create` returned the shared default settings for a multiple scattering medium and dropped
+  `"distancesampling"`.
+
+Test `ProductionSampling.EquiangularBesideNextEvent` (light scattered once, quadrature 0.078532; deviation of one sample):
+homogeneous density 0.139, equiangular 0.020, mis 0.032; tracked 0.167 / 0.090 / 0.080; the same with the decomposition
+tracker. All within error.
+
+Renders, lights inside the medium, 10 bounces, 16 spp (RMSE against 256 spp of next-event estimation alone, in brackets
+without the 20 most deviant pixels; time): homogeneous fog: next-event alone 0.183 (0.138), 10.4 s; mis 0.145 (0.093), 20.8 s;
+equiangular 2.56 (0.091), 22.0 s. Cloud: 0.305 (0.273), 9.8 s; mis 0.217 (0.208), 17.3 s; equiangular 0.279 (0.264), 17.2 s.
+Lower error for about twice the time: about even at equal time in the fog, about 10% better in the cloud. "equiangular"
+alone gave one pixel of 800 in the fog: about a point light the equiangular density leaves 1 / D (D the distance of the ray
+from the light), whose variance does not converge, and without the collision's share nothing bounds it.
+
+## Emission of volumes: sampled as a light everywhere, emission majorant, residual emission tracking (uncommitted after 6655c0b)
+
+Villemin and Hery 2013 (Pixar memo 13-02), Simon et al. 2017 (line integration, forward next event estimation), Huang et al.
+2021 (emission and scattering importance sampling, with the talk notes). What was there before: emission at every collision,
+emission ratio tracking (`Volume.TrackEmission`), and `VolumeEmissionLight` (point and forward sampling) for `TextureMedium`
+in volpath, BDPT and MLT only.
+
+1. **The light for every emissive medium.** `VolumeEmissionLight` takes any `Medium` that answers `Medium.EmissionRegion`
+   (default: its `AggregateRegion`) and `Medium.EmissionBoundUnit(box of the unit cube)`: `GridMedium`, `RGBGridMedium`,
+   `NanoVDBMedium`, `TextureMedium` and `AggregateMedium` (one light for the aggregate: the sum of its members' bounds over
+   the box of the members). `"bool emission_nee"`, `"bool emission_fnee"`, `"integer emission_nee_res"` are read for all of
+   them (`Medium.CreateEmissionSampling`), the registry of the lights is on `Medium` (`EnableEmissionSampling`,
+   `AddEmissionLights`, `EmissionLights`), `Medium.MajorantAt` has a default (the first segment of a ray from the point).
+   volpath, BDPT and MLT pick the light up for these media as they did for the texture medium.
+2. **The production path tracer.** Every emission light is sampled along lines, whatever `"emission_fnee"` says
+   (`ProductionPathIntegrator.SampleEmission`): at every surface and volume point of the path, and at the points that the
+   single scattering volumes light themselves (`VolumeServices.SampleEmission`, called from `Volume.DirectLighting`), a
+   direction is drawn towards the emission and `Volume.EmissionOver` gathers along the ray, which stops once it has left the
+   box of the emitting voxels. The emission that the path gathers on its own ray is the other strategy: every
+   `Volume.Integrate` multiplies it by `VolumeContext.emissionWeight`, the balance heuristic in the density of directions
+   (p_b against pmf x `PdfDirection`), set by the path tracer per medium; `EvaluateLightSample` gives the phase-sampled
+   direction of a single scattering point its share the same way. The lights of the emission are chosen by their power, apart
+   from the sampler of the lights. `EmissionOver` passes the densities of the path into the tracking of the emission (the
+   mean over wavelengths of the product, not the product of the means).
+3. **Emission-aware majorant**, `"float emissionmajorant" m` on a medium with a grid of majorants (grid, RGB grid, NanoVDB,
+   texture without `"hierarchydepth"`); 0: off. `MajorantGrid.RaiseForEmission`: a voxel is raised to at least
+   m x (largest majorant of the grid) x (its emission bound / the largest emission bound). Disney use max(mu_t, mu_a Le),
+   which mixes units and needs a clamp; this form has neither.
+4. **Residual emission tracking**, `"string emission" "residual"` (default `"ratio"`): `Volume.TrackEmissionResidual`. The
+   mean extinction of each majorant cell is taken out as an exponential and the rest is ratio tracked, with collisions at the
+   scalar majorant, per-wavelength factors, and roulette below 0.02. Not in the papers (the control of Novak et al. 2014
+   given to emission tracking). It acts in `Volume.Emission` of the tracked volumes, i.e. on the lines of 2 and on
+   phase-sampled directions; not on the emission that a path's own walk gathers, not with absorption alone, not in the
+   aggregate.
+
+Tests (`ProductionSampling.EmissionTracking`, `.EmissionLight`):
+- residual against ratio, emission through fire in smoke, deviation of one line (lookups): density scale 0.5: 0.295 (1.04) /
+  0.258 (1.18); scale 4: 0.181 (8.3) / 0.042 (8.0); scale 16: 0.0047 (33.1) / 0.0008 (8.6). Closed form in a constant grid:
+  0.62918 +- 0.00082 against 0.62907.
+- emission majorant, a hot place where the smoke is thinnest, deviation (lookups): off 0.114 (0.79); 1: 0.064 (0.98); 4: 0.035
+  (1.88); the same mean.
+- the light on a grid medium and on an aggregate of two: the density of directions integrates to 0.999 +- 0.001; emission
+  arriving at a point by directions towards the emission against uniform directions, 3 million samples: 0.09192 +- 0.00006
+  against 0.09184 +- 0.00010, 0.06790 +- 0.00003 against 0.06786 +- 0.00006.
+
+Renders (production, independent sampler). Mean of the image, sampled against gathered only, several seeds: coloured smoke
+that emits everywhere over a floor, 0.018639 +- 0.000042 against 0.018714 +- 0.000047; under single scattering fog 0.017135 +-
+0.000051 ("mis"), 0.017171 +- 0.000039 ("light") against 0.017178 +- 0.000088; aggregate 0.023176 +- 0.000061 against 0.023436
++- 0.000181; texture medium 0.3571 +- 0.0010 against 0.3589 +- 0.0013; volpath on the grid medium 0.018559 (point), 0.018556
+(lines) against 0.018543; small fire, 0.013061 +- 0.000219 against 0.013046 +- 0.000169, in multiple scattering fog 0.012944
++- 0.000121 against 0.013177 +- 0.000162.
+
+RMSE over the pixels that do not see the emission, 64 spp unless said (time; RMSE^2 x time):
+- hot place in thin smoke (reference 512 spp sampled + majorant): gathered 0.229 (8.7 s; 0.454), 256 spp 0.120 (34 s; 0.499);
+  majorant 4: 0.091 (8.9 s; 0.073), 256 spp 0.045 (34 s; 0.068); sampled 0.031 (24 s; 0.023); sampled + majorant 0.013 (26 s;
+  0.0043). Over the whole image the majorant alone is best (0.142 at 8.9 s): sampling does nothing for the pixels that see the
+  emission.
+- torch in fog (reference 1024 spp sampled): gathered 0.050 (8.4 s; 0.021), 256 spp 0.025 (30 s; 0.019); sampled 0.029 (29 s;
+  0.024). About even at equal time.
+- fire inside smoke (reference 1024 spp sampled): gathered 0.128 (8.4 s; 0.138), 256 spp 0.069 (30 s; 0.144); sampled, ratio
+  0.072 (30 s; 0.157); sampled, residual 0.078 (28 s; 0.168). Even; the residual tracking saves time, not error, here.
+
+Not done / known:
+- point sampling of the emission in the production path tracer (lines only).
+- the NanoVDB bound of the emission is the density of the cell wherever any temperature of the grid emits; untested (no data).
+- `EvaluateLightSample` (the phase-sampled direction of a single scattering point, from before) still divides the emission
+  by the mean density of the beam and then of the path, a product of means; `SampleEmission` uses the mean of the product.
+- the probe-sphere scattering guidance of Huang et al. is not implemented.
+
+## `adaptivegrid` beside `uniformgrid` (uncommitted after 6655c0b)
+
+The refinement rule of Benyoub and Dupuy, "Adaptive Tetrahedral Grids for Volumetric Path-Tracing" (SIGGRAPH Talks 2025),
+given to the majorants of our grid medium (`GridMedium.RefineMajorants`): the same data and lookups (nothing resampled,
+unbiased), the 16^3 majorants as the first level, a voxel split into `"integer branching"`^3 (2) where (max - min) / mean of
+the density is above `"float variation"` (0.5), down to `"integer maxdepth"` levels (3) or one data cell; every voxel has
+its largest, smallest and mean density. `"bool adaptivewalk"` (false): whether the walk of a path also steps through the
+refined majorants, or only what asks for them (the estimators of the transmittance, the trackers with a control).
+
+The paper's own structure, a `tetrahedralgrid` medium (conforming longest-edge bisection, one density per tetrahedron,
+regular tracking, exact transmittance), was implemented, tested and measured, and then removed at the user's request because
+it resamples the data (biased against the source grid). What it measured: 26.2 s against 14.0 s for the cloud render below at
+the same RMSE; 462 k tetrahedra and 44 MB for a 128^3 smooth cloud; a ray's transmittance 0.003 rms from the data.
+
+A fix found on the way and kept: a walk whose majorant equals the extinction could choose a null collision by the rounding
+of the probabilities and divide 0 by 0; `MultiScatterHeterogeneousVolume`, `SingleScatterHeterogeneousVolume` and the
+aggregate now treat it as no event.
+
+Tests (`AdaptiveGrids.Transmittance`; `AdaptiveGrids.Slices` writes pictures where GRID_SLICES names a folder):
+transmittance of 200 rays against the data marched finely (deviation of one estimate; lookups; ns; deviation^2 x ns):
+- 64^3 cloud with detail at the cell size, scale 24: grid ratio 0.150, 8.0, 9400, 212; grid residuallocal 0.154, 5.6, 4300,
+  102; adaptive residuallocal 0.074, 2.0, 5800, 32; adaptive ratio 0.173, 4.6, 9200, 276.
+- 128^3 smooth cloud, scale 12: grid residuallocal 0.139, 1.8, 1600, 32; adaptive residuallocal (241 k voxels) 0.041, 0.40,
+  8400, 14.
+Ratio tracking gains nothing from tighter majorants (fewer lookups, more variance and more segments).
+
+Render (production, 96^3 cloud, sun and sky, depth 60, 240x180, 64 spp; render time without start-up; RMSE against the
+grid at 1024 spp; RMSE^2 x time): uniformgrid ratio 14.0 s, 0.1152, 0.186; uniformgrid residuallocal 14.2 s, 0.1112, 0.176;
+adaptivegrid 1 level, residuallocal 13.8 s, 0.1082, 0.162; the same with the walk 15.5 s, 0.1081, 0.181; adaptivegrid 3
+levels 17.9 s, 0.1094, 0.214; with the walk 22.8 s, 0.1090, 0.271. In this scene the error is the path sampling's, not the
+transmittance's: all are within 7% in RMSE and the time decides.
+
+Not done: the hierarchy on NanoVDB and RGB grid media; data above 128^3; expensive lookups.

@@ -1,4 +1,4 @@
-// (not in pbrt-v4) productionvolume_test.cs
+﻿// (not in pbrt-v4) productionvolume_test.cs
 //
 // The volume integrators of productionvolume.cs in a slab (the surfaces z = 0 and z = -1, a light at infinity), where the
 // answers are known:
@@ -41,6 +41,13 @@ namespace pbrt
                 L = new SampledSpectrum(1f);
                 beamR = new SampledSpectrum(1f);
                 beamTransmittance = Exp(-sigma_t * (-ctx.P.z / toLight.z));
+                return true;
+            }
+
+            public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, out Vector3f wi, out SampledSpectrum L)
+            {
+                wi = toLight;
+                L = new SampledSpectrum(1f);
                 return true;
             }
         }
@@ -121,6 +128,87 @@ namespace pbrt
                               estimate, error, exact, through / count, throughExact / count);
             EXPECT_LT(Math.Abs(estimate - exact), 4 * error + 1e-5);
             EXPECT_LT(Math.Abs(through - throughExact) / count, 1e-5);
+        }
+
+        // The course's listing 13: the point of the scattering from a density built by marching, the transmittance by
+        // quadrature. Against the same closed form; the march takes the volume as constant over a step, which is exact here.
+        [TEST("ProductionVolume", "SingleScatteringByDensity")]
+        public static void SingleScatteringByDensity()
+        {
+            HomogeneousMedium medium = Medium(new RGB(0.2f, 0.5f, 1.5f), new RGB(0.5f, 1.5f, 3f), VolumeScattering.SinglePDF);
+            medium.volumeIntegrator.stepSize = 0.05f;
+            RNG rng = new RNG(11);
+            Slab rs = new Slab(3);
+            rs.toLight = Normalize(new Vector3f(0.3f, 0.2f, 0.7f));
+            Float mu = 0.6f, mu0 = rs.toLight.z;
+            Vector3f d = new Vector3f(SafeSqrt(1 - mu * mu), 0, -mu);
+            double estimate = 0, exact = 0, squares = 0, through = 0, throughExact = 0, shadow = 0, shadowExact = 0;
+            int count = 100000;
+            for (int s = 0; s < count; ++s)
+            {
+                VolumeContext ctx = new VolumeContext();
+                ctx.lambda = SampledWavelengths.SampleVisible(rng.Uniform<Float>());
+                ctx.P = new Point3f(0, 0, 0);
+                MediumProperties mp = medium.SamplePoint(ctx.P, ctx.lambda);
+                rs.sigma_t = mp.sigma_a + mp.sigma_s;
+                SampledSpectrum L, T, w;
+                Point3f P;
+                Ray wo;
+                VolumeGeometry g;
+                Volume volume = Volume.Create(ctx, medium);
+                EXPECT_TRUE(volume is SingleScatterPDFVolume);
+                volume.Integrate(rs, new Ray(ctx.P, d, 0), out L, out T, out w, out P, out wo, out g);
+                SampledSpectrum between = volume.Transmittance(rs, new Point3f(0.1f, 0.2f, -0.1f), new Point3f(0.4f, -0.3f, -0.8f));
+                double length = Distance(new Point3f(0.1f, 0.2f, -0.1f), new Point3f(0.4f, -0.3f, -0.8f));
+                double mean = 0;
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    mean += L[i] / NSpectrumSamples;
+                    double st = rs.sigma_t[i], k = st * (1 + mu / mu0);
+                    exact += mp.sigma_s[i] / (4 * Math.PI) * (1 - Math.Exp(-k / mu)) / k / NSpectrumSamples;
+                    through += T[i] / NSpectrumSamples;
+                    throughExact += Math.Exp(-st / mu) / NSpectrumSamples;
+                    shadow += between[i] / NSpectrumSamples;
+                    shadowExact += Math.Exp(-st * length) / NSpectrumSamples;
+                }
+                estimate += mean;
+                squares += mean * mean;
+            }
+            estimate /= count;
+            exact /= count;
+            double error = Math.Sqrt(Math.Max(0, squares / count - estimate * estimate) / count);
+            Console.WriteLine("MEASURE production volume, single scattering by a marched density: {0:F5} +- {1:F5}, closed form {2:F5}; beam {3:F5} / {4:F5}; " +
+                              "between two points {5:F5} / {6:F5}", estimate, error, exact, through / count, throughExact / count, shadow / count, shadowExact / count);
+            EXPECT_LT(Math.Abs(estimate - exact), 4 * error + 1e-5);
+            EXPECT_LT(Math.Abs(through - throughExact) / count, 1e-5);
+            EXPECT_LT(Math.Abs(shadow - shadowExact) / count, 1e-5);
+        }
+
+        // The course's listing 2
+        [TEST("ProductionVolume", "Empty")]
+        public static void Empty()
+        {
+            HomogeneousMedium medium = Medium(new RGB(0.2f, 0.5f, 1.5f), new RGB(0.5f, 1.5f, 3f), VolumeScattering.None);
+            VolumeContext ctx = new VolumeContext();
+            ctx.lambda = SampledWavelengths.SampleVisible(0.3f);
+            ctx.P = new Point3f(0, 0, 0);
+            Slab rs = new Slab(5);
+            SampledSpectrum L, T, w;
+            Point3f P;
+            Ray wo;
+            VolumeGeometry g;
+            Volume volume = Volume.Create(ctx, medium);
+            EXPECT_TRUE(volume is EmptyVolume);
+            EXPECT_TRUE(volume.Integrate(rs, new Ray(ctx.P, new Vector3f(0, 0, -1), 0), out L, out T, out w, out P, out wo, out g));
+            EXPECT_TRUE(g.isSurface);
+            EXPECT_LT(Math.Abs(P.z + 1), 1e-6);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                EXPECT_EQ(1, T[i]);
+                EXPECT_EQ(1, w[i]);
+                EXPECT_EQ(0, L[i]);
+                EXPECT_EQ(1, volume.Transmittance(rs, ctx.P, P)[i]);
+            }
         }
 
         [TEST("ProductionVolume", "MultipleScattering")]

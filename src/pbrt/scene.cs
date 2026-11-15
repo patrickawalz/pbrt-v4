@@ -349,6 +349,20 @@ namespace pbrt
                     Warning(medium.loc, StringPrintf("Animated transformation provided for a medium of type \"%s\". Only the \"texture\" and " +
                                                      "\"osl\" media move; this one uses the start transform.", type));
 
+                if (type == "aggregate")
+                {
+                    // (not in pbrt-v4) A volume aggregate (volumeaggregate.cs) of media that were made before it
+                    List<string> names = medium.parameters.GetStringArray("members");
+                    Medium[] members = new Medium[names.Count];
+                    for (int i = 0; i < names.Count; ++i)
+                        members[i] = GetMedium(names[i], medium.loc);
+                    Medium aggregate = AggregateMedium.Create(members, medium.parameters, medium.loc);
+                    aggregate.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
+                    aggregate.CreateEmissionSampling(medium.parameters, medium.loc);
+                    medium.parameters.ReportUnused();
+                    return aggregate;
+                }
+
                 return Medium.Create(type, medium.parameters, medium.renderFromObject.startTransform,
                                      medium.loc, new Allocator(), movingMedium ? medium.renderFromObject : null);
             };

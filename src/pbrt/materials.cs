@@ -2277,19 +2277,34 @@ namespace pbrt
         public void SetOwnVolume(Medium medium) { ownVolume = medium; }
 
         // The homogeneous medium of the coefficients given as functions of the wavelength, with the integrator named
-        // ("multiple", "single", "absorption": productionvolume.cs)
+        // ("multiple", "single", "singlepdf", "absorption", "none": productionvolume.cs)
         public static Medium MakeHomogeneousVolume(Func<Float, Float> sigma_a, Func<Float, Float> sigma_s, Float g, string scattering, FileLoc loc, Allocator alloc)
         {
             HomogeneousMedium medium = new HomogeneousMedium(DenselySampledSpectrum.SampleFunction(sigma_a), DenselySampledSpectrum.SampleFunction(sigma_s), 1,
                                                              new ConstantSpectrum(0f), 1, g, alloc);
             if (scattering != "multiple")
             {
-                if (scattering != "single" && scattering != "absorption")
-                {
-                    ErrorExit(loc, StringPrintf("%s: the scattering of a volume must be \"multiple\", \"single\" or \"absorption\"", scattering));
-                }
                 VolumeIntegrator integrator = new VolumeIntegrator(VolumeIntegrator.Default.tracker, VolumeIntegrator.Default.transmittance);
-                integrator.scattering = scattering == "single" ? VolumeScattering.Single : VolumeScattering.Absorption;
+                if (scattering == "single")
+                {
+                    integrator.scattering = VolumeScattering.Single;
+                }
+                else if (scattering == "singlepdf")
+                {
+                    integrator.scattering = VolumeScattering.SinglePDF;
+                }
+                else if (scattering == "absorption")
+                {
+                    integrator.scattering = VolumeScattering.Absorption;
+                }
+                else if (scattering == "none")
+                {
+                    integrator.scattering = VolumeScattering.None;
+                }
+                else
+                {
+                    ErrorExit(loc, StringPrintf("%s: the scattering of a volume must be \"multiple\", \"single\", \"singlepdf\", \"absorption\" or \"none\"", scattering));
+                }
                 medium.volumeIntegrator = integrator;
             }
             return medium;
