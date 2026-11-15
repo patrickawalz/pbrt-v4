@@ -29,6 +29,10 @@ namespace pbrt
             where TextureEvaluator : ITextureEvaluator;
         public abstract Image GetNormalMap();
         public abstract FloatTexture GetDisplacement();
+
+        // (not in pbrt-v4) The presence of the surface, from 0 (not there) to 1: a ray meets the surface with this probability and
+        // otherwise goes on as if nothing were there, and so does the light it emits. null: always there.
+        public virtual FloatTexture GetOpacity() { return null; }
         public abstract bool HasSubsurfaceScattering();
     }
 

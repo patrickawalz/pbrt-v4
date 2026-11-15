@@ -1069,6 +1069,11 @@ namespace pbrt
                         if (mtl is InterfaceMaterial)
                             mtl = null;
 
+                        // (not in pbrt-v4) The presence of the surface is the alpha of the shape times the opacity of its material
+                        FloatTexture opacityTex = mtl != null ? mtl.GetOpacity() : null;
+                        if (opacityTex != null)
+                            alphaTex = alphaTex != null ? new FloatScaledTexture(alphaTex, opacityTex) : opacityTex;
+
                         shapeIndexToAreaLights.TryGetValue(i, out List<Light> areaList);
                         for (ulong j = 0; j < shapeObjs.size(); ++j)
                         {
@@ -1090,6 +1095,8 @@ namespace pbrt
                                 area = oslLight;
                             }
 
+                            if (opacityTex != null && area is DiffuseAreaLight presentLight)
+                                presentLight.SetPresence(alphaTex);
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(shapeObjs[j], mtl, ObjectIds.Hash(sh.loc)));
                             else
@@ -1144,6 +1151,11 @@ namespace pbrt
                         if (mtl is InterfaceMaterial)
                             mtl = null;
 
+                        // (not in pbrt-v4) The presence of the surface is the alpha of the shape times the opacity of its material
+                        FloatTexture opacityTex = mtl != null ? mtl.GetOpacity() : null;
+                        if (opacityTex != null)
+                            alphaTex = alphaTex != null ? new FloatScaledTexture(alphaTex, opacityTex) : opacityTex;
+
                         // (not in pbrt-v4) The area lights of the shape were made with the shape in its own space and know its motion; the
                         // emission of a hit is then evaluated at the time of the ray (the primitive is inside the AnimatedPrimitive).
                         // An animated shape in an instance definition has no area light, as a static one has none (the same warning is given
@@ -1160,6 +1172,8 @@ namespace pbrt
                             if (areaList != null)
                                 area = areaList[(int)k];
 
+                            if (opacityTex != null && area is DiffuseAreaLight presentLight)
+                                presentLight.SetPresence(alphaTex);
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(s, mtl));
                             else

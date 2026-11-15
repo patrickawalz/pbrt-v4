@@ -22,7 +22,7 @@ namespace pbrt
         private static readonly string[] shapeKinds = new string[] { "quad", "triangle", "sphere", "disk" };
 
         // The shape in the space given by the transformation (the vertices of the meshes are transformed by it, the quadrics hold it)
-        private static Shape MakeShape(string kind, Transform renderFromObject)
+        internal static Shape MakeShape(string kind, Transform renderFromObject)
         {
             Transform objectFromRender = Inverse(renderFromObject);
             switch (kind)

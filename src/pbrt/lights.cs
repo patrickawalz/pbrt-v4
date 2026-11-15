@@ -1399,8 +1399,43 @@ namespace pbrt
             }
             else
                 L = Lemit.Sample(lambda) * scale;
-            return Pi * (twoSided ? 2 : 1) * area * L;
+            return Pi * (twoSided ? 2 : 1) * area * presence * L;
         }
+
+        // (not in pbrt-v4) The surface of the light is there with the probability that `texture` gives at each point (the alpha
+        // of the shape times the opacity of its material). The mean over the shape is measured, for the power and for the light
+        // sampler; a light that was given its power keeps it: the radiance of what is left is raised by 1 / mean.
+        public void SetPresence(FloatTexture texture)
+        {
+            alpha = texture;
+            if (fromPower && presence > 0)
+                scale *= presence;
+            presence = 1;
+            if (alpha != null)
+            {
+                const int side = 32;
+                RNG rng = new RNG(0x414c5048UL);
+                double sum = 0;
+                int count = 0;
+                for (int y = 0; y < side; ++y)
+                    for (int x = 0; x < side; ++x)
+                    {
+                        Point2f u = new Point2f((x + rng.Uniform<Float>()) / side, (y + rng.Uniform<Float>()) / side);
+                        pstd.optional<ShapeSample> ss = shape.Sample(u);
+                        if (!ss)
+                            continue;
+                        Float a = new UniversalTextureEvaluator().Apply(alpha, new TextureEvalContext(ss.value().intr));
+                        sum += pbrt.Clamp(a, 0, 1);
+                        ++count;
+                    }
+                if (count > 0)
+                    presence = (Float)(sum / count);
+            }
+            if (fromPower && presence > 0)
+                scale /= presence;
+        }
+
+        public Float Presence() { return presence; }
 
         public override pstd.optional<LightBounds> Bounds()
         {
@@ -1427,7 +1462,7 @@ namespace pbrt
             }
             else
                 phi = Lemit.MaxValue();
-            phi *= scale * area * Pi;
+            phi *= scale * area * presence * Pi;
 
             DirectionCone nb = shape.NormalBounds();
             Bounds3f shapeBounds = shape.Bounds();
@@ -1561,6 +1596,8 @@ namespace pbrt
         Float areaScale = 1;
         Shape shape;
         FloatTexture alpha;
+        Float presence = 1;
+        public bool fromPower = false;
         Float area;
         bool twoSided;
         DenselySampledSpectrum Lemit;
@@ -1646,6 +1683,8 @@ namespace pbrt
 
             DiffuseAreaLight light = new DiffuseAreaLight(renderFromLight, new MediumInterface(medium), L, scale, shape, alphaTex, image,
                                                           imageColorSpace, twoSided);
+            light.fromPower = phi_v > 0;
+            light.SetPresence(alphaTex);
             light.SetMotion(renderFromLightAnimated);
             return light;
         }

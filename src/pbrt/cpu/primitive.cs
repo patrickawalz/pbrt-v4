@@ -58,7 +58,10 @@ namespace pbrt
                 if (a < 1)
                 {
                     // Possibly ignore intersection based on stochastic alpha test
-                    Float u = (a <= 0) ? 1.0f : HashFloat(r.o, r.d);
+                    // (pbrt-v4 hashes the ray. The point is hashed here, as DiffuseAreaLight.AlphaMasked does: whether a point of the
+                    // surface is there is then one fact for the ray that meets it and for the light it emits. With two hashes a
+                    // ray saw the light of a surface of presence a with the probability a squared.)
+                    Float u = (a <= 0) ? 1.0f : HashFloat(si.value().intr.p());
                     if (u > a)
                     {
                         // Ignore this intersection and trace a new ray
