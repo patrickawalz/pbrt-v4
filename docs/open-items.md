@@ -195,5 +195,133 @@ Left:
 ## Polygrain: reciprocity and energy together
 
 Not solved. `reciprocal` true: reciprocal, white furnace within 0.01 of 1. `reciprocal` false: 0.9998 - 1.0000, reciprocal to
-2 %. Both at once needs a walk whose probabilities are symmetric (the first scattering uses the correlated visibility of the
-two directions, the later ones do not); a compensation lobe built from the albedo would need a table per set of grains.
+2 %.
+
+Why the present walk cannot have both. Its BSDF is defined by its own rules of transition, and those are not the same from
+the two ends: the first scattering uses the visibility of the two directions together (one grain that hides both is counted
+once, as the paper does), the later ones multiply separate one-sided probabilities; a ray stopped on its way meets "a grain
+above" or "below" drawn without the masking of that grain; and each step forgets where the earlier segments of the path went.
+Averaging the two directions restores reciprocity but not the energy that the forward rules conserve.
+
+The redesign: trace the grains themselves, generated as the path meets them.
+- The model of the paper is a real random geometry: grains of each type scattered over the base as a Poisson process. Its
+  distribution of normals and its correlated visibility are exact statements about that geometry (the heights buried by other
+  grains, the shadow areas).
+- A path knows its own shape: heights, directions and lengths give every vertex its place relative to the first. What it does
+  not know is where the other grains are, and those are independent of each other. So the grains along a new segment can be
+  drawn when the segment is traced: a Poisson number of centres in the footprint of the segment, placed uniformly, kept if the
+  grain meets the segment, and discarded if it would have blocked an earlier segment or buried an earlier vertex (thinning: the
+  path so far has shown those places to be empty). The grains already hit are kept and tested as ordinary geometry. The
+  nearest hit is the next vertex.
+- This is an exact simulation of the model, not a position-free approximation. Every realisation is a real surface, so the
+  mean is reciprocal, and with lossless grains and base nothing is lost: both properties by construction, with no option to
+  choose between them. It should also close what is left against grains laid out (0.013 - 0.017), since that test becomes the
+  same computation on a finite patch.
+- Evaluation: the connection of a vertex to the other direction is a shadow ray through the same lazily drawn grains (free or
+  not: an unbiased estimate of the conditional visibility). At the first vertex the closed form of the paper is kept, so the
+  first scattering stays noise-free and identical to the paper.
+- Sampling, the density and the Mueller matrices keep their present form (weights are products of reflectances).
+
+To check before building on it: that the first scattering of the lazy tracer equals the closed form of the paper for several
+types and for anisotropic grains (this is the claim that the paper's model is exactly this geometry). Costs: the number of
+candidate grains grows as 1 / cos(theta) at grazing, so long segments are traced in pieces; the tests against the earlier
+segments are quadratic in the number of scatterings; the shadow rays of the later vertices are noisier than a closed form.
+The position-free walk could stay as a faster, approximate option.
+
+## Status after commit 91d8bce (the seven items that were open)
+
+1. Volumes bound to materials: done. `Volume.Integrate()` / `Volume.Transmittance()` after the course's listings, and
+   `Integrator "production"`, which knows of no collision or tracker. Beer's law, single and multiple scattering, each
+   homogeneous and heterogeneous, by `"string scattering" "multiple" | "single" | "absorption"` on the medium. Against volpath
+   on ten scenes every region mean within 1.8 sigma; three unit tests against closed forms. The course PDF could not be
+   fetched: the interface follows the signatures of its listings and memory of its section 3. Not in it: polarisation,
+   equiangular sampling, overlapping volumes each integrated its own way (the member of the highest overlap priority decides),
+   bdpt and mlt.
+2. The inside of OpenPBR and Maxwell materials: done. `transmission_depth`, `transmission_scatter`, `subsurface_mode "volume"`,
+   Maxwell `attenuation` with `scattering`; the medium is owned by the material. Open: these scenes are 1 - 2 % brighter in
+   production than in volpath at 400 spp (within 1.4 sigma, the same sign in eight of nine channels), unexplained. The volume
+   parameters are constants, not textures.
+3. Reciprocity of stacks: the earlier claim was wrong. pbrt's layered walk is reciprocal in the mean (four pairs, 40000
+   evaluations, within 1.4 sigma); the chi2 of 2.9 was the heavy tail of the estimate. `"bool reciprocal"` on OpenPBR and
+   Maxwell makes each evaluation reciprocal at twice the cost.
+4. Thin film: done. The Airy sum per microfacet is what the paper's appendix E describes; under a coat the medium above the
+   film is now the coat. A perfect metal under films of 0.1, 0.4 and 1.5 micrometres returns 1.0000.
+5. Polarisation through held lobes: mostly done. The thin dielectric and the smooth thin film keep their matrices in a mix or
+   a stack (6e-8 against the lobe alone); the hazy dielectric still depolarises there.
+6. MaterialX: further, not the library. About 60 pattern nodes, the document's own node definitions, the colour spaces
+   srgb_texture and g22_rec709, the hair BSDF, images (tested). Missing: the standard library of node definitions, code
+   generation, mip-mapped images, other colour spaces, EDFs.
+7. Polygrain energy with reciprocity: not solved; the redesign is the section above.
+
+Tests that ran and passed at that commit: ProductionVolume 3, Combine 6, OpenPBR 7, Lobes 5, PolyGrain 12, Polarised 24,
+FacetForge 18, BxDFCheck 30, BSDF 9, Volume 4, BoundaryStack 7, TextureMedium 5, DistributionBlend 4. The whole suite was not
+run.
+
+
+## Exact polygrain (`Material "exactpolygrain"`, uncommitted after 91d8bce)
+
+The redesign described above, built as a second implementation beside `polygrain`
+(`exactpolygrain.cs`, `polygrain_access.cs`, `exactpolygrain_test.cs`, 8 tests).
+Grains are drawn lazily along each ray piece and then kept as geometry, so the path
+walks one consistent realisation of the Boolean model.
+
+Measured (ExactPolyGrain.* tests):
+
+- first scattering by tracing equals the paper's closed form (worst 3.4 sigma, <= 0.73 % of f)
+- white furnace 1.0000 in all 18 cases
+- reciprocity of f: worst 2.0 sigma (<= 0.9 % of f), i.e. noise
+- against grains laid out and traced: worst 0.0073 (position-free walk 0.0175, one scattering 0.3168)
+- Sample_f is exact; f() and PDF() miss one class of paths with pure-mirror grains:
+  those that leave by two or more successive mirrors on grains the path already knows.
+  Share of the albedo: 0.0012-0.0052 (largest for tau 0.85). The other known-grain
+  connections (after a wide scattering; after a mirror on a drawn grain) are found by
+  Newton on the normal of the known grain and match their sampled shares
+  (0.0150 vs 0.0145, 0.0078 vs 0.0080, 0.0093 vs 0.0094, 0.0160 vs 0.0163).
+  Closing it needs chains of known mirrors (nested solves over ordered grain pairs).
+- solver recovery of traced reflections: one mirror 14908/14908, drawn-then-known 1886/1895.
+
+Renders (64 spp, sphere region mean, exact relative to `polygrain` reciprocal off):
+white +0.4 %, gold on red +0.3..1.3 %, two types +0.8..4.1 %, dense silver +1.6..1.7 %.
+
+Open:
+
+- cost with mirror grains: 187-231 s against 26-31 s for the walk (diffuse grains: 18 s against 26 s)
+- no Mueller matrices
+- PDF() is one unit walk mixed 0.9/0.1 with a uniform density (as pbrt's layered BxDF);
+  without the floor the path integrator produced NaN weights
+- known-mirror chains in f()/PDF() as above
+- directions must be normalised in double precision before the solves (float-normalised
+  wi made the convergence test fail; fixed, worth remembering for other solvers)
+
+
+### Third attempt: chains of known mirrors by unbiased manifold sampling (`"bool chains"`, default true)
+
+The gap of the second attempt (paths that leave by two or more successive mirrors on
+grains the path already knows) is closed in expectation. After the last event with chance
+in it (a wide scattering, or a mirror on a drawn grain) such a path is a root of an
+equation with no list of roots to enumerate. A trial starts Newton from a random direction
+towards a known mirror grain, takes whatever sequence of known mirrors that ray meets
+(two or more; for a drawn grain the sequence may return to the drawn grain itself, which
+was 3/4 of the share), and solves for that sequence. The root found is weighted by the
+number of further trials until the same root is found again, which is an unbiased
+estimate of 1 / p (Zeltner, Georgiev, Jakob 2020). `"bool chains" false` is the second attempt.
+
+Measured:
+
+- share of the albedo by such chains, dense mirror grains (tau 0.85), 1.5 M samples:
+  by samples 0.00536 +- 0.00006, found by evaluation 0.00534 +- 0.00041
+- albedo by samples against by evaluation: 0.4233 / 0.4203 +- 0.0022, 1.0000 / 0.9991 +- 0.0022,
+  0.8053 / 0.8097 +- 0.0042, gold on grey 0.6548 / 0.6512 +- 0.0013 (2.3 sigma) and 0.7815 / 0.7806
+- density integrates to 0.9959 and 0.9989 (second attempt 0.9907, 0.9965)
+- render cost unchanged within 3 % (192 / 115 / 236 s against 187 / 112 / 231 s)
+- renders brighter than the second attempt by 0.1-0.45 % (sphere mean), as the share predicts
+
+Open:
+
+- the estimator is heavy tailed: about 13 % of the roots need more than 64 trials, and at
+  250 k samples the mean came out 22 % low (0.00424) with an error bar that did not show it;
+  only at 1.5 M did it settle. Right in expectation, slow to converge, and a source of rare
+  bright values in f(). Better first guesses (aim the reflection off the first grain at the
+  second) would shorten the tail.
+- trials are capped at 262144 (11 of 54850 roots reached it; their contribution is dropped)
+- chains longer than 8 mirrors are dropped

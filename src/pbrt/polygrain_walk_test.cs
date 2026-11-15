@@ -14,7 +14,7 @@ namespace pbrt
 {
     public static unsafe class PolyGrainWalkTests
     {
-        static PolyGrainBxDF Mirror(mg.PolyGrain d, Float bulkReflectance, int order, int samples = 4)
+        internal static PolyGrainBxDF Mirror(mg.PolyGrain d, Float bulkReflectance, int order, int samples = 4)
         {
             PolyGrainBxDF bxdf = new PolyGrainBxDF(d, samples);
             for (int j = 0; j < d.n; ++j)
@@ -28,7 +28,7 @@ namespace pbrt
             return bxdf;
         }
 
-        static PolyGrainBxDF Chalk(mg.PolyGrain d, int order)
+        internal static PolyGrainBxDF Chalk(mg.PolyGrain d, int order)
         {
             PolyGrainBxDF bxdf = new PolyGrainBxDF(d, 4);
             for (int j = 0; j < d.n; ++j)
@@ -40,7 +40,7 @@ namespace pbrt
             return bxdf;
         }
 
-        static Vector3f Direction(Float cosine, Float phi)
+        internal static Vector3f Direction(Float cosine, Float phi)
         {
             Float sine = SafeSqrt(1 - cosine * cosine);
             return new Vector3f(sine * (Float)Math.Cos(phi), sine * (Float)Math.Sin(phi), cosine);
@@ -215,7 +215,7 @@ namespace pbrt
         // ---- Grains laid out one by one: unit hemispheres with their centres on the plane z = 0, placed at random (they may
         // overlap, as in the model), mirrors or white, on a diffuse base. Rays are traced through them. This is what the model
         // of the paper describes for one scattering, and what the walk approximates for the later ones.
-        sealed class Layout
+        internal sealed class Layout
         {
             public double size;
             public int cells;
@@ -327,7 +327,7 @@ namespace pbrt
         }
 
         // The light that leaves, in all and after one scattering only, for light that arrives from wo
-        static void Simulate(Layout layout, Vector3f wo, bool mirrorGrains, double baseAlbedo, int rays, ref RNG rng, out double all, out double once)
+        internal static void Simulate(Layout layout, Vector3f wo, bool mirrorGrains, double baseAlbedo, int rays, ref RNG rng, out double all, out double once)
         {
             double sumAll = 0, sumOnce = 0;
             for (int r = 0; r < rays; ++r)

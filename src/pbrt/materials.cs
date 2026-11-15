@@ -2352,6 +2352,8 @@ namespace pbrt
                 material = MaterialXMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "openpbr")
                 material = OpenPBRMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "exactpolygrain")
+                material = ExactPolyGrainMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "polygrain")
                 material = PolyGrainMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "facetforge")
