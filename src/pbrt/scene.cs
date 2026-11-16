@@ -358,15 +358,24 @@ namespace pbrt
                     // (a refractive member: the index of a place is not one medium's own, and a ray through the aggregate
                     // has one path. The aggregate is then made of the medium that the member holds, with the others, and
                     // is itself held by a refractive medium of the member's field: the rays bend through all of it.)
+                    // Several such members: their fields together (the sum of their n^2 - 1).
                     RefractiveMedium bending = null;
+                    List<TetrahedralIndexField> fields = new List<TetrahedralIndexField>();
+                    bool surfacesInside = false, bentJoint = true, bentEquiangular = true;
+                    Float surfaceTolerance = Infinity;
+                    Func<Float, double> dispersion = null;
                     for (int i = 0; i < names.Count; ++i)
                     {
                         members[i] = GetMedium(names[i], medium.loc);
                         if (members[i] is RefractiveMedium refractiveMember)
                         {
-                            if (bending != null)
-                                ErrorExit(medium.loc, "An aggregate can have one refractive member (one field of the index).");
                             bending = refractiveMember;
+                            fields.Add(refractiveMember.field);
+                            surfacesInside |= refractiveMember.surfacesInside;
+                            bentJoint &= refractiveMember.bentJoint;
+                            bentEquiangular &= refractiveMember.bentEquiangular;
+                            surfaceTolerance = Math.Min(surfaceTolerance, refractiveMember.surfaceTolerance);
+                            dispersion = dispersion ?? refractiveMember.dispersion;
                             members[i] = refractiveMember.inner;
                         }
                     }
@@ -376,9 +385,11 @@ namespace pbrt
                     if (bending != null)
                     {
                         aggregate.CreateEmissionSampling(medium.parameters, medium.loc);
-                        RefractiveMedium around = new RefractiveMedium(aggregate, bending.field, bending.surfacesInside);
-                        around.dispersion = bending.dispersion;
-                        around.surfaceTolerance = bending.surfaceTolerance;
+                        RefractiveMedium around = new RefractiveMedium(aggregate, fields.Count == 1 ? fields[0] : TetrahedralIndexField.Together(fields), surfacesInside);
+                        around.dispersion = dispersion;
+                        around.surfaceTolerance = surfaceTolerance;
+                        around.bentJoint = bentJoint;
+                        around.bentEquiangular = bentEquiangular;
                         around.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
                         medium.parameters.ReportUnused();
                         return around;

@@ -1660,7 +1660,7 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densitiesC * densitiesB * beamR;
                 if ((bool)r)
                 {
-                    result = toC * mp.sigma_s * mp.phase.p(-tangent, w) * toB * at.sigma_s * at.phase.p(-arrival, wl) * arriving * beam *
+                    result = toC * mp.sigma_s * mp.phase.pSpectral(-tangent, w) * toB * at.sigma_s * at.phase.pSpectral(-arrival, wl) * arriving * beam *
                              (indexC * share * searches * seen * (bent ? Seen(path.indexAtStart, indexC) : 1) * s * s / (spread * pdf * r.Average()));
                 }
             }

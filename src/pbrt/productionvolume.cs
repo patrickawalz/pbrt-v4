@@ -742,7 +742,7 @@ namespace pbrt
                 SampledSpectrum rBeam = r * beamR;
                 if ((bool)rBeam)
                 {
-                    sum += w * numerator * phase.p(intr.wo, direction) * light * beam / rBeam.Average();
+                    sum += w * numerator * phase.pSpectral(intr.wo, direction) * light * beam / rBeam.Average();
                 }
             }
             SampledSpectrum sampledEmission;
@@ -963,7 +963,7 @@ namespace pbrt
                         r *= betweenR * beamR;
                         if ((bool)r)
                         {
-                            result = toC * mp.sigma_s * mp.phase.p(-wi.d, w) * between * at.sigma_s * at.phase.p(-w, toLight) * arriving * beam /
+                            result = toC * mp.sigma_s * mp.phase.pSpectral(-wi.d, w) * between * at.sigma_s * at.phase.pSpectral(-w, toLight) * arriving * beam /
                                      (pdfT * pdf * r.Average());
                         }
                     }
@@ -1018,7 +1018,7 @@ namespace pbrt
                 SampledSpectrum rBeam = r * beamR;
                 if ((bool)rBeam)
                 {
-                    result = through * at.sigma_s * at.phase.p(-wi.d, toLight) * arriving * beam * (share / (pdf * rBeam.Average()));
+                    result = through * at.sigma_s * at.phase.pSpectral(-wi.d, toLight) * arriving * beam * (share / (pdf * rBeam.Average()));
                 }
             }
             m_ctx.SetP(saved);
@@ -1142,7 +1142,7 @@ namespace pbrt
 
             public SampledSpectrum f(Vector3f w)
             {
-                return surface ? bsdf.f(point.wo, w) * AbsDot(w, ((SurfaceInteraction)point).shading.n) : new SampledSpectrum(phase.p(point.wo, w));
+                return surface ? bsdf.f(point.wo, w) * AbsDot(w, ((SurfaceInteraction)point).shading.n) : phase.pSpectral(point.wo, w);
             }
 
             public Float PDF(Vector3f w)
@@ -1231,7 +1231,7 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densities * beamR;
                 if ((bool)r)
                 {
-                    result = through * mp.sigma_s * f * mp.phase.p(-w, wl) * arriving * beam * (integrand * share / r.Average());
+                    result = through * mp.sigma_s * f * mp.phase.pSpectral(-w, wl) * arriving * beam * (integrand * share / r.Average());
                 }
             }
             m_ctx.SetP(saved);
@@ -1300,7 +1300,7 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densities * beamR;
                 if ((bool)r)
                 {
-                    result = through * mp.sigma_s * f * mp.phase.p(-arrival, wl) * arriving * beam * (integrand * share * searches * seen * squared / (spread * r.Average()));
+                    result = through * mp.sigma_s * f * mp.phase.pSpectral(-arrival, wl) * arriving * beam * (integrand * share * searches * seen * squared / (spread * r.Average()));
                 }
             }
             m_ctx.SetP(saved);
@@ -1627,7 +1627,7 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densitiesC * densitiesB * beamR;
                 if ((bool)r)
                 {
-                    result = toC * mp.sigma_s * mp.phase.p(-wi.d, w) * toB * at.sigma_s * at.phase.p(-w, wl) * arriving * beam * (share / (pdf * r.Average()));
+                    result = toC * mp.sigma_s * mp.phase.pSpectral(-wi.d, w) * toB * at.sigma_s * at.phase.pSpectral(-w, wl) * arriving * beam * (share / (pdf * r.Average()));
                 }
             }
             m_ctx.SetP(saved);

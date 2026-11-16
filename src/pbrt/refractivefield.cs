@@ -27,6 +27,7 @@
 // how far every cell is from the nearest cell with a gradient, and a path crosses those regions in one piece.
 
 using System;
+using System.Collections.Generic;
 
 namespace pbrt
 {
@@ -178,6 +179,45 @@ namespace pbrt
         }
 
         public Bounds3f Bounds() { return bounds; }
+
+        // n^2 of the field at a point, as the field is made (without the scaling of a wavelength); one outside its box
+        public double SquaredAsMade(Point3f p)
+        {
+            if (!Inside(p, bounds))
+            {
+                return 1;
+            }
+            double n = Index(p);
+            return 1 + (n * n - 1) / (1 + dispersionShift);
+        }
+
+        // The field of several fields together, for the media of an aggregate that each bend the rays: n^2 - 1 is the sum
+        // of theirs, in closed form on a lattice of their boxes together with the smallest of their cells
+        public static TetrahedralIndexField Together(List<TetrahedralIndexField> fields)
+        {
+            Bounds3f all = fields[0].bounds;
+            double sizeX = fields[0].sizeX, sizeY = fields[0].sizeY, sizeZ = fields[0].sizeZ;
+            for (int i = 1; i < fields.Count; ++i)
+            {
+                all = Union(all, fields[i].bounds);
+                sizeX = Math.Min(sizeX, fields[i].sizeX);
+                sizeY = Math.Min(sizeY, fields[i].sizeY);
+                sizeZ = Math.Min(sizeZ, fields[i].sizeZ);
+            }
+            Vector3f extent = all.Diagonal();
+            Func<double, double, double, double> index = (double x, double y, double z) =>
+            {
+                Point3f p = new Point3f((Float)x, (Float)y, (Float)z);
+                double squared = 1;
+                for (int i = 0; i < fields.Count; ++i)
+                {
+                    squared += fields[i].SquaredAsMade(p) - 1;
+                }
+                return Math.Sqrt(Math.Max(squared, 0));
+            };
+            return new TetrahedralIndexField(all, Math.Max(1, (int)Math.Ceiling(extent.x / sizeX)), Math.Max(1, (int)Math.Ceiling(extent.y / sizeY)),
+                                             Math.Max(1, (int)Math.Ceiling(extent.z / sizeZ)), index, true);
+        }
 
         // n^2 at the four corners of the tetrahedron of a cell where the local coordinate of the axis `first` is the
         // largest and that of `third` the smallest: the corner at the cell's origin, then one step along each axis in turn

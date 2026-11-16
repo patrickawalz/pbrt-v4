@@ -79,7 +79,24 @@ With these, joint double scattering on bent rays (`JointShareBent`) is on, as is
 bentjoint"`, `"bool bentequiangular"` turn them off). The held medium no longer draws joint points itself inside a
 refractive medium: it connected them along straight lines (1.2 % too bright).
 
+Also since:
+- every medium that bounds its extinction over a box can be held: `homogeneous`, the grid media (`uniformgrid`,
+  `adaptivegrid`, `rgbgrid`), `cloud`, `nanovdb`, `texture` and `osl` (not moving), `atmosphere`, and aggregates of those. A
+  cloud with negligible bending: 0.09602 +- 0.00018 against 0.09626 +- 0.00025 plain; an RGB grid (68 seeds): 0.08100
+  0.08937 0.06813 against 0.08090 0.08923 0.06798, each +- 0.00006;
+- the volumes that light their points themselves (`"scattering" "single" | "singlepdf"`) work on bent rays: the curve
+  services give the light sample of a point of the curve (0.08144 +- 0.00006, 0.08131 +- 0.00004 against 0.08131 +-
+  0.00003, 0.08125 +- 0.00004 plain);
+- the value of the phase function is that of each wavelength in the volumes' own estimates too (`pSpectral`);
+- tests: `RefractiveVolume.CarriedDerivative` (the closed-form derivative and the area per solid angle against differences
+  of paths: 1.5 % at most for paths bent by up to 0.5 rad), `RefractiveVolume.BoxMajorants` (no point of a box above the
+  bound of the medium or below its floor: grid, cloud, atmosphere).
+
 Not done:
+- from a point of a curve, the sample of the phase function towards the lights (`"lightsampling" "mis"` of the
+  single-scattering volumes) and the sample of the emission by the volume itself are not followed (the path tracer's own
+  are: `"emission_nee"`);
+- an aggregate takes one refractive member (one field of the index);
 - in polarised mode the volumes gather no light of their own (equiangular, joint, once-more are off), and a
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
 
