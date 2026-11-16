@@ -1232,14 +1232,26 @@ namespace pbrt
             rs.stack = MediumTracking.Start(camera.GetMedium());
             rs.rng = new RNG(Hash(ray.o, ray.d), Hash(sampler.Get1D()));
             ctx.r = new SampledSpectrum(1f);
-            Landing landing = Follow(rs, ctx, rs.stack, new Ray(ray.o, Normalize(ray.d), ray.time), false, default, default, true, false, false, null, default,
-                                     new SampledSpectrum(1f));
+            // (where the ray leaves the scene first, without the transmittance: most rays meet no light there)
+            Ray leaving = new Ray(ray.o, Normalize(ray.d), ray.time);
+            Landing landing = Follow(rs, ctx, rs.stack, leaving, false, default, default, false, false, false, null, default, new SampledSpectrum(1f));
+            if (landing.kind != LandingKind.Escaped)
+            {
+                return L;
+            }
+            SampledSpectrum emitted = new SampledSpectrum(0f);
+            foreach (Light light in infiniteLights)
+            {
+                emitted += light.Le(landing.arrival, lambda);
+            }
+            if (!(bool)emitted)
+            {
+                return L;
+            }
+            landing = Follow(rs, ctx, rs.stack, leaving, false, default, default, true, false, false, null, default, new SampledSpectrum(1f));
             if (landing.kind == LandingKind.Escaped && (bool)landing.T)
             {
-                foreach (Light light in infiniteLights)
-                {
-                    L += landing.T * light.Le(landing.arrival, lambda) / ctx.r.Average();
-                }
+                L = landing.T * emitted / ctx.r.Average();
             }
             return L;
         }

@@ -58,7 +58,33 @@ Not done:
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
 - a refractive medium as a member of an aggregate is taken as the medium that it holds, with straight rays (it can hold
   an aggregate);
-- an atmosphere with refraction.
+
+## The refractive atmosphere
+
+`MakeNamedMedium "sky" "string type" "refractiveatmosphere" ...` takes every parameter of `"atmosphere"` (it holds that
+medium, so its air, aerosols, ozone and phase functions are the same code) and bends the rays:
+
+- the index is that of air of the atmosphere's own density at each height, n - 1 = (n_s - 1) rho(h) / rho(0), with Edlen's
+  refractivity of standard air n_s(lambda) (2.78e-4 at 550 nm);
+- the field is asked for in closed form on a lattice that stores nothing (`"float indexcellacross"` 1e4 m,
+  `"float indexcellup"` 200 m, `"float indexextent"` 1.5e6 m to each side of the top of the planet, `"float indextop"` 6e4 m);
+  20 km by 500 m cells move the limbs of the setting sun by 1 arc second against 10 km by 250 m;
+- `"bool dispersion"` (true): the n^2 - 1 of the field is scaled by n_s(lambda) / n_s(550 nm) for the wavelength of the path.
+  The path tracer then follows the light seen along the camera ray once for each wavelength of the sample, and walks the
+  scattered path with the first wavelength alone (its samples are all of that wavelength while it is walked);
+- `Integrator "production" "bool seethrough" true`: the infinite lights along the camera ray come with an estimate of the
+  transmittance (not only where the walk gets through); with `"string transmittance" "raymarching"` on the medium the sun
+  through 30 air masses is smooth at 4 samples (ratio tracking is all or nothing there: the shells bound the air tightly);
+- the atmosphere bounds its extinction over a piece of a curve by the heights that the piece spans (`MajorantOnPiece`).
+
+Checks: `RefractiveField.AstronomicalRefraction` (36.15 arc minutes along the horizon against 36.17 from the integral for
+an exponential atmosphere). In the renders the sun whose centre is 0.5 degrees below the horizontal stands on the sea
+horizon of a viewer 30 m up, 27 arc minutes high (32 wide); at 1.0 degree below only a sliver is left.
+
+Not done there: the light sampling of the sun along bent rays (the sample of a direction of the disc is followed and
+mostly lands beside it: the sky lit by a low sun is right in the mean and far too noisy to use; the frames are of the
+light seen directly, `"maxdepth" 0`, which measured 2500 times the sky beside it); inversion layers and other weather
+(the standard atmosphere has none, so no mock-mirage flashes); the limb darkening is the approximate one of the sun light.
 
 Scene syntax: `MakeNamedMedium "x" "string type" "refractive" "string medium" "homogeneous" | "uniformgrid" | "adaptivegrid"`
 with the held medium's own parameters, and `"string indexfield" "grid"` (`"float index"`, `"integer inx/iny/inz"`,

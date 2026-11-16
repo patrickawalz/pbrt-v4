@@ -42,6 +42,11 @@ namespace pbrt
 
         public override bool BendsRays() { return true; }
 
+        // How far from the path the chords that it is tested against the surfaces by may be, in scene units ("float
+        // surfacetolerance"); without it they are within a ten-thousandth of their length, which over the kilometres of a
+        // piece of an atmosphere is metres: a ray that passes low over the sea would meet it or not by chance.
+        public Float surfaceTolerance = Infinity;
+
         // Dispersion: for a wavelength (nm), how many times the n^2 - 1 of the field the medium has; null for none. A
         // scene with such a medium is rendered one wavelength to a path (ProductionPath, by `anyDispersion`).
         public Func<Float, double> dispersion;
@@ -91,6 +96,7 @@ namespace pbrt
             int cellsAcross = Math.Max(1, (int)Math.Ceiling(2 * extent / across)), cellsUp = Math.Max(1, (int)Math.Ceiling((below + top) / up));
             TetrahedralIndexField field = new TetrahedralIndexField(box, cellsAcross, cellsUp, cellsAcross, index, true);
             RefractiveMedium medium = new RefractiveMedium(inner, field, parameters.GetOneBool("surfacesinside", true));
+            medium.surfaceTolerance = parameters.GetOneFloat("surfacetolerance", (Float)(0.1 / unit));
             if (disperses)
             {
                 medium.dispersion = (Float lambdaNm) => { return AirRefractivity(lambdaNm) / reference; };
@@ -849,6 +855,7 @@ namespace pbrt
             VolumeIntegrator settings = new VolumeIntegrator(from.tracker, from.transmittance);
             settings.scattering = from.scattering == VolumeScattering.None || from.scattering == VolumeScattering.Absorption ? from.scattering : VolumeScattering.Multiple;
             settings.stepSize = from.stepSize;
+            settings.marchingLookups = from.marchingLookups;
             settings.contrast = from.contrast;
             settings.spectralTracking = from.spectralTracking;
             settings.spectralMaximum = from.spectralMaximum;
@@ -1108,7 +1115,14 @@ namespace pbrt
             DirectionAt(path.pieces[untested], 0, out ax, out ay, out az);
             DirectionAt(path.pieces[last], path.pieces[last].sigma, out bx, out by, out bz);
             double cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
-            if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together)
+            // (a path that has turned by an angle over a length is within a quarter of their product of its chord)
+            bool far = false;
+            if (!IsInf(refractive.surfaceTolerance))
+            {
+                RefractivePiece first = path.pieces[untested], end = path.pieces[last];
+                far = 0.25 * Math.Sqrt(cx * cx + cy * cy + cz * cz) * Distance(first.Point(0), end.Point(end.sigma)) > refractive.surfaceTolerance;
+            }
+            if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together || far)
             {
                 if (last > untested)
                 {
@@ -1122,7 +1136,12 @@ namespace pbrt
                     cy = az * bx - ax * bz;
                     cz = ax * by - ay * bx;
                 }
-                if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together)
+                if (!IsInf(refractive.surfaceTolerance))
+                {
+                    RefractivePiece only = path.pieces[last];
+                    far = 0.25 * Math.Sqrt(cx * cx + cy * cy + cz * cz) * Distance(only.Point(0), only.Point(only.sigma)) > refractive.surfaceTolerance;
+                }
+                if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together || far)
                 {
                     RefractivePiece alone = path.pieces[last];
                     double whole = alone.sigma;
@@ -1208,6 +1227,10 @@ namespace pbrt
                 if (chord > 0 && sagitta > 1e-4f * chord)
                 {
                     chords = Math.Min((int)Math.Ceiling(Math.Sqrt(sagitta / (1e-4f * chord))), 16);
+                }
+                if (sagitta > refractive.surfaceTolerance)
+                {
+                    chords = Math.Max(chords, Math.Min((int)Math.Ceiling(Math.Sqrt(sagitta / refractive.surfaceTolerance)), 1024));
                 }
             }
             for (int c = 0; c < chords; ++c)

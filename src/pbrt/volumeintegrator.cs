@@ -473,7 +473,9 @@ namespace pbrt
                 return true;
             }
             double length = tEnd - tStart;
-            int M = TupleSize(tauMajorant);
+            // (not fewer lookups than the medium asks for: the rule of the paper goes by the optical depth alone, and a long
+            // ray through air that thins out along it gets few lookups where the air is)
+            int M = Math.Max(TupleSize(tauMajorant), medium.volumeIntegrator.marchingLookups);
             double* weights = stackalloc double[MaxOrder + 1];
             int N = Roulette(rng.Uniform<Float>(), weights);
 
@@ -1127,6 +1129,8 @@ namespace pbrt
         public VolumeScattering scattering = VolumeScattering.Multiple;
         // The step of the integrator that marches (SingleScatterPDFVolume), in the units of the scene
         public Float stepSize = 0.1f;
+        // "integer raymarchinglookups" (0): the least number of lookups of one estimate of the "raymarching" estimator
+        public int marchingLookups;
         // How a single scattering volume chooses the point of the scattering along the ray (the course, section 4.2):
         // with the density of the transmittance, with the equiangular density about a point of a light, or with both
         public VolumeDistanceSampling distanceSampling = VolumeDistanceSampling.Density;
@@ -1298,6 +1302,7 @@ namespace pbrt
             made.emissionResidual = emissionName == "residual";
             made.scattering = scattering;
             made.stepSize = stepSize;
+            made.marchingLookups = parameters.GetOneInt("raymarchinglookups", 0);
             made.distanceSampling = distanceSampling;
             made.phaseSampling = lightName == "mis";
             made.lightSamples = lightSamples;
