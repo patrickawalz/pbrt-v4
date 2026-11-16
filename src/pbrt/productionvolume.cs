@@ -266,6 +266,10 @@ namespace pbrt
         public Vector3f stopNormal;
         public bool atPlane;
         public bool geometryOnly;
+        // Two small changes of the ray that is followed (of its point and of its direction), which a volume that bends
+        // the ray carries to where it leaves the ray (CurvedPath.Carry): for the search of the path to a light
+        public bool differentials;
+        public Vector3f offset1, turn1, offset2, turn2;
         // Set by the path tracer's shadow ray when a volume bent it
         public bool shadowBent;
         // A path tracer that carries the polarisation of the light: the volumes gather no light of their own from the lights

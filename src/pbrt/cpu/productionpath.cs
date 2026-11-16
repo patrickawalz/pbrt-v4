@@ -661,6 +661,7 @@ namespace pbrt
                         g.surface = si.value();
                     }
                     Medium medium = MediumTracking.Current(stack);
+                    bool carried = false;
                     if (medium != null)
                     {
                         ctx.SetP(ray.o);
@@ -678,11 +679,19 @@ namespace pbrt
                             arrival = arrivalBent;
                             atPlane = ctx.atPlane;
                             P = PBent;
+                            carried = true;
                         }
                         if (!T)
                         {
                             break;
                         }
+                    }
+                    if (ctx.differentials && !carried && (hit || atPlane))
+                    {
+                        // (a straight stretch)
+                        Float length = hit ? si.value().tHit : toPlane;
+                        ctx.offset1 += length * ctx.turn1;
+                        ctx.offset2 += length * ctx.turn2;
                     }
                 }
                 pending = false;
@@ -760,14 +769,22 @@ namespace pbrt
         // target at a point, where the ray meets the plane through the point (across the straight line to it), in the two
         // coordinates of the plane; for a target that is a direction, the ray as it leaves the scene, across that direction.
         // False where the ray is stopped on the way.
+        // With the derivative of the miss by the two coordinates of the direction (along a1 and a2, across it), carried
+        // along the ray in closed form (VolumeContext.differentials).
         private bool Miss(Services rs, VolumeContext ctx, Interaction origin, BoundaryStack stack, Vector3f direction, bool toPoint, Point3f target, Vector3f towards,
-                          Vector3f e1, Vector3f e2, out Float m1, out Float m2)
+                          Vector3f e1, Vector3f e2, Vector3f a1, Vector3f a2, out Float m1, out Float m2, out Float j11, out Float j21, out Float j12, out Float j22)
         {
             m1 = 0;
             m2 = 0;
+            j11 = j21 = j12 = j22 = 0;
             BoundaryStack entered;
             Ray ray = Leaving(origin, direction, stack, out entered);
+            ctx.differentials = true;
+            ctx.offset1 = ctx.offset2 = new Vector3f(0, 0, 0);
+            ctx.turn1 = a1;
+            ctx.turn2 = a2;
             Landing landing = Follow(rs, ctx, entered, ray, toPoint, target, towards, false, false, false, null, default, new SampledSpectrum(1f));
+            ctx.differentials = false;
             if (toPoint)
             {
                 if (landing.kind != LandingKind.Plane)
@@ -776,6 +793,13 @@ namespace pbrt
                 }
                 m1 = Dot(landing.P - target, e1);
                 m2 = Dot(landing.P - target, e2);
+                // (the changes of the point, taken along the ray onto the plane)
+                Float rate = Dot(landing.arrival.d, towards);
+                Vector3f p1 = ctx.offset1 - landing.arrival.d * (Dot(ctx.offset1, towards) / rate), p2 = ctx.offset2 - landing.arrival.d * (Dot(ctx.offset2, towards) / rate);
+                j11 = Dot(p1, e1);
+                j21 = Dot(p1, e2);
+                j12 = Dot(p2, e1);
+                j22 = Dot(p2, e2);
                 return true;
             }
             if (landing.kind != LandingKind.Escaped || !(Dot(landing.arrival.d, towards) > 0))
@@ -784,12 +808,16 @@ namespace pbrt
             }
             m1 = Dot(landing.arrival.d, e1);
             m2 = Dot(landing.arrival.d, e2);
+            j11 = Dot(ctx.turn1, e1);
+            j21 = Dot(ctx.turn1, e2);
+            j12 = Dot(ctx.turn2, e1);
+            j22 = Dot(ctx.turn2, e2);
             return true;
         }
 
         // The direction in which a ray from a point of the path, bent by the volumes on its way, reaches a point (or leaves
         // the scene in a direction): Newton's method on the two coordinates of the direction, from a first direction, with
-        // the derivative by differences. `spread`: the size of the derivative's determinant at the solution -- the area
+        // the derivative carried along the ray, and steps that are halved until the miss falls. `spread`: the size of the derivative's determinant at the solution -- the area
         // across the ray at the target per solid angle at the start (the squared distance, where nothing bends the ray), or
         // the solid angle of the directions of leaving per solid angle at the start (one).
         private bool SolveConnection(Services rs, VolumeContext ctx, Interaction origin, BoundaryStack stack, bool toPoint, Point3f target, Vector3f towards,
@@ -802,20 +830,15 @@ namespace pbrt
             Float scale = toPoint ? Distance(origin.p(), target) : 1;
             // (as near as the single precision of the points of the scene allows)
             Float tolerance = toPoint ? 2e-5f * scale + 4e-6f * (1 + Length((Vector3f)target)) : 2e-5f;
-            const Float h = 2e-3f;
-            for (int iteration = 0; iteration < 10; ++iteration)
+            Vector3f a1, a2;
+            CoordinateSystem(direction, &a1, &a2);
+            Float m1, m2, j11, j21, j12, j22;
+            if (!Miss(rs, ctx, origin, stack, direction, toPoint, target, towards, e1, e2, a1, a2, out m1, out m2, out j11, out j21, out j12, out j22))
             {
-                Vector3f a1, a2;
-                CoordinateSystem(direction, &a1, &a2);
-                Float m1, m2, u1, u2, v1, v2;
-                if (!Miss(rs, ctx, origin, stack, direction, toPoint, target, towards, e1, e2, out m1, out m2) ||
-                    !Miss(rs, ctx, origin, stack, Normalize(direction + h * a1), toPoint, target, towards, e1, e2, out u1, out u2) ||
-                    !Miss(rs, ctx, origin, stack, Normalize(direction + h * a2), toPoint, target, towards, e1, e2, out v1, out v2))
-                {
-                    return false;
-                }
-                // The derivative of the miss by the two coordinates, and its determinant
-                Float j11 = (u1 - m1) / h, j21 = (u2 - m2) / h, j12 = (v1 - m1) / h, j22 = (v2 - m2) / h;
+                return false;
+            }
+            for (int iteration = 0; iteration < 16; ++iteration)
+            {
                 Float determinant = j11 * j22 - j12 * j21;
                 if (!(std.abs(determinant) > 0) || IsNaN(determinant))
                 {
@@ -834,7 +857,36 @@ namespace pbrt
                     du *= 0.25f / step;
                     dv *= 0.25f / step;
                 }
-                direction = Normalize(direction + du * a1 + dv * a2);
+                // The step, halved until the ray gets through and misses by less
+                bool stepped = false;
+                for (int halving = 0; halving < 6; ++halving)
+                {
+                    Vector3f trial = Normalize(direction + du * a1 + dv * a2);
+                    Vector3f b1, b2;
+                    CoordinateSystem(trial, &b1, &b2);
+                    Float n1, n2, k11, k21, k12, k22;
+                    if (Miss(rs, ctx, origin, stack, trial, toPoint, target, towards, e1, e2, b1, b2, out n1, out n2, out k11, out k21, out k12, out k22) &&
+                        n1 * n1 + n2 * n2 < m1 * m1 + m2 * m2)
+                    {
+                        direction = trial;
+                        a1 = b1;
+                        a2 = b2;
+                        m1 = n1;
+                        m2 = n2;
+                        j11 = k11;
+                        j21 = k21;
+                        j12 = k12;
+                        j22 = k22;
+                        stepped = true;
+                        break;
+                    }
+                    du *= 0.5f;
+                    dv *= 0.5f;
+                }
+                if (!stepped)
+                {
+                    return false;
+                }
             }
             return false;
         }
@@ -871,7 +923,11 @@ namespace pbrt
         private bool BentDeltaArrival(Services rs, VolumeContext ctx, Interaction intr, BoundaryStack stack, Sampler sampler, Light light, LightLiSample ls,
                                       out Vector3f found, out SampledSpectrum arriving, out SampledSpectrum T, out SampledSpectrum beamR)
         {
-            const int MostSearches = 64;
+            // (the searches go on until the direction is found again; past `SureSearches` each further one is made with
+            // the probability `Further` only and counts for as many more, so that the count stays right in the mean and
+            // the work is bounded)
+            const int SureSearches = 24;
+            const Float Further = 0.75f;
             arriving = new SampledSpectrum(0f);
             T = new SampledSpectrum(0f);
             beamR = new SampledSpectrum(1f);
@@ -881,11 +937,21 @@ namespace pbrt
             Vector3f towards = Normalize(ls.wi);
             Float spread = 0;
             bool any = false;
-            int searches = 0;
-            for (int search = 0; search < MostSearches; ++search)
+            Float searches = 0, worth = 1;
+            for (int search = 0; ; ++search)
             {
-                Float cone = sampler.Get1D() < 0.5f ? 0.02f : 0.5f;
-                Vector3f offset = SampleUniformCone(sampler.Get2D(), std.cos(cone));
+                if (search > SureSearches)
+                {
+                    if (sampler.Get1D() >= Further)
+                    {
+                        break;
+                    }
+                    worth /= Further;
+                }
+                // (the straight direction itself, or about it: closely, widely, or anywhere)
+                Float choice = sampler.Get1D();
+                Float cone = choice < 0.4f ? 0 : choice < 0.7f ? 0.1f : choice < 0.9f ? 0.5f : Pi;
+                Vector3f offset = cone > 0 ? SampleUniformCone(sampler.Get2D(), std.cos(cone)) : new Vector3f(0, 0, 1);
                 Frame frame = Frame.FromZ(towards);
                 Vector3f first = frame.FromLocal(offset);
                 Vector3f direction;
@@ -902,7 +968,7 @@ namespace pbrt
                     spread = s;
                     continue;
                 }
-                ++searches;
+                searches += worth;
                 if (solved && Dot(direction, found) > 1 - 1e-6f)
                 {
                     break;
@@ -940,7 +1006,7 @@ namespace pbrt
             {
                 emitted = ls.L;
             }
-            arriving = emitted * ((Float)searches / spread);
+            arriving = emitted * (searches / spread);
             T = landing.T;
             return true;
         }

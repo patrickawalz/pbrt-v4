@@ -163,6 +163,126 @@ namespace pbrt
         public bool lost;
         // A path that the plane of VolumeContext.stopAtPlane stopped (P is the point of the plane)
         public bool atPlane;
+        // Whether the first piece is the straight way up to the field, and the last the straight way beyond it
+        public bool lead, beyond;
+
+        public void Reset()
+        {
+            pieces.Clear();
+            bent = hit = lost = atPlane = lead = beyond = false;
+            surface = null;
+            P = default;
+            arrival = default;
+            indexAtStart = indexAtEnd = sigma = 0;
+        }
+
+        // A small change of the ray at the start of the path -- of its point (`offset`) and of its direction (`turn`, across
+        // the direction) -- carried to the end of the path, in closed form: within a piece the change of the point grows
+        // by sigma times the change of v; at the face between two pieces the changed ray crosses a little later, which adds
+        // (A_before - A_after) times that delay to the change of v (the difference of the two is along the normal of the
+        // face, the index being continuous); at the faces of the box of the field the direction is kept and v = n d.
+        // The changes at the end compare the rays at the same parameter: what is along the ray there is of no account.
+        public void Carry(Bounds3f box, ref Vector3f offset, ref Vector3f turn)
+        {
+            double px = offset.x, py = offset.y, pz = offset.z, qx = turn.x, qy = turn.y, qz = turn.z;
+            bool inside = false;
+            for (int k = 0; k < pieces.Count; ++k)
+            {
+                RefractivePiece piece = pieces[k];
+                double n = Math.Sqrt(piece.vx * piece.vx + piece.vy * piece.vy + piece.vz * piece.vz);
+                double dx = piece.vx / n, dy = piece.vy / n, dz = piece.vz / n;
+                bool straight = (k == 0 && lead) || (k == pieces.Count - 1 && beyond);
+                if (straight)
+                {
+                    if (inside)
+                    {
+                        // Out of the field: to the face, then to the direction
+                        RefractivePiece before = pieces[k - 1];
+                        double nx, ny, nz;
+                        FaceNormal(box, piece.x, piece.y, piece.z, out nx, out ny, out nz);
+                        double rate = nx * piece.vx + ny * piece.vy + nz * piece.vz;
+                        double delay = rate != 0 ? -(nx * px + ny * py + nz * pz) / rate : 0;
+                        px += piece.vx * delay;
+                        py += piece.vy * delay;
+                        pz += piece.vz * delay;
+                        qx += before.ax * delay;
+                        qy += before.ay * delay;
+                        qz += before.az * delay;
+                        double along = dx * qx + dy * qy + dz * qz;
+                        qx = (qx - dx * along) / n;
+                        qy = (qy - dy * along) / n;
+                        qz = (qz - dz * along) / n;
+                        inside = false;
+                    }
+                    if (!double.IsInfinity(piece.sigma))
+                    {
+                        double distance = piece.sigma * n;
+                        px += qx * distance;
+                        py += qy * distance;
+                        pz += qz * distance;
+                    }
+                    continue;
+                }
+                if (!inside)
+                {
+                    // Into the field (or a start inside it): v = n(x) d
+                    double delay = 0;
+                    if (k > 0)
+                    {
+                        double nx, ny, nz;
+                        FaceNormal(box, piece.x, piece.y, piece.z, out nx, out ny, out nz);
+                        double rate = nx * dx + ny * dy + nz * dz;
+                        delay = rate != 0 ? -(nx * px + ny * py + nz * pz) / rate : 0;
+                    }
+                    double fx = px + dx * delay, fy = py + dy * delay, fz = pz + dz * delay;
+                    double gradient = (piece.ax * fx + piece.ay * fy + piece.az * fz) / n;
+                    qx = n * qx + dx * gradient - piece.ax * delay / n;
+                    qy = n * qy + dy * gradient - piece.ay * delay / n;
+                    qz = n * qz + dz * gradient - piece.az * delay / n;
+                    inside = true;
+                }
+                else
+                {
+                    RefractivePiece before = pieces[k - 1];
+                    double jx = before.ax - piece.ax, jy = before.ay - piece.ay, jz = before.az - piece.az;
+                    double rate = jx * piece.vx + jy * piece.vy + jz * piece.vz;
+                    double size = Math.Sqrt(jx * jx + jy * jy + jz * jz);
+                    if (Math.Abs(rate) > 1e-9 * size * n)
+                    {
+                        double delay = -(jx * px + jy * py + jz * pz) / rate;
+                        qx += jx * delay;
+                        qy += jy * delay;
+                        qz += jz * delay;
+                    }
+                }
+                px += qx * piece.sigma;
+                py += qy * piece.sigma;
+                pz += qz * piece.sigma;
+            }
+            if (inside)
+            {
+                // An end inside the field: to the direction there
+                RefractivePiece last = pieces[pieces.Count - 1];
+                double vx = last.vx + last.sigma * last.ax, vy = last.vy + last.sigma * last.ay, vz = last.vz + last.sigma * last.az;
+                double n = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                double along = (vx * qx + vy * qy + vz * qz) / n;
+                qx = (qx - vx / n * along) / n;
+                qy = (qy - vy / n * along) / n;
+                qz = (qz - vz / n * along) / n;
+            }
+            offset = new Vector3f((Float)px, (Float)py, (Float)pz);
+            turn = new Vector3f((Float)qx, (Float)qy, (Float)qz);
+        }
+
+        // The normal of the face of a box that a point is on (the nearest)
+        private static void FaceNormal(Bounds3f box, double x, double y, double z, out double nx, out double ny, out double nz)
+        {
+            double fx = Math.Min(Math.Abs(x - box.pMin.x), Math.Abs(x - box.pMax.x)), fy = Math.Min(Math.Abs(y - box.pMin.y), Math.Abs(y - box.pMax.y));
+            double fz = Math.Min(Math.Abs(z - box.pMin.z), Math.Abs(z - box.pMax.z));
+            nx = fx <= fy && fx <= fz ? 1 : 0;
+            ny = nx == 0 && fy <= fz ? 1 : 0;
+            nz = nx == 0 && ny == 0 ? 1 : 0;
+        }
     }
 
     // CurvedMajorantIterator Definition
@@ -600,8 +720,26 @@ namespace pbrt
         // the way, to the first surface or out of the scene
         private CurvedPath Trace(VolumeServices rs, Ray wi)
         {
+            return Trace(rs, wi, new CurvedPath());
+        }
+
+        // (a path of this thread that is used again by the walks that want the geometry alone, which keep nothing of it)
+        [ThreadStatic]
+        private static CurvedPath scratch;
+
+        private static CurvedPath Scratch()
+        {
+            if (scratch == null)
+            {
+                scratch = new CurvedPath();
+            }
+            scratch.Reset();
+            return scratch;
+        }
+
+        private CurvedPath Trace(VolumeServices rs, Ray wi, CurvedPath path)
+        {
             TetrahedralIndexField field = refractive.field;
-            CurvedPath path = new CurvedPath();
             Vector3f d = Normalize(wi.d);
             Point3f o = wi.o;
             Bounds3f box = field.Bounds();
@@ -644,6 +782,7 @@ namespace pbrt
                 lead.vz = index * d.z;
                 lead.sigma = t0 / index;
                 lead.largestIndex = lead.smallestIndex = index;
+                path.lead = true;
                 path.pieces.Add(lead);
                 path.sigma += lead.sigma;
                 o = entry;
@@ -654,6 +793,7 @@ namespace pbrt
                 // (on the far face of the box, going out: straight)
                 bool hit = rs.GetNearestHit(new Ray(wi.o, d, wi.time), out P, out distance, out g);
                 path.pieces.Clear();
+                path.lead = false;
                 path.sigma = 0;
                 path.hit = hit;
                 path.surface = g;
@@ -735,6 +875,7 @@ namespace pbrt
             last.vz = exitIndex * e.z;
             last.sigma = path.hit || path.atPlane ? Math.Max(distance - back, 0) / exitIndex : double.PositiveInfinity;
             last.largestIndex = last.smallestIndex = exitIndex;
+            path.beyond = true;
             path.pieces.Add(last);
             path.sigma += last.sigma;
             return path;
@@ -917,7 +1058,7 @@ namespace pbrt
         public override SampledSpectrum Transmit(VolumeServices rs, Ray entering, Float tMax, out bool bent, out bool hit, out Point3f P, out VolumeGeometry g,
                                                  out Ray arrival)
         {
-            CurvedPath path = Trace(rs, entering);
+            CurvedPath path = m_ctx.geometryOnly ? Trace(rs, entering, Scratch()) : Trace(rs, entering);
             Medium saved = m_ctx.medium;
             bent = path.bent;
             hit = path.hit;
@@ -941,6 +1082,12 @@ namespace pbrt
                 return new SampledSpectrum(0f);
             }
             m_ctx.atPlane = path.atPlane;
+            if (m_ctx.differentials)
+            {
+                Bounds3f box = refractive.field.Bounds();
+                path.Carry(box, ref m_ctx.offset1, ref m_ctx.turn1);
+                path.Carry(box, ref m_ctx.offset2, ref m_ctx.turn2);
+            }
             if (m_ctx.geometryOnly)
             {
                 return new SampledSpectrum(1f);
