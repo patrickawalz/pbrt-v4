@@ -375,7 +375,48 @@ namespace pbrt
                 {
                     pstd.optional<ShapeIntersection> si = integrator.Intersect(ray);
                     Medium medium = MediumTracking.Current(local);
-                    if (medium != null)
+                    // (where the ray arrives: as it left, unless a volume bends it)
+                    Ray reaching = ray;
+                    bool onSurface = (bool)si;
+                    SurfaceInteraction isect = si ? si.value().intr : default;
+                    if (medium != null && medium.BendsRays())
+                    {
+                        // A volume that may bend the ray: its emission and its transmittance along the ray as it goes,
+                        // and the ray goes on from where it leaves the volume
+                        ctx.SetP(ray.o);
+                        ctx.medium = medium;
+                        bool gather = medium.IsEmissive() && (bool)ctx.r;
+                        Float share = 1;
+                        if (gather)
+                        {
+                            Float pmf = integrator.EmissionPmf(medium.EmissionLight());
+                            if (pmf > 0)
+                            {
+                                share = scatterPdf / (scatterPdf + pmf * medium.EmissionLight().PdfDirection(point.p(), wi, ctx.time));
+                            }
+                        }
+                        SampledSpectrum part;
+                        bool bent, hit;
+                        Point3f P;
+                        VolumeGeometry g;
+                        Ray arrival;
+                        Bounds3f everywhere = new Bounds3f(new Point3f(-1e30f, -1e30f, -1e30f), new Point3f(1e30f, 1e30f, 1e30f));
+                        SampledSpectrum through = Volume.Create(ctx, medium).Gather(this, new Ray(ray.o, Normalize(ray.d), ray.time), si ? si.value().tHit : Unbounded, gather,
+                                                                                    ctx.r, everywhere, out part, out bent, out hit, out P, out g, out arrival);
+                        emitted += share * T * part;
+                        T *= through;
+                        if (!T)
+                        {
+                            break;
+                        }
+                        if (bent)
+                        {
+                            reaching = arrival;
+                            onSurface = hit;
+                            isect = hit ? g.surface.intr : default;
+                        }
+                    }
+                    else if (medium != null)
                     {
                         Point3f end = ray.Apply(si ? si.value().tHit : Unbounded);
                         ctx.SetP(ray.o);
@@ -398,11 +439,11 @@ namespace pbrt
                             break;
                         }
                     }
-                    if (!si)
+                    if (!onSurface)
                     {
                         foreach (Light light in integrator.infiniteLights)
                         {
-                            SampledSpectrum Le = light.Le(ray, ctx.lambda);
+                            SampledSpectrum Le = light.Le(reaching, ctx.lambda);
                             if ((bool)Le)
                             {
                                 Float p_l = integrator.lightSampler.PMF(lightContext, light) * light.PDF_Li(lightContext, wi, true);
@@ -412,10 +453,9 @@ namespace pbrt
                         }
                         break;
                     }
-                    SurfaceInteraction isect = si.value().intr;
-                    if (ThinCoatMaterial.Blocks(isect, ray.d))
+                    if (ThinCoatMaterial.Blocks(isect, reaching.d))
                     {
-                        SampledSpectrum Le = isect.Le(-ray.d, ctx.lambda);
+                        SampledSpectrum Le = isect.Le(-reaching.d, ctx.lambda);
                         if ((bool)Le)
                         {
                             Float p_l = isect.areaLight == null ? 0 : integrator.lightSampler.PMF(lightContext, isect.areaLight) * isect.areaLight.PDF_Li(lightContext, wi, true);
@@ -424,7 +464,7 @@ namespace pbrt
                         }
                         break;
                     }
-                    ray = isect.SpawnRay(wi);
+                    ray = isect.SpawnRay(Normalize(reaching.d));
                     MediumTracking.CrossSurface(ref local, isect, ray.d);
                 }
                 beamTransmittance = T;

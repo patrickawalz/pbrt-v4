@@ -848,6 +848,42 @@ namespace pbrt
                 return lit;
             }
 
+            // The light along a direction sampled from the phase function at a point of the curve, and the emission that
+            // a volume samples from such a point: the renderer's, for the point and the direction of the scene
+            public override bool EvaluateLightSample(VolumeContext ctx, MediumInteraction point, Vector3f wi, Float scatterPdf, out SampledSpectrum L,
+                                                     out SampledSpectrum beamTransmittance, out SampledSpectrum beamR, out SampledSpectrum emitted)
+            {
+                Vector3f tangent, b1, b2;
+                Float index;
+                MediumInteraction there = InScene(ctx, point, out tangent, out index);
+                CoordinateSystem(tangent, &b1, &b2);
+                Vector3f inScene = wi.x * tangent + wi.y * b1 + wi.z * b2;
+                Point3f saved = ctx.P;
+                ctx.SetP(there.p());
+                renderer.rng = rng;
+                bool reached = renderer.EvaluateLightSample(ctx, there, inScene, scatterPdf, out L, out beamTransmittance, out beamR, out emitted);
+                rng = renderer.rng;
+                ctx.SetP(saved);
+                L *= Seen(path.indexAtStart, index);
+                emitted *= Seen(path.indexAtStart, index);
+                return reached;
+            }
+
+            public override bool SampleEmission(VolumeContext ctx, MediumInteraction point, PhaseFunction phase, SampledSpectrum r, bool weighted, out SampledSpectrum emitted)
+            {
+                Vector3f tangent;
+                Float index;
+                MediumInteraction there = InScene(ctx, point, out tangent, out index);
+                Point3f saved = ctx.P;
+                ctx.SetP(there.p());
+                renderer.rng = rng;
+                bool sampled = renderer.SampleEmission(ctx, there, phase, r, weighted, out emitted);
+                rng = renderer.rng;
+                ctx.SetP(saved);
+                emitted *= Seen(path.indexAtStart, index);
+                return sampled;
+            }
+
             private MediumInteraction InScene(VolumeContext ctx, MediumInteraction point, out Vector3f tangent, out Float index)
             {
                 Vector3f velocity;
@@ -928,6 +964,7 @@ namespace pbrt
             // (a volume that lights its points itself does so by the light sample; the sample of the phase function and
             // of the emission from a point of the curve are not followed along bent rays)
             settings.lightSamples = from.lightSamples;
+            settings.phaseSampling = from.phaseSampling;
             settings.stepSize = from.stepSize;
             settings.marchingLookups = from.marchingLookups;
             settings.contrast = from.contrast;

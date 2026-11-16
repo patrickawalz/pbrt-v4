@@ -91,12 +91,14 @@ Also since:
 - tests: `RefractiveVolume.CarriedDerivative` (the closed-form derivative and the area per solid angle against differences
   of paths: 1.5 % at most for paths bent by up to 0.5 rad), `RefractiveVolume.BoxMajorants` (no point of a box above the
   bound of the medium or below its floor: grid, cloud, atmosphere).
+- from a point of a curve a single-scattering volume also samples the phase function towards the lights (`"lightsampling"
+  "mis"`: the renderer's phase-sample service follows bent rays now, for every volume) and the emission
+  (single scattering with the phase sample 0.08146 +- 0.00006 against 0.08130 +- 0.00003 plain; an emissive
+  single-scattering volume 0.02584 +- 0.00022 against 0.02579 +- 0.00012);
+- an aggregate may have several refractive members: their fields together, the sum of their n^2 - 1 (two members with
+  half the bump each: 0.97648 +- 0.00006, as one member with the whole bump).
 
-Not done:
-- from a point of a curve, the sample of the phase function towards the lights (`"lightsampling" "mis"` of the
-  single-scattering volumes) and the sample of the emission by the volume itself are not followed (the path tracer's own
-  are: `"emission_nee"`);
-- an aggregate takes one refractive member (one field of the index);
+Not done (as in every medium, refractive or not):
 - in polarised mode the volumes gather no light of their own (equiangular, joint, once-more are off), and a
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
 
