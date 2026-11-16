@@ -52,12 +52,14 @@ Done since:
   the squared distance gives way to the area across the path per solid angle, in the estimate and in the densities of
   the rivals on both sides (`OnceMoreFinishBent`, `JointOnCurve`).
 
+- a refractive medium as a member of an aggregate (one member at most): the aggregate is made of the medium that the member
+  holds, with the others, and is held by a refractive medium of the member's field, so that the rays bend through all of
+  it (three puffs, n up to 1.2: 0.97648 +- 0.00020 as a member against 0.97639 +- 0.00005 holding the aggregate).
+
 Not done:
 - joint double scattering (`"doublescattering"`) on a bent ray (off there);
 - in polarised mode the volumes gather no light of their own (equiangular, joint, once-more are off), and a
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
-- a refractive medium as a member of an aggregate is taken as the medium that it holds, with straight rays (it can hold
-  an aggregate);
 
 ## The refractive atmosphere
 

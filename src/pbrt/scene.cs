@@ -355,11 +355,34 @@ namespace pbrt
                     // were made before it
                     List<string> names = medium.parameters.GetStringArray("members");
                     Medium[] members = new Medium[names.Count];
+                    // (a refractive member: the index of a place is not one medium's own, and a ray through the aggregate
+                    // has one path. The aggregate is then made of the medium that the member holds, with the others, and
+                    // is itself held by a refractive medium of the member's field: the rays bend through all of it.)
+                    RefractiveMedium bending = null;
                     for (int i = 0; i < names.Count; ++i)
+                    {
                         members[i] = GetMedium(names[i], medium.loc);
+                        if (members[i] is RefractiveMedium refractiveMember)
+                        {
+                            if (bending != null)
+                                ErrorExit(medium.loc, "An aggregate can have one refractive member (one field of the index).");
+                            bending = refractiveMember;
+                            members[i] = refractiveMember.inner;
+                        }
+                    }
                     Medium aggregate = type == "aggregate" ? AggregateMedium.Create(members, medium.parameters, medium.loc)
                                                            : AggregateMedium2.Create(members, medium.parameters, medium.loc);
                     aggregate.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
+                    if (bending != null)
+                    {
+                        aggregate.CreateEmissionSampling(medium.parameters, medium.loc);
+                        RefractiveMedium around = new RefractiveMedium(aggregate, bending.field, bending.surfacesInside);
+                        around.dispersion = bending.dispersion;
+                        around.surfaceTolerance = bending.surfaceTolerance;
+                        around.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
+                        medium.parameters.ReportUnused();
+                        return around;
+                    }
                     aggregate.CreateEmissionSampling(medium.parameters, medium.loc);
                     medium.parameters.ReportUnused();
                     return aggregate;
