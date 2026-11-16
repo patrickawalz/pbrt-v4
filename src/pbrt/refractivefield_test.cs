@@ -34,6 +34,57 @@ namespace pbrt
 
         // n^2 linear over the whole box: the field holds it exactly, and the path is one parabola in closed form,
         // x0 + v0 sigma + 1/4 g sigma^2 with g the gradient of n^2, whatever the lattice.
+        // The bending of a ray from the ground through an atmosphere whose index falls with the height above a sphere,
+        // n = 1 + 2.77e-4 exp(-h / 8.4 km), on a lattice that stores nothing (cells of 5 km by 100 m): against the
+        // integral of the bending of a ray in a medium of spherical symmetry (n r sin z stays what it is),
+        //     the integral over r of -(dn/dr) / n  k / sqrt(n^2 r^2 - k^2),    k = n0 r0 sin z0,
+        // for a ray that leaves along the horizon and for one that leaves 5 degrees above it. (Units: km.)
+        [TEST("RefractiveField", "AstronomicalRefraction")]
+        public static void AstronomicalRefraction()
+        {
+            const double Radius = 6371, Scale = 8.4, Excess = 2.77e-4;
+            Func<double, double, double, double> index = (double x, double y, double z) =>
+            {
+                double h = Math.Sqrt(x * x + (y + Radius) * (y + Radius) + z * z) - Radius;
+                return 1 + Excess * Math.Exp(-h / Scale);
+            };
+            Bounds3f box = new Bounds3f(new Point3f(-20, -40, -10), new Point3f(1500, 160, 10));
+            TetrahedralIndexField field = new TetrahedralIndexField(box, 304, 2000, 1, index, true);
+            double[] elevations = { 0, 5 };
+            for (int e = 0; e < elevations.Length; ++e)
+            {
+                double elevation = elevations[e] * Math.PI / 180, height = 0.002;
+                RefractiveRay ray = new RefractiveRay();
+                Vector3f d = new Vector3f((Float)Math.Cos(elevation), (Float)Math.Sin(elevation), 0);
+                EXPECT_TRUE(ray.Begin(field, new Point3f(0, (Float)height, 0), d));
+                RefractivePiece piece;
+                int pieces = 0;
+                while (ray.Next(out piece))
+                {
+                    ++pieces;
+                }
+                double n = Math.Sqrt(ray.vx * ray.vx + ray.vy * ray.vy + ray.vz * ray.vz);
+                double bending = Math.Atan2(d.y, d.x) - Math.Atan2(ray.vy / n, ray.vx / n);
+                // The integral, with r = r0 + u^2 (the integrand is not bounded at the start of a ray along the horizon)
+                double r0 = Radius + height, n0 = 1 + Excess * Math.Exp(-height / Scale), k = n0 * r0 * Math.Cos(Math.Atan2(d.y, d.x));
+                double expected = 0, top = Math.Sqrt(150.0);
+                const int Steps = 400000;
+                for (int i = 0; i < Steps; ++i)
+                {
+                    double u = (i + 0.5) * top / Steps, r = r0 + u * u;
+                    double excess = Excess * Math.Exp(-(r - Radius) / Scale), nr = 1 + excess, slope = -excess / Scale;
+                    double under = nr * nr * r * r - k * k;
+                    if (under > 0)
+                    {
+                        expected += -slope / nr * k / Math.Sqrt(under) * 2 * u * top / Steps;
+                    }
+                }
+                Console.WriteLine("MEASURE refraction at {0} degrees: {1:F3} arc minutes, the integral {2:F3}; {3} pieces, the ray leaves at height {4:F1} km", elevations[e],
+                                  bending * 180 * 60 / Math.PI, expected * 180 * 60 / Math.PI, pieces, Math.Sqrt(ray.x * ray.x + (ray.y + Radius) * (ray.y + Radius)) - Radius);
+                EXPECT_LT(Math.Abs(bending - expected), 0.005 * expected);
+            }
+        }
+
         [TEST("RefractiveField", "ConstantGradient")]
         public static void ConstantGradient()
         {

@@ -82,6 +82,33 @@ namespace pbrt
             MeasureUniformCells();
         }
 
+        // The same with nothing stored: the index at the points of the lattice is asked for when a path is there (for a
+        // field too large to hold, as that of an atmosphere, given in closed form). `index` gives n at (x, y, z).
+        public TetrahedralIndexField(Bounds3f bounds, int cellsX, int cellsY, int cellsZ, Func<double, double, double, double> index, bool asked)
+        {
+            this.bounds = bounds;
+            this.cellsX = cellsX;
+            this.cellsY = cellsY;
+            this.cellsZ = cellsZ;
+            sizeX = (double)(bounds.pMax.x - bounds.pMin.x) / cellsX;
+            sizeY = (double)(bounds.pMax.y - bounds.pMin.y) / cellsY;
+            sizeZ = (double)(bounds.pMax.z - bounds.pMin.z) / cellsZ;
+            closedForm = index;
+            skipUniform = false;
+        }
+
+        private double Squared(int i, int j, int k)
+        {
+            if (closedForm != null)
+            {
+                double n = closedForm(bounds.pMin.x + i * sizeX, bounds.pMin.y + j * sizeY, bounds.pMin.z + k * sizeZ);
+                return n * n;
+            }
+            return squared[Vertex(i, j, k)];
+        }
+
+        private Func<double, double, double, double> closedForm;
+
         // The field of the index given by a grid of samples, on a lattice `refine` times as fine as the grid. The samples
         // are at the centres of the grid's cells and interpolated as those of a density grid are (Interpolate), except that
         // beyond the outermost samples the index stays what it is there (a density is nothing outside its grid; an index
@@ -155,13 +182,13 @@ namespace pbrt
             at[0] = i;
             at[1] = j;
             at[2] = k;
-            corner[0] = squared[Vertex(at[0], at[1], at[2])];
+            corner[0] = Squared(at[0], at[1], at[2]);
             at[first]++;
-            corner[1] = squared[Vertex(at[0], at[1], at[2])];
+            corner[1] = Squared(at[0], at[1], at[2]);
             at[second]++;
-            corner[2] = squared[Vertex(at[0], at[1], at[2])];
+            corner[2] = Squared(at[0], at[1], at[2]);
             at[third]++;
-            corner[3] = squared[Vertex(at[0], at[1], at[2])];
+            corner[3] = Squared(at[0], at[1], at[2]);
         }
 
         private int Vertex(int i, int j, int k)
