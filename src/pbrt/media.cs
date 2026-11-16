@@ -227,6 +227,10 @@ namespace pbrt
                 return SampleT_maj<AggregateMedium2, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is BoundedMedium)
                 return SampleT_maj<BoundedMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is CurvedRayMedium)
+                return SampleT_maj<CurvedRayMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is RefractiveMedium)
+                return SampleT_maj<RefractiveMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }
@@ -607,6 +611,15 @@ namespace pbrt
         }
 
         public override bool IsEmissive() { return Le_spec.MaxValue() > 0; }
+
+        // (not in pbrt-v4) The same everywhere
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            sigma_maj = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+            controlFraction = 1;
+            averageFraction = 1;
+            return true;
+        }
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda)
         {
@@ -1038,6 +1051,40 @@ namespace pbrt
         public override SampledSpectrum AggregateExtinction(SampledWavelengths lambda)
         {
             return sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+        }
+
+        // (not in pbrt-v4) The largest majorant over the voxels of the majorant grid that a box of rendering space meets
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            Bounds3f inMedium = new Bounds3f(renderFromMedium.ApplyInverse(box.Corner(0)));
+            for (int corner = 1; corner < 8; ++corner)
+            {
+                inMedium = Union(inMedium, renderFromMedium.ApplyInverse(box.Corner(corner)));
+            }
+            Vector3f low = bounds.Offset(inMedium.pMin), high = bounds.Offset(inMedium.pMax);
+            int x0 = Clamp((int)std.floor(low.x * majorantGrid.res.x), 0, majorantGrid.res.x - 1), x1 = Clamp((int)std.floor(high.x * majorantGrid.res.x), 0, majorantGrid.res.x - 1);
+            int y0 = Clamp((int)std.floor(low.y * majorantGrid.res.y), 0, majorantGrid.res.y - 1), y1 = Clamp((int)std.floor(high.y * majorantGrid.res.y), 0, majorantGrid.res.y - 1);
+            int z0 = Clamp((int)std.floor(low.z * majorantGrid.res.z), 0, majorantGrid.res.z - 1), z1 = Clamp((int)std.floor(high.z * majorantGrid.res.z), 0, majorantGrid.res.z - 1);
+            Float largest = 0, smallest = Infinity, sum = 0;
+            int count = 0;
+            for (int z = z0; z <= z1; ++z)
+            {
+                for (int y = y0; y <= y1; ++y)
+                {
+                    for (int x = x0; x <= x1; ++x)
+                    {
+                        int index = x + majorantGrid.res.x * (y + majorantGrid.res.y * z);
+                        largest = std.max(largest, majorantGrid.voxels[index]);
+                        smallest = std.min(smallest, majorantGrid.minima != null ? majorantGrid.minima[index] : 0);
+                        sum += majorantGrid.averages != null ? majorantGrid.averages[index] : 0;
+                        ++count;
+                    }
+                }
+            }
+            sigma_maj = (sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda)) * largest;
+            controlFraction = largest > 0 ? smallest / largest : 0;
+            averageFraction = largest > 0 ? Clamp(sum / count / largest, controlFraction, 1) : 0;
+            return true;
         }
 
         private Bounds3f bounds;
@@ -1816,6 +1863,17 @@ namespace pbrt
         // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
 
+        // A bound of the extinction over a box of rendering space, with the fractions of it that the extinction is never
+        // below and is about there (as RayMajorantSegment has them), for the media that a refractive medium may hold: its
+        // light paths are curves, and a piece of a curve is bounded by a box. False for a medium that cannot say.
+        public virtual bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            sigma_maj = new SampledSpectrum(0f);
+            controlFraction = 0;
+            averageFraction = 0;
+            return false;
+        }
+
         // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
         // (not in pbrt-v4) For decomposition tracking (Kutz et al. 2017): whether the medium is one set of coefficients and one
         // phase function scaled by a density that alone varies, and then those coefficients for the density 1. A collision of
@@ -2026,6 +2084,11 @@ namespace pbrt
                 grid.RefineMajorants(variation, maxDepth, branching);
                 grid.adaptiveWalk = parameters.GetOneBool("adaptivewalk", false);
                 m = grid;
+            }
+            else if (name == "refractive")
+            {
+                // (not in pbrt-v4) A medium with an index of refraction that varies (refractivemedium.cs)
+                m = RefractiveMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else if (name == "rgbgrid")
             {

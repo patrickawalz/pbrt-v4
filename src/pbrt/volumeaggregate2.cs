@@ -119,6 +119,13 @@ namespace pbrt
 
         public VolumeAggregate Aggregate() { return aggregate; }
 
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            controlFraction = 0;
+            averageFraction = 0;
+            return aggregate.MajorantOver(box, lambda, out sigma_maj);
+        }
+
         public override bool EmissionRegion(out Bounds3f mediumBounds, out Transform renderFromMedium)
         {
             return inner.EmissionRegion(out mediumBounds, out renderFromMedium);

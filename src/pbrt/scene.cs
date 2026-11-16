@@ -365,6 +365,17 @@ namespace pbrt
                     return aggregate;
                 }
 
+                if (type == "refractive" && medium.parameters.GetOneString("heldmedium", "") != "")
+                {
+                    // (not in pbrt-v4) A refractive medium (refractivemedium.cs) that holds a medium made before it: an
+                    // aggregate, say
+                    Medium held = GetMedium(medium.parameters.GetOneString("heldmedium", ""), medium.loc);
+                    Medium refractive = RefractiveMedium.Create(medium.parameters, medium.renderFromObject.startTransform, medium.loc, new Allocator(), held);
+                    refractive.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
+                    medium.parameters.ReportUnused();
+                    return refractive;
+                }
+
                 return Medium.Create(type, medium.parameters, medium.renderFromObject.startTransform,
                                      medium.loc, new Allocator(), movingMedium ? medium.renderFromObject : null);
             };

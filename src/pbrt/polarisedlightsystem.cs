@@ -336,6 +336,17 @@ namespace pbrt
                 return new Attenuation(intensity, PolarisationElementType.DepolarisingBoth);
             }
 
+            // (not in PolarisedUPBP) Light carried from one direction of travel to another without a change of its state: the
+            // identity between a frame where it arrives (travelling along directionEnter, with the x axis of the Stokes
+            // vector along axisEnter) and a frame where it leaves. For a ray that a medium bends, whose polarisation is
+            // carried along the curve (RefractiveVolume): the two axes are one vector carried along it.
+            public static Attenuation Transport(Vector3f directionExit, Vector3f axisExit, Vector3f directionEnter, Vector3f axisEnter)
+            {
+                Attenuation carried = new Attenuation(MuellerMatrix.Diagonal(new SampledSpectrum(1.0f)));
+                carried.SetFrames(directionExit, axisExit, directionEnter, axisEnter);
+                return carried;
+            }
+
             // Fs and Fp are the reflectances of the perpendicular and parallel polarisations, Ds and Dp their retardances
             public static Attenuation Fresnel(SampledSpectrum multipliedBy, Float Fs, Float Fp, Float Ds, Float Dp)
             {

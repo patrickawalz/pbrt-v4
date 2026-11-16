@@ -412,6 +412,28 @@ namespace pbrt
 
         public AggregateMember Member(int index) { return members[index]; }
         public int MemberCount() { return members.Count; }
+
+        // A bound of the extinction of the volumes together over a box of rendering space: the sum of the bounds of those
+        // that the box meets (for a refractive medium that holds the aggregate; no control). False if a volume cannot say.
+        public bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj)
+        {
+            sigma_maj = new SampledSpectrum(0f);
+            for (int i = 0; i < members.Count; ++i)
+            {
+                if (!Overlaps(box, members[i].renderBounds))
+                {
+                    continue;
+                }
+                SampledSpectrum bound;
+                Float control, average;
+                if (!members[i].medium.MajorantOver(box, lambda, out bound, out control, out average))
+                {
+                    return false;
+                }
+                sigma_maj += bound;
+            }
+            return true;
+        }
         public int NodeCount() { return nodes.Count; }
         public int LeafCount() { return leaves; }
         public int Depth() { return deepest; }
@@ -510,6 +532,13 @@ namespace pbrt
         public override bool IsEmissive() { return emissive; }
 
         public VolumeAggregate Aggregate() { return aggregate; }
+
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            controlFraction = 0;
+            averageFraction = 0;
+            return aggregate.MajorantOver(box, lambda, out sigma_maj);
+        }
 
         // The emission of the aggregate as one light (media_emission_light.cs): the box of its members in render space, and
         // over a box of it the sum of what the members say of their own

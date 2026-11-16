@@ -505,7 +505,7 @@ namespace pbrt
         }
 
         // Whether the rough matrix of the BSDF is built by RoughAttenuation itself (the BxDFs of pbrt), not by the BxDF
-        static bool StockRough(BSDF bsdf)
+        internal static bool StockRough(BSDF bsdf)
         {
             BxDF bxdf = bsdf.GetBxDF();
             return bxdf is ConductorBxDF || bxdf is DielectricBxDF;

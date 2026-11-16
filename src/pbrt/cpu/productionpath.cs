@@ -24,6 +24,8 @@
 
 using System;
 using System.Collections.Generic;
+using PLight = pbrt.PolarisedLightSystem.Light;
+using PAttenuation = pbrt.PolarisedLightSystem.Attenuation;
 
 namespace pbrt
 {
@@ -241,7 +243,18 @@ namespace pbrt
                 Float p_l = sampledLight.value().p * ls.value().pdf;
                 // (a volume that is scattered in once has no other way to the light: no heuristic)
                 L = ls.value().L / p_l;
-                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, stack, out beamR);
+                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, stack, out beamR, sampledLight.value().light, ls.value().L);
+                if (ctx.shadowBent && IsDeltaLight(sampledLight.value().light.Type()))
+                {
+                    // (a light at a point or from one direction behind a volume that bends the way to it)
+                    SampledSpectrum arriving;
+                    if (!integrator.BentDeltaArrival(this, ctx, point, stack, sampler, sampledLight.value().light, ls.value(), out wi, out arriving, out beamTransmittance,
+                                                     out beamR))
+                    {
+                        return false;
+                    }
+                    L = arriving / p_l;
+                }
                 return (bool)beamTransmittance;
             }
 
@@ -293,7 +306,16 @@ namespace pbrt
                 lightPdf = sampledLight.value().p * ls.value().pdf;
                 delta = IsDeltaLight(light.Type());
                 L = ls.value().L / lightPdf;
-                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, stack, out beamR);
+                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, stack, out beamR, light, ls.value().L);
+                if (ctx.shadowBent && delta)
+                {
+                    SampledSpectrum arriving;
+                    if (!integrator.BentDeltaArrival(this, ctx, point, stack, sampler, light, ls.value(), out wi, out arriving, out beamTransmittance, out beamR))
+                    {
+                        return false;
+                    }
+                    L = arriving / lightPdf;
+                }
                 return (bool)beamTransmittance;
             }
 
@@ -462,7 +484,18 @@ namespace pbrt
                 wi = ls.value().wi;
                 L = ls.value().L / (light.probability * ls.value().pdf);
                 BoundaryStack unused;
-                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, place != null ? place.stack : stack, out beamR, out unused);
+                beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, place != null ? place.stack : stack, out beamR, out unused,
+                                                                   light.light, ls.value().L);
+                if (ctx.shadowBent && IsDeltaLight(light.light.Type()))
+                {
+                    SampledSpectrum arriving;
+                    if (!integrator.BentDeltaArrival(this, ctx, point, place != null ? place.stack : stack, sampler, light.light, ls.value(), out wi, out arriving,
+                                                     out beamTransmittance, out beamR))
+                    {
+                        return false;
+                    }
+                    L = arriving / light.probability;
+                }
                 return (bool)beamTransmittance;
             }
         }
@@ -479,10 +512,30 @@ namespace pbrt
         private SampledSpectrum ShadowTransmittance(Services rs, VolumeContext ctx, Interaction origin, Interaction target, BoundaryStack stack, out SampledSpectrum beamR,
                                                     out BoundaryStack end)
         {
+            return ShadowTransmittance(rs, ctx, origin, target, stack, out beamR, out end, null, new SampledSpectrum(0f));
+        }
+
+        // The same for the sample of a light, where a volume on the way may bend the ray (Volume.Transmit). The ray is then
+        // followed through the volumes and the surfaces that only bound them to the first surface that stops it, or out of
+        // the scene, and the sample counts if that is the light it was drawn for: what is returned is the transmittance
+        // along the way times what the light emits there towards the ray, over `sampled`, the radiance that the sample
+        // was given (so that the caller's product with `sampled` is right). Nothing for a light at a point or from one
+        // direction, which no ray lands on.
+        private SampledSpectrum ShadowTransmittance(Services rs, VolumeContext ctx, Interaction origin, Interaction target, BoundaryStack stack, out SampledSpectrum beamR,
+                                                    Light light, SampledSpectrum sampled)
+        {
+            BoundaryStack end;
+            return ShadowTransmittance(rs, ctx, origin, target, stack, out beamR, out end, light, sampled);
+        }
+
+        private SampledSpectrum ShadowTransmittance(Services rs, VolumeContext ctx, Interaction origin, Interaction target, BoundaryStack stack, out SampledSpectrum beamR,
+                                                    out BoundaryStack end, Light light, SampledSpectrum sampled)
+        {
             beamR = new SampledSpectrum(1f);
             SampledSpectrum T = new SampledSpectrum(1f);
             Ray ray = origin.SpawnRayTo(target);
             end = stack;
+            bool shadowBent = false;
             if (LengthSquared(ray.d) == 0)
             {
                 return T;
@@ -506,7 +559,18 @@ namespace pbrt
                     Float tMax = si ? si.value().tHit : (1 - ShadowEpsilon);
                     ctx.SetP(ray.o);
                     ctx.medium = medium;
-                    T *= Volume.Create(ctx, medium).Transmittance(rs, ray.o, ray.Apply(tMax));
+                    Float length = Length(ray.d);
+                    bool bent, hit;
+                    Point3f P;
+                    VolumeGeometry g;
+                    Ray arrival;
+                    T *= Volume.Create(ctx, medium).Transmit(rs, new Ray(ray.o, ray.d / length, ray.time), tMax * length, out bent, out hit, out P, out g, out arrival);
+                    if (bent)
+                    {
+                        shadowBent = true;
+                        T = Landed(rs, ctx, stack, hit, g, arrival, T, light, sampled);
+                        break;
+                    }
                     if (!T)
                     {
                         break;
@@ -524,7 +588,361 @@ namespace pbrt
             ctx.r = savedR;
             ctx.SetP(savedP);
             ctx.medium = savedMedium;
+            ctx.shadowBent = shadowBent;
             return T;
+        }
+
+        // Where a ray that is followed through the scene ends (Follow)
+        private enum LandingKind
+        {
+            // on a surface that stops it
+            Surface,
+            // out of the scene
+            Escaped,
+            // on the plane that it was to be stopped at
+            Plane,
+            // nowhere (nothing gets through, or too many surfaces were crossed)
+            Lost
+        }
+
+        private struct Landing
+        {
+            public LandingKind kind;
+            public SampledSpectrum T;
+            public Point3f P;
+            public Ray arrival;
+            public SurfaceInteraction isect;
+        }
+
+        // A ray followed through the volumes and the surfaces that only bound them, as the volumes bend it
+        // (Volume.Transmit), to the first surface that stops it, to a plane if one is given (coming from behind it), or out
+        // of the scene; with the transmittance along the way if it is wanted. `pending`: the ray has been carried through a
+        // first volume already, which bent it, and it is where that volume left it (hit, g, arrival, with the transmittance T).
+        private Landing Follow(Services rs, VolumeContext ctx, BoundaryStack stack, Ray ray, bool plane, Point3f planePoint, Vector3f planeNormal, bool wantT,
+                               bool pending, bool hit, VolumeGeometry g, Ray arrival, SampledSpectrum T)
+        {
+            Landing landing = new Landing();
+            landing.kind = LandingKind.Lost;
+            landing.T = new SampledSpectrum(0f);
+            bool savedStop = ctx.stopAtPlane, savedOnly = ctx.geometryOnly;
+            Point3f savedP = ctx.P;
+            Medium savedMedium = ctx.medium;
+            ctx.stopAtPlane = plane;
+            ctx.stopPoint = planePoint;
+            ctx.stopNormal = planeNormal;
+            ctx.geometryOnly = !wantT;
+            ctx.atPlane = false;
+            bool atPlane = false;
+            Point3f P = default;
+            for (int crossings = 0; crossings < 256; ++crossings)
+            {
+                if (!pending)
+                {
+                    // The next stretch of the ray: straight to the nearest surface or to the plane, or as the volume there bends it
+                    pstd.optional<ShapeIntersection> si = Intersect(ray);
+                    Float toPlane = Infinity;
+                    if (plane)
+                    {
+                        Float rate = Dot(ray.d, planeNormal), behind = Dot(planePoint - ray.o, planeNormal);
+                        if (rate > 0 && behind >= 0)
+                        {
+                            toPlane = behind / rate;
+                        }
+                    }
+                    hit = (bool)si && si.value().tHit <= toPlane;
+                    atPlane = !hit && !IsInf(toPlane);
+                    arrival = ray;
+                    P = atPlane ? ray.Apply(toPlane) : default;
+                    g = null;
+                    if (hit)
+                    {
+                        g = new VolumeGeometry();
+                        g.isSurface = true;
+                        g.surface = si.value();
+                    }
+                    Medium medium = MediumTracking.Current(stack);
+                    if (medium != null)
+                    {
+                        ctx.SetP(ray.o);
+                        ctx.medium = medium;
+                        bool bent, hitBent;
+                        Point3f PBent;
+                        VolumeGeometry gBent;
+                        Ray arrivalBent;
+                        Float tMax = hit ? si.value().tHit : atPlane ? toPlane : Unbounded;
+                        T *= Volume.Create(ctx, medium).Transmit(rs, ray, tMax, out bent, out hitBent, out PBent, out gBent, out arrivalBent);
+                        if (bent)
+                        {
+                            hit = hitBent;
+                            g = gBent;
+                            arrival = arrivalBent;
+                            atPlane = ctx.atPlane;
+                            P = PBent;
+                        }
+                        if (!T)
+                        {
+                            break;
+                        }
+                    }
+                }
+                pending = false;
+                if (atPlane)
+                {
+                    landing.kind = LandingKind.Plane;
+                    landing.T = T;
+                    landing.P = P;
+                    landing.arrival = arrival;
+                    break;
+                }
+                if (!hit)
+                {
+                    landing.kind = LandingKind.Escaped;
+                    landing.T = T;
+                    landing.arrival = arrival;
+                    break;
+                }
+                SurfaceInteraction isect = g.surface.intr;
+                if (ThinCoatMaterial.Blocks(isect, arrival.d))
+                {
+                    landing.kind = LandingKind.Surface;
+                    landing.T = T;
+                    landing.arrival = arrival;
+                    landing.isect = isect;
+                    landing.P = isect.p();
+                    break;
+                }
+                // A surface that only bounds a volume: through it, straight on
+                ray = isect.SpawnRay(arrival.d);
+                ray.d = Normalize(ray.d);
+                MediumTracking.CrossSurface(ref stack, isect, ray.d);
+            }
+            ctx.stopAtPlane = savedStop;
+            ctx.geometryOnly = savedOnly;
+            ctx.atPlane = false;
+            ctx.SetP(savedP);
+            ctx.medium = savedMedium;
+            return landing;
+        }
+
+        // A shadow ray that a volume bent, followed from where that volume left it (a surface, or none) to the first surface
+        // that stops it or out of the scene: the transmittance of the whole way times what `light` emits there towards the
+        // ray, over `sampled` (ShadowTransmittance)
+        private SampledSpectrum Landed(Services rs, VolumeContext ctx, BoundaryStack stack, bool hit, VolumeGeometry g, Ray arrival, SampledSpectrum T, Light light,
+                                       SampledSpectrum sampled)
+        {
+            if (light == null)
+            {
+                return new SampledSpectrum(0f);
+            }
+            Landing landing = Follow(rs, ctx, stack, arrival, false, default, default, true, true, hit, g, arrival, T);
+            if (landing.kind == LandingKind.Escaped && light.Type() == LightType.Infinite)
+            {
+                return landing.T * SafeDiv(light.Le(landing.arrival, ctx.lambda), sampled);
+            }
+            if (landing.kind == LandingKind.Surface && landing.isect.areaLight == light)
+            {
+                return landing.T * SafeDiv(landing.isect.Le(-landing.arrival.d, ctx.lambda), sampled);
+            }
+            return new SampledSpectrum(0f);
+        }
+
+        // The ray from a point of the path in a direction, with the stack of the volumes that it starts in
+        private Ray Leaving(Interaction origin, Vector3f direction, BoundaryStack stack, out BoundaryStack entered)
+        {
+            Ray ray = origin.SpawnRay(direction);
+            ray.d = Normalize(ray.d);
+            entered = stack;
+            MediumTracking.CrossSurface(ref entered, origin, ray.d);
+            return ray;
+        }
+
+        // How far the ray that leaves a point in a direction ends from a target, through the volumes as they bend it: for a
+        // target at a point, where the ray meets the plane through the point (across the straight line to it), in the two
+        // coordinates of the plane; for a target that is a direction, the ray as it leaves the scene, across that direction.
+        // False where the ray is stopped on the way.
+        private bool Miss(Services rs, VolumeContext ctx, Interaction origin, BoundaryStack stack, Vector3f direction, bool toPoint, Point3f target, Vector3f towards,
+                          Vector3f e1, Vector3f e2, out Float m1, out Float m2)
+        {
+            m1 = 0;
+            m2 = 0;
+            BoundaryStack entered;
+            Ray ray = Leaving(origin, direction, stack, out entered);
+            Landing landing = Follow(rs, ctx, entered, ray, toPoint, target, towards, false, false, false, null, default, new SampledSpectrum(1f));
+            if (toPoint)
+            {
+                if (landing.kind != LandingKind.Plane)
+                {
+                    return false;
+                }
+                m1 = Dot(landing.P - target, e1);
+                m2 = Dot(landing.P - target, e2);
+                return true;
+            }
+            if (landing.kind != LandingKind.Escaped || !(Dot(landing.arrival.d, towards) > 0))
+            {
+                return false;
+            }
+            m1 = Dot(landing.arrival.d, e1);
+            m2 = Dot(landing.arrival.d, e2);
+            return true;
+        }
+
+        // The direction in which a ray from a point of the path, bent by the volumes on its way, reaches a point (or leaves
+        // the scene in a direction): Newton's method on the two coordinates of the direction, from a first direction, with
+        // the derivative by differences. `spread`: the size of the derivative's determinant at the solution -- the area
+        // across the ray at the target per solid angle at the start (the squared distance, where nothing bends the ray), or
+        // the solid angle of the directions of leaving per solid angle at the start (one).
+        private bool SolveConnection(Services rs, VolumeContext ctx, Interaction origin, BoundaryStack stack, bool toPoint, Point3f target, Vector3f towards,
+                                     Vector3f first, out Vector3f direction, out Float spread)
+        {
+            direction = Normalize(first);
+            spread = 0;
+            Vector3f e1, e2;
+            CoordinateSystem(towards, &e1, &e2);
+            Float scale = toPoint ? Distance(origin.p(), target) : 1;
+            // (as near as the single precision of the points of the scene allows)
+            Float tolerance = toPoint ? 2e-5f * scale + 4e-6f * (1 + Length((Vector3f)target)) : 2e-5f;
+            const Float h = 2e-3f;
+            for (int iteration = 0; iteration < 10; ++iteration)
+            {
+                Vector3f a1, a2;
+                CoordinateSystem(direction, &a1, &a2);
+                Float m1, m2, u1, u2, v1, v2;
+                if (!Miss(rs, ctx, origin, stack, direction, toPoint, target, towards, e1, e2, out m1, out m2) ||
+                    !Miss(rs, ctx, origin, stack, Normalize(direction + h * a1), toPoint, target, towards, e1, e2, out u1, out u2) ||
+                    !Miss(rs, ctx, origin, stack, Normalize(direction + h * a2), toPoint, target, towards, e1, e2, out v1, out v2))
+                {
+                    return false;
+                }
+                // The derivative of the miss by the two coordinates, and its determinant
+                Float j11 = (u1 - m1) / h, j21 = (u2 - m2) / h, j12 = (v1 - m1) / h, j22 = (v2 - m2) / h;
+                Float determinant = j11 * j22 - j12 * j21;
+                if (!(std.abs(determinant) > 0) || IsNaN(determinant))
+                {
+                    return false;
+                }
+                if (m1 * m1 + m2 * m2 < tolerance * tolerance)
+                {
+                    spread = std.abs(determinant);
+                    return true;
+                }
+                Float du = -(j22 * m1 - j12 * m2) / determinant, dv = -(-j21 * m1 + j11 * m2) / determinant;
+                // (no further than a quarter of a radian at a step)
+                Float step = std.sqrt(du * du + dv * dv);
+                if (step > 0.25f)
+                {
+                    du *= 0.25f / step;
+                    dv *= 0.25f / step;
+                }
+                direction = Normalize(direction + du * a1 + dv * a2);
+            }
+            return false;
+        }
+
+        // The light of a light at a point or from one direction at a point of the path, where a volume bends the way to
+        // it: the direction that reaches the light is searched (SolveConnection) from a first direction drawn about the
+        // straight one, half the time within a fiftieth of a radian and half within half a radian. There may be more than
+        // one such direction; the one found is weighed by one over the probability of finding it, estimated by the number
+        // of further searches until it is found again (Pediredla et al. 2020, algorithm 3; Booth 2007). The light arrives as
+        //     I T (n_start / n_light)^2 / spread          (a light at a point, of intensity I towards the ray)
+        //     L T (n_start / n_end)^2 / spread            (a light from one direction, of radiance L)
+        // with the transmittance and the indices along the path (the volumes give them together).
+        private SampledSpectrum BentDeltaLight(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler,
+                                               Light light, LightLiSample ls, Float lightProbability, out Vector3f found)
+        {
+            SampledSpectrum arriving, T, beamR;
+            if (!BentDeltaArrival(rs, ctx, intr, rs.stack, sampler, light, ls, out found, out arriving, out T, out beamR))
+            {
+                return new SampledSpectrum(0f);
+            }
+            Vector3f wo = intr.wo;
+            SampledSpectrum f = surface ? bsdf.f(wo, found) * AbsDot(found, ((SurfaceInteraction)intr).shading.n) : new SampledSpectrum(phase.p(wo, found));
+            SampledSpectrum r = ctx.r * beamR;
+            if (!f || !r)
+            {
+                return new SampledSpectrum(0f);
+            }
+            return f * arriving * T / (lightProbability * r.Average());
+        }
+
+        // The same without the scattering at the point: the direction found, what arrives along it before the transmittance
+        // (the light's intensity or radiance, over `spread`, times the number of searches), the transmittance and the
+        // densities of the way
+        private bool BentDeltaArrival(Services rs, VolumeContext ctx, Interaction intr, BoundaryStack stack, Sampler sampler, Light light, LightLiSample ls,
+                                      out Vector3f found, out SampledSpectrum arriving, out SampledSpectrum T, out SampledSpectrum beamR)
+        {
+            const int MostSearches = 64;
+            arriving = new SampledSpectrum(0f);
+            T = new SampledSpectrum(0f);
+            beamR = new SampledSpectrum(1f);
+            found = default;
+            bool toPoint = light.Type() == LightType.DeltaPosition;
+            Point3f target = ls.pLight.p();
+            Vector3f towards = Normalize(ls.wi);
+            Float spread = 0;
+            bool any = false;
+            int searches = 0;
+            for (int search = 0; search < MostSearches; ++search)
+            {
+                Float cone = sampler.Get1D() < 0.5f ? 0.02f : 0.5f;
+                Vector3f offset = SampleUniformCone(sampler.Get2D(), std.cos(cone));
+                Frame frame = Frame.FromZ(towards);
+                Vector3f first = frame.FromLocal(offset);
+                Vector3f direction;
+                Float s;
+                bool solved = SolveConnection(rs, ctx, intr, stack, toPoint, target, towards, first, out direction, out s);
+                if (!any)
+                {
+                    if (!solved)
+                    {
+                        return false;
+                    }
+                    any = true;
+                    found = direction;
+                    spread = s;
+                    continue;
+                }
+                ++searches;
+                if (solved && Dot(direction, found) > 1 - 1e-6f)
+                {
+                    break;
+                }
+            }
+            if (!any || searches == 0)
+            {
+                return false;
+            }
+            // Along the path that was found, with the transmittance
+            BoundaryStack entered;
+            Ray ray = Leaving(intr, found, stack, out entered);
+            SampledSpectrum savedR = ctx.r;
+            ctx.r = new SampledSpectrum(1f);
+            Landing landing = Follow(rs, ctx, entered, ray, toPoint, target, towards, true, false, false, null, default, new SampledSpectrum(1f));
+            beamR = ctx.r;
+            ctx.r = savedR;
+            if ((toPoint && landing.kind != LandingKind.Plane) || (!toPoint && landing.kind != LandingKind.Escaped) || !landing.T)
+            {
+                return false;
+            }
+            SampledSpectrum emitted;
+            if (toPoint)
+            {
+                // (the intensity towards the ray: what the light gives a point at the distance one back along the ray)
+                LightSampleContext before = new LightSampleContext(new Point3fi(target - landing.arrival.d), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time);
+                pstd.optional<LightLiSample> towardsRay = light.SampleLi(before, new Point2f(0.5f, 0.5f), ctx.lambda, false);
+                if (!towardsRay)
+                {
+                    return false;
+                }
+                emitted = towardsRay.value().L;
+            }
+            else
+            {
+                emitted = ls.L;
+            }
+            arriving = emitted * ((Float)searches / spread);
+            T = landing.T;
+            return true;
         }
 
         // Next event estimation at a surface or at a point of a volume: f L T / p, with the weight of the heuristic, divided by
@@ -542,14 +960,21 @@ namespace pbrt
             {
                 return 1;
             }
-            LightSampleContext origin = new LightSampleContext(new Point3fi(direct.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), direct.ray.time);
+            LightSampleContext origin = new LightSampleContext(new Point3fi(direct.curve != null ? direct.worldOrigin : direct.ray.o), new Normal3f(0, 0, 0),
+                                                                new Normal3f(0, 0, 0), direct.ray.time);
             pstd.optional<LightLiSample> pivot = light.SampleLi(origin, sampler.Get2D(), lambda, false);
             return pivot ? direct.For(true, type == LightType.DeltaPosition, pivot.value().pLight.p()) : 1;
         }
 
-        private SampledSpectrum SampleLd(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler, VolumeDirectWeight direct)
+        private SampledSpectrum SampleLd(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler, VolumeDirectWeight direct,
+                                         out Vector3f wiLight)
         {
             LightSampleContext lightContext;
+            wiLight = new Vector3f(0, 0, 1);
+            if (!lightSampling)
+            {
+                return new SampledSpectrum(0f);
+            }
             if (surface)
             {
                 SurfaceInteraction isect = (SurfaceInteraction)intr;
@@ -581,6 +1006,7 @@ namespace pbrt
                 return new SampledSpectrum(0f);
             }
             Vector3f wo = intr.wo, wi = ls.value().wi;
+            wiLight = wi;
             SampledSpectrum f;
             Float scatterPdf;
             if (surface)
@@ -593,13 +1019,20 @@ namespace pbrt
                 f = new SampledSpectrum(phase.p(wo, wi));
                 scatterPdf = phase.PDF(wo, wi);
             }
-            if (!f)
+            bool delta = IsDeltaLight(light.Type());
+            if (!f && !delta)
             {
                 return new SampledSpectrum(0f);
             }
             SampledSpectrum beamR;
-            SampledSpectrum T = ShadowTransmittance(rs, ctx, intr, ls.value().pLight, rs.stack, out beamR);
-            if (!T)
+            SampledSpectrum T = ShadowTransmittance(rs, ctx, intr, ls.value().pLight, rs.stack, out beamR, light, ls.value().L);
+            if (delta && ctx.shadowBent)
+            {
+                // A light at a point or from one direction behind a volume that bends the way to it
+                return DirectWeight(direct, light, sampler, ctx.lambda) *
+                       BentDeltaLight(rs, ctx, intr, surface, bsdf, phase, sampler, light, ls.value(), sampledLight.value().p, out wiLight);
+            }
+            if (!T || !f)
             {
                 return new SampledSpectrum(0f);
             }
@@ -616,6 +1049,15 @@ namespace pbrt
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler, ScratchBuffer scratchBuffer, VisibleSurface visibleSurf)
         {
             SampledSpectrum L = new SampledSpectrum(0f), beta = new SampledSpectrum(1f);
+            // The polarised path. `relative` is the product of the Mueller matrices of the path so far, each over its first
+            // element (beta has those); what has been added to L since the last change of it is unpolarised light, or light
+            // through one more matrix (next-event estimation), and goes into `Lp` through `relative` before it changes
+            // (Polarise).
+            PAttenuation relative = PAttenuation.Identity();
+            PLight Lp = PLight.Zero();
+            SampledSpectrum polarisedUpTo = new SampledSpectrum(0f);
+            Vector3f cameraDirection = -ray.d;
+            Ray cameraRay = new Ray(ray);
             int depth = 0;
             Float p_b = 0, etaScale = 1;
             // What weighs the light that arrives straight from a light at the last point of a volume, where the volume gathered
@@ -634,12 +1076,16 @@ namespace pbrt
             rs.sampler = sampler;
             rs.stack = MediumTracking.Start(camera.GetMedium());
             rs.rng = new RNG(Hash(ray.o, ray.d), Hash(sampler.Get1D()));
+            // The direction that the path left its last point in: what the densities of the light sampling are of, where a
+            // volume bends the ray on its way (it stays through the surfaces that only bound volumes)
+            Vector3f departure = ray.d;
 
             while (true)
             {
                 // The next point of the path: the nearest surface, or what the volume that the ray is in says
                 Float length = Length(ray.d);
                 Ray unit = new Ray(ray.o, ray.d / length, ray.time);
+
                 Point3f P;
                 VolumeGeometry g;
                 bool hit;
@@ -672,12 +1118,27 @@ namespace pbrt
                     Volume volume = Volume.Create(ctx, medium);
                     SampledSpectrum Lv, transmittance, weight;
                     Ray wo;
+                    ctx.bent = false;
+                    ctx.polarised = polarised;
                     hit = volume.Integrate(rs, unit, out Lv, out transmittance, out weight, out P, out wo, out g);
                     L += beta * Lv;
                     beta *= weight * transmittance;
                     if (!beta || !ctx.r)
                     {
                         break;
+                    }
+                    if (ctx.bent)
+                    {
+                        // A volume that bent the ray: the path goes on with the ray as it arrives, and the polarisation
+                        // of the light is carried along the curve (it comes the other way: it arrives along the reverse of
+                        // the direction of arrival and leaves along the reverse of the direction that the ray started in)
+                        ray = new RayDifferential(ctx.arrival);
+                        length = 1;
+                        if (polarised)
+                        {
+                            Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                            relative *= PAttenuation.Transport(-ctx.startDirection, ctx.startAxis, -ctx.arrivalDirection, ctx.arrivalAxis);
+                        }
                     }
                 }
                 else
@@ -697,8 +1158,8 @@ namespace pbrt
                         }
                         else
                         {
-                            Float p_l = lightSampler.PMF(prevIntrCtx, light) * light.PDF_Li(prevIntrCtx, ray.d, true);
-                            L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le0 / ctx.r.Average();
+                            Float p_l = lightSampler.PMF(prevIntrCtx, light) * light.PDF_Li(prevIntrCtx, departure, true);
+                            L += beta * (lightSampling ? PowerHeuristic(1, p_b, 1, p_l) : 1) * Le0 / ctx.r.Average();
                         }
                     }
                     break;
@@ -713,14 +1174,26 @@ namespace pbrt
                     }
                     MediumInteraction point = g.scatter;
                     direct = g.direct;
-                    L += beta * SampleLd(rs, ctx, point, false, default, g.phase, sampler, direct);
+                    Vector3f wiLight;
+                    if (polarised)
+                    {
+                        Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                    }
+                    L += beta * SampleLd(rs, ctx, point, false, default, g.phase, sampler, direct, out wiLight);
+                    if (polarised)
+                    {
+                        // (the light of the lights is scattered here with the matrix of the phase function for its direction)
+                        PAttenuation towardsLight;
+                        bool known = PolarisedPathIntegrator.PhaseAttenuation(g.phase, point.wo, wiLight, true, out towardsLight);
+                        Polarise(ref Lp, ref polarisedUpTo, L, relative, known, towardsLight);
+                    }
                     if (emissionLights.Count > 0)
                     {
                         L += beta * SampleEmission(rs, ctx, point, false, default, g.phase, sampler, rs.stack, ctx.r, true);
                     }
                     // One more scattering between this collision and a light at a position, where the volume asks for it
                     // (Volume.OnceMoreShare): the light of the next collision, which the path may still reach
-                    if (g.joint != null && g.joint.onceMore != VolumeOnceMore.None && depth < maxDepth)
+                    if (g.joint != null && g.joint.onceMore != VolumeOnceMore.None && depth < maxDepth && !polarised)
                     {
                         Medium here = MediumTracking.Current(rs.stack);
                         if (here != null)
@@ -741,11 +1214,25 @@ namespace pbrt
                     {
                         joint.phasePdf = ps.value().pdf;
                     }
+                    if (polarised)
+                    {
+                        Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                        PAttenuation scattered;
+                        if (PolarisedPathIntegrator.PhaseAttenuation(g.phase, point.wo, ps.value().wi, true, out scattered))
+                        {
+                            relative *= scattered;
+                        }
+                        else
+                        {
+                            relative *= PAttenuation.Lambert(new SampledSpectrum(1f));
+                        }
+                    }
                     beta *= ps.value().p / ps.value().pdf;
                     p_b = ps.value().pdf;
                     specularBounce = false;
                     prevIntrCtx = new LightSampleContext(point);
                     ray = point.SpawnRay(ps.value().wi);
+                    departure = ray.d;
                 }
                 else
                 {
@@ -763,8 +1250,8 @@ namespace pbrt
                         else
                         {
                             Light areaLight = isect.areaLight;
-                            Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) * areaLight.PDF_Li(prevIntrCtx, ray.d, true);
-                            L += beta * DirectWeight(direct, areaLight, sampler, ctx.lambda) * PowerHeuristic(1, p_b, 1, p_l) * Le / ctx.r.Average();
+                            Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) * areaLight.PDF_Li(prevIntrCtx, departure, true);
+                            L += beta * (lightSampling ? DirectWeight(direct, areaLight, sampler, ctx.lambda) * PowerHeuristic(1, p_b, 1, p_l) : 1) * Le / ctx.r.Average();
                         }
                     }
                     BSDF bsdf = isect.GetBSDF(ray, ref lambda, camera, scratchBuffer, sampler);
@@ -772,6 +1259,15 @@ namespace pbrt
                     if (!bsdf)
                     {
                         // a surface that only bounds a volume
+                        if (polarised)
+                        {
+                            PAttenuation coat;
+                            if (PolarisedPathIntegrator.PassedCoat(isect, -ray.d, TransportMode.Radiance, out coat))
+                            {
+                                Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                                relative *= coat;
+                            }
+                        }
                         isect.SkipIntersection(ref ray, tHit);
                         MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
                         continue;
@@ -782,11 +1278,23 @@ namespace pbrt
                     }
                     if (IsNonSpecular(bsdf.Flags()))
                     {
-                        L += beta * SampleLd(rs, ctx, isect, true, bsdf, null, sampler, null);
+                        Vector3f wiLight;
+                        if (polarised)
+                        {
+                            Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                        }
+                        L += beta * SampleLd(rs, ctx, isect, true, bsdf, null, sampler, null, out wiLight);
+                        if (polarised)
+                        {
+                            PAttenuation towardsLight = default;
+                            bool known = PolarisedPathIntegrator.StockRough(bsdf) &&
+                                         PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, -ray.d, wiLight, new SampledSpectrum(1f), TransportMode.Radiance, out towardsLight);
+                            Polarise(ref Lp, ref polarisedUpTo, L, relative, known, known ? towardsLight : default);
+                        }
                         // One more scattering between this point and a light at a position, in the volume that the path
                         // came through, where that volume asks for it (Volume.OnceMoreShare)
                         Medium around = MediumTracking.Current(rs.stack);
-                        if (around != null && around.volumeIntegrator.onceMore != VolumeOnceMore.None && around.volumeIntegrator.scattering == VolumeScattering.Multiple &&
+                        if (!polarised && around != null && around.volumeIntegrator.onceMore != VolumeOnceMore.None && around.volumeIntegrator.scattering == VolumeScattering.Multiple &&
                             !(around is AggregateMedium) && depth < maxDepth)
                         {
                             MediumProperties mp = around.SamplePoint(isect.p(), lambda, ray.time);
@@ -824,6 +1332,24 @@ namespace pbrt
                         break;
                     }
                     beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
+                    if (polarised)
+                    {
+                        // The matrix of the scattering over its first element (the weight of the path has that)
+                        Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                        PAttenuation scattered;
+                        if (PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out scattered))
+                        {
+                            relative *= scattered * SafeDiv(new SampledSpectrum(1f), scattered.GetIntensity());
+                        }
+                        else if (PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, wo, bs.value().wi, new SampledSpectrum(1f), TransportMode.Radiance, out scattered))
+                        {
+                            relative *= scattered;
+                        }
+                        else
+                        {
+                            relative *= PAttenuation.Lambert(new SampledSpectrum(1f));
+                        }
+                    }
                     p_b = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
                     specularBounce = bs.value().IsSpecular();
                     direct = null;
@@ -839,6 +1365,7 @@ namespace pbrt
                     }
                     prevIntrCtx = new LightSampleContext(isect);
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
+                    departure = ray.d;
                     MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
                 }
 
@@ -857,7 +1384,30 @@ namespace pbrt
                     beta /= 1 - q;
                 }
             }
+            if (polarised)
+            {
+                Polarise(ref Lp, ref polarisedUpTo, L, relative, false, default);
+                return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, lambda[0], Lp, analyser, analyserAngle, measurement, cameraDirection, cameraUp);
+            }
             return L;
+        }
+
+        // What has been added to L since `upTo` goes into the polarised light: through the matrices of the path, and first
+        // through `last` if there is one (the matrix, over its first element, of the scattering that sent it along the path)
+        private static void Polarise(ref PLight Lp, ref SampledSpectrum upTo, SampledSpectrum L, PAttenuation relative, bool hasLast, PAttenuation last)
+        {
+            SampledSpectrum added = L - upTo;
+            upTo = L;
+            if (!added)
+            {
+                return;
+            }
+            PLight light = new PLight(added);
+            if (hasLast)
+            {
+                light = last * light;
+            }
+            Lp += relative * light;
         }
 
         public override string ToString() { return StringPrintf("[ ProductionPathIntegrator maxDepth: %d lightSampler: %s ]", maxDepth, lightSampler); }
@@ -865,10 +1415,28 @@ namespace pbrt
         public static ProductionPathIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                                                       FileLoc loc)
         {
-            return new ProductionPathIntegrator(parameters.GetOneInt("maxdepth", 5), camera, sampler, aggregate, lights, parameters.GetOneString("lightsampler", "bvh"));
+            ProductionPathIntegrator integrator = new ProductionPathIntegrator(parameters.GetOneInt("maxdepth", 5), camera, sampler, aggregate, lights,
+                                                                               parameters.GetOneString("lightsampler", "bvh"));
+            // ("bool lightsampling" false: no light is sampled, and a path finds the lights only by reaching them: the
+            // reference that the estimators with light sampling are tested against)
+            integrator.lightSampling = parameters.GetOneBool("lightsampling", true);
+            // ("bool polarised": the path carries the polarisation of the light, and the sensor measures what "analyser"
+            // and "measure" say, as "polarisedpath" does)
+            integrator.polarised = parameters.GetOneBool("polarised", false);
+            PolarisedPathIntegrator.ParseSensor(parameters, loc, out integrator.analyser, out integrator.analyserAngle, out integrator.measurement);
+            integrator.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
+            return integrator;
         }
 
         private int maxDepth;
+        private bool lightSampling = true;
+        // The polarised path (Li): the Mueller matrices of the path from the camera, each over its first element (the weight
+        // of the path has those), and the light with its Stokes vector; what the sensor measures of it
+        private bool polarised;
+        private bool analyser;
+        private Float analyserAngle;
+        private PolarisedPathIntegrator.Measurement measurement;
+        private Vector3f cameraUp;
         private LightSampler lightSampler;
         private List<VolumeEmissionLight> emissionLights;
         private Float[] emissionPmf;

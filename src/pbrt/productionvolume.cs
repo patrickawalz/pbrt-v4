@@ -254,6 +254,27 @@ namespace pbrt
         public int depth;
         // The throughput of the path up to the point (spectral tracking sets its probabilities by it)
         public SampledSpectrum throughput = new SampledSpectrum(1f);
+        // Set by a volume whose light paths are not straight (RefractiveVolume) when Integrate has bent the ray: the ray as
+        // it arrives at the point that Integrate returns (or as it leaves the scene), in the place of the ray it was given
+        public bool bent;
+        public Ray arrival;
+        // For the search of the path between two points through a volume that bends rays (the path tracer's
+        // CurvedConnection): a plane that stops the ray that Transmit follows (`atPlane` is then set, and Transmit's P is the
+        // point of the plane), and whether only the geometry is wanted (no transmittance is estimated)
+        public bool stopAtPlane;
+        public Point3f stopPoint;
+        public Vector3f stopNormal;
+        public bool atPlane;
+        public bool geometryOnly;
+        // Set by the path tracer's shadow ray when a volume bent it
+        public bool shadowBent;
+        // A path tracer that carries the polarisation of the light: the volumes gather no light of their own from the lights
+        // (the equiangular point, the points drawn jointly), which they would add without its polarisation
+        public bool polarised;
+        // Set with `bent`: the direction that the ray started in and the one that it arrives in, each with an axis across
+        // it; the second axis is the first carried along the curve without turning about it (the polarisation of light in
+        // a medium whose index varies slowly keeps its angle to such an axis)
+        public Vector3f startDirection, startAxis, arrivalDirection, arrivalAxis;
         // What weighs the emission that the volume gathers along the ray that it is given (Volume.Integrate), where the path
         // tracer also samples the emission of the medium from the point that the ray left (forward next event estimation):
         // the two find the same integral along the ray, and share it by the densities of the direction
@@ -375,6 +396,11 @@ namespace pbrt
         public bool equiangularOnly;
         // The collision before this one on the path, where the volume also draws the two jointly; null otherwise
         public VolumeJoint joint;
+        // For a collision on a curved path (RefractiveVolume): `ray`, `distance` and `t` are those of the straight ray
+        // that stands for the curve, and the point of a light that the equiangular density is about is where the curve puts
+        // it (CurvedRayMedium.Pivot); `worldOrigin` is where the path really started
+        public CurvedRayMedium curve;
+        public Point3f worldOrigin;
 
         // `hasPoint`: the light has a point to draw about (`pivot`); `fixedPoint`: it is the only one (a light at a position)
         public Float For(bool hasPoint, bool fixedPoint, Point3f pivot)
@@ -384,6 +410,10 @@ namespace pbrt
                 return 1;
             }
             Float pdf = 0, own = product;
+            if (curve != null)
+            {
+                pivot = curve.Pivot(pivot);
+            }
             if (equiangular)
             {
                 EquiangularDensity about = EquiangularDensity.Create(ray, 0, distance, pivot);
@@ -591,6 +621,25 @@ namespace pbrt
                                        out Point3f P, out Ray wo, out VolumeGeometry g);
 
         public abstract SampledSpectrum Transmittance(VolumeServices rs, Point3f P0, Point3f P1);
+
+        // The transmittance along a ray that is carried through the volume without scattering, for a volume that may bend
+        // it. For a volume of straight paths (every one but RefractiveVolume) it is Transmittance() over the first tMax of
+        // the ray, and `bent` is false. A volume that bends the ray follows it to the first surface, or out of the scene,
+        // whatever tMax says: `hit`, P and g are that surface as Integrate would return it, and `arrival` the ray there.
+        public virtual SampledSpectrum Transmit(VolumeServices rs, Ray entering, Float tMax, out bool bent, out bool hit, out Point3f P, out VolumeGeometry g,
+                                                out Ray arrival)
+        {
+            bent = false;
+            hit = false;
+            P = entering.Apply(tMax);
+            g = null;
+            arrival = entering;
+            if (m_ctx.geometryOnly)
+            {
+                return new SampledSpectrum(1f);
+            }
+            return Transmittance(rs, entering.o, P);
+        }
 
         // The radiance that the volume emits between the two points towards the first (section 3.8), attenuated by the volume
         // itself: int T(P0, x) sigma_a Le dx. An estimate whose densities are divided out already.
@@ -939,7 +988,7 @@ namespace pbrt
         protected bool Joint()
         {
             VolumeDoubleScattering mode = medium.volumeIntegrator.doubleScattering;
-            return mode == VolumeDoubleScattering.Joint || mode == VolumeDoubleScattering.MIS;
+            return !m_ctx.polarised && (mode == VolumeDoubleScattering.Joint || mode == VolumeDoubleScattering.MIS);
         }
 
         // The collision of a walk as VolumeGeometry.joint
@@ -1812,6 +1861,10 @@ namespace pbrt
                 // (section 6: the aggregate integrates itself)
                 return new AggregateVolume(ctx, aggregate);
             }
+            if (medium is RefractiveMedium refractive)
+            {
+                return new RefractiveVolume(ctx, refractive);
+            }
             bool homogeneous = medium is HomogeneousMedium;
             switch (medium.volumeIntegrator.scattering)
             {
@@ -2492,7 +2545,7 @@ namespace pbrt
             L = new SampledSpectrum(0f);
             wo = new Ray(P, wi.d, wi.time);
             // The equiangular point about a point of a light, with its share of the direct light (EquiangularShare)
-            bool weighed = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density && m_ctx.mayScatter && distance > 0;
+            bool weighed = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density && m_ctx.mayScatter && distance > 0 && !m_ctx.polarised;
             if (weighed)
             {
                 VolumeLight chosen;
@@ -2602,7 +2655,7 @@ namespace pbrt
             // collisions are those of a ratio-tracking walk with the tracker of the medium; with the decomposition tracker
             // the collisions of the two walks are not of one kind, and the weights leave W out (they still add up to one).
             bool pathWeights = !(medium.volumeIntegrator.tracker is DecompositionTracker);
-            bool weighed = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density && m_ctx.mayScatter && distance > 0;
+            bool weighed = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density && m_ctx.mayScatter && distance > 0 && !m_ctx.polarised;
             if (weighed)
             {
                 VolumeLight chosen;
