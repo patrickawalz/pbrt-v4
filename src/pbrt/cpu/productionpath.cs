@@ -109,7 +109,7 @@ namespace pbrt
             }
             else
             {
-                f = new SampledSpectrum(phase.p(wo, wi));
+                f = phase.pSpectral(wo, wi);
                 scatterPdf = phase.PDF(wo, wi);
             }
             if (!f)
@@ -655,6 +655,8 @@ namespace pbrt
             public Point3f P;
             public Ray arrival;
             public SurfaceInteraction isect;
+            // (a volume bent the ray on the way)
+            public bool bent;
         }
 
         // A ray followed through the volumes and the surfaces that only bound them, as the volumes bend it
@@ -723,6 +725,7 @@ namespace pbrt
                             atPlane = ctx.atPlane;
                             P = PBent;
                             carried = true;
+                            landing.bent = true;
                         }
                         if (!T)
                         {
@@ -963,13 +966,44 @@ namespace pbrt
                 return new SampledSpectrum(0f);
             }
             Vector3f wo = intr.wo;
-            SampledSpectrum f = surface ? bsdf.f(wo, found) * AbsDot(found, ((SurfaceInteraction)intr).shading.n) : new SampledSpectrum(phase.p(wo, found));
+            SampledSpectrum f = surface ? bsdf.f(wo, found) * AbsDot(found, ((SurfaceInteraction)intr).shading.n) : phase.pSpectral(wo, found);
             SampledSpectrum r = ctx.r * beamR;
             if (!f || !r)
             {
                 return new SampledSpectrum(0f);
             }
             return f * arriving * T / (lightProbability * r.Average());
+        }
+
+        // The sun (a light from a small disc of directions) behind a volume that bends the way to it: the direction of the
+        // disc that was sampled is taken as a light from that one direction, of the irradiance L / pdf, and the direction
+        // that leaves the point for it is searched as for BentDeltaLight. This is the only strategy that counts for the
+        // paths that a volume bends between the point and the sun (the path that happens to leave the scene into the disc
+        // after a bend does not: Walk); the paths that nothing bends are left to the light sample and the scattered ray,
+        // weighed against each other as ever.
+        private SampledSpectrum BentSunLight(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler,
+                                             LightLiSample ls, Float lightProbability, out Vector3f found)
+        {
+            Float spread, searches;
+            Vector3f towards = Normalize(ls.wi);
+            if (!FindBent(rs, ctx, intr, rs.stack, sampler, false, default, towards, out found, out spread, out searches) || !(spread > 0))
+            {
+                return new SampledSpectrum(0f);
+            }
+            BoundaryStack entered;
+            Ray ray = Leaving(intr, found, rs.stack, out entered);
+            SampledSpectrum savedR = ctx.r;
+            ctx.r = new SampledSpectrum(1f);
+            Landing landing = Follow(rs, ctx, entered, ray, false, default, towards, true, false, false, null, default, new SampledSpectrum(1f));
+            SampledSpectrum r = savedR * ctx.r;
+            ctx.r = savedR;
+            if (landing.kind != LandingKind.Escaped || !landing.bent || !landing.T || !r)
+            {
+                return new SampledSpectrum(0f);
+            }
+            Vector3f wo = intr.wo;
+            SampledSpectrum f = surface ? bsdf.f(wo, found) * AbsDot(found, ((SurfaceInteraction)intr).shading.n) : phase.pSpectral(wo, found);
+            return f * ls.L * landing.T * (searches / (spread * ls.pdf * lightProbability * r.Average()));
         }
 
         // The same without the scattering at the point: the direction found, what arrives along it before the transmittance
@@ -1158,7 +1192,7 @@ namespace pbrt
             }
             else
             {
-                f = new SampledSpectrum(phase.p(wo, wi));
+                f = phase.pSpectral(wo, wi);
                 scatterPdf = phase.PDF(wo, wi);
             }
             bool delta = IsDeltaLight(light.Type());
@@ -1168,6 +1202,10 @@ namespace pbrt
             }
             SampledSpectrum beamR;
             SampledSpectrum T = ShadowTransmittance(rs, ctx, intr, ls.value().pLight, rs.stack, out beamR, light, ls.value().L);
+            if (light is SunLight && ctx.shadowBent)
+            {
+                return BentSunLight(rs, ctx, intr, surface, bsdf, phase, sampler, ls.value(), sampledLight.value().p, out wiLight);
+            }
             if (delta && ctx.shadowBent)
             {
                 // A light at a point or from one direction behind a volume that bends the way to it
@@ -1291,6 +1329,8 @@ namespace pbrt
             // The direction that the path left its last point in: what the densities of the light sampling are of, where a
             // volume bends the ray on its way (it stays through the surfaces that only bound volumes)
             Vector3f departure = ray.d;
+            // (whether a volume has bent the path since it left that point)
+            bool bentSince = false;
 
             if (seeThrough && !seenAlready && infiniteLights.Count > 0)
             {
@@ -1347,6 +1387,7 @@ namespace pbrt
                     {
                         break;
                     }
+                    bentSince |= ctx.bent;
                     if (ctx.bent)
                     {
                         // A volume that bent the ray: the path goes on with the ray as it arrives, and the polarisation
@@ -1372,6 +1413,11 @@ namespace pbrt
                     foreach (Light light in infiniteLights)
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
+                        if (light is SunLight && bentSince && depth > 0 && !specularBounce && lightSampling)
+                        {
+                            // (the sun at the end of a path that a volume bent: counted by the light sample: BentSunLight)
+                            continue;
+                        }
                         if (depth == 0 && seeThrough)
                         {
                             // (counted along the camera ray, above)
@@ -1451,12 +1497,15 @@ namespace pbrt
                             relative *= PAttenuation.Lambert(new SampledSpectrum(1f));
                         }
                     }
-                    beta *= ps.value().p / ps.value().pdf;
+                    // (the value of the phase function for every wavelength, where it depends on the wavelength: the direction
+                    // was drawn with the first)
+                    beta *= g.phase.pSpectral(point.wo, ps.value().wi) / ps.value().pdf;
                     p_b = ps.value().pdf;
                     specularBounce = false;
                     prevIntrCtx = new LightSampleContext(point);
                     ray = point.SpawnRay(ps.value().wi);
                     departure = ray.d;
+                    bentSince = false;
                 }
                 else
                 {
@@ -1590,6 +1639,7 @@ namespace pbrt
                     prevIntrCtx = new LightSampleContext(isect);
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
                     departure = ray.d;
+                    bentSince = false;
                     MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
                 }
 

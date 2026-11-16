@@ -81,10 +81,23 @@ Checks: `RefractiveField.AstronomicalRefraction` (36.15 arc minutes along the ho
 an exponential atmosphere). In the renders the sun whose centre is 0.5 degrees below the horizontal stands on the sea
 horizon of a viewer 30 m up, 27 arc minutes high (32 wide); at 1.0 degree below only a sliver is left.
 
-Not done there: the light sampling of the sun along bent rays (the sample of a direction of the disc is followed and
-mostly lands beside it: the sky lit by a low sun is right in the mean and far too noisy to use; the frames are of the
-light seen directly, `"maxdepth" 0`, which measured 2500 times the sky beside it); inversion layers and other weather
-(the standard atmosphere has none, so no mock-mirage flashes); the limb darkening is the approximate one of the sun light.
+The sun is sampled along bent rays (`BentSunLight`): the direction of the disc that was drawn is taken as a light from
+that one direction, of the irradiance L / pdf, and the direction that leaves the point for it is searched; the paths that
+a volume bends between a point and the sun count by that sample alone. Sky with a sun 30 degrees up, three seeds each
+(means of R, G, B): plain atmosphere 0.1201 0.1462 0.1956, refractive without dispersion 0.1189 0.1447 0.1942, with
+dispersion 0.128 +- 0.006, 0.144, 0.197.
+
+Found on the way: the production path took the phase function's value at the first wavelength for all four wavelengths
+of a sample (`p` where `pSpectral` was due). With the atmosphere, whose mix of air and aerosol scattering depends on the
+wavelength, that sky came out 21 % too dark in red and 15 % too bright in blue; fixed in the path tracer's light sample
+and scattered ray (the volumes' own light sampling and once-more scattering still take the one value).
+
+`"integer raymarchinglookups"` (on the medium): the ray-marching estimator's own rule gave 14 lookups over the 1200 km of
+a ray along the horizon, and rays below the horizontal had a spread of 2 to 4 times their mean; 0.12 with 48 or more.
+
+Not done there: inversion layers and other weather (the standard atmosphere has none, so no mock-mirage flashes); the
+limb darkening is the approximate one of the sun light; the final frames (light seen directly, `"maxdepth" 0`, which
+measured 2500 times the sky beside it) were rendered before the lookups setting and are grainy below the horizontal.
 
 Scene syntax: `MakeNamedMedium "x" "string type" "refractive" "string medium" "homogeneous" | "uniformgrid" | "adaptivegrid"`
 with the held medium's own parameters, and `"string indexfield" "grid"` (`"float index"`, `"integer inx/iny/inz"`,
