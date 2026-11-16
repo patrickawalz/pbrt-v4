@@ -273,6 +273,9 @@ namespace pbrt
         // Set by a volume that bends the ray for the volume that it walks the curve with: the collision that the ray
         // leaves, in the scene (in the place of `joint`, whose points would be those of the straight ray)
         public JointOnCurve jointOnCurve;
+        // (and: the two points that a volume draws jointly are drawn by the volume that bends the ray, not by the one that
+        // walks the ray for it)
+        public bool jointElsewhere;
         // Two small changes of the ray that is followed (of its point and of its direction), which a volume that bends
         // the ray carries to where it leaves the ray (CurvedPath.Carry): for the search of the path to a light
         public bool differentials;
@@ -479,6 +482,7 @@ namespace pbrt
         public bool onCurve;
         public Point3f worldC;
         public Vector3f worldWo;
+        public CurvedRayMedium curve;
 
         // The density of the scattering b that is put between c and the point a of a light, over the phase function of the
         // direction that the path took from c: what the densities of the path and of the equiangular point have in common
@@ -504,13 +508,14 @@ namespace pbrt
             {
                 return 0;
             }
-            InverseDistanceDensity along = InverseDistanceDensity.Create(ray, tMin, tMax, a);
+            // (on a curved path c is drawn on the straight ray that stands for the curve, about where the curve puts a)
+            InverseDistanceDensity along = InverseDistanceDensity.Create(ray, tMin, tMax, onCurve && curve != null ? curve.Pivot(a) : a);
             Float squared = LengthSquared(a - b);
             if (!along.valid || !(squared > 0) || !(product > 0))
             {
                 return 0;
             }
-            return along.PDF(t) * Distance(a, ray.Apply(t)) / (Pi * Pi * Pi * squared) / product;
+            return along.PDF(t) * Distance(a, onCurve ? worldC : ray.Apply(t)) / (Pi * Pi * Pi * squared) / product;
         }
 
         // The density with which the two were drawn jointly at c and at b about the point a of a light,
@@ -772,6 +777,11 @@ namespace pbrt
 
         // The part of the ray that the medium may fill: the extent that the medium says it has, or, for a ray without end in a
         // homogeneous medium, as far as anything gets through; false for a ray without end in a medium that has no extent
+        public bool SpanOf(Ray ray, Float distance, out Float t0, out Float t1)
+        {
+            return Span(ray, distance, out t0, out t1);
+        }
+
         protected bool Span(Ray ray, Float distance, out Float t0, out Float t1)
         {
             t0 = 0;
@@ -1505,7 +1515,7 @@ namespace pbrt
         protected SampledSpectrum JointShare(VolumeServices rs, Ray wi, Float distance, bool pathWeights)
         {
             SampledSpectrum none = new SampledSpectrum(0f);
-            if (!Joint() || !m_ctx.mayScatter || !m_ctx.mayScatterTwice)
+            if (!Joint() || m_ctx.jointElsewhere || !m_ctx.mayScatter || !m_ctx.mayScatterTwice)
             {
                 return none;
             }

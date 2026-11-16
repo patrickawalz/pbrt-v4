@@ -46,6 +46,15 @@ namespace pbrt
         // surfacetolerance"); without it they are within a ten-thousandth of their length, which over the kilometres of a
         // piece of an atmosphere is metres: a ray that passes low over the sea would meet it or not by chance.
         public Float surfaceTolerance = Infinity;
+        // "bool bentjoint" (false): the two scatterings that "doublescattering" draws jointly are drawn along bent rays
+        // too (JointShareBent). Off, they are drawn on the rays that the field leaves straight alone, as before. Not on by
+        // itself: with it the image of a lamp beside a scattering lens came out 0.8 % too bright (24 seeds, 3.7 standard
+        // errors), in the limit of no bending too, and the cause has not been found.
+        public bool bentJoint;
+        // "bool bentequiangular" (false): the equiangular point of "distancesampling" is drawn on bent rays too. Off, it is
+        // drawn on the rays that the field leaves straight alone. Not on by itself either: with it the same image came out
+        // 0.8 % too bright in the limit of no bending (twenty seeds, 6.6 standard errors) and 1.1 % with a lens.
+        public bool bentEquiangular;
 
         // Dispersion: for a wavelength (nm), how many times the n^2 - 1 of the field the medium has; null for none. A
         // scene with such a medium is rendered one wavelength to a path (ProductionPath, by `anyDispersion`).
@@ -179,7 +188,11 @@ namespace pbrt
             Float control, average;
             if (!inner.MajorantOver(box, SampledWavelengths.SampleUniform(0.5f), out bound, out control, out average))
                 ErrorExit(loc, $"{innerName}: a refractive medium can hold \"homogeneous\", \"uniformgrid\", \"adaptivegrid\" and aggregates of those.");
-            return new RefractiveMedium(inner, field, surfacesInside);
+            RefractiveMedium made = new RefractiveMedium(inner, field, surfacesInside);
+            made.bentJoint = parameters.GetOneBool("bentjoint", false);
+            made.bentEquiangular = parameters.GetOneBool("bentequiangular", false);
+            made.surfaceTolerance = parameters.GetOneFloat("surfacetolerance", Infinity);
+            return made;
         }
 
         public override string ToString()
@@ -863,9 +876,12 @@ namespace pbrt
             settings.emissionResidual = from.emissionResidual;
             // (the equiangular point: the straight ray that stands for the curve draws it about where the curve puts the
             // point of the light)
-            settings.distanceSampling = from.distanceSampling;
+            settings.distanceSampling = refractive.bentEquiangular ? from.distanceSampling : VolumeDistanceSampling.Density;
             // (one more scattering before a light: from the collisions of the curve, by the path tracer, in the scene)
             settings.onceMore = from.onceMore;
+            // (the two points drawn jointly: by this volume, in the scene (JointShareBent); the walk keeps the record of
+            // its collision for the densities)
+            settings.doubleScattering = refractive.bentJoint ? from.doubleScattering : VolumeDoubleScattering.None;
             return settings;
         }
 
@@ -1276,9 +1292,25 @@ namespace pbrt
             if (!path.bent)
             {
                 // A ray that the field leaves straight: the volume of the held medium, as it is
+                // (the two points drawn jointly are connected as the field bends the way between them, though it has left
+                // this ray straight: where the ray has pieces of a path to draw the first one on)
+                bool jointHere = refractive.bentJoint && Joint() && path.pieces.Count > 0 && path.hit;
+                // (the volume of the held medium does not draw them itself: it would connect them along a straight line,
+                // which the field may bend -- a lamp beside a scattering lens came out 1.2 % too bright that way)
                 m_ctx.medium = refractive.inner;
+                m_ctx.jointElsewhere = true;
                 bool straight = Create(m_ctx, refractive.inner).Integrate(rs, wi, out L, out transmittance, out weight, out P, out wo, out g);
+                m_ctx.jointElsewhere = false;
                 m_ctx.medium = saved;
+                if (!jointHere && g != null && g.joint != null)
+                {
+                    // (and its collision is not one that two points are drawn jointly from)
+                    g.joint.jointly = false;
+                }
+                if (jointHere)
+                {
+                    L += JointShareBent(rs, path, wi);
+                }
                 return straight;
             }
             if (path.lost)
@@ -1312,13 +1344,19 @@ namespace pbrt
                 rivals.origin = wi.o;
             }
             m_ctx.jointOnCurve = rivals;
+            m_ctx.jointElsewhere = refractive.bentJoint;
             m_ctx.medium = curve;
             Point3f onAxis;
             Ray leaves;
             bool hit = Create(m_ctx, curve).Integrate(along, CurvedRayMedium.Axis(wi.time), out L, out transmittance, out weight, out onAxis, out leaves, out g);
             rs.rng = along.rng;
             m_ctx.jointOnCurve = null;
+            m_ctx.jointElsewhere = false;
             m_ctx.medium = saved;
+            if (refractive.bentJoint && Joint())
+            {
+                L += JointShareBent(rs, path, wi);
+            }
             P = path.P;
             wo = path.arrival;
             if (hit && g != null && !g.isSurface)
@@ -1348,7 +1386,11 @@ namespace pbrt
                     here.onCurve = true;
                     here.worldC = point;
                     here.worldWo = -tangent;
-                    here.jointly = false;
+                    here.curve = curve;
+                    if (!refractive.bentJoint)
+                    {
+                        here.jointly = false;
+                    }
                 }
                 g = new VolumeGeometry();
                 g.isSurface = false;
@@ -1416,6 +1458,156 @@ namespace pbrt
             rs.rng = along.rng;
             m_ctx.medium = saved;
             return T * Seen(path.indexAtStart, path.indexAtEnd);
+        }
+
+        // Two scatterings drawn jointly before a light at a position (Volume.JointShare), along the path of a ray: the first,
+        // c, on the path, by the density of the straight ray that stands for it about where the curve puts the light; the
+        // second, b, about the light in the scene as ever. The way from c to b is searched and walked as the field bends it
+        // (ConnectBent, ReachBent), and the area across it per solid angle takes the place of the squared distance, in the
+        // estimate and in the densities of the rivals that go by the direction at c (as OnceMoreFinishBent has it).
+        private SampledSpectrum JointShareBent(VolumeServices rs, CurvedPath path, Ray wi)
+        {
+            SampledSpectrum none = new SampledSpectrum(0f);
+            if (!m_ctx.mayScatter || !m_ctx.mayScatterTwice || path.lost || path.pieces.Count == 0)
+            {
+                return none;
+            }
+            VolumeLight light;
+            if (!rs.ChooseLight(m_ctx, out light) || !FixedPoint(light))
+            {
+                return none;
+            }
+            // (a ray that the field leaves straight is walked by the volume of the held medium itself, whose densities
+            // the collision of the path then has: c is drawn and reached the same way)
+            bool bent = path.bent;
+            Ray unit = new Ray(wi.o, Normalize(wi.d), wi.time);
+            CurvedRayMedium curve = new CurvedRayMedium(refractive.inner, path, wi.time, AlongCurveSettings());
+            Ray axis = bent ? CurvedRayMedium.Axis(wi.time) : unit;
+            Medium walked = bent ? (Medium)curve : refractive.inner;
+            // (the stretch of the path that c is drawn on: the one that the walk of the path records for its collision)
+            Medium around = m_ctx.medium;
+            m_ctx.medium = walked;
+            Float tMin, tMax;
+            bool spanned = Create(m_ctx, walked).SpanOf(axis, !path.hit ? Infinity : bent ? (Float)path.sigma : Distance(wi.o, path.P), out tMin, out tMax);
+            m_ctx.medium = around;
+            if (!spanned || !(tMax > tMin))
+            {
+                return none;
+            }
+            InverseDistanceDensity along = InverseDistanceDensity.Create(axis, tMin, tMax, bent ? curve.Pivot(light.point) : light.point);
+            if (!along.valid)
+            {
+                return none;
+            }
+            Float t = along.Sample(rs.GenerateRandomNumber());
+            if (!(t >= tMin) || !(t <= tMax) || !(t > 0))
+            {
+                return none;
+            }
+            SampledWavelengths lambda = m_ctx.lambda;
+            Vector3f velocity = unit.d;
+            Point3f c = bent ? curve.At(t, out velocity) : unit.Apply(t);
+            Float indexC = Length(velocity);
+            Vector3f tangent = velocity / indexC;
+            // The second: the direction by its angle to that of the light, the distance equiangular about the light
+            Vector3f toLight = light.point - c;
+            Float far = Length(toLight);
+            if (!(far > 0))
+            {
+                return none;
+            }
+            Vector3f towards = toLight / far, v1, v2;
+            CoordinateSystem(towards, &v1, &v2);
+            Float theta = Pi * (1 - SafeSqrt(1 - rs.GenerateRandomNumber())), phi = 2 * Pi * rs.GenerateRandomNumber();
+            Float sin = std.sin(theta), cos = std.cos(theta);
+            Vector3f straight = sin * std.cos(phi) * v1 + sin * std.sin(phi) * v2 + cos * towards;
+            Float s = far * cos + far * sin * std.tan(rs.GenerateRandomNumber() * (Pi - theta) + theta - Pi / 2);
+            if (!(s > 0) || IsInf(s))
+            {
+                return none;
+            }
+            Point3f b = c + s * straight;
+            Float squared = LengthSquared(light.point - b);
+            Float pdf = squared > 0 ? along.PDF(t) * far / (Pi * Pi * Pi * squared) : 0;
+            if (!(pdf > 0))
+            {
+                return none;
+            }
+            // The walk to c along the path
+            AlongCurve services = new AlongCurve();
+            services.renderer = rs;
+            services.path = path;
+            services.curve = curve;
+            services.medium = medium;
+            services.rng = rs.rng;
+            Medium saved = m_ctx.medium;
+            m_ctx.medium = walked;
+            SampledSpectrum toC, densitiesC, nullsC;
+            bool reached = bent ? Create(m_ctx, curve).ReachTo(services, axis, t, out toC, out densitiesC, out nullsC)
+                                : Create(m_ctx, walked).ReachTo(rs, axis, t, out toC, out densitiesC, out nullsC);
+            if (bent)
+            {
+                rs.rng = services.rng;
+            }
+            m_ctx.medium = saved;
+            if (!reached)
+            {
+                return none;
+            }
+            MediumProperties mp = medium.SamplePoint(c, lambda, wi.time);
+            if (!(bool)mp.sigma_s)
+            {
+                return none;
+            }
+            // The way from c to b
+            MediumInteraction atC = new MediumInteraction(c, -tangent, wi.time, medium, mp.phase);
+            Vector3f w;
+            Float searches, spread;
+            if (!rs.ConnectBent(m_ctx, atC, null, b, out w, out searches, out spread) || !(spread > 0))
+            {
+                return none;
+            }
+            SampledSpectrum toB, densitiesB, nullsB;
+            Float equiangular, indexB, seen;
+            Vector3f arrival;
+            if (!ReachBent(rs, new Ray(c, w, wi.time), b, light.point, out toB, out densitiesB, out nullsB, out equiangular, out arrival, out indexB, out seen))
+            {
+                return none;
+            }
+            MediumProperties at = medium.SamplePoint(b, lambda, wi.time);
+            if (!(bool)at.sigma_s)
+            {
+                return none;
+            }
+            // The densities of the rivals for these two points
+            bool pathWeights = !(medium.volumeIntegrator.tracker is DecompositionTracker);
+            Float phase = mp.phase.PDF(-tangent, w);
+            Float productC = ((mp.sigma_a + mp.sigma_s) * (pathWeights ? nullsC : new SampledSpectrum(1f))).Average() * indexC;
+            Float productB = ((at.sigma_a + at.sigma_s) * (pathWeights ? nullsB : new SampledSpectrum(1f))).Average() * indexB;
+            if (medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular && equiangular > 0)
+            {
+                productB = 0;
+            }
+            Float exchange = s * s / (spread * indexB);
+            Float onceMore = OnceMoreScattering.Density(medium.volumeIntegrator.onceMore, mp.phase, -tangent, c, b, light.point);
+            Float share = pdf / (pdf + productC * (phase * (productB + equiangular) * exchange + onceMore));
+            Point3f savedP = m_ctx.P;
+            m_ctx.SetP(b);
+            SampledSpectrum result = none;
+            MediumInteraction atB = new MediumInteraction(b, -arrival, wi.time, medium, at.phase);
+            Vector3f wl;
+            SampledSpectrum arriving, beam, beamR;
+            if (rs.EvaluateLight(m_ctx, light, null, atB, out wl, out arriving, out beam, out beamR))
+            {
+                SampledSpectrum r = m_ctx.r * densitiesC * densitiesB * beamR;
+                if ((bool)r)
+                {
+                    result = toC * mp.sigma_s * mp.phase.p(-tangent, w) * toB * at.sigma_s * at.phase.p(-arrival, wl) * arriving * beam *
+                             (indexC * share * searches * seen * (bent ? Seen(path.indexAtStart, indexC) : 1) * s * s / (spread * pdf * r.Average()));
+                }
+            }
+            m_ctx.SetP(savedP);
+            return result;
         }
 
         // The stretch of a path from a point in a direction up to the point b that the path passes through (the direction
