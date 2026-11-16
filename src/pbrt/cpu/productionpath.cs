@@ -504,6 +504,13 @@ namespace pbrt
                 return (bool)beamTransmittance;
             }
 
+            public override bool ConnectBent(VolumeContext ctx, Interaction from, VolumePlace place, Point3f to, out Vector3f direction, out Float searches,
+                                             out Float spread)
+            {
+                return integrator.FindBent(this, ctx, from, place != null ? place.stack : stack, sampler, true, to, Normalize(to - from.p()), out direction, out spread,
+                                           out searches);
+            }
+
             public override bool EvaluateLight(VolumeContext ctx, VolumeLight light, VolumePlace place, MediumInteraction point, out Vector3f wi, out SampledSpectrum L,
                                                out SampledSpectrum beamTransmittance, out SampledSpectrum beamR)
             {
@@ -808,10 +815,12 @@ namespace pbrt
         // With the derivative of the miss by the two coordinates of the direction (along a1 and a2, across it), carried
         // along the ray in closed form (VolumeContext.differentials).
         private bool Miss(Services rs, VolumeContext ctx, Interaction origin, BoundaryStack stack, Vector3f direction, bool toPoint, Point3f target, Vector3f towards,
-                          Vector3f e1, Vector3f e2, Vector3f a1, Vector3f a2, out Float m1, out Float m2, out Float j11, out Float j21, out Float j12, out Float j22)
+                          Vector3f e1, Vector3f e2, Vector3f a1, Vector3f a2, out Float m1, out Float m2, out Float j11, out Float j21, out Float j12, out Float j22,
+                          out Float across)
         {
             m1 = 0;
             m2 = 0;
+            across = 1;
             j11 = j21 = j12 = j22 = 0;
             BoundaryStack entered;
             Ray ray = Leaving(origin, direction, stack, out entered);
@@ -831,6 +840,8 @@ namespace pbrt
                 m2 = Dot(landing.P - target, e2);
                 // (the changes of the point, taken along the ray onto the plane)
                 Float rate = Dot(landing.arrival.d, towards);
+                // (the plane is not across the ray as it arrives: the area across it is less by this)
+                across = std.abs(rate);
                 Vector3f p1 = ctx.offset1 - landing.arrival.d * (Dot(ctx.offset1, towards) / rate), p2 = ctx.offset2 - landing.arrival.d * (Dot(ctx.offset2, towards) / rate);
                 j11 = Dot(p1, e1);
                 j21 = Dot(p1, e2);
@@ -868,8 +879,8 @@ namespace pbrt
             Float tolerance = toPoint ? 2e-5f * scale + 4e-6f * (1 + Length((Vector3f)target)) : 2e-5f;
             Vector3f a1, a2;
             CoordinateSystem(direction, &a1, &a2);
-            Float m1, m2, j11, j21, j12, j22;
-            if (!Miss(rs, ctx, origin, stack, direction, toPoint, target, towards, e1, e2, a1, a2, out m1, out m2, out j11, out j21, out j12, out j22))
+            Float m1, m2, j11, j21, j12, j22, across;
+            if (!Miss(rs, ctx, origin, stack, direction, toPoint, target, towards, e1, e2, a1, a2, out m1, out m2, out j11, out j21, out j12, out j22, out across))
             {
                 return false;
             }
@@ -882,7 +893,7 @@ namespace pbrt
                 }
                 if (m1 * m1 + m2 * m2 < tolerance * tolerance)
                 {
-                    spread = std.abs(determinant);
+                    spread = std.abs(determinant) * across;
                     return true;
                 }
                 Float du = -(j22 * m1 - j12 * m2) / determinant, dv = -(-j21 * m1 + j11 * m2) / determinant;
@@ -900,8 +911,8 @@ namespace pbrt
                     Vector3f trial = Normalize(direction + du * a1 + dv * a2);
                     Vector3f b1, b2;
                     CoordinateSystem(trial, &b1, &b2);
-                    Float n1, n2, k11, k21, k12, k22;
-                    if (Miss(rs, ctx, origin, stack, trial, toPoint, target, towards, e1, e2, b1, b2, out n1, out n2, out k11, out k21, out k12, out k22) &&
+                    Float n1, n2, k11, k21, k12, k22, slant;
+                    if (Miss(rs, ctx, origin, stack, trial, toPoint, target, towards, e1, e2, b1, b2, out n1, out n2, out k11, out k21, out k12, out k22, out slant) &&
                         n1 * n1 + n2 * n2 < m1 * m1 + m2 * m2)
                     {
                         direction = trial;
@@ -913,6 +924,7 @@ namespace pbrt
                         j21 = k21;
                         j12 = k12;
                         j22 = k22;
+                        across = slant;
                         stepped = true;
                         break;
                     }
@@ -921,6 +933,13 @@ namespace pbrt
                 }
                 if (!stepped)
                 {
+                    // (no step misses by less: the miss is as small as the single precision of the walk lets it be, where
+                    // it is within a few times the tolerance; the search has failed otherwise)
+                    if (m1 * m1 + m2 * m2 < 16 * tolerance * tolerance)
+                    {
+                        spread = std.abs(determinant) * across;
+                        return true;
+                    }
                     return false;
                 }
             }
@@ -959,11 +978,6 @@ namespace pbrt
         private bool BentDeltaArrival(Services rs, VolumeContext ctx, Interaction intr, BoundaryStack stack, Sampler sampler, Light light, LightLiSample ls,
                                       out Vector3f found, out SampledSpectrum arriving, out SampledSpectrum T, out SampledSpectrum beamR)
         {
-            // (the searches go on until the direction is found again; past `SureSearches` each further one is made with
-            // the probability `Further` only and counts for as many more, so that the count stays right in the mean and
-            // the work is bounded)
-            const int SureSearches = 24;
-            const Float Further = 0.75f;
             arriving = new SampledSpectrum(0f);
             T = new SampledSpectrum(0f);
             beamR = new SampledSpectrum(1f);
@@ -971,9 +985,29 @@ namespace pbrt
             bool toPoint = light.Type() == LightType.DeltaPosition;
             Point3f target = ls.pLight.p();
             Vector3f towards = Normalize(ls.wi);
-            Float spread = 0;
+            Float spread, searches;
+            if (!FindBent(rs, ctx, intr, stack, sampler, toPoint, target, towards, out found, out spread, out searches))
+            {
+                return false;
+            }
+            return BentArrival(rs, ctx, intr, stack, light, ls, toPoint, target, towards, found, spread, searches, out arriving, out T, out beamR);
+        }
+
+        // The search of BentDeltaArrival: a direction that reaches the target, with the area (or solid angle) that the
+        // directions about it spread to there and the number of searches until it was found again
+        private bool FindBent(Services rs, VolumeContext ctx, Interaction intr, BoundaryStack stack, Sampler sampler, bool toPoint, Point3f target, Vector3f towards,
+                              out Vector3f found, out Float spread, out Float searches)
+        {
+            // (the searches go on until the direction is found again; past `SureSearches` each further one is made with
+            // the probability `Further` only and counts for as many more, so that the count stays right in the mean and
+            // the work is bounded)
+            const int SureSearches = 24;
+            const Float Further = 0.75f;
+            found = default;
+            spread = 0;
+            searches = 0;
             bool any = false;
-            Float searches = 0, worth = 1;
+            Float worth = 1;
             for (int search = 0; ; ++search)
             {
                 if (search > SureSearches)
@@ -1010,10 +1044,16 @@ namespace pbrt
                     break;
                 }
             }
-            if (!any || searches == 0)
-            {
-                return false;
-            }
+            return any && searches > 0;
+        }
+
+        private bool BentArrival(Services rs, VolumeContext ctx, Interaction intr, BoundaryStack stack, Light light, LightLiSample ls, bool toPoint, Point3f target,
+                                 Vector3f towards, Vector3f found, Float spread, Float searches, out SampledSpectrum arriving, out SampledSpectrum T,
+                                 out SampledSpectrum beamR)
+        {
+            arriving = new SampledSpectrum(0f);
+            T = new SampledSpectrum(0f);
+            beamR = new SampledSpectrum(1f);
             // Along the path that was found, with the transmittance
             BoundaryStack entered;
             Ray ray = Leaving(intr, found, stack, out entered);

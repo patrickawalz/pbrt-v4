@@ -148,7 +148,7 @@ namespace pbrt
 
     // CurvedPath Definition: a light path through a refractive medium from a point in a direction, to the first surface
     // or out of the scene
-    public sealed class CurvedPath
+    public sealed unsafe class CurvedPath
     {
         public List<RefractivePiece> pieces = new List<RefractivePiece>();
         // Whether any piece is not straight
@@ -187,11 +187,57 @@ namespace pbrt
         // The changes at the end compare the rays at the same parameter: what is along the ray there is of no account.
         public void Carry(Bounds3f box, ref Vector3f offset, ref Vector3f turn)
         {
-            double px = offset.x, py = offset.y, pz = offset.z, qx = turn.x, qy = turn.y, qz = turn.z;
-            bool inside = false;
+            Carry(box, double.PositiveInfinity, ref offset, ref turn);
+        }
+
+        // The area across the path at a sigma per solid angle of directions at its start (the squared distance, for a
+        // straight path), with the direction and the index there
+        public Float Spread(Bounds3f box, double sigma, out Vector3f direction, out double index)
+        {
+            RefractivePiece first = pieces[0];
+            Vector3f start = Normalize(new Vector3f((Float)first.vx, (Float)first.vy, (Float)first.vz)), a1, a2;
+            CoordinateSystem(start, &a1, &a2);
+            Vector3f p1 = new Vector3f(0, 0, 0), p2 = new Vector3f(0, 0, 0);
+            Carry(box, sigma, ref p1, ref a1);
+            Carry(box, sigma, ref p2, ref a2);
+            double remaining = sigma;
+            direction = start;
+            index = 1;
             for (int k = 0; k < pieces.Count; ++k)
             {
                 RefractivePiece piece = pieces[k];
+                double within = Math.Min(piece.sigma, remaining);
+                double vx = piece.vx + within * piece.ax, vy = piece.vy + within * piece.ay, vz = piece.vz + within * piece.az;
+                index = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                direction = new Vector3f((Float)(vx / index), (Float)(vy / index), (Float)(vz / index));
+                remaining -= within;
+                if (!(remaining > 0))
+                {
+                    break;
+                }
+            }
+            return AbsDot(Cross(p1, p2), direction);
+        }
+
+        // (`upTo`: the sigma of the path that the changes are carried to)
+        public void Carry(Bounds3f box, double upTo, ref Vector3f offset, ref Vector3f turn)
+        {
+            double px = offset.x, py = offset.y, pz = offset.z, qx = turn.x, qy = turn.y, qz = turn.z;
+            bool inside = false;
+            double remaining = upTo;
+            int ended = pieces.Count - 1;
+            double endedAt = pieces.Count > 0 ? pieces[pieces.Count - 1].sigma : 0;
+            for (int k = 0; k < pieces.Count; ++k)
+            {
+                RefractivePiece piece = pieces[k];
+                bool cut = piece.sigma > remaining;
+                if (cut)
+                {
+                    piece.sigma = remaining;
+                    ended = k;
+                    endedAt = remaining;
+                }
+                remaining -= piece.sigma;
                 double n = Math.Sqrt(piece.vx * piece.vx + piece.vy * piece.vy + piece.vz * piece.vz);
                 double dx = piece.vx / n, dy = piece.vy / n, dz = piece.vz / n;
                 bool straight = (k == 0 && lead) || (k == pieces.Count - 1 && beyond);
@@ -223,6 +269,10 @@ namespace pbrt
                         px += qx * distance;
                         py += qy * distance;
                         pz += qz * distance;
+                    }
+                    if (cut)
+                    {
+                        break;
                     }
                     continue;
                 }
@@ -261,12 +311,16 @@ namespace pbrt
                 px += qx * piece.sigma;
                 py += qy * piece.sigma;
                 pz += qz * piece.sigma;
+                if (cut)
+                {
+                    break;
+                }
             }
             if (inside)
             {
                 // An end inside the field: to the direction there
-                RefractivePiece last = pieces[pieces.Count - 1];
-                double vx = last.vx + last.sigma * last.ax, vy = last.vy + last.sigma * last.ay, vz = last.vz + last.sigma * last.az;
+                RefractivePiece last = pieces[ended];
+                double vx = last.vx + endedAt * last.ax, vy = last.vy + endedAt * last.ay, vz = last.vz + endedAt * last.az;
                 double n = Math.Sqrt(vx * vx + vy * vy + vz * vz);
                 double along = (vx * qx + vy * qy + vz * qz) / n;
                 qx = (qx - vx / n * along) / n;
@@ -285,6 +339,34 @@ namespace pbrt
             nx = fx <= fy && fx <= fz ? 1 : 0;
             ny = nx == 0 && fy <= fz ? 1 : 0;
             nz = nx == 0 && ny == 0 ? 1 : 0;
+        }
+    }
+
+    // JointOnCurve Definition: the collision that a curved ray leaves (VolumeJoint), for the densities of its rivals at the
+    // points of the ray: those of the points of the scene, times the volume across the path per solid angle and sigma there
+    // over the squared distance (one, for a straight ray).
+    public sealed class JointOnCurve
+    {
+        public VolumeJoint joint;
+        public CurvedRayMedium curve;
+        public CurvedPath path;
+        public Bounds3f box;
+        public Point3f origin;
+
+        public Float Stretch(Float sigma)
+        {
+            Vector3f direction, velocity;
+            double index;
+            Float spread = path.Spread(box, sigma, out direction, out index);
+            Float squared = DistanceSquared(origin, curve.At(sigma, out velocity));
+            return squared > 0 ? spread * (Float)index / squared : 1;
+        }
+
+        public Float Rivals(Point3f lightPoint, Float sigma)
+        {
+            Vector3f velocity;
+            Point3f b = curve.At(sigma, out velocity);
+            return (joint.Ratio(lightPoint, b) + joint.OnceMore(lightPoint, b)) * Stretch(sigma);
         }
     }
 
@@ -662,6 +744,8 @@ namespace pbrt
                 }
                 if (light.hasPoint)
                 {
+                    light.worldPoint = light.point;
+                    light.onCurve = true;
                     light.point = curve.Pivot(light.point);
                 }
                 return true;
@@ -716,6 +800,8 @@ namespace pbrt
             // (the equiangular point: the straight ray that stands for the curve draws it about where the curve puts the
             // point of the light)
             settings.distanceSampling = from.distanceSampling;
+            // (one more scattering before a light: from the collisions of the curve, by the path tracer, in the scene)
+            settings.onceMore = from.onceMore;
             return settings;
         }
 
@@ -1130,14 +1216,26 @@ namespace pbrt
             along.curve = curve;
             along.medium = medium;
             along.rng = rs.rng;
+            // (the collision that the ray leaves, where one more scattering was put before a light: its densities at the
+            // points of this ray are those of the points of the scene, by the spread of the path there)
             VolumeJoint joint = m_ctx.joint;
-            m_ctx.joint = null;
+            JointOnCurve rivals = null;
+            if (joint != null)
+            {
+                rivals = new JointOnCurve();
+                rivals.joint = joint;
+                rivals.curve = curve;
+                rivals.path = path;
+                rivals.box = refractive.field.Bounds();
+                rivals.origin = wi.o;
+            }
+            m_ctx.jointOnCurve = rivals;
             m_ctx.medium = curve;
             Point3f onAxis;
             Ray leaves;
             bool hit = Create(m_ctx, curve).Integrate(along, CurvedRayMedium.Axis(wi.time), out L, out transmittance, out weight, out onAxis, out leaves, out g);
             rs.rng = along.rng;
-            m_ctx.joint = joint;
+            m_ctx.jointOnCurve = null;
             m_ctx.medium = saved;
             P = path.P;
             wo = path.arrival;
@@ -1158,11 +1256,23 @@ namespace pbrt
                 {
                     direct.curve = curve;
                     direct.worldOrigin = wi.o;
+                    direct.worldPoint = point;
+                    direct.stretch = rivals != null ? rivals.Stretch(onAxis.x) : 1;
+                }
+                VolumeJoint here = g.joint;
+                if (here != null)
+                {
+                    // (this collision, for the ray that leaves it: where it is in the scene)
+                    here.onCurve = true;
+                    here.worldC = point;
+                    here.worldWo = -tangent;
+                    here.jointly = false;
                 }
                 g = new VolumeGeometry();
                 g.isSurface = false;
                 g.phase = phase;
                 g.direct = direct;
+                g.joint = here;
                 g.scatter = new MediumInteraction(point, -tangent, wi.time, medium, phase);
                 P = point;
                 wo = new Ray(point, tangent, wi.time);
@@ -1224,6 +1334,90 @@ namespace pbrt
             rs.rng = along.rng;
             m_ctx.medium = saved;
             return T * Seen(path.indexAtStart, path.indexAtEnd);
+        }
+
+        // The stretch of a path from a point in a direction up to the point b that the path passes through (the direction
+        // was searched for it): the transmittance and the densities of the walk to it (Reach), the density of the
+        // equiangular point there about the point of a light, each per sigma, with the direction of arrival, the index
+        // there and how much of what is there is seen from the start
+        public override bool ReachBent(VolumeServices rs, Ray from, Point3f b, Point3f lightPoint, out SampledSpectrum through, out SampledSpectrum densities,
+                                       out SampledSpectrum nulls, out Float equiangular, out Vector3f arrival, out Float index, out Float seen)
+        {
+            through = densities = nulls = new SampledSpectrum(0f);
+            equiangular = 0;
+            arrival = from.d;
+            index = 1;
+            seen = 1;
+            CurvedPath path = Trace(rs, from);
+            if (path.lost || path.pieces.Count == 0)
+            {
+                return false;
+            }
+            // Where the path is nearest to b
+            double best = double.PositiveInfinity, bestSigma = 0, before = 0;
+            for (int k = 0; k < path.pieces.Count; ++k)
+            {
+                RefractivePiece piece = path.pieces[k];
+                double limit = double.IsInfinity(piece.sigma) ? 1e30 : piece.sigma;
+                double sigma = 0;
+                for (int iteration = 0; iteration < 8; ++iteration)
+                {
+                    // (the sigma where the path is across the line to b: Newton's method on (x - b) . v)
+                    double x = piece.x + sigma * (piece.vx + 0.5 * sigma * piece.ax) - b.x, y = piece.y + sigma * (piece.vy + 0.5 * sigma * piece.ay) - b.y;
+                    double z = piece.z + sigma * (piece.vz + 0.5 * sigma * piece.az) - b.z;
+                    double vx = piece.vx + sigma * piece.ax, vy = piece.vy + sigma * piece.ay, vz = piece.vz + sigma * piece.az;
+                    double value = x * vx + y * vy + z * vz, slope = vx * vx + vy * vy + vz * vz + x * piece.ax + y * piece.ay + z * piece.az;
+                    if (!(slope > 0))
+                    {
+                        break;
+                    }
+                    sigma = Math.Min(Math.Max(sigma - value / slope, 0), limit);
+                }
+                Point3f nearest = piece.Point(sigma);
+                double miss = Distance(nearest, b);
+                if (miss < best)
+                {
+                    best = miss;
+                    bestSigma = before + sigma;
+                }
+                before += limit;
+            }
+            Float far = Distance(from.o, b);
+            if (!(best <= 1e-3f * far + 1e-5f * (1 + Length((Vector3f)b))))
+            {
+                return false;
+            }
+            Medium saved = m_ctx.medium;
+            CurvedRayMedium curve = new CurvedRayMedium(refractive.inner, path, from.time, AlongCurveSettings());
+            AlongCurve along = new AlongCurve();
+            along.renderer = rs;
+            along.path = path;
+            along.curve = curve;
+            along.medium = medium;
+            along.rng = rs.rng;
+            m_ctx.medium = curve;
+            Ray axis = CurvedRayMedium.Axis(from.time);
+            bool reached = Create(m_ctx, curve).ReachTo(along, axis, (Float)bestSigma, out through, out densities, out nulls);
+            rs.rng = along.rng;
+            m_ctx.medium = saved;
+            if (!reached)
+            {
+                return false;
+            }
+            Vector3f velocity;
+            curve.At(bestSigma, out velocity);
+            index = Length(velocity);
+            arrival = velocity / index;
+            seen = Seen(path.indexAtStart, index);
+            if (refractive.inner.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density)
+            {
+                EquiangularDensity about = EquiangularDensity.Create(axis, 0, path.hit ? (Float)path.sigma : Infinity, curve.Pivot(lightPoint));
+                if (about.valid)
+                {
+                    equiangular = about.PDF((Float)bestSigma);
+                }
+            }
+            return true;
         }
 
         // The emission and the transmittance along the path of a ray, as Transmit follows it

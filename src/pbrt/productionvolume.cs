@@ -177,6 +177,10 @@ namespace pbrt
         public Point3f point;
         // The light is at a position: the point is the only one it has
         public bool fixedPoint;
+        // For a point of a curved path (RefractiveVolume): `point` is where the curve puts the point of the light, which
+        // is at `worldPoint` in the scene
+        public bool onCurve;
+        public Point3f worldPoint;
     }
 
     // Where a connection ended: the volume that the point is in, and the stack of the volumes around it for what the renderer
@@ -266,6 +270,9 @@ namespace pbrt
         public Vector3f stopNormal;
         public bool atPlane;
         public bool geometryOnly;
+        // Set by a volume that bends the ray for the volume that it walks the curve with: the collision that the ray
+        // leaves, in the scene (in the place of `joint`, whose points would be those of the straight ray)
+        public JointOnCurve jointOnCurve;
         // Two small changes of the ray that is followed (of its point and of its direction), which a volume that bends
         // the ray carries to where it leaves the ray (CurvedPath.Carry): for the search of the path to a light
         public bool differentials;
@@ -405,6 +412,10 @@ namespace pbrt
         // it (CurvedRayMedium.Pivot); `worldOrigin` is where the path really started
         public CurvedRayMedium curve;
         public Point3f worldOrigin;
+        // (and the collision in the scene, with what the densities of the rivals that are put in the scene -- one more
+        // scattering from the collision before -- are multiplied by there: JointOnCurve.Stretch)
+        public Point3f worldPoint;
+        public Float stretch = 1;
 
         // `hasPoint`: the light has a point to draw about (`pivot`); `fixedPoint`: it is the only one (a light at a position)
         public Float For(bool hasPoint, bool fixedPoint, Point3f pivot)
@@ -414,9 +425,11 @@ namespace pbrt
                 return 1;
             }
             Float pdf = 0, own = product;
+            Point3f lightPoint = pivot, collision = ray.Apply(t);
             if (curve != null)
             {
                 pivot = curve.Pivot(pivot);
+                collision = worldPoint;
             }
             if (equiangular)
             {
@@ -430,7 +443,7 @@ namespace pbrt
                     }
                 }
             }
-            Float jointly = joint != null && fixedPoint ? joint.Ratio(pivot, ray.Apply(t)) + joint.OnceMore(pivot, ray.Apply(t)) : 0;
+            Float jointly = joint != null && fixedPoint ? (joint.Ratio(lightPoint, collision) + joint.OnceMore(lightPoint, collision)) * stretch : 0;
             if (pdf == 0 && jointly == 0)
             {
                 return 1;
@@ -461,6 +474,11 @@ namespace pbrt
         // the medium there): the normal on the side that the path came from, the only side that is sampled
         public bool sided;
         public Normal3f side;
+        // For a collision on a curved path (RefractiveVolume): `ray` and `t` are those of the straight ray that stands for
+        // the curve; the collision is at `worldC` in the scene, where the path came along -`worldWo`
+        public bool onCurve;
+        public Point3f worldC;
+        public Vector3f worldWo;
 
         // The density of the scattering b that is put between c and the point a of a light, over the phase function of the
         // direction that the path took from c: what the densities of the path and of the equiangular point have in common
@@ -471,12 +489,12 @@ namespace pbrt
             {
                 return 0;
             }
-            Point3f c = ray.Apply(t);
+            Point3f c = onCurve ? worldC : ray.Apply(t);
             if (sided && (!(Dot(a - c, side) > 0) || !(Dot(b - c, side) > 0)))
             {
                 return 0;
             }
-            return OnceMoreScattering.Density(onceMore, phase, -ray.d, c, b, a) / phasePdf;
+            return OnceMoreScattering.Density(onceMore, phase, onCurve ? worldWo : -ray.d, c, b, a) / phasePdf;
         }
 
         // The density with which c and b are drawn jointly about a, over mu_t W of c
@@ -579,6 +597,17 @@ namespace pbrt
         // A light for the ray that starts at the point of the context, with a point of it if it has a position: the point
         // about which the equiangular density is taken (section 4.2.3: a point chosen on an area light) and the joint
         // importance sampling of the double scattering is made; false if there is no light
+        // In a scene where a volume bends the rays: a direction in which a ray from a point of the path reaches the point
+        // `to`, one of those there may be, with the number of searches that stands for one over the probability of finding
+        // it and the area across the ray at `to` per solid angle at the start
+        public virtual bool ConnectBent(VolumeContext ctx, Interaction from, VolumePlace place, Point3f to, out Vector3f direction, out Float searches, out Float spread)
+        {
+            direction = default;
+            searches = 0;
+            spread = 0;
+            return false;
+        }
+
         public virtual bool ChooseLight(VolumeContext ctx, out VolumeLight light)
         {
             light = null;
@@ -964,7 +993,8 @@ namespace pbrt
             }
             Point3f point = wi.Apply(t);
             // (the third rival, for a light at a position: the two points drawn jointly from the ray before)
-            Float jointly = m_ctx.joint != null && FixedPoint(chosen) ? m_ctx.joint.Ratio(chosen.point, point) + m_ctx.joint.OnceMore(chosen.point, point) : 0;
+            Float jointly = !FixedPoint(chosen) ? 0 : m_ctx.jointOnCurve != null ? m_ctx.jointOnCurve.Rivals(chosen.worldPoint, t)
+                            : m_ctx.joint != null ? m_ctx.joint.Ratio(chosen.point, point) + m_ctx.joint.OnceMore(chosen.point, point) : 0;
             Float own = medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular ? 0 : product.Average();
             Float share = pdf / (own + pdf + jointly);
             MediumInteraction intr = new MediumInteraction(point, -wi.d, wi.time, medium, at.phase);
@@ -995,7 +1025,7 @@ namespace pbrt
             weight.product = product.Average();
             weight.equiangular = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density;
             weight.equiangularOnly = medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular;
-            weight.joint = m_ctx.joint;
+            weight.joint = m_ctx.jointOnCurve != null ? m_ctx.jointOnCurve.joint : m_ctx.joint;
             return weight;
         }
 
@@ -1039,6 +1069,24 @@ namespace pbrt
         // The transmittance from the start of a ray to a point of it by ratio tracking with the tracker of the medium, with
         // the densities of the walk for the other wavelengths and the product of mu_n / mu_bar over its null collisions
         // (which is that transmittance as a path finds it: W); false where nothing gets through
+        public bool ReachTo(VolumeServices rs, Ray ray, Float t, out SampledSpectrum through, out SampledSpectrum densities, out SampledSpectrum nulls)
+        {
+            return Reach(rs, ray, t, out through, out densities, out nulls);
+        }
+
+        // For a volume that may bend a ray (Medium.BendsRays): Reach along the path of a ray up to the point b that the
+        // path passes through, with what the rivals of one more scattering need there (RefractiveVolume)
+        public virtual bool ReachBent(VolumeServices rs, Ray from, Point3f b, Point3f lightPoint, out SampledSpectrum through, out SampledSpectrum densities,
+                                      out SampledSpectrum nulls, out Float equiangular, out Vector3f arrival, out Float index, out Float seen)
+        {
+            through = densities = nulls = new SampledSpectrum(0f);
+            equiangular = 0;
+            arrival = from.d;
+            index = 1;
+            seen = 1;
+            return false;
+        }
+
         protected virtual bool Reach(VolumeServices rs, Ray ray, Float t, out SampledSpectrum through, out SampledSpectrum densities, out SampledSpectrum nulls)
         {
             SampledSpectrum T_ray = new SampledSpectrum(1f), rl = new SampledSpectrum(1f), ru = new SampledSpectrum(1f), product = new SampledSpectrum(1f);
@@ -1112,6 +1160,10 @@ namespace pbrt
         {
             SampledSpectrum none = new SampledSpectrum(0f);
             Point3f origin = start.P();
+            if (medium.BendsRays())
+            {
+                return OnceMoreFinishBent(rs, start, at, light, b, density, integrand, pathWeights);
+            }
             Vector3f w = Normalize(b - origin);
             if (!start.Faces(w))
             {
@@ -1170,6 +1222,75 @@ namespace pbrt
                 if ((bool)r)
                 {
                     result = through * mp.sigma_s * f * mp.phase.p(-w, wl) * arriving * beam * (integrand * share / r.Average());
+                }
+            }
+            m_ctx.SetP(saved);
+            return result;
+        }
+
+        // The same in a volume that bends the rays: b is where it was put in the scene; the direction that reaches it from
+        // the start is searched (VolumeServices.ConnectBent, which gives one of the paths to b with the number of searches
+        // that stands for one over the probability of finding it, and the area across the path at b per solid angle at the
+        // start), and the stretch is walked along that path (ReachBent). In the estimate the squared distance of the
+        // straight stretch gives way to that area, and the densities of the rivals that go by the direction at the start --
+        // the path and the equiangular point, each per sigma -- are those of b in the scene by the same exchange:
+        //     the path           p(c -> b)  mu_t(b) n W(b)  |cb|^2 / (area n)
+        //     the equiangular b  p(c -> b)  p_ea(b)         |cb|^2 / (area n)
+        private SampledSpectrum OnceMoreFinishBent(VolumeServices rs, OnceMoreStart start, VolumeJoint at, VolumeLight light, Point3f b, Float density, Float integrand,
+                                                   bool pathWeights)
+        {
+            SampledSpectrum none = new SampledSpectrum(0f);
+            Point3f origin = start.P();
+            Float squared = DistanceSquared(origin, b);
+            if (!(squared > 0))
+            {
+                return none;
+            }
+            Vector3f w;
+            Float searches, spread;
+            if (!rs.ConnectBent(m_ctx, start.point, start.place, b, out w, out searches, out spread) || !(spread > 0) || !start.Faces(w))
+            {
+                return none;
+            }
+            SampledSpectrum f = start.f(w);
+            if (!(bool)f)
+            {
+                return none;
+            }
+            Float time = start.point.time;
+            Ray ray = start.surface ? ((SurfaceInteraction)start.point).SpawnRay(w) : new Ray(origin, w, time);
+            ray.d = w;
+            SampledSpectrum through, densities, nulls;
+            Float equiangular, index, seen;
+            Vector3f arrival;
+            if (!ReachBent(rs, ray, b, light.point, out through, out densities, out nulls, out equiangular, out arrival, out index, out seen))
+            {
+                return none;
+            }
+            MediumProperties mp = medium.SamplePoint(b, m_ctx.lambda, time);
+            if (!(bool)mp.sigma_s)
+            {
+                return none;
+            }
+            Float own = ((mp.sigma_a + mp.sigma_s) * (pathWeights ? nulls : new SampledSpectrum(1f))).Average() * index;
+            if (medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular && equiangular > 0)
+            {
+                own = 0;
+            }
+            Float exchange = squared / (spread * index);
+            Float share = density / (density + start.PDF(w) * (own + equiangular) * exchange + (at != null ? at.Jointly(light.point, b) : 0));
+            Point3f saved = m_ctx.P;
+            m_ctx.SetP(b);
+            SampledSpectrum result = none;
+            MediumInteraction atB = new MediumInteraction(b, -arrival, time, medium, mp.phase);
+            Vector3f wl;
+            SampledSpectrum arriving, beam, beamR;
+            if (rs.EvaluateLight(m_ctx, light, start.place, atB, out wl, out arriving, out beam, out beamR))
+            {
+                SampledSpectrum r = m_ctx.r * densities * beamR;
+                if ((bool)r)
+                {
+                    result = through * mp.sigma_s * f * mp.phase.p(-arrival, wl) * arriving * beam * (integrand * share * searches * seen * squared / (spread * r.Average()));
                 }
             }
             m_ctx.SetP(saved);
@@ -2609,7 +2730,7 @@ namespace pbrt
                 g.isSurface = false;
                 g.phase = mp.phase;
                 g.scatter = new MediumInteraction(P, -wi.d, wi.time, medium, mp.phase);
-                if (weighed || m_ctx.joint != null)
+                if (weighed || m_ctx.joint != null || m_ctx.jointOnCurve != null)
                 {
                     g.direct = CollisionWeight(wi, distance, t, sigma_t * T);
                 }
@@ -2794,7 +2915,7 @@ namespace pbrt
                 g.phase = at.phase;
                 g.scatter = new MediumInteraction(point, -wi.d, wi.time, medium, at.phase);
                 SampledSpectrum product = (at.sigma_a + at.sigma_s) * (pathWeights ? nullsToCollision : new SampledSpectrum(1f));
-                if (weighed || m_ctx.joint != null)
+                if (weighed || m_ctx.joint != null || m_ctx.jointOnCurve != null)
                 {
                     g.direct = CollisionWeight(wi, distance, Dot(point - wi.o, wi.d), product);
                 }

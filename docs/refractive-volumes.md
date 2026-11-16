@@ -37,14 +37,28 @@ Done:
 - the polarised path tracer (`Integrator "production" "bool polarised" true`, with `"float analyser"` and `"string measure"`
   as `polpath`), and the axis that is carried along a bent ray for it (`CurvedRayMedium.Carry`, `Attenuation.Transport`).
 
+Done since:
+- the search for the path to a point or a direction carries its derivative along the ray in closed form
+  (`CurvedPath.Carry`: within a piece the change of the point grows by sigma times the change of v; at a face the change of v
+  takes (A_before - A_after) times the delay of the crossing), halves its steps until the miss falls, starts some searches
+  anywhere on the sphere, and counts the repeated searches without a cap (Russian roulette past 24);
+- the area across the ray at the target is taken across the ray as it arrives (it was taken on the plane across the
+  straight line: too bright by one over the cosine between the two);
+- the surfaces along a path are tested in chords of several pieces while the path has turned by less than 4e-4 rad;
+- the emission of the held medium is sampled as a light (`"emission_nee"`): the direction drawn towards the emission is
+  followed as the field bends it (`Volume.Gather`);
+- once-more scattering (`"oncemore" "omnee" | "omnee2"`) on bent rays: b is put in the scene as before, the direction that
+  reaches it is searched (`VolumeServices.ConnectBent`), the stretch is walked along that path (`Volume.ReachBent`), and
+  the squared distance gives way to the area across the path per solid angle, in the estimate and in the densities of
+  the rivals on both sides (`OnceMoreFinishBent`, `JointOnCurve`).
+
 Not done:
-- joint double scattering and once-more scattering on a bent ray (they are off there; they work on rays that the field
-  leaves straight);
-- the sampling of the emission of a refractive medium (`"emission_nee"`, `"emission_fnee"` are refused for it);
+- joint double scattering (`"doublescattering"`) on a bent ray (off there);
 - in polarised mode the volumes gather no light of their own (equiangular, joint, once-more are off), and a
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
-- closed-form derivatives for the search (it uses differences, starts within half a radian of the straight direction, and
-  stops after 64 searches); no speed work (a lamp inside a lens renders about 10 to 30 times slower than without one).
+- a refractive medium as a member of an aggregate is taken as the medium that it holds, with straight rays (it can hold
+  an aggregate);
+- an atmosphere with refraction.
 
 Scene syntax: `MakeNamedMedium "x" "string type" "refractive" "string medium" "homogeneous" | "uniformgrid" | "adaptivegrid"`
 with the held medium's own parameters, and `"string indexfield" "grid"` (`"float index"`, `"integer inx/iny/inz"`,
@@ -91,6 +105,19 @@ More checks:
 - The same fog inside a refractive medium with negligible bending: S1 -0.05261, analyser 0 0.01125, analyser 90 0.11648.
 - `RefractiveVolume.CarriedAxis`: the carried axis against a hundred small turns per piece, 3.7e-5; across the path 3e-8.
 - `RefractiveVolume.Walk` also checks the total weight of the collisions against quadrature.
+
+Later checks (image means):
+- Search: a lamp inside a lens (160x160, 32 spp) 84 s -> 36 s; the carried derivative against central differences at 400
+  converged connections: median ratio of the determinants 1.0000; the spread carried along a path against the spread the
+  search finds for the same two points: equal to four digits.
+- Emission sampling in a lens (n up to 1.25), three seeds: sampled 0.03485 +- 0.00047, not sampled 0.03502 +- 0.00054;
+  negligible bending 0.03608 +- 0.00027 against the plain medium 0.03562 +- 0.00043.
+- Once-more scattering, lamp outside a scattering lens (n up to 1.1), twelve seeds: light sampling alone 0.13375 +-
+  0.00028, `omnee` 0.13420 +- 0.00034, `omnee2` 0.13357 +- 0.00021; negligible bending 0.13400 / 0.13396; the plain medium
+  0.13367 / 0.13440. (With the lamp inside the medium the inverse square of the distance gives the means no finite
+  variance, and nothing can be read from them.)
+- A point light seen through a lens focuses to caustics, where the exact spread goes to zero: bright isolated samples,
+  which the derivative by differences had blurred.
 
 Found on the way:
 - The bent light of a delta light did not take the weight against the equiangular point (65% too bright with
