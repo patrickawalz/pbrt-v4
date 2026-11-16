@@ -804,21 +804,64 @@ namespace pbrt
                 return u;
             }
 
+            // The light sample of a point of the curve (for the volumes that light their points themselves: single
+            // scattering): the renderer's for the point of the scene, which follows the way to the light as the field
+            // bends it; the direction comes back in the frame of the straight ray that stands for the curve
             public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, PhaseFunction phase, out Vector3f wi, out SampledSpectrum L,
                                                      out SampledSpectrum beamTransmittance, out SampledSpectrum beamR)
             {
-                wi = default;
-                L = default;
-                beamTransmittance = default;
-                beamR = new SampledSpectrum(1f);
-                return false;
+                Vector3f tangent;
+                Float index;
+                MediumInteraction there = InScene(ctx, point, out tangent, out index);
+                Point3f saved = ctx.P;
+                ctx.SetP(there.p());
+                renderer.rng = rng;
+                Vector3f toLight;
+                bool lit = renderer.GenerateLightSample(ctx, there, phase, out toLight, out L, out beamTransmittance, out beamR);
+                rng = renderer.rng;
+                ctx.SetP(saved);
+                wi = lit ? OnAxis(toLight, tangent) : default;
+                if (lit)
+                {
+                    L *= Seen(path.indexAtStart, index);
+                }
+                return lit;
             }
 
             public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, out Vector3f wi, out SampledSpectrum L)
             {
-                wi = default;
-                L = default;
-                return false;
+                Vector3f tangent;
+                Float index;
+                MediumInteraction there = InScene(ctx, point, out tangent, out index);
+                Point3f saved = ctx.P;
+                ctx.SetP(there.p());
+                renderer.rng = rng;
+                Vector3f toLight;
+                bool lit = renderer.GenerateLightSample(ctx, there, out toLight, out L);
+                rng = renderer.rng;
+                ctx.SetP(saved);
+                wi = lit ? OnAxis(toLight, tangent) : default;
+                if (lit)
+                {
+                    L *= Seen(path.indexAtStart, index);
+                }
+                return lit;
+            }
+
+            private MediumInteraction InScene(VolumeContext ctx, MediumInteraction point, out Vector3f tangent, out Float index)
+            {
+                Vector3f velocity;
+                Point3f world = curve.At(point.p().x, out velocity);
+                index = Length(velocity);
+                tangent = velocity / index;
+                return new MediumInteraction(world, -tangent, point.time, medium, point.phase);
+            }
+
+            private static Vector3f OnAxis(Vector3f direction, Vector3f tangent)
+            {
+                Vector3f b1, b2;
+                CoordinateSystem(tangent, &b1, &b2);
+                return new Vector3f(Dot(direction, tangent), Dot(direction, b1), Dot(direction, b2));
             }
 
             // The light that a point of the curve is sampled about: the renderer's, with its point where the curve puts it
@@ -881,7 +924,10 @@ namespace pbrt
         {
             VolumeIntegrator from = refractive.inner.volumeIntegrator;
             VolumeIntegrator settings = new VolumeIntegrator(from.tracker, from.transmittance);
-            settings.scattering = from.scattering == VolumeScattering.None || from.scattering == VolumeScattering.Absorption ? from.scattering : VolumeScattering.Multiple;
+            settings.scattering = from.scattering;
+            // (a volume that lights its points itself does so by the light sample; the sample of the phase function and
+            // of the emission from a point of the curve are not followed along bent rays)
+            settings.lightSamples = from.lightSamples;
             settings.stepSize = from.stepSize;
             settings.marchingLookups = from.marchingLookups;
             settings.contrast = from.contrast;
