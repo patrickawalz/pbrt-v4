@@ -536,6 +536,18 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) Every wavelength becomes one of them: for a path in a medium that bends each wavelength its
+        // own way, which then carries one wavelength in all of its samples
+        public void CollapseTo(int which)
+        {
+            Float wavelength = lambda[which], density = pdf[which];
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                lambda[i] = wavelength;
+                pdf[i] = density;
+            }
+        }
+
         public void TerminateSecondary()
         {
             if (SecondaryTerminated())

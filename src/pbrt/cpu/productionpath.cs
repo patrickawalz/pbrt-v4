@@ -1190,6 +1190,64 @@ namespace pbrt
 
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler, ScratchBuffer scratchBuffer, VisibleSurface visibleSurf)
         {
+            if (!RefractiveMedium.anyDispersion)
+            {
+                return Walk(ray, ref lambda, sampler, scratchBuffer, visibleSurf, false);
+            }
+            // A medium of the scene bends each wavelength its own way. The path is that of its first wavelength, which all
+            // of its samples are of while it is walked (so that the densities of the wavelengths are one density), and
+            // what it gathers goes to the first wavelength of the sample alone, as many times over as there are
+            // wavelengths. The light that is seen along the camera ray itself ("seethrough") has no path to share: it is
+            // followed once for each wavelength of the sample.
+            SampledWavelengths sample = lambda;
+            SampledSpectrum seen = new SampledSpectrum(0f);
+            if (seeThrough && infiniteLights.Count > 0)
+            {
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    SampledWavelengths one = sample;
+                    one.CollapseTo(i);
+                    seen[i] = SeenThrough(ray, one, sampler)[0];
+                }
+            }
+            SampledWavelengths first = sample;
+            first.CollapseTo(0);
+            SampledSpectrum walked = Walk(ray, ref first, sampler, scratchBuffer, visibleSurf, true);
+            seen[0] += NSpectrumSamples * walked[0];
+            lambda = sample;
+            return seen;
+        }
+
+        // The light of the infinite lights along the camera ray itself: what they emit where the ray leaves the scene,
+        // as the volumes bend it, times an estimate of the transmittance
+        private SampledSpectrum SeenThrough(RayDifferential ray, SampledWavelengths lambda, Sampler sampler)
+        {
+            SampledSpectrum L = new SampledSpectrum(0f);
+            VolumeContext ctx = new VolumeContext();
+            ctx.lambda = lambda;
+            ctx.time = ray.time;
+            Services rs = new Services();
+            rs.integrator = this;
+            rs.sampler = sampler;
+            rs.stack = MediumTracking.Start(camera.GetMedium());
+            rs.rng = new RNG(Hash(ray.o, ray.d), Hash(sampler.Get1D()));
+            ctx.r = new SampledSpectrum(1f);
+            Landing landing = Follow(rs, ctx, rs.stack, new Ray(ray.o, Normalize(ray.d), ray.time), false, default, default, true, false, false, null, default,
+                                     new SampledSpectrum(1f));
+            if (landing.kind == LandingKind.Escaped && (bool)landing.T)
+            {
+                foreach (Light light in infiniteLights)
+                {
+                    L += landing.T * light.Le(landing.arrival, lambda) / ctx.r.Average();
+                }
+            }
+            return L;
+        }
+
+        // (`seenAlready`: the light along the camera ray itself has been counted by the caller)
+        private SampledSpectrum Walk(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler, ScratchBuffer scratchBuffer, VisibleSurface visibleSurf,
+                                     bool seenAlready)
+        {
             SampledSpectrum L = new SampledSpectrum(0f), beta = new SampledSpectrum(1f);
             // The polarised path. `relative` is the product of the Mueller matrices of the path so far, each over its first
             // element (beta has those); what has been added to L since the last change of it is unpolarised light, or light
@@ -1221,6 +1279,13 @@ namespace pbrt
             // The direction that the path left its last point in: what the densities of the light sampling are of, where a
             // volume bends the ray on its way (it stays through the surfaces that only bound volumes)
             Vector3f departure = ray.d;
+
+            if (seeThrough && !seenAlready && infiniteLights.Count > 0)
+            {
+                // The light from beyond the scene along the camera ray itself, in the place of all of it where the walk
+                // happens to get through (below). For a sun seen through a long stretch of air, which few walks get through.
+                L += SeenThrough(ray, lambda, sampler);
+            }
 
             while (true)
             {
@@ -1295,7 +1360,11 @@ namespace pbrt
                     foreach (Light light in infiniteLights)
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
-                        if (depth == 0 || specularBounce)
+                        if (depth == 0 && seeThrough)
+                        {
+                            // (counted along the camera ray, above)
+                        }
+                        else if (depth == 0 || specularBounce)
                         {
                             L += beta * Le0 / ctx.r.Average();
                         }
@@ -1563,6 +1632,9 @@ namespace pbrt
             // ("bool lightsampling" false: no light is sampled, and a path finds the lights only by reaching them: the
             // reference that the estimators with light sampling are tested against)
             integrator.lightSampling = parameters.GetOneBool("lightsampling", true);
+            // "bool seethrough" (false): the light of the infinite lights that is seen along the camera ray comes with an
+            // estimate of the transmittance of the volumes on the way, not only where the walk gets through them
+            integrator.seeThrough = parameters.GetOneBool("seethrough", false);
             // ("bool polarised": the path carries the polarisation of the light, and the sensor measures what "analyser"
             // and "measure" say, as "polarisedpath" does)
             integrator.polarised = parameters.GetOneBool("polarised", false);
@@ -1573,6 +1645,7 @@ namespace pbrt
 
         private int maxDepth;
         private bool lightSampling = true;
+        private bool seeThrough;
         // The polarised path (Li): the Mueller matrices of the path from the camera, each over its first element (the weight
         // of the path has those), and the light with its Stokes vector; what the sensor measures of it
         private bool polarised;

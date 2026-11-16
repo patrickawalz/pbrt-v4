@@ -1866,6 +1866,14 @@ namespace pbrt
         // A bound of the extinction over a box of rendering space, with the fractions of it that the extinction is never
         // below and is about there (as RayMajorantSegment has them), for the media that a refractive medium may hold: its
         // light paths are curves, and a piece of a curve is bounded by a box. False for a medium that cannot say.
+        // The same for a piece of a curve that the box bounds, with its ends and its middle: for a medium that can say
+        // more of a curve than of a box (the atmosphere, by the heights that the piece is at)
+        public virtual bool MajorantOnPiece(Bounds3f box, Point3f start, Point3f middle, Point3f end, SampledWavelengths lambda, out SampledSpectrum sigma_maj,
+                                            out Float controlFraction, out Float averageFraction)
+        {
+            return MajorantOver(box, lambda, out sigma_maj, out controlFraction, out averageFraction);
+        }
+
         public virtual bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
         {
             sigma_maj = new SampledSpectrum(0f);
@@ -2110,6 +2118,10 @@ namespace pbrt
             else if (name == "atmosphere")
             {
                 m = AtmosphereMedium.Create(parameters, loc, alloc);
+            }
+            else if (name == "refractiveatmosphere")
+            {
+                m = RefractiveMedium.CreateAtmosphere(parameters, loc, alloc);
             }
             else if (name == "nanovdb")
             {

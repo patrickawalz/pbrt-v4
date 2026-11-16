@@ -554,6 +554,9 @@ namespace pbrt
                 segment.tMin = (Float)lo;
                 segment.tMax = (Float)hi;
                 segment.sigma_maj = medium.ShellMajorant(annulus, lambda);
+                // (what the extinction of the shell is never below, for the estimators that take a control out)
+                segment.controlFraction = AtmosphereMedium.ControlFraction(medium.ShellMinorant(annulus, lambda), segment.sigma_maj);
+                segment.averageFraction = segment.controlFraction;
                 return segment;
             }
             return default;
@@ -715,6 +718,8 @@ namespace pbrt
             shellRadius = new double[shells + 1];
             maxRayleighDensity = new double[shells];
             maxAerosolMass = new double[shells][];
+            minRayleighDensity = new double[shells];
+            minAerosolMass = new double[shells][];
             maxOzoneDensity = new double[shells];
             maxOzoneCrossSection = new DenselySampledSpectrum[shells];
             maxNo2Density = new double[shells];
@@ -728,6 +733,21 @@ namespace pbrt
             {
                 double lo = edges[i], hi = edges[i + 1];
                 maxRayleighDensity[i] = profile.RelativeDensity(lo);
+                // (and the least of the air and of each aerosol in the shell, for the control of the residual estimators)
+                minRayleighDensity[i] = profile.RelativeDensity(hi);
+                minAerosolMass[i] = new double[Species];
+                for (int s = 0; s < Species; ++s)
+                {
+                    double minMass = Math.Min(AerosolMass(s, lo), AerosolMass(s, hi));
+                    for (int n = 0; n < aerosolAltitude.Length; ++n)
+                    {
+                        if (aerosolAltitude[n] > lo && aerosolAltitude[n] < hi)
+                        {
+                            minMass = Math.Min(minMass, AerosolMass(s, aerosolAltitude[n]));
+                        }
+                    }
+                    minAerosolMass[i][s] = minMass;
+                }
                 // The profiles are interpolated between the nodes of the table (and are not monotone: the soot of the files is zero in the
                 // boundary layer): the maximum is at an end of the shell or at a node inside
                 maxAerosolMass[i] = new double[Species];
@@ -1040,6 +1060,101 @@ namespace pbrt
             return 1.0001f * majorant;
         }
 
+        // What the extinction of a shell is never below: the air and the aerosols where they are least (the absorbing
+        // gases are left out)
+        public SampledSpectrum ShellMinorant(int annulus, SampledWavelengths lambda)
+        {
+            SampledSpectrum minorant = (Float)minRayleighDensity[annulus] * rayleigh.Sample(lambda);
+            for (int s = 0; s < Species; ++s)
+            {
+                minorant += (Float)minAerosolMass[annulus][s] * massExtinction[s].Sample(lambda);
+            }
+            return 0.9999f * minorant;
+        }
+
+        // The share of a bound that a floor of the extinction is, for every wavelength
+        public static Float ControlFraction(SampledSpectrum floor, SampledSpectrum bound)
+        {
+            Float fraction = 1;
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                fraction = bound[i] > 0 ? Math.Min(fraction, floor[i] / bound[i]) : 0;
+            }
+            return fraction;
+        }
+
+        public AtmosphereProfile Profile() { return profile; }
+
+        public double MetersPerUnit() { return metersPerUnit; }
+
+        public double TopAltitudeMeters() { return topAltitudeMeters; }
+
+        // A bound of the extinction over a box: the largest of the bounds of the shells that the box reaches (for the
+        // refractive atmosphere, whose paths are curves)
+        // (a piece of a curve: between the least and the largest distance from the centre of its ends and its middle,
+        // with a margin for how far a nearly straight piece of that length can dip below them between two of the three
+        // and for the single precision of the points)
+        public override bool MajorantOnPiece(Bounds3f box, Point3f start, Point3f middle, Point3f end, SampledWavelengths lambda, out SampledSpectrum sigma_maj,
+                                             out Float controlFraction, out Float averageFraction)
+        {
+            double r0 = Radius(start), r1 = Radius(middle), r2 = Radius(end);
+            double near = Math.Min(r0, Math.Min(r1, r2)), far = Math.Max(r0, Math.Max(r1, r2));
+            double length = Distance(start, end);
+            double margin = length * length / (16 * near) + 2e-7 * far + 1e-3 * (far - near);
+            return MajorantBetween(near - margin, far + margin, lambda, out sigma_maj, out controlFraction, out averageFraction);
+        }
+
+        private double Radius(Point3f p)
+        {
+            double x = p.x - cx, y = p.y - cy, z = p.z - cz;
+            return Math.Sqrt(x * x + y * y + z * z);
+        }
+
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            // The nearest and the farthest point of the box from the centre
+            double nx = Math.Min(Math.Max(cx, box.pMin.x), box.pMax.x) - cx, ny = Math.Min(Math.Max(cy, box.pMin.y), box.pMax.y) - cy;
+            double nz = Math.Min(Math.Max(cz, box.pMin.z), box.pMax.z) - cz;
+            double fx = Math.Max(Math.Abs(box.pMin.x - cx), Math.Abs(box.pMax.x - cx)), fy = Math.Max(Math.Abs(box.pMin.y - cy), Math.Abs(box.pMax.y - cy));
+            double fz = Math.Max(Math.Abs(box.pMin.z - cz), Math.Abs(box.pMax.z - cz));
+            // (with a margin for the single precision of the box)
+            double near = Math.Sqrt(nx * nx + ny * ny + nz * nz) * (1 - 2e-7), far = Math.Sqrt(fx * fx + fy * fy + fz * fz) * (1 + 2e-7);
+            return MajorantBetween(near, far, lambda, out sigma_maj, out controlFraction, out averageFraction);
+        }
+
+        // The bound and the floor of the extinction between two distances from the centre
+        private bool MajorantBetween(double near, double far, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            controlFraction = 0;
+            averageFraction = 0;
+            int shells = shellRadius.Length - 1;
+            sigma_maj = new SampledSpectrum(0f);
+            if (near >= shellRadius[shells])
+            {
+                return true;
+            }
+            SampledSpectrum floor = new SampledSpectrum(Infinity);
+            bool whole = near >= shellRadius[0] && far <= shellRadius[shells];
+            int first = 0;
+            while (first < shells - 1 && shellRadius[first + 1] <= near)
+            {
+                ++first;
+            }
+            for (int annulus = first; annulus < shells && shellRadius[annulus] < far; ++annulus)
+            {
+                SampledSpectrum bound = ShellMajorant(annulus, lambda), least = ShellMinorant(annulus, lambda);
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    sigma_maj[i] = Math.Max(sigma_maj[i], bound[i]);
+                    floor[i] = Math.Min(floor[i], least[i]);
+                }
+            }
+            // (a box that reaches out of the atmosphere, or into the planet, has no floor)
+            controlFraction = whole ? ControlFraction(floor, sigma_maj) : 0;
+            averageFraction = controlFraction;
+            return true;
+        }
+
         public AtmosphereMajorantIterator SampleRay(Ray ray, Float raytMax, SampledWavelengths lambda)
         {
             return new AtmosphereMajorantIterator(this, ray, raytMax, lambda);
@@ -1084,6 +1199,8 @@ namespace pbrt
         readonly double[][] aerosolMass;
         readonly double[] shellRadius, maxRayleighDensity, maxOzoneDensity;
         readonly double[][] maxAerosolMass;
+        readonly double[] minRayleighDensity;
+        readonly double[][] minAerosolMass;
     }
 
 }  // namespace pbrt

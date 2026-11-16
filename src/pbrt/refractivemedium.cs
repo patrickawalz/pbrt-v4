@@ -42,6 +42,63 @@ namespace pbrt
 
         public override bool BendsRays() { return true; }
 
+        // Dispersion: for a wavelength (nm), how many times the n^2 - 1 of the field the medium has; null for none. A
+        // scene with such a medium is rendered one wavelength to a path (ProductionPath, by `anyDispersion`).
+        public Func<Float, double> dispersion;
+        public static bool anyDispersion;
+
+        // The refractivity of standard air (15 C, 101325 Pa, dry) at a wavelength in nm: Edlen's formula of 1966
+        public static double AirRefractivity(double lambdaNm)
+        {
+            double s = 1000 / lambdaNm, s2 = s * s;
+            return 1e-8 * (8342.54 + 2406147 / (130 - s2) + 15998 / (38.9 - s2));
+        }
+
+        // An atmosphere that refracts (scene type "refractiveatmosphere"): the "atmosphere" medium with all of its
+        // parameters, held by a refractive medium whose index is that of air of the density that the atmosphere has at each
+        // height (the refractivity of a gas is in proportion to its density), in closed form on a lattice that stores
+        // nothing. The lattice is a box about the top of the planet (the point above its centre along +y), where the
+        // viewer is taken to be:
+        //     "float indexextent" (1.5e6)     how far the box reaches to each side, in metres
+        //     "float indexcellacross" (1e4)   the size of its cells across, in metres
+        //     "float indexcellup" (200)       and up
+        //     "float indextop" (60000)        the height that the box reaches to: the air above it bends nothing (it has
+        //                                     0.02 % of the refractivity of the air at the ground at 60 km)
+        //     "bool dispersion" (true)        the index changes with the wavelength (and a path carries one wavelength)
+        public static RefractiveMedium CreateAtmosphere(ParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            AtmosphereMedium inner = AtmosphereMedium.Create(parameters, loc, alloc);
+            inner.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
+            double unit = inner.MetersPerUnit(), radius = inner.PlanetRadiusUnits() * unit;
+            double top = Math.Min(inner.TopAltitudeMeters(), parameters.GetOneFloat("indextop", 60000f));
+            double extent = parameters.GetOneFloat("indexextent", 1.5e6f), across = parameters.GetOneFloat("indexcellacross", 1e4f), up = parameters.GetOneFloat("indexcellup", 200f);
+            bool disperses = parameters.GetOneBool("dispersion", true);
+            double cx = inner.CenterX(), cy = inner.CenterY(), cz = inner.CenterZ();
+            // (the box reaches as far below the top of the planet as the planet falls away at its sides, and a path bends)
+            double below = extent * extent / (2 * radius) * 1.3 + 2000;
+            Bounds3f box = new Bounds3f(new Point3f((Float)(cx - extent / unit), (Float)(cy + (radius - below) / unit), (Float)(cz - extent / unit)),
+                                        new Point3f((Float)(cx + extent / unit), (Float)(cy + (radius + top) / unit), (Float)(cz + extent / unit)));
+            AtmosphereProfile profile = inner.Profile();
+            double reference = AirRefractivity(550);
+            Func<double, double, double, double> index = (double x, double y, double z) =>
+            {
+                double dx = x - cx, dy = y - cy, dz = z - cz;
+                double h = (Math.Sqrt(dx * dx + dy * dy + dz * dz) - radius / unit) * unit;
+                // (below the ground the density goes on as it does just above it: the lattice has points there)
+                double density = h >= 0 ? profile.RelativeDensity(h) : Math.Exp(-h / 10400);
+                return h >= top ? 1 : 1 + reference * density;
+            };
+            int cellsAcross = Math.Max(1, (int)Math.Ceiling(2 * extent / across)), cellsUp = Math.Max(1, (int)Math.Ceiling((below + top) / up));
+            TetrahedralIndexField field = new TetrahedralIndexField(box, cellsAcross, cellsUp, cellsAcross, index, true);
+            RefractiveMedium medium = new RefractiveMedium(inner, field, parameters.GetOneBool("surfacesinside", true));
+            if (disperses)
+            {
+                medium.dispersion = (Float lambdaNm) => { return AirRefractivity(lambdaNm) / reference; };
+                anyDispersion = true;
+            }
+            return medium;
+        }
+
         // "string medium": the type of the medium that is held, made from the same parameters.
         // "string indexfield" ("grid" | "bump" | "luneburg"):
         //     grid: "float index" [...] with "integer inx" "integer iny" "integer inz" samples, interpolated, on a lattice
@@ -434,7 +491,7 @@ namespace pbrt
                 }
                 SampledSpectrum bound;
                 Float control, average;
-                medium.inner.MajorantOver(Box(p), lambda, out bound, out control, out average);
+                medium.inner.MajorantOnPiece(Box(p), p.Point(0), p.Point(0.5 * p.sigma), p.Point(p.sigma), lambda, out bound, out control, out average);
                 RayMajorantSegment segment = new RayMajorantSegment();
                 segment.tMin = (Float)(first - start);
                 segment.tMax = std.min((Float)(to - start), tMax);
@@ -829,6 +886,8 @@ namespace pbrt
         private CurvedPath Trace(VolumeServices rs, Ray wi, CurvedPath path)
         {
             TetrahedralIndexField field = refractive.field;
+            // (the index of the first wavelength of the path, the only one it carries where the medium disperses)
+            TetrahedralIndexField.dispersionShift = refractive.dispersion != null ? refractive.dispersion(m_ctx.lambda[0]) - 1 : 0;
             Vector3f d = Normalize(wi.d);
             Point3f o = wi.o;
             Bounds3f box = field.Bounds();

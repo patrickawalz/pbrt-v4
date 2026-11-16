@@ -102,10 +102,15 @@ namespace pbrt
             if (closedForm != null)
             {
                 double n = closedForm(bounds.pMin.x + i * sizeX, bounds.pMin.y + j * sizeY, bounds.pMin.z + k * sizeZ);
-                return n * n;
+                return 1 + (1 + dispersionShift) * (n * n - 1);
             }
-            return squared[Vertex(i, j, k)];
+            return 1 + (1 + dispersionShift) * (squared[Vertex(i, j, k)] - 1);
         }
+
+        // Dispersion: the fields are those of one wavelength; for the paths of this thread n^2 - 1 is taken this much more
+        // (a share of it, zero for none), as the index of a gas changes with the wavelength (RefractiveMedium.dispersion)
+        [ThreadStatic]
+        public static double dispersionShift;
 
         private Func<double, double, double, double> closedForm;
 
