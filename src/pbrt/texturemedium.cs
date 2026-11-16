@@ -392,6 +392,22 @@ namespace pbrt
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
         }
 
+        // For a refractive medium that holds this one (not while it moves: the box has no time)
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            sigma_maj = new SampledSpectrum(0f);
+            controlFraction = 0;
+            averageFraction = 0;
+            if (animated != null)
+            {
+                return false;
+            }
+            Float largest, smallest, average;
+            majorantGrid.Over(bounds, renderFromMedium, box, out largest, out smallest, out average);
+            sigma_maj = (sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda)) * largest;
+            return true;
+        }
+
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
             return SampleRay(ray, tMax, lambda);

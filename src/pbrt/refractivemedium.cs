@@ -187,7 +187,8 @@ namespace pbrt
             SampledSpectrum bound;
             Float control, average;
             if (!inner.MajorantOver(box, SampledWavelengths.SampleUniform(0.5f), out bound, out control, out average))
-                ErrorExit(loc, $"{innerName}: a refractive medium can hold \"homogeneous\", \"uniformgrid\", \"adaptivegrid\" and aggregates of those.");
+                ErrorExit(loc, $"{innerName}: a refractive medium can hold the media that bound their extinction over a box (Medium.MajorantOver): " +
+                               "\"homogeneous\", the grid media, \"cloud\", \"nanovdb\", \"texture\" and \"osl\" (not moving), \"atmosphere\" and aggregates of those.");
             RefractiveMedium made = new RefractiveMedium(inner, field, surfacesInside);
             made.bentJoint = bentJoint;
             made.bentEquiangular = bentEquiangular;

@@ -352,6 +352,40 @@ namespace pbrt
     // MajorantGrid Definition
     public unsafe class MajorantGrid
     {
+        // (not in pbrt-v4) The largest and the least of the voxels that a box of rendering space reaches, with the mean of
+        // their averages: for the bound of the extinction of a grid medium over a box (Medium.MajorantOver)
+        public void Over(Bounds3f mediumBounds, Transform renderFromMedium, Bounds3f box, out Float largest, out Float smallest, out Float average)
+        {
+            Bounds3f inMedium = new Bounds3f(renderFromMedium.ApplyInverse(box.Corner(0)));
+            for (int corner = 1; corner < 8; ++corner)
+            {
+                inMedium = Union(inMedium, renderFromMedium.ApplyInverse(box.Corner(corner)));
+            }
+            Vector3f low = mediumBounds.Offset(inMedium.pMin), high = mediumBounds.Offset(inMedium.pMax);
+            int x0 = Clamp((int)std.floor(low.x * res.x), 0, res.x - 1), x1 = Clamp((int)std.floor(high.x * res.x), 0, res.x - 1);
+            int y0 = Clamp((int)std.floor(low.y * res.y), 0, res.y - 1), y1 = Clamp((int)std.floor(high.y * res.y), 0, res.y - 1);
+            int z0 = Clamp((int)std.floor(low.z * res.z), 0, res.z - 1), z1 = Clamp((int)std.floor(high.z * res.z), 0, res.z - 1);
+            largest = 0;
+            smallest = Infinity;
+            Float sum = 0;
+            int count = 0;
+            for (int z = z0; z <= z1; ++z)
+            {
+                for (int y = y0; y <= y1; ++y)
+                {
+                    for (int x = x0; x <= x1; ++x)
+                    {
+                        int index = x + res.x * (y + res.y * z);
+                        largest = std.max(largest, voxels[index]);
+                        smallest = std.min(smallest, minima != null ? minima[index] : 0);
+                        sum += averages != null ? averages[index] : 0;
+                        ++count;
+                    }
+                }
+            }
+            average = count > 0 ? sum / count : 0;
+        }
+
         // MajorantGrid Public Methods
         public MajorantGrid() { }
         public MajorantGrid(Bounds3f bounds, Point3i res, Allocator alloc)
@@ -1144,6 +1178,17 @@ namespace pbrt
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
         }
 
+        // (not in pbrt-v4) For a refractive medium that holds this one: the voxels of the grid bound the extinction itself
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            Float largest, smallest, average;
+            majorantGrid.Over(bounds, renderFromMedium, box, out largest, out smallest, out average);
+            sigma_maj = new SampledSpectrum(largest);
+            controlFraction = largest > 0 ? smallest / largest : 0;
+            averageFraction = largest > 0 ? Clamp(average / largest, controlFraction, 1) : 0;
+            return true;
+        }
+
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
             return buf.Alloc(SampleRay(ray, tMax, lambda));
@@ -1384,6 +1429,15 @@ namespace pbrt
             return new HomogeneousMajorantIterator(tMin, tMax, sigma_t);
         }
 
+        // (not in pbrt-v4) For a refractive medium that holds this one: the density of the cloud is one at most
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            sigma_maj = sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda);
+            controlFraction = 0;
+            averageFraction = 0;
+            return true;
+        }
+
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
             return buf.Alloc(SampleRay(ray, tMax, lambda));
@@ -1618,6 +1672,17 @@ namespace pbrt
 
             SampledSpectrum sigma_t = sigma_a + sigma_s;
             return new DDAMajorantIterator(ray, tMin, tMax, majorantGrid, sigma_t);
+        }
+
+        // (not in pbrt-v4) For a refractive medium that holds this one
+        public override bool MajorantOver(Bounds3f box, SampledWavelengths lambda, out SampledSpectrum sigma_maj, out Float controlFraction, out Float averageFraction)
+        {
+            Float largest, smallest, average;
+            majorantGrid.Over(bounds, renderFromMedium, box, out largest, out smallest, out average);
+            sigma_maj = (sigma_a_spec.Sample(lambda) + sigma_s_spec.Sample(lambda)) * largest;
+            controlFraction = largest > 0 ? smallest / largest : 0;
+            averageFraction = largest > 0 ? Clamp(average / largest, controlFraction, 1) : 0;
+            return true;
         }
 
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)

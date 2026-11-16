@@ -1,6 +1,7 @@
 // (not in pbrt-v4) Tests of the volume of a refractive medium (refractivemedium.cs).
 
 using System;
+using System.Collections.Generic;
 using testing;
 
 namespace pbrt
@@ -178,6 +179,169 @@ namespace pbrt
 
         // The axis that is carried along a curved path for the polarisation of the light (CurvedRayMedium.Carry): one turn
         // for each piece, against the same in a hundred small turns for each piece; it stays across the path, of length one.
+        // A path of the field from a point in a direction, as the volume has it inside the field
+        private static CurvedPath PathFrom(TetrahedralIndexField field, Point3f o, Vector3f d)
+        {
+            RefractiveRay ray = new RefractiveRay();
+            CurvedPath path = new CurvedPath();
+            if (!ray.Begin(field, o, d))
+            {
+                return path;
+            }
+            RefractivePiece piece;
+            while (ray.Next(out piece))
+            {
+                path.pieces.Add(piece);
+                path.sigma += piece.sigma;
+            }
+            path.indexAtStart = 1;
+            return path;
+        }
+
+        // The point of a path at a sigma
+        private static void PointAt(CurvedPath path, double sigma, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            double before = 0;
+            for (int k = 0; k < path.pieces.Count; ++k)
+            {
+                RefractivePiece p = path.pieces[k];
+                if (sigma <= before + p.sigma || k == path.pieces.Count - 1)
+                {
+                    double s = sigma - before;
+                    x = p.x + s * (p.vx + 0.5 * s * p.ax);
+                    y = p.y + s * (p.vy + 0.5 * s * p.ay);
+                    z = p.z + s * (p.vz + 0.5 * s * p.az);
+                    return;
+                }
+                before += p.sigma;
+            }
+        }
+
+        // The change of a path with its direction at the start, carried along it in closed form (CurvedPath.Carry, which the
+        // search for the path to a light goes by): against the difference of two paths whose directions are 1e-4 rad to
+        // either side, at a sigma inside the field. What is along the path there is of no account (the two are compared at
+        // one sigma), so the parts across it are compared; and the area per solid angle (Spread) against the cross product
+        // of two such differences.
+        [TEST("RefractiveVolume", "CarriedDerivative")]
+        public static void CarriedDerivative()
+        {
+            TetrahedralIndexField field = Bump(0.3f);
+            Bounds3f box = field.Bounds();
+            RNG rng = new RNG(67);
+            double worst = 0, worstSpread = 0, largestBend = 0;
+            int compared = 0;
+            for (int trial = 0; trial < 300; ++trial)
+            {
+                Point3f o = new Point3f(-0.6f + 0.4f * rng.Uniform<Float>(), -0.5f + rng.Uniform<Float>(), -0.5f + rng.Uniform<Float>());
+                Vector3f d = Normalize(new Vector3f(1, 0.8f * (rng.Uniform<Float>() - 0.5f), 0.8f * (rng.Uniform<Float>() - 0.5f)));
+                CurvedPath path = PathFrom(field, o, d);
+                if (path.pieces.Count < 3)
+                {
+                    continue;
+                }
+                double sigma = path.sigma * (0.3 + 0.6 * rng.Uniform<Float>());
+                Vector3f a1, a2;
+                CoordinateSystem(d, &a1, &a2);
+                const double H = 1e-4;
+                Vector3f direction;
+                double index;
+                Float spread = path.Spread(box, sigma, out direction, out index);
+                Vector3f* across = stackalloc Vector3f[2];
+                bool whole = true;
+                for (int side = 0; side < 2; ++side)
+                {
+                    Vector3f a = side == 0 ? a1 : a2;
+                    Vector3f offset = new Vector3f(0, 0, 0), turn = a;
+                    path.Carry(box, sigma, ref offset, ref turn);
+                    CurvedPath plus = PathFrom(field, o, Normalize(d + (Float)H * a)), minus = PathFrom(field, o, Normalize(d - (Float)H * a));
+                    if (plus.sigma < sigma || minus.sigma < sigma)
+                    {
+                        whole = false;
+                        break;
+                    }
+                    double px, py, pz, mx, my, mz;
+                    PointAt(plus, sigma, out px, out py, out pz);
+                    PointAt(minus, sigma, out mx, out my, out mz);
+                    Vector3f difference = new Vector3f((Float)((px - mx) / (2 * H)), (Float)((py - my) / (2 * H)), (Float)((pz - mz) / (2 * H)));
+                    // (across the path)
+                    Vector3f carried = offset - direction * Dot(offset, direction);
+                    across[side] = difference - direction * Dot(difference, direction);
+                    worst = Math.Max(worst, Length(carried - across[side]) / Math.Max(Length(across[side]), 1e-6f));
+                }
+                if (!whole)
+                {
+                    continue;
+                }
+                double byDifferences = AbsDot(Cross(across[0], across[1]), direction);
+                worstSpread = Math.Max(worstSpread, Math.Abs(spread - byDifferences) / byDifferences);
+                largestBend = Math.Max(largestBend, Math.Acos(Math.Min(1, Dot(d, direction))));
+                ++compared;
+            }
+            Console.WriteLine("MEASURE carried derivative: {0} paths, bent by up to {1:F3} rad; differs from differences by {2:E2} of its size, the area per solid angle by {3:E2}", compared,
+                              largestBend, worst, worstSpread);
+            EXPECT_GT(compared, 150);
+            EXPECT_GT(largestBend, 0.1);
+            EXPECT_LT(worst, 2e-2);
+            EXPECT_LT(worstSpread, 3e-2);
+        }
+
+        // The bound of the extinction that a medium gives over a box (Medium.MajorantOver, which a refractive medium bounds
+        // the pieces of its curved paths by): no point of the box has more, for the media that a refractive medium may
+        // hold -- here a grid, an RGB grid, a cloud and the atmosphere -- and where a floor is given, none has less.
+        [TEST("RefractiveVolume", "BoxMajorants")]
+        public static void BoxMajorants()
+        {
+            Allocator alloc = new Allocator();
+            Float[] density = new Float[4 * 4 * 4];
+            RNG fill = new RNG(71);
+            for (int i = 0; i < density.Length; ++i)
+            {
+                density[i] = fill.Uniform<Float>();
+            }
+            RGBColorSpace cs = RGBColorSpace.sRGB;
+            Medium gridMedium = new GridMedium(new Bounds3f(new Point3f(0, 0, 0), new Point3f(1, 1, 1)), new Transform(), new RGBUnboundedSpectrum(cs, new RGB(0.1f, 0.2f, 0.3f)),
+                                               new RGBUnboundedSpectrum(cs, new RGB(1, 0.8f, 0.6f)), 2, 0, new SampledGrid<Float>(density, 4, 4, 4, alloc), default, 1, 0,
+                                               new ConstantSpectrum(0f), new SampledGrid<Float>(new Float[] { 0 }, 1, 1, 1, alloc), alloc);
+            List<ParsedParameter> none = new List<ParsedParameter>();
+            Medium[] media = { gridMedium, Medium.Create("cloud", new ParameterDictionary(none, cs), new Transform(), new FileLoc(), alloc),
+                               Medium.Create("atmosphere", new ParameterDictionary(none, cs), new Transform(), new FileLoc(), alloc) };
+            Bounds3f[] regions = { new Bounds3f(new Point3f(0, 0, 0), new Point3f(1, 1, 1)), new Bounds3f(new Point3f(0, 0, 0), new Point3f(1, 1, 1)),
+                                   new Bounds3f(new Point3f(-200000, 0, -200000), new Point3f(200000, 60000, 200000)) };
+            RNG rng = new RNG(73);
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.37f);
+            for (int m = 0; m < media.Length; ++m)
+            {
+                double worstOver = 0, worstUnder = 0;
+                int floors = 0;
+                for (int trial = 0; trial < 300; ++trial)
+                {
+                    Vector3f size = regions[m].Diagonal();
+                    Point3f corner = regions[m].Lerp(new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>()));
+                    Vector3f extent = new Vector3f(size.x * 0.2f * rng.Uniform<Float>(), size.y * 0.2f * rng.Uniform<Float>(), size.z * 0.2f * rng.Uniform<Float>());
+                    Bounds3f box = new Bounds3f(corner, corner + extent);
+                    SampledSpectrum bound;
+                    Float control, average;
+                    EXPECT_TRUE(media[m].MajorantOver(box, lambda, out bound, out control, out average));
+                    floors += control > 0 ? 1 : 0;
+                    for (int k = 0; k < 20; ++k)
+                    {
+                        Point3f p = box.Lerp(new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>()));
+                        MediumProperties mp = media[m].SamplePoint(p, lambda);
+                        SampledSpectrum sigma_t = mp.sigma_a + mp.sigma_s;
+                        for (int c = 0; c < NSpectrumSamples; ++c)
+                        {
+                            worstOver = Math.Max(worstOver, sigma_t[c] - bound[c] * 1.00001);
+                            worstUnder = Math.Max(worstUnder, bound[c] * control * 0.99999 - sigma_t[c]);
+                        }
+                    }
+                }
+                Console.WriteLine("MEASURE box majorants, medium {0}: over the bound by {1:E2}, under the floor by {2:E2} at most; {3} boxes of 300 with a floor", m, worstOver, worstUnder, floors);
+                EXPECT_LE(worstOver, 0);
+                EXPECT_LE(worstUnder, 0);
+            }
+        }
+
         [TEST("RefractiveVolume", "CarriedAxis")]
         public static void CarriedAxis()
         {
