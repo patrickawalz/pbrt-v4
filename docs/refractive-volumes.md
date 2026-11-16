@@ -30,7 +30,7 @@ Done:
 - the shadow ray that follows what a volume bends, for area and infinite lights (4);
 - the search for the path to a light at a point or from one direction (5, by differences, in `ProductionPath`), used by the
   path tracer's direct lighting and by the light sampling that the volumes ask the path tracer for;
-- equiangular sampling (`"distancesampling"`) on a bent ray (opt-in, see the later check): the straight ray that stands for the curve draws its point
+- equiangular sampling (`"distancesampling"`) on a bent ray: the straight ray that stands for the curve draws its point
   about where the curve puts the point of the light (`CurvedRayMedium.Pivot`), and the weights at the collision use the
   same rule (`VolumeDirectWeight.curve`);
 - a refractive medium that holds an aggregate (`"string heldmedium"`);
@@ -56,21 +56,30 @@ Done since:
   holds, with the others, and is held by a refractive medium of the member's field, so that the rays bend through all of
   it (three puffs, n up to 1.2: 0.97648 +- 0.00020 as a member against 0.97639 +- 0.00005 holding the aggregate).
 
-Checked again with a lamp beside (not inside) a scattering lens, where the means have a finite variance (64x64, 16 spp,
-ten to forty seeds; light sampling alone 0.13377 +- 0.00017 with the lens, 0.13458 +- 0.00020 with negligible bending):
-- equiangular sampling on bent rays, which the earlier check (1.2 % of noise) had passed, is too bright: 0.13571 +-
-  0.00012 with negligible bending, 0.13524 +- 0.00017 with the lens (0.8 % and 1.1 %). The cause is not found. It is off
-  by default now (`"bool bentequiangular"` turns it on); the equiangular point is drawn on the rays that the field leaves
-  straight, and the default gives 0.13450 +- 0.00018 and 0.13381 +- 0.00019;
-- joint double scattering on bent rays is written (`JointShareBent`, `"bool bentjoint"`) and has the same kind of excess
-  (0.13561 +- 0.00019 with negligible bending): off by default;
-- joint double scattering by the held medium along straight connections inside a refractive medium, which was the
-  behaviour before, was 1.2 % too bright (the connection may be bent); a refractive medium no longer draws joint points
-  unless `"bool bentjoint"` is set;
-- once-more scattering is unchanged by this: 0.13420 +- 0.00034 and 0.13357 +- 0.00021.
+Checked with a lamp beside (not inside) a scattering lens, where the means have a finite variance (64x64, 16 spp, sixteen
+to forty seeds, under ten seconds a render; light sampling alone 0.13377 +- 0.00017 with the lens, n up to 1.1):
+
+| strategies | mean |
+|---|---|
+| once-more `omnee` | 0.13373 +- 0.00018 |
+| once-more `omnee2` | 0.13372 +- 0.00022 |
+| joint (`"doublescattering" "joint"`) | 0.13399 +- 0.00021 |
+| equiangular (`"distancesampling" "mis"`) | 0.13382 +- 0.00016 |
+| all three | 0.13384 +- 0.00012 |
+| all three, negligible bending (0.13458 +- 0.00020) | 0.13432 +- 0.00011 |
+
+Two errors that this scene found (the earlier checks, with the lamp inside the medium, had 1 % of noise and passed them):
+- the walk along a curve kept a copy of the renderer's random numbers and gave it back at its end, so what the renderer
+  did for it meanwhile -- the shadow ray of a light sample -- used the numbers the walk had just used. Equiangular
+  sampling on bent rays was 0.8 to 1.1 % too bright by it. The numbers are handed over and back at each call now;
+- two searches for the same path were known for the same by their directions being within 1.4e-3 rad, which is less than
+  the search can tell for a target near by: the count of the searches ran on, and once-more and joint scattering, whose
+  connections are short, were up to 1.3 % too bright. The test goes by the tolerance of the search now.
+With these, joint double scattering on bent rays (`JointShareBent`) is on, as is the equiangular point (`"bool
+bentjoint"`, `"bool bentequiangular"` turn them off). The held medium no longer draws joint points itself inside a
+refractive medium: it connected them along straight lines (1.2 % too bright).
 
 Not done:
-- the excess of the equiangular and the joint strategies on bent rays (both opt-in, see above);
 - in polarised mode the volumes gather no light of their own (equiangular, joint, once-more are off), and a
   single-scattering volume's own light and the sampled emission are added as unpolarised light;
 

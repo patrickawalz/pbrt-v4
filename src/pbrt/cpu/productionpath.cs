@@ -1073,9 +1073,17 @@ namespace pbrt
                     continue;
                 }
                 searches += worth;
-                if (solved && Dot(direction, found) > 1 - 1e-6f)
+                // (found again: within what the tolerance of the search leaves of the direction, which for a target
+                // near by is more than a thousandth of a radian -- two searches for the one path would not be known for
+                // the same, and the count would run on)
+                if (solved && s > 0)
                 {
-                    break;
+                    Float tolerance = toPoint ? 2e-5f * Distance(intr.p(), target) + 4e-6f * (1 + Length((Vector3f)target)) : 2e-5f;
+                    Float apart = 1.4e-3f + 4 * tolerance * (1 / std.sqrt(spread) + 1 / std.sqrt(s));
+                    if (Dot(direction, found) > 1 - 0.5f * apart * apart)
+                    {
+                        break;
+                    }
                 }
             }
             return any && searches > 0;

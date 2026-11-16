@@ -46,15 +46,12 @@ namespace pbrt
         // surfacetolerance"); without it they are within a ten-thousandth of their length, which over the kilometres of a
         // piece of an atmosphere is metres: a ray that passes low over the sea would meet it or not by chance.
         public Float surfaceTolerance = Infinity;
-        // "bool bentjoint" (false): the two scatterings that "doublescattering" draws jointly are drawn along bent rays
-        // too (JointShareBent). Off, they are drawn on the rays that the field leaves straight alone, as before. Not on by
-        // itself: with it the image of a lamp beside a scattering lens came out 0.8 % too bright (24 seeds, 3.7 standard
-        // errors), in the limit of no bending too, and the cause has not been found.
-        public bool bentJoint;
-        // "bool bentequiangular" (false): the equiangular point of "distancesampling" is drawn on bent rays too. Off, it is
-        // drawn on the rays that the field leaves straight alone. Not on by itself either: with it the same image came out
-        // 0.8 % too bright in the limit of no bending (twenty seeds, 6.6 standard errors) and 1.1 % with a lens.
-        public bool bentEquiangular;
+        // "bool bentjoint" (true), "bool bentequiangular" (true): the two scatterings that "doublescattering" draws jointly
+        // and the equiangular point of "distancesampling" are drawn along bent rays too (JointShareBent; the walk along
+        // the curve). Off, they are drawn on no ray of the medium (joint) or on the rays that the field leaves straight
+        // (equiangular).
+        public bool bentJoint = true;
+        public bool bentEquiangular = true;
 
         // Dispersion: for a wavelength (nm), how many times the n^2 - 1 of the field the medium has; null for none. A
         // scene with such a medium is rendered one wavelength to a path (ProductionPath, by `anyDispersion`).
@@ -133,6 +130,9 @@ namespace pbrt
         // made here from "string medium")
         public static RefractiveMedium Create(ParameterDictionary parameters, Transform renderFromMedium, FileLoc loc, Allocator alloc, Medium held)
         {
+            // (read before the held medium is made, which reports what nobody has read)
+            bool bentJoint = parameters.GetOneBool("bentjoint", true), bentEquiangular = parameters.GetOneBool("bentequiangular", true);
+            Float surfaceTolerance = parameters.GetOneFloat("surfacetolerance", Infinity);
             string innerName = held != null ? "heldmedium" : parameters.GetOneString("medium", "homogeneous");
             if (innerName == "refractive")
                 ErrorExit(loc, "\"refractive\": the medium that it holds cannot be \"refractive\".");
@@ -189,9 +189,9 @@ namespace pbrt
             if (!inner.MajorantOver(box, SampledWavelengths.SampleUniform(0.5f), out bound, out control, out average))
                 ErrorExit(loc, $"{innerName}: a refractive medium can hold \"homogeneous\", \"uniformgrid\", \"adaptivegrid\" and aggregates of those.");
             RefractiveMedium made = new RefractiveMedium(inner, field, surfacesInside);
-            made.bentJoint = parameters.GetOneBool("bentjoint", false);
-            made.bentEquiangular = parameters.GetOneBool("bentequiangular", false);
-            made.surfaceTolerance = parameters.GetOneFloat("surfacetolerance", Infinity);
+            made.bentJoint = bentJoint;
+            made.bentEquiangular = bentEquiangular;
+            made.surfaceTolerance = surfaceTolerance;
             return made;
         }
 
@@ -792,7 +792,16 @@ namespace pbrt
                 return true;
             }
 
-            public override Float GenerateRandomNumber() { return renderer.GenerateRandomNumber(); }
+            // (the random numbers of the walk along the curve are this object's own while it lasts: the renderer takes
+            // them over for what it is asked, and hands them back -- or its own walks, the shadow rays of a light sample
+            // among them, would use the numbers that the walk along the curve has just used)
+            public override Float GenerateRandomNumber()
+            {
+                renderer.rng = rng;
+                Float u = renderer.GenerateRandomNumber();
+                rng = renderer.rng;
+                return u;
+            }
 
             public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, PhaseFunction phase, out Vector3f wi, out SampledSpectrum L,
                                                      out SampledSpectrum beamTransmittance, out SampledSpectrum beamR)
@@ -814,7 +823,10 @@ namespace pbrt
             // The light that a point of the curve is sampled about: the renderer's, with its point where the curve puts it
             public override bool ChooseLight(VolumeContext ctx, out VolumeLight light)
             {
-                if (!renderer.ChooseLight(ctx, out light))
+                renderer.rng = rng;
+                bool chosen = renderer.ChooseLight(ctx, out light);
+                rng = renderer.rng;
+                if (!chosen)
                 {
                     return false;
                 }
@@ -841,7 +853,9 @@ namespace pbrt
                 ctx.SetP(world);
                 MediumInteraction there = new MediumInteraction(world, -tangent, point.time, medium, point.phase);
                 Vector3f toLight;
+                renderer.rng = rng;
                 bool lit = renderer.EvaluateLight(ctx, light, place, there, out toLight, out L, out beamTransmittance, out beamR);
+                rng = renderer.rng;
                 ctx.SetP(saved);
                 wi = default;
                 if (!lit)
@@ -1297,19 +1311,17 @@ namespace pbrt
                 bool jointHere = refractive.bentJoint && Joint() && path.pieces.Count > 0 && path.hit;
                 // (the volume of the held medium does not draw them itself: it would connect them along a straight line,
                 // which the field may bend -- a lamp beside a scattering lens came out 1.2 % too bright that way)
+                SampledSpectrum jointly = jointHere ? JointShareBent(rs, path, wi) : new SampledSpectrum(0f);
                 m_ctx.medium = refractive.inner;
                 m_ctx.jointElsewhere = true;
                 bool straight = Create(m_ctx, refractive.inner).Integrate(rs, wi, out L, out transmittance, out weight, out P, out wo, out g);
                 m_ctx.jointElsewhere = false;
                 m_ctx.medium = saved;
+                L += jointly;
                 if (!jointHere && g != null && g.joint != null)
                 {
                     // (and its collision is not one that two points are drawn jointly from)
                     g.joint.jointly = false;
-                }
-                if (jointHere)
-                {
-                    L += JointShareBent(rs, path, wi);
                 }
                 return straight;
             }
@@ -1323,6 +1335,8 @@ namespace pbrt
                 g = null;
                 return false;
             }
+            // (the two points drawn jointly, before the walk: the densities of the path so far are the walk's to change)
+            SampledSpectrum jointShare = refractive.bentJoint && Joint() ? JointShareBent(rs, path, wi) : new SampledSpectrum(0f);
             CurvedRayMedium curve = new CurvedRayMedium(refractive.inner, path, wi.time, AlongCurveSettings());
             AlongCurve along = new AlongCurve();
             along.renderer = rs;
@@ -1353,10 +1367,7 @@ namespace pbrt
             m_ctx.jointOnCurve = null;
             m_ctx.jointElsewhere = false;
             m_ctx.medium = saved;
-            if (refractive.bentJoint && Joint())
-            {
-                L += JointShareBent(rs, path, wi);
-            }
+            L += jointShare;
             P = path.P;
             wo = path.arrival;
             if (hit && g != null && !g.isSurface)
@@ -1662,6 +1673,29 @@ namespace pbrt
                 return false;
             }
             Medium saved = m_ctx.medium;
+            if (!path.bent)
+            {
+                // (a stretch that the field leaves straight: by the volume of the held medium itself, as the walk of a
+                // path along it is, so that the densities of the two are of one kind)
+                Ray unit = new Ray(from.o, Normalize(from.d), from.time);
+                m_ctx.medium = refractive.inner;
+                bool straight = Create(m_ctx, refractive.inner).ReachTo(rs, unit, far, out through, out densities, out nulls);
+                m_ctx.medium = saved;
+                if (!straight)
+                {
+                    return false;
+                }
+                arrival = unit.d;
+                if (refractive.inner.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density)
+                {
+                    EquiangularDensity beside = EquiangularDensity.Create(unit, 0, path.hit ? Distance(from.o, path.P) : Infinity, lightPoint);
+                    if (beside.valid)
+                    {
+                        equiangular = beside.PDF(far);
+                    }
+                }
+                return true;
+            }
             CurvedRayMedium curve = new CurvedRayMedium(refractive.inner, path, from.time, AlongCurveSettings());
             AlongCurve along = new AlongCurve();
             along.renderer = rs;
