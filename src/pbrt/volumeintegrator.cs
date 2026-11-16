@@ -1151,6 +1151,9 @@ namespace pbrt
         // Whether the emission between two points (Volume.Emission) is tracked about the mean extinction of each cell of the
         // medium, in the place of ratio tracking (Volume.TrackEmissionResidual)
         public bool emissionResidual = false;
+        // Whether a multiple scattering volume puts one more scattering between each of its collisions and a light at a
+        // position (Volume.OnceMoreShare, Volume.OnceMoreShare2)
+        public VolumeOnceMore onceMore = VolumeOnceMore.None;
 
         public VolumeIntegrator(VolumeTracker tracker, TransmittanceEstimator transmittance)
         {
@@ -1233,7 +1236,8 @@ namespace pbrt
         // "residuallocal" | "residualtracking" | "pseriescumulative" | "pseriescmf"),
         // "string scattering" ("multiple" | "single" | "singlepdf" | "absorption" | "none"), "float stepsize",
         // "string distancesampling" ("density" | "equiangular" | "mis"), "string lightsampling" ("light" | "mis"),
-        // "integer lightsamples", "float contrast", "string doublescattering" ("none" | "plain" | "joint" | "mis")
+        // "integer lightsamples", "float contrast", "string doublescattering" ("none" | "plain" | "joint" | "mis"),
+        // "string oncemore" ("none" | "omnee" | "omnee2")
         public static VolumeIntegrator Create(ParameterDictionary parameters, FileLoc loc)
         {
             string trackerName = parameters.GetOneString("tracker", "majorant");
@@ -1287,7 +1291,8 @@ namespace pbrt
             if (emissionName != "ratio" && emissionName != "residual")
                 ErrorExit(loc, $"{emissionName}: \"emission\" must be \"ratio\" or \"residual\".");
             if (tracker == majorantTracker && estimator == ratioEstimator && scattering == VolumeScattering.Multiple && contrast == 1 && spectralName == "hero" &&
-                distanceSampling == VolumeDistanceSampling.Density && emissionName == "ratio")
+                distanceSampling == VolumeDistanceSampling.Density && emissionName == "ratio" && parameters.GetOneString("doublescattering", "none") == "none" &&
+                parameters.GetOneString("oncemore", "none") == "none")
                 return Default;
             VolumeIntegrator made = new VolumeIntegrator(tracker, estimator);
             made.emissionResidual = emissionName == "residual";
@@ -1306,6 +1311,13 @@ namespace pbrt
                 made.doubleScattering = VolumeDoubleScattering.MIS;
             else if (doubleName != "none")
                 ErrorExit(loc, $"{doubleName}: \"doublescattering\" must be \"none\", \"plain\", \"joint\" or \"mis\".");
+            string onceMoreName = parameters.GetOneString("oncemore", "none");
+            if (onceMoreName == "omnee")
+                made.onceMore = VolumeOnceMore.OnceMore;
+            else if (onceMoreName == "omnee2")
+                made.onceMore = VolumeOnceMore.OnceMore2;
+            else if (onceMoreName != "none")
+                ErrorExit(loc, $"{onceMoreName}: \"oncemore\" must be \"none\", \"omnee\" or \"omnee2\".");
             made.spectralTracking = spectralName == "tracking";
             string probabilityName = parameters.GetOneString("spectralprobabilities", "average");
             if (probabilityName != "average" && probabilityName != "maximum")

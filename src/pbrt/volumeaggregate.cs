@@ -164,6 +164,51 @@ namespace pbrt
             return IsInf(smallest) ? 0 : smallest;
         }
 
+        // The mean density over a box of render space, by the means of the cells of the grid that it touches (zero where the
+        // box is not wholly in the volume or the means are not known): a control for the estimators that take one
+        // (volumeaggregate2.cs), which any value serves without bias
+        public Float MeanDensity(Bounds3f box)
+        {
+            if (grid == null || grid.averages == null)
+            {
+                return 0;
+            }
+            Point3f lo = new Point3f(Infinity, Infinity, Infinity), hi = new Point3f(-Infinity, -Infinity, -Infinity);
+            for (int corner = 0; corner < 8; ++corner)
+            {
+                Point3f p = renderFromMedium.ApplyInverse(box.Corner(corner));
+                if (!pbrt.Inside(p, mediumBounds))
+                {
+                    return 0;
+                }
+                lo = Min(lo, p);
+                hi = Max(hi, p);
+            }
+            Vector3f a = mediumBounds.Offset(lo), b = mediumBounds.Offset(hi);
+            int* first = stackalloc int[3];
+            int* last = stackalloc int[3];
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                int n = grid.res[axis];
+                first[axis] = Clamp((int)std.floor(a[axis] * n), 0, n - 1);
+                last[axis] = Clamp((int)std.floor(b[axis] * n), 0, n - 1);
+            }
+            Float sum = 0;
+            int count = 0;
+            for (int z = first[2]; z <= last[2]; ++z)
+            {
+                for (int y = first[1]; y <= last[1]; ++y)
+                {
+                    for (int x = first[0]; x <= last[0]; ++x)
+                    {
+                        sum += grid.averages[x + grid.res.x * (y + grid.res.y * z)];
+                        ++count;
+                    }
+                }
+            }
+            return count > 0 ? sum / count : 0;
+        }
+
         public Medium medium;
         public Bounds3f mediumBounds, renderBounds;
         public Transform renderFromMedium;
@@ -181,7 +226,7 @@ namespace pbrt
             public Bounds3f box;
             public int firstChild = -1;
             public int[] volumes;
-            public Float[] maxDensity, minDensity;
+            public Float[] maxDensity, minDensity, meanDensity;
             public Float maxExtinction, minExtinction;
         }
 
@@ -219,7 +264,7 @@ namespace pbrt
         {
             Node node = nodes[index];
             List<int> held = new List<int>();
-            List<Float> densities = new List<Float>(), minima = new List<Float>();
+            List<Float> densities = new List<Float>(), minima = new List<Float>(), means = new List<Float>();
             Float largest = 0, smallest = 0, smallestVolume = Infinity, finestCell = Infinity;
             for (int k = 0; k < candidates.Length; ++k)
             {
@@ -233,6 +278,7 @@ namespace pbrt
                 densities.Add(density);
                 Float least = member.MinDensity(node.box);
                 minima.Add(least);
+                means.Add(std.min(density, std.max(least, member.MeanDensity(node.box))));
                 largest += density * member.scalarExtinction;
                 smallest += least * member.scalarExtinction;
                 smallestVolume = std.min(smallestVolume, Length(member.renderBounds.Diagonal()));
@@ -241,6 +287,7 @@ namespace pbrt
             node.volumes = held.ToArray();
             node.maxDensity = densities.ToArray();
             node.minDensity = minima.ToArray();
+            node.meanDensity = means.ToArray();
             node.maxExtinction = largest;
             node.minExtinction = smallest;
             deepest = Math.Max(deepest, depth);
@@ -338,6 +385,8 @@ namespace pbrt
             public Float MaxDensity(int k) { return node.maxDensity[k]; }
             // The smallest density of the k-th volume of the node over the node (zero where it is not known)
             public Float MinDensity(int k) { return node.minDensity[k]; }
+            // The mean density of the k-th volume of the node over the node (between the two; zero where it is not known)
+            public Float MeanDensity(int k) { return node.meanDensity[k]; }
 
             private VolumeAggregate aggregate;
             private Point3f o;
@@ -349,6 +398,16 @@ namespace pbrt
         public Iterator GetIterator(Point3f o, Vector3f d, Float tMax)
         {
             return new Iterator(this, o, d, tMax);
+        }
+
+        // The volumes of the leaf that holds a point; null outside the box of the aggregate
+        public int[] VolumesAt(Point3f p)
+        {
+            if (nodes.Count == 0 || !Inside(p, nodes[0].box))
+            {
+                return null;
+            }
+            return nodes[Leaf(p)].volumes;
         }
 
         public AggregateMember Member(int index) { return members[index]; }

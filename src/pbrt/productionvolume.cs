@@ -82,6 +82,79 @@ namespace pbrt
         MIS
     }
 
+    // Whether a multiple scattering volume also samples, at each of its collisions, one more scattering on the way to a light
+    // at a position, and how (Volume.OnceMoreShare, Volume.OnceMoreShare2)
+    public enum VolumeOnceMore
+    {
+        None,
+        // Hanika, Weidlich and Droske 2022 as published: the scattering angle from the phase function, forward only
+        OnceMore,
+        // the same over all angles, with candidates resampled by what the first leaves in the weight
+        OnceMore2
+    }
+
+    // The density of once-more scattered next-event estimation, and what its two implementations share.
+    //
+    // From a point c towards a point a of a light at the distance s, one scattering is put in between, at b. With theta the
+    // angle by which the light is deflected at b and alpha the angle at c between the directions of a and of b, b is on the
+    // arc of the circle through c and a of the points that see the two under pi - theta (the inscribed angle), at
+    //     |cb| = s sin(theta - alpha) / sin(theta),     |ba| = s sin(alpha) / sin(theta),     0 < alpha < theta,
+    // turned by phi about the axis from c to a. In (theta, alpha, phi) the volume is |cb|^2 sin(alpha) s sin(alpha) /
+    // sin^2(theta), which with the two geometry terms 1 / (|cb|^2 |ba|^2) leaves 1 / s: the product of the two inverse squared
+    // distances is constant in alpha and phi. (The paper's fractional distance t along the axis, equation 41, is
+    // |cb| cos(alpha) / s with alpha uniform.) So theta is drawn from the phase function, as a direction is, and alpha and phi
+    // uniformly; the density of b per solid angle about c and per length along that direction is
+    //     p(theta) / (2 pi theta)  s / |ba|^2,
+    // with p(theta) the density of the angle: 2 pi sin(theta) times the phase function, for theta below pi / 2
+    // ("omnee"); or, over all angles, three quarters of that and a quarter uniform in theta ("omnee2": the weight
+    // theta / sin(theta) that the first leaves is not bounded towards pi).
+    public static unsafe class OnceMoreScattering
+    {
+        // (the part of the angles of "omnee2" that is drawn uniformly)
+        public const Float Uniform = 0.25f;
+
+        // The direction that a direction is deflected to by an angle (about any axis: the phase function only knows the angle)
+        public static Vector3f Deflected(Vector3f from, Float cos, Float sin)
+        {
+            Vector3f v1, v2;
+            CoordinateSystem(from, &v1, &v2);
+            return cos * from + sin * v1;
+        }
+
+        // The density of the angle theta, with `phase` the phase function that it is drawn from and `wo` what it is given
+        public static Float Angle(VolumeOnceMore mode, PhaseFunction phase, Vector3f wo, Float theta)
+        {
+            if (mode == VolumeOnceMore.None || !(theta > 0) || !(theta < Pi))
+            {
+                return 0;
+            }
+            Float sin = std.sin(theta), cos = std.cos(theta);
+            Float fromPhase = 2 * Pi * sin * phase.PDF(wo, Deflected(-wo, cos, sin));
+            if (mode == VolumeOnceMore.OnceMore)
+            {
+                return theta < Pi / 2 ? fromPhase : 0;
+            }
+            return (1 - Uniform) * fromPhase + Uniform / Pi;
+        }
+
+        // The density of b, per solid angle about c and per length, for a light at a
+        public static Float Density(VolumeOnceMore mode, PhaseFunction phase, Vector3f wo, Point3f c, Point3f b, Point3f a)
+        {
+            if (mode == VolumeOnceMore.None)
+            {
+                return 0;
+            }
+            Float s = Distance(c, a), first = Distance(c, b), second = Distance(b, a);
+            if (!(s > 0) || !(first > 0) || !(second > 0))
+            {
+                return 0;
+            }
+            Float theta = SafeACos(Dot((b - c) / first, (a - b) / second));
+            Float angle = Angle(mode, phase, wo, theta);
+            return angle > 0 ? angle / (2 * Pi * theta) * s / (second * second) : 0;
+        }
+    }
+
     // Whether a single scattering volume also gathers the light that is scattered twice, and how it samples it
     // (Volume.DoubleScattering)
     public enum VolumeDoubleScattering
@@ -102,6 +175,8 @@ namespace pbrt
         public Float probability;
         public bool hasPoint;
         public Point3f point;
+        // The light is at a position: the point is the only one it has
+        public bool fixedPoint;
     }
 
     // Where a connection ended: the volume that the point is in, and the stack of the volumes around it for what the renderer
@@ -188,6 +263,9 @@ namespace pbrt
         // from them and says so
         public SampledSpectrum emissionDensity = new SampledSpectrum(1f);
         public bool emissionDensityUsed;
+        // The collision that the ray given to Volume.Integrate() leaves from, where it was returned with VolumeGeometry.joint;
+        // null for any other ray
+        public VolumeJoint joint;
 
         public Point3f GetP() { return P; }
         public void SetP(Point3f p) { P = p; }
@@ -281,32 +359,114 @@ namespace pbrt
     // collision in the balance heuristic, mu_t W / (mu_t W + p_ea), with p_ea the equiangular density of the collision about
     // a point of that light: a point drawn as the volume draws its own (from where the ray starts), which need not be the
     // same point, since the two weights add up to one for every point and are each used in the mean over the points.
+    //
+    // With "doublescattering" on a multiple scattering volume (Volume.JointShare) the collision has a third rival for a
+    // light at a fixed position: the two points drawn jointly from the ray before (VolumeJoint), whose density over what
+    // the two strategies above share, mu_t W of the collision before times the phase function there, is added below.
     public sealed class VolumeDirectWeight
     {
         public Ray ray;
         public Float distance, t;
         // mu_t W at the collision, its mean over the wavelengths
         public Float product;
+        // Whether the volume draws an equiangular point on this ray ("distancesampling" other than "density")
+        public bool equiangular = true;
         // "distancesampling" "equiangular": the lights that have a position are left to the equiangular point alone
         public bool equiangularOnly;
+        // The collision before this one on the path, where the volume also draws the two jointly; null otherwise
+        public VolumeJoint joint;
 
-        public Float For(bool hasPoint, Point3f pivot)
+        // `hasPoint`: the light has a point to draw about (`pivot`); `fixedPoint`: it is the only one (a light at a position)
+        public Float For(bool hasPoint, bool fixedPoint, Point3f pivot)
         {
             if (!hasPoint)
             {
                 return 1;
             }
-            EquiangularDensity about = EquiangularDensity.Create(ray, 0, distance, pivot);
-            if (!about.valid)
+            Float pdf = 0, own = product;
+            if (equiangular)
+            {
+                EquiangularDensity about = EquiangularDensity.Create(ray, 0, distance, pivot);
+                if (about.valid)
+                {
+                    pdf = about.PDF(t);
+                    if (equiangularOnly)
+                    {
+                        own = 0;
+                    }
+                }
+            }
+            Float jointly = joint != null && fixedPoint ? joint.Ratio(pivot, ray.Apply(t)) + joint.OnceMore(pivot, ray.Apply(t)) : 0;
+            if (pdf == 0 && jointly == 0)
             {
                 return 1;
             }
-            if (equiangularOnly)
+            return own + pdf + jointly > 0 ? own / (own + pdf + jointly) : 1;
+        }
+    }
+
+    // VolumeJoint Definition: a collision c of a multiple scattering volume that draws two points of its rays jointly
+    // ("doublescattering", Volume.JointShare), for the weights of the light at the collision b that follows it: the ray that
+    // c was found on with the part of it that the medium fills, where c is, mu_t W there (its mean over the wavelengths),
+    // and the value of the phase function for the direction that the path took from c.
+    //
+    // The same collision is where once-more scattered next-event estimation puts its one scattering (Volume.OnceMoreShare):
+    // for its density at b, the phase function of c and which of the two implementations the medium asks for.
+    public sealed class VolumeJoint
+    {
+        public Ray ray;
+        public Float tMin, tMax, t;
+        public Float product;
+        public Float phasePdf;
+        // Whether the volume draws two points jointly on its rays ("doublescattering")
+        public bool jointly;
+        // The phase function at c, and how the volume samples one more scattering from c ("oncemore")
+        public PhaseFunction phase;
+        public VolumeOnceMore onceMore;
+        // For a point of a surface in the place of c (`ray` starts there, `t` and the product are 0 and 1, `phase` is that of
+        // the medium there): the normal on the side that the path came from, the only side that is sampled
+        public bool sided;
+        public Normal3f side;
+
+        // The density of the scattering b that is put between c and the point a of a light, over the phase function of the
+        // direction that the path took from c: what the densities of the path and of the equiangular point have in common
+        // after mu_t W of c
+        public Float OnceMore(Point3f a, Point3f b)
+        {
+            if (onceMore == VolumeOnceMore.None || !(phasePdf > 0))
             {
                 return 0;
             }
-            Float pdf = about.PDF(t);
-            return product + pdf > 0 ? product / (product + pdf) : 1;
+            Point3f c = ray.Apply(t);
+            if (sided && (!(Dot(a - c, side) > 0) || !(Dot(b - c, side) > 0)))
+            {
+                return 0;
+            }
+            return OnceMoreScattering.Density(onceMore, phase, -ray.d, c, b, a) / phasePdf;
+        }
+
+        // The density with which c and b are drawn jointly about a, over mu_t W of c
+        public Float Jointly(Point3f a, Point3f b)
+        {
+            if (!jointly)
+            {
+                return 0;
+            }
+            InverseDistanceDensity along = InverseDistanceDensity.Create(ray, tMin, tMax, a);
+            Float squared = LengthSquared(a - b);
+            if (!along.valid || !(squared > 0) || !(product > 0))
+            {
+                return 0;
+            }
+            return along.PDF(t) * Distance(a, ray.Apply(t)) / (Pi * Pi * Pi * squared) / product;
+        }
+
+        // The density with which the two were drawn jointly at c and at b about the point a of a light,
+        // p(c) |ac| / (pi^3 |ab|^2), over mu_t W of c times the phase function: what the densities of the path and of the
+        // equiangular point have in common
+        public Float Ratio(Point3f a, Point3f b)
+        {
+            return phasePdf > 0 ? Jointly(a, b) / phasePdf : 0;
         }
     }
 
@@ -321,6 +481,10 @@ namespace pbrt
         // (the multiple scattering volumes with "distancesampling"): what gives the weight of that light at this point, for
         // the next-event estimation there and for a light that the next ray reaches. Null otherwise: the weight is one.
         public VolumeDirectWeight direct;
+        // Where the volume draws two points jointly ("doublescattering" on a multiple scattering volume): this collision,
+        // for the weights at the next one (the path tracer adds the phase function of the direction it takes, and gives it
+        // back in VolumeContext.joint for the ray that leaves from here). Null otherwise.
+        public VolumeJoint joint;
     }
 
     // VolumeServices Definition
@@ -728,8 +892,11 @@ namespace pbrt
             {
                 return none;
             }
-            Float share = medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular ? 1 : pdf / (product.Average() + pdf);
             Point3f point = wi.Apply(t);
+            // (the third rival, for a light at a position: the two points drawn jointly from the ray before)
+            Float jointly = m_ctx.joint != null && FixedPoint(chosen) ? m_ctx.joint.Ratio(chosen.point, point) + m_ctx.joint.OnceMore(chosen.point, point) : 0;
+            Float own = medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular ? 0 : product.Average();
+            Float share = pdf / (own + pdf + jointly);
             MediumInteraction intr = new MediumInteraction(point, -wi.d, wi.time, medium, at.phase);
             Point3f saved = m_ctx.P;
             m_ctx.SetP(point);
@@ -756,8 +923,514 @@ namespace pbrt
             weight.distance = distance;
             weight.t = t;
             weight.product = product.Average();
+            weight.equiangular = medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density;
             weight.equiangularOnly = medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular;
+            weight.joint = m_ctx.joint;
             return weight;
+        }
+
+        // A light at a position: the only point that the samplings about a point of a light can be about
+        protected static bool FixedPoint(VolumeLight light)
+        {
+            return light.hasPoint && light.fixedPoint;
+        }
+
+        // Whether this volume draws two points jointly on its rays (JointShare)
+        protected bool Joint()
+        {
+            VolumeDoubleScattering mode = medium.volumeIntegrator.doubleScattering;
+            return mode == VolumeDoubleScattering.Joint || mode == VolumeDoubleScattering.MIS;
+        }
+
+        // The collision of a walk as VolumeGeometry.joint
+        protected VolumeJoint JointAt(Ray wi, Float distance, Float t, SampledSpectrum product, PhaseFunction phase)
+        {
+            VolumeOnceMore onceMore = medium.volumeIntegrator.onceMore;
+            if (!Joint() && onceMore == VolumeOnceMore.None)
+            {
+                return null;
+            }
+            VolumeJoint joint = new VolumeJoint();
+            joint.ray = wi;
+            joint.t = t;
+            joint.product = product.Average();
+            joint.phase = phase;
+            joint.onceMore = onceMore;
+            Float tMin, tMax;
+            if (Joint() && Span(wi, distance, out tMin, out tMax) && tMax > tMin)
+            {
+                joint.jointly = true;
+                joint.tMin = tMin;
+                joint.tMax = tMax;
+            }
+            return joint;
+        }
+
+        // The transmittance from the start of a ray to a point of it by ratio tracking with the tracker of the medium, with
+        // the densities of the walk for the other wavelengths and the product of mu_n / mu_bar over its null collisions
+        // (which is that transmittance as a path finds it: W); false where nothing gets through
+        protected virtual bool Reach(VolumeServices rs, Ray ray, Float t, out SampledSpectrum through, out SampledSpectrum densities, out SampledSpectrum nulls)
+        {
+            SampledSpectrum T_ray = new SampledSpectrum(1f), rl = new SampledSpectrum(1f), ru = new SampledSpectrum(1f), product = new SampledSpectrum(1f);
+            RNG walk = rs.rng;
+            SampledSpectrum T_last = medium.volumeIntegrator.tracker.ForTransmittance().SampleT_maj(ray, medium, t, rs.GenerateRandomNumber(), ref walk, m_ctx.lambda,
+                (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
+                {
+                    SampledSpectrum sigma_n = ClampZero(sigma_maj - mp.sigma_a - mp.sigma_s);
+                    MediumEvents.RatioTrackingStep(ref T_ray, ref rl, ref ru, T_maj, sigma_maj, sigma_n);
+                    for (int i = 0; i < NSpectrumSamples; ++i)
+                    {
+                        if (sigma_maj[i] > 0)
+                        {
+                            product[i] *= sigma_n[i] / sigma_maj[i];
+                        }
+                    }
+                    return (bool)T_ray;
+                });
+            rs.rng = walk;
+            if ((bool)T_ray)
+            {
+                MediumEvents.FinishSegment(ref T_ray, ref rl, ref ru, T_last);
+            }
+            through = T_ray;
+            densities = rl;
+            nulls = product;
+            return (bool)T_ray && (bool)rl;
+        }
+
+        // The point that once-more scattering starts from: a collision of the volume, with its phase function, or a point of
+        // a surface that the volume touches, with its BSDF (then only towards the side that the path came from: `side`)
+        public sealed class OnceMoreStart
+        {
+            public Interaction point;
+            public PhaseFunction phase;
+            public BSDF bsdf;
+            public bool surface;
+            public Normal3f side;
+            // (the volume of the points on the path's side of a surface, with the stack of the volumes there)
+            public VolumePlace place;
+
+            public Point3f P() { return point.p(); }
+
+            public SampledSpectrum f(Vector3f w)
+            {
+                return surface ? bsdf.f(point.wo, w) * AbsDot(w, ((SurfaceInteraction)point).shading.n) : new SampledSpectrum(phase.p(point.wo, w));
+            }
+
+            public Float PDF(Vector3f w)
+            {
+                return surface ? bsdf.PDF(point.wo, w) : phase.PDF(point.wo, w);
+            }
+
+            public bool Faces(Vector3f w)
+            {
+                return !surface || Dot(w, side) > 0;
+            }
+        }
+
+        // What the two implementations of once-more scattering do alike once b is chosen: b has to be a point of this volume
+        // that the start sees, the stretch to it is walked (Reach), the light is asked for (EvaluateLight), and the share
+        // against the rivals for this b is taken by the balance heuristic over the densities of the whole path, per mu_t W of
+        // the start (one, for a surface):
+        //     the path           p(c -> b)  mu_t(b) W(b)
+        //     the equiangular b  p(c -> b)  p_ea(b)                  (with "distancesampling" "mis" / "equiangular")
+        //     jointly            p(c, b) / (mu_t(c) W(c))            (with "doublescattering", from the ray that c is on)
+        //     once more          `density`
+        // `integrand`: what multiplies the transmittances, the scattering coefficient at b and the light in the estimate.
+        private SampledSpectrum OnceMoreFinish(VolumeServices rs, OnceMoreStart start, VolumeJoint at, VolumeLight light, Point3f b, Float density, Float integrand,
+                                               bool pathWeights)
+        {
+            SampledSpectrum none = new SampledSpectrum(0f);
+            Point3f origin = start.P();
+            Vector3f w = Normalize(b - origin);
+            if (!start.Faces(w))
+            {
+                return none;
+            }
+            SampledSpectrum f = start.f(w);
+            if (!(bool)f)
+            {
+                return none;
+            }
+            Float time = start.point.time;
+            Ray ray = start.surface ? ((SurfaceInteraction)start.point).SpawnRay(w) : new Ray(origin, w, time);
+            ray.d = w;
+            Float first = Distance(ray.o, b);
+            Point3f surfacePoint;
+            Float surfaceDistance;
+            VolumeGeometry surface;
+            bool hit = rs.GetNearestHit(ray, out surfacePoint, out surfaceDistance, out surface);
+            if (hit && !(first < surfaceDistance))
+            {
+                return none;
+            }
+            SampledSpectrum through, densities, nulls;
+            if (!Reach(rs, ray, first, out through, out densities, out nulls))
+            {
+                return none;
+            }
+            MediumProperties mp = medium.SamplePoint(b, m_ctx.lambda, time);
+            if (!(bool)mp.sigma_s)
+            {
+                return none;
+            }
+            Float own = ((mp.sigma_a + mp.sigma_s) * (pathWeights ? nulls : new SampledSpectrum(1f))).Average(), equiangular = 0;
+            if (medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density)
+            {
+                EquiangularDensity about = EquiangularDensity.Create(ray, 0, hit ? surfaceDistance : Infinity, light.point);
+                if (about.valid)
+                {
+                    equiangular = about.PDF(first);
+                    if (medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular)
+                    {
+                        own = 0;
+                    }
+                }
+            }
+            Float share = density / (density + start.PDF(w) * (own + equiangular) + (at != null ? at.Jointly(light.point, b) : 0));
+            Point3f saved = m_ctx.P;
+            m_ctx.SetP(b);
+            SampledSpectrum result = none;
+            MediumInteraction atB = new MediumInteraction(b, -w, time, medium, mp.phase);
+            Vector3f wl;
+            SampledSpectrum arriving, beam, beamR;
+            if (rs.EvaluateLight(m_ctx, light, start.place, atB, out wl, out arriving, out beam, out beamR))
+            {
+                SampledSpectrum r = m_ctx.r * densities * beamR;
+                if ((bool)r)
+                {
+                    result = through * mp.sigma_s * f * mp.phase.p(-w, wl) * arriving * beam * (integrand * share / r.Average());
+                }
+            }
+            m_ctx.SetP(saved);
+            return result;
+        }
+
+        // The point b of the arc for the angles (theta, alpha, phi) between c and a; false where it is not a point
+        private static bool OnceMorePoint(Point3f c, Point3f a, Float theta, Float alpha, Float phi, out Point3f b, out Float second)
+        {
+            b = c;
+            second = 0;
+            Vector3f axis = a - c, v1, v2;
+            Float s = Length(axis);
+            Float sin = std.sin(theta);
+            if (!(s > 0) || !(sin > 0) || !(alpha > 0) || !(alpha < theta))
+            {
+                return false;
+            }
+            axis /= s;
+            CoordinateSystem(axis, &v1, &v2);
+            Float first = s * std.sin(theta - alpha) / sin;
+            second = s * std.sin(alpha) / sin;
+            if (!(first > 0) || !(second > 0) || IsInf(first) || IsInf(second))
+            {
+                return false;
+            }
+            b = c + first * (std.cos(alpha) * axis + std.sin(alpha) * (std.cos(phi) * v1 + std.sin(phi) * v2));
+            return true;
+        }
+
+        // The light at a position that the start samples about; false for any other light, and for a surface when the light
+        // is not on the side that the path came from
+        private bool OnceMoreLight(VolumeServices rs, OnceMoreStart start, out VolumeLight light)
+        {
+            Point3f saved = m_ctx.P;
+            m_ctx.SetP(start.P());
+            bool chosen = rs.ChooseLight(m_ctx, out light) && FixedPoint(light);
+            m_ctx.SetP(saved);
+            return chosen && start.Faces(light.point - start.P());
+        }
+
+        // Once-more scattered next-event estimation (Hanika, Weidlich and Droske, "Once-more scattered next event estimation
+        // for volume rendering", EGSR 2022; "oncemore" "omnee" on a multiple scattering volume), from a collision of the
+        // volume or a point of a surface in it, for a light at a position a: one scattering b in between, with the angle of
+        // its deflection drawn from the phase function and its place on the arc of that angle drawn so that the two inverse
+        // squared distances cancel (OnceMoreScattering). As published: the angle is that of a direction drawn from the phase
+        // function, and a direction that turns back is discarded (the forward half only); the transmittances, and the phase
+        // function or BSDF at the start, are left in the weight; the medium may vary, and is then tracked. The paper connects
+        // to the camera from the light; here the path comes from the camera and connects to the light, which is the same
+        // construction. What is not sampled here (the angles beyond pi / 2) is the path's and the equiangular point's, by
+        // the weights (OnceMoreFinish). `proposal`: the phase function that the angle is drawn from (that of the medium at
+        // the start).
+        public SampledSpectrum OnceMoreShare(VolumeServices rs, OnceMoreStart start, PhaseFunction proposal, VolumeJoint at, bool pathWeights)
+        {
+            SampledSpectrum none = new SampledSpectrum(0f);
+            VolumeLight light;
+            if (!OnceMoreLight(rs, start, out light))
+            {
+                return none;
+            }
+            Vector3f wo = start.point.wo;
+            pstd.optional<PhaseFunctionSample> ps = proposal.Sample_p(wo, new Point2f(rs.GenerateRandomNumber(), rs.GenerateRandomNumber()));
+            Float alphaSample = rs.GenerateRandomNumber(), phi = 2 * Pi * rs.GenerateRandomNumber();
+            if (!ps || !(ps.value().pdf > 0))
+            {
+                return none;
+            }
+            Float cos = Dot(-wo, ps.value().wi);
+            if (!(cos > 0))
+            {
+                return none;
+            }
+            Float theta = SafeACos(cos);
+            Point3f b;
+            Float second;
+            if (!OnceMorePoint(start.P(), light.point, theta, alphaSample * theta, phi, out b, out second))
+            {
+                return none;
+            }
+            Float angle = OnceMoreScattering.Angle(VolumeOnceMore.OnceMore, proposal, wo, theta);
+            if (!(angle > 0))
+            {
+                return none;
+            }
+            // (in the measure of the three angles the integrand has |ba|^2 / s of the volume, and the density is p / (2 pi theta))
+            Float s = Distance(start.P(), light.point);
+            Float inAngles = angle / (2 * Pi * theta);
+            return OnceMoreFinish(rs, start, at, light, b, inAngles * s / (second * second), second * second / s / inAngles, pathWeights);
+        }
+
+        // The second implementation ("oncemore" "omnee2"), for what the paper says the first leaves out:
+        //   - the angles beyond pi / 2: the angle is drawn over all of them, a quarter of the time uniformly, so that the
+        //     weight theta / sin(theta) of an angle drawn from the phase function stays bounded where a path turns back;
+        //   - the phase function or BSDF at the start, the scattering coefficient where the medium varies, and the
+        //     transmittances: a few candidates are drawn and one is kept in proportion to what the first leaves in the
+        //     weight -- the phase function or BSDF at the start towards b, the scattering coefficient and the phase function
+        //     at b, and the transmittance of the two stretches as the extinctions at the start and at b would give it --
+        //     over its density (resampled importance sampling: the estimate of the one kept is its integrand over that
+        //     target, times the mean of the candidates' ratios of target to density).
+        // The share against the rivals is that of the density of a candidate, which is what the rivals can know: the weights
+        // add up to one for every path whatever the resampling makes of the candidates.
+        public SampledSpectrum OnceMoreShare2(VolumeServices rs, OnceMoreStart start, PhaseFunction proposal, VolumeJoint at, bool pathWeights)
+        {
+            const int Candidates = 4;
+            SampledSpectrum none = new SampledSpectrum(0f);
+            VolumeLight light;
+            if (!OnceMoreLight(rs, start, out light))
+            {
+                return none;
+            }
+            Point3f origin = start.P();
+            Vector3f wo = start.point.wo;
+            Float s = Distance(origin, light.point);
+            MediumProperties here = medium.SamplePoint(origin, m_ctx.lambda, start.point.time);
+            Float extinctionHere = (here.sigma_a + here.sigma_s).Average();
+            Point3f* points = stackalloc Point3f[Candidates];
+            Float* targets = stackalloc Float[Candidates];
+            Float* densities = stackalloc Float[Candidates];
+            Float* seconds = stackalloc Float[Candidates];
+            Float sum = 0;
+            for (int k = 0; k < Candidates; ++k)
+            {
+                targets[k] = 0;
+                Float theta;
+                Float pick = rs.GenerateRandomNumber(), u0 = rs.GenerateRandomNumber(), u1 = rs.GenerateRandomNumber();
+                Float alphaSample = rs.GenerateRandomNumber(), phi = 2 * Pi * rs.GenerateRandomNumber();
+                if (pick < OnceMoreScattering.Uniform)
+                {
+                    theta = Pi * u0;
+                }
+                else
+                {
+                    pstd.optional<PhaseFunctionSample> ps = proposal.Sample_p(wo, new Point2f(u0, u1));
+                    if (!ps || !(ps.value().pdf > 0))
+                    {
+                        continue;
+                    }
+                    theta = SafeACos(Dot(-wo, ps.value().wi));
+                }
+                Float angle = OnceMoreScattering.Angle(VolumeOnceMore.OnceMore2, proposal, wo, theta);
+                Point3f b;
+                Float second;
+                if (!(angle > 0) || !OnceMorePoint(origin, light.point, theta, alphaSample * theta, phi, out b, out second))
+                {
+                    continue;
+                }
+                Float first = Distance(origin, b);
+                Vector3f w = (b - origin) / first;
+                if (!start.Faces(w))
+                {
+                    continue;
+                }
+                MediumProperties mp = medium.SamplePoint(b, m_ctx.lambda, start.point.time);
+                Float scattering = mp.sigma_s.Average();
+                if (!(scattering > 0))
+                {
+                    continue;
+                }
+                Float extinction = 0.5f * (extinctionHere + (mp.sigma_a + mp.sigma_s).Average());
+                Float target = start.f(w).Average() * scattering * mp.phase.p(-w, (light.point - b) / second) * std.exp(-extinction * (first + second));
+                Float inAngles = angle / (2 * Pi * theta);
+                if (!(target > 0) || !(inAngles > 0))
+                {
+                    continue;
+                }
+                points[k] = b;
+                seconds[k] = second;
+                densities[k] = inAngles;
+                targets[k] = target;
+                sum += target / inAngles;
+            }
+            if (!(sum > 0))
+            {
+                return none;
+            }
+            Float choose = rs.GenerateRandomNumber() * sum, running = 0;
+            int kept = -1;
+            for (int k = 0; k < Candidates; ++k)
+            {
+                if (!(targets[k] > 0))
+                {
+                    continue;
+                }
+                kept = k;
+                running += targets[k] / densities[k];
+                if (choose < running)
+                {
+                    break;
+                }
+            }
+            Float second2 = seconds[kept] * seconds[kept];
+            // (the integrand of the one kept over its target, times the mean of the ratios)
+            Float integrand = second2 / s / targets[kept] * (sum / Candidates);
+            return OnceMoreFinish(rs, start, at, light, points[kept], densities[kept] * s / second2, integrand, pathWeights);
+        }
+
+        // Joint importance sampling of two scatterings beside the path, in a volume that scatters any number of times
+        // ("doublescattering" "joint" or "mis" on a multiple scattering volume; Georgiev et al. 2013 for the densities,
+        // DoubleScattering above; Miller et al. 2019 for the weights, EquiangularShare above). The light that is scattered
+        // twice more from this ray and then reaches a light at a position a is sampled by the path: a collision c of the walk
+        // on this ray, a direction from the phase function there, a collision b of the walk on that ray, lit by the path
+        // tracer; and here: c on the ray in proportion to 1 / |ac|, then the direction from c and the distance of b along it
+        // jointly, in proportion to the two geometry terms 1 / (|cb|^2 |ba|^2), with b before any surface. With W the
+        // product of mu_n / mu_bar over the null collisions of each of the two stretches, the densities of one such path are
+        //     the path           mu_t(c) W(c)  p(c -> b)  mu_t(b) W(b)
+        //     the equiangular b  mu_t(c) W(c)  p(c -> b)  p_ea(b)           (with "distancesampling" "mis" / "equiangular")
+        //     jointly            p(c) |ac| / (pi^3 |ab|^2)
+        // and each takes its share by the balance heuristic (VolumeDirectWeight for the first, EquiangularShare for the
+        // second, here for the third), with mu_t W as its mean over the wavelengths. Only for a light at a position: the
+        // weights are about the one point that such a light has. The path tracer says which collision a ray leaves from
+        // (VolumeContext.joint).
+        protected SampledSpectrum JointShare(VolumeServices rs, Ray wi, Float distance, bool pathWeights)
+        {
+            SampledSpectrum none = new SampledSpectrum(0f);
+            if (!Joint() || !m_ctx.mayScatter || !m_ctx.mayScatterTwice)
+            {
+                return none;
+            }
+            Float tMin, tMax;
+            if (!Span(wi, distance, out tMin, out tMax) || !(tMax > tMin))
+            {
+                return none;
+            }
+            VolumeLight light;
+            if (!rs.ChooseLight(m_ctx, out light) || !FixedPoint(light))
+            {
+                return none;
+            }
+            InverseDistanceDensity along = InverseDistanceDensity.Create(wi, tMin, tMax, light.point);
+            if (!along.valid)
+            {
+                return none;
+            }
+            // The first scattering, on the ray
+            Float t = along.Sample(rs.GenerateRandomNumber());
+            if (!(t >= tMin) || !(t <= tMax) || !(t > 0))
+            {
+                return none;
+            }
+            SampledWavelengths lambda = m_ctx.lambda;
+            Point3f c = wi.Apply(t);
+            SampledSpectrum toC, densitiesC, nullsC;
+            if (!Reach(rs, wi, t, out toC, out densitiesC, out nullsC))
+            {
+                return none;
+            }
+            MediumProperties mp = medium.SamplePoint(c, lambda, wi.time);
+            if (!(bool)mp.sigma_s)
+            {
+                return none;
+            }
+            // The second: the direction by its angle to that of the light, the distance equiangular about the light
+            Vector3f toLight = light.point - c;
+            Float far = Length(toLight);
+            if (!(far > 0))
+            {
+                return none;
+            }
+            Vector3f axis = toLight / far, v1, v2;
+            CoordinateSystem(axis, &v1, &v2);
+            Float theta = Pi * (1 - SafeSqrt(1 - rs.GenerateRandomNumber())), phi = 2 * Pi * rs.GenerateRandomNumber();
+            Float sin = std.sin(theta), cos = std.cos(theta);
+            Vector3f w = sin * std.cos(phi) * v1 + sin * std.sin(phi) * v2 + cos * axis;
+            Float s = far * cos + far * sin * std.tan(rs.GenerateRandomNumber() * (Pi - theta) + theta - Pi / 2);
+            if (!(s > 0) || IsInf(s))
+            {
+                return none;
+            }
+            Point3f b = c + s * w;
+            Float squared = LengthSquared(light.point - b);
+            Float pdf = squared > 0 ? along.PDF(t) * far / (Pi * Pi * Pi * squared) : 0;
+            if (!(pdf > 0))
+            {
+                return none;
+            }
+            // b is a point of this volume that the ray from c reaches before any surface
+            Ray second = new Ray(c, w, wi.time);
+            Point3f surfacePoint;
+            Float surfaceDistance;
+            VolumeGeometry surface;
+            bool hit = rs.GetNearestHit(second, out surfacePoint, out surfaceDistance, out surface);
+            if (hit && !(s < surfaceDistance))
+            {
+                return none;
+            }
+            SampledSpectrum toB, densitiesB, nullsB;
+            if (!Reach(rs, second, s, out toB, out densitiesB, out nullsB))
+            {
+                return none;
+            }
+            MediumProperties at = medium.SamplePoint(b, lambda, wi.time);
+            if (!(bool)at.sigma_s)
+            {
+                return none;
+            }
+            // The densities of the rivals for these two points
+            Float phase = mp.phase.PDF(-wi.d, w);
+            Float productC = ((mp.sigma_a + mp.sigma_s) * (pathWeights ? nullsC : new SampledSpectrum(1f))).Average();
+            Float productB = ((at.sigma_a + at.sigma_s) * (pathWeights ? nullsB : new SampledSpectrum(1f))).Average();
+            Float equiangular = 0;
+            if (medium.volumeIntegrator.distanceSampling != VolumeDistanceSampling.Density)
+            {
+                EquiangularDensity about = EquiangularDensity.Create(second, 0, hit ? surfaceDistance : Infinity, light.point);
+                if (about.valid)
+                {
+                    equiangular = about.PDF(s);
+                    if (medium.volumeIntegrator.distanceSampling == VolumeDistanceSampling.Equiangular)
+                    {
+                        productB = 0;
+                    }
+                }
+            }
+            // (and the scattering that is put between c and the light, where the volume also does that)
+            Float onceMore = OnceMoreScattering.Density(medium.volumeIntegrator.onceMore, mp.phase, -wi.d, c, b, light.point);
+            Float share = pdf / (pdf + productC * (phase * (productB + equiangular) + onceMore));
+            Point3f saved = m_ctx.P;
+            m_ctx.SetP(b);
+            SampledSpectrum result = none;
+            MediumInteraction atB = new MediumInteraction(b, -w, wi.time, medium, at.phase);
+            Vector3f wl;
+            SampledSpectrum arriving, beam, beamR;
+            if (rs.EvaluateLight(m_ctx, light, null, atB, out wl, out arriving, out beam, out beamR))
+            {
+                SampledSpectrum r = m_ctx.r * densitiesC * densitiesB * beamR;
+                if ((bool)r)
+                {
+                    result = toC * mp.sigma_s * mp.phase.p(-wi.d, w) * toB * at.sigma_s * at.phase.p(-w, wl) * arriving * beam * (share / (pdf * r.Average()));
+                }
+            }
+            m_ctx.SetP(saved);
+            return result;
         }
 
         // How a spectral tracking walk ends: beyond the end of the ray, at a scattering, or with nothing left to follow
@@ -1838,6 +2511,11 @@ namespace pbrt
                     }
                 }
             }
+            // Two more scatterings drawn jointly about a light at a position, with their share (JointShare)
+            if (distance > 0)
+            {
+                L += JointShare(rs, wi, distance, true);
+            }
             Float s0 = sigma_t[0];
             Float t = s0 > 0 ? -std.log(1 - rs.GenerateRandomNumber()) / s0 : Infinity;
             if (t < distance)
@@ -1857,10 +2535,11 @@ namespace pbrt
                 g.isSurface = false;
                 g.phase = mp.phase;
                 g.scatter = new MediumInteraction(P, -wi.d, wi.time, medium, mp.phase);
-                if (weighed)
+                if (weighed || m_ctx.joint != null)
                 {
                     g.direct = CollisionWeight(wi, distance, t, sigma_t * T);
                 }
+                g.joint = JointAt(wi, distance, t, sigma_t * T, mp.phase);
                 wo = new Ray(P, wi.d, wi.time);
                 return true;
             }
@@ -1874,6 +2553,16 @@ namespace pbrt
             weight = through / through[0];
             m_ctx.r *= through / through[0];
             return hit;
+        }
+
+        // (in a medium that is the same everywhere the transmittance is known, and is what a path finds: W)
+        protected override bool Reach(VolumeServices rs, Ray ray, Float t, out SampledSpectrum through, out SampledSpectrum densities, out SampledSpectrum nulls)
+        {
+            MediumProperties mp = medium.SamplePoint(ray.o, m_ctx.lambda, ray.time);
+            through = Attenuation(mp.sigma_a + mp.sigma_s, t);
+            densities = new SampledSpectrum(1f);
+            nulls = through;
+            return (bool)through;
         }
 
         public override SampledSpectrum Transmittance(VolumeServices rs, Point3f P0, Point3f P1)
@@ -1954,6 +2643,11 @@ namespace pbrt
                     }
                 }
             }
+            // Two more scatterings drawn jointly about a light at a position, with their share (JointShare)
+            if (distance > 0)
+            {
+                emitted += JointShare(rs, wi, distance, pathWeights);
+            }
             SampledSpectrum nullsToCollision = new SampledSpectrum(1f);
             bool scattered = false, absorbed = false;
             Point3f point = default;
@@ -2025,11 +2719,12 @@ namespace pbrt
                 g.isSurface = false;
                 g.phase = at.phase;
                 g.scatter = new MediumInteraction(point, -wi.d, wi.time, medium, at.phase);
-                if (weighed)
+                SampledSpectrum product = (at.sigma_a + at.sigma_s) * (pathWeights ? nullsToCollision : new SampledSpectrum(1f));
+                if (weighed || m_ctx.joint != null)
                 {
-                    SampledSpectrum product = (at.sigma_a + at.sigma_s) * (pathWeights ? nullsToCollision : new SampledSpectrum(1f));
                     g.direct = CollisionWeight(wi, distance, Dot(point - wi.o, wi.d), product);
                 }
+                g.joint = JointAt(wi, distance, Dot(point - wi.o, wi.d), product, at.phase);
                 wo = new Ray(point, wi.d, wi.time);
                 return true;
             }

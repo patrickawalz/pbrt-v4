@@ -82,6 +82,7 @@ namespace pbrt
                 chosen = new VolumeLight();
                 chosen.probability = 1;
                 chosen.hasPoint = givesPoint;
+                chosen.fixedPoint = givesPoint;
                 chosen.point = light;
                 return true;
             }
@@ -207,6 +208,11 @@ namespace pbrt
         // look at (a grid falls to nothing over the half cell at its faces), and the rays end where the services say.
         static GridMedium Grid(RGB absorption, RGB scattering, Float emission)
         {
+            return Grid(absorption, scattering, emission, 0);
+        }
+
+        static GridMedium Grid(RGB absorption, RGB scattering, Float emission, Float g)
+        {
             Allocator alloc = new Allocator();
             Float[] density = new Float[512], scale = new Float[512];
             for (int i = 0; i < 512; ++i)
@@ -215,7 +221,7 @@ namespace pbrt
                 scale[i] = emission > 0 ? 1 : 0;
             }
             return new GridMedium(new Bounds3f(new Point3f(-40, -40, -40), new Point3f(40, 40, 40)), new Transform(), new RGBUnboundedSpectrum(RGBColorSpace.sRGB, absorption),
-                                  new RGBUnboundedSpectrum(RGBColorSpace.sRGB, scattering), 1, 0, new SampledGrid<Float>(density, 8, 8, 8, alloc), default, 1, 0,
+                                  new RGBUnboundedSpectrum(RGBColorSpace.sRGB, scattering), 1, g, new SampledGrid<Float>(density, 8, 8, 8, alloc), default, 1, 0,
                                   new ConstantSpectrum(emission), new SampledGrid<Float>(scale, 8, 8, 8, alloc), alloc);
         }
 
@@ -1809,7 +1815,7 @@ namespace pbrt
                             Vector3f toLight;
                             SampledSpectrum arriving, beam, beamR;
                             fog.GenerateLightSample(ctx, g.scatter, g.phase, out toLight, out arriving, out beam, out beamR);
-                            Float direct = g.direct != null ? g.direct.For(true, fog.light) : 1;
+                            Float direct = g.direct != null ? g.direct.For(true, true, fog.light) : 1;
                             value += direct * (w * T * g.phase.p(-ray.d, toLight) * arriving * beam / ctx.r.Average()).Average();
                         }
                         sum += value;
@@ -1823,6 +1829,241 @@ namespace pbrt
                     EXPECT_LT(Math.Abs(mean - 0.078532), 4 * error + 2e-5);
                 }
                 EXPECT_LT(deviations[2], 0.6 * deviations[0]);
+            }
+        }
+
+        // Joint importance sampling of two scatterings beside the path in a multiple scattering volume (Volume.JointShare):
+        // the light that reaches the start of a ray after one or two scatterings, gathered as the path tracer does it over
+        // two rays (what the volumes gather themselves, and the next-event estimation at each collision with the weight that
+        // the volume gives), is the same with and without it, alone and with the equiangular point of either kind; and with
+        // a light in the medium it varies less.
+        [TEST("ProductionSampling", "JointBesideThePath")]
+        public static void JointBesideThePath()
+        {
+            RGB absorption = new RGB(0.05f, 0.1f, 0.2f), scattering = new RGB(0.4f, 0.6f, 1f);
+            SampledWavelengths[] orders = Orders(0.37f);
+            Ray ray = new Ray(new Point3f(0, 0, 0), new Vector3f(1, 0, 0), 0);
+            string[] kinds = { "homogeneous", "tracked", "tracked with the decomposition tracker" };
+            VolumeDistanceSampling[] distances = { VolumeDistanceSampling.Density, VolumeDistanceSampling.MIS, VolumeDistanceSampling.Equiangular };
+            for (int kind = 0; kind < 3; ++kind)
+            {
+                double reference = 0, referenceError = 0, plain = 0;
+                for (int mode = 0; mode < 6; ++mode)
+                {
+                    bool jointly = mode >= 3;
+                    Fog fog = new Fog(171);
+                    fog.light = new Point3f(0.7f, 0.2f, 0.05f);
+                    fog.distance = 2;
+                    Medium medium = kind == 0 ? Homogeneous(absorption, scattering, 0.3f, 0) : Grid(absorption, scattering, 0);
+                    medium.volumeIntegrator = kind == 2 ? new VolumeIntegrator(VolumeIntegrator.Decomposition(), VolumeIntegrator.Default.transmittance)
+                                                        : Settings(VolumeScattering.Multiple, distances[mode % 3]);
+                    medium.volumeIntegrator.scattering = VolumeScattering.Multiple;
+                    medium.volumeIntegrator.distanceSampling = distances[mode % 3];
+                    medium.volumeIntegrator.doubleScattering = jointly ? VolumeDoubleScattering.Joint : VolumeDoubleScattering.None;
+                    RNG choose = new RNG(77);
+                    double sum = 0, squares = 0;
+                    int count = mode == 0 ? 2400000 : 600000;
+                    for (int s = 0; s < count; ++s)
+                    {
+                        VolumeContext ctx = new VolumeContext();
+                        ctx.lambda = orders[s % orders.Length];
+                        MediumProperties here = medium.SamplePoint(ray.o, ctx.lambda);
+                        fog.sigma_t = here.sigma_a + here.sigma_s;
+                        ctx.P = ray.o;
+                        ctx.medium = medium;
+                        ctx.mayScatter = true;
+                        ctx.mayScatterTwice = true;
+                        SampledSpectrum L, T, w;
+                        Point3f P;
+                        Ray wo;
+                        VolumeGeometry g;
+                        bool hit = Volume.Create(ctx, medium).Integrate(fog, ray, out L, out T, out w, out P, out wo, out g);
+                        double value = L.Average();
+                        if (hit && !g.isSurface)
+                        {
+                            // The first collision: its light, and the ray that the path takes from it
+                            ctx.P = P;
+                            Vector3f toLight;
+                            SampledSpectrum arriving, beam, beamR;
+                            fog.GenerateLightSample(ctx, g.scatter, g.phase, out toLight, out arriving, out beam, out beamR);
+                            Float direct = g.direct != null ? g.direct.For(true, true, fog.light) : 1;
+                            SampledSpectrum beta = w * T;
+                            value += direct * (beta * g.phase.p(-ray.d, toLight) * arriving * beam / ctx.r.Average()).Average();
+                            pstd.optional<PhaseFunctionSample> ps = g.phase.Sample_p(-ray.d, new Point2f(choose.Uniform<Float>(), choose.Uniform<Float>()));
+                            if (ps && ps.value().pdf > 0)
+                            {
+                                beta *= ps.value().p / ps.value().pdf;
+                                ctx.joint = g.joint;
+                                if (ctx.joint != null)
+                                {
+                                    ctx.joint.phasePdf = ps.value().pdf;
+                                }
+                                // (two scatterings and no more: the second ray draws nothing jointly)
+                                ctx.mayScatterTwice = false;
+                                Ray second = new Ray(P, ps.value().wi, 0);
+                                SampledSpectrum L2, T2, w2;
+                                Point3f P2;
+                                Ray wo2;
+                                VolumeGeometry g2;
+                                bool hit2 = Volume.Create(ctx, medium).Integrate(fog, second, out L2, out T2, out w2, out P2, out wo2, out g2);
+                                value += (beta * L2).Average();
+                                if (hit2 && !g2.isSurface)
+                                {
+                                    ctx.P = P2;
+                                    fog.GenerateLightSample(ctx, g2.scatter, g2.phase, out toLight, out arriving, out beam, out beamR);
+                                    Float direct2 = g2.direct != null ? g2.direct.For(true, true, fog.light) : 1;
+                                    value += direct2 * (beta * w2 * T2 * g2.phase.p(-second.d, toLight) * arriving * beam / ctx.r.Average()).Average();
+                                }
+                            }
+                        }
+                        sum += value;
+                        squares += value * value;
+                    }
+                    double mean = sum / count;
+                    double deviation = Math.Sqrt(Math.Max(0, squares / count - mean * mean)), error = deviation / Math.Sqrt(count);
+                    Console.WriteLine("MEASURE scattered once or twice in a multiple scattering volume, {0}, distances {1}, {2}: {3:F6} +- {4:F6}, deviation {5:F4}", kinds[kind],
+                                      distances[mode % 3], jointly ? "two drawn jointly" : "the path alone", mean, error, deviation);
+                    if (mode == 0)
+                    {
+                        reference = mean;
+                        referenceError = error;
+                        plain = deviation;
+                    }
+                    else
+                    {
+                        EXPECT_LT(Math.Abs(mean - reference), 4 * Math.Sqrt(error * error + referenceError * referenceError));
+                    }
+                    if (mode == 3)
+                    {
+                        EXPECT_LT(deviation, plain);
+                    }
+                }
+            }
+        }
+
+        // Once-more scattered next-event estimation (Volume.OnceMoreShare, Volume.OnceMoreShare2) beside the path: the light
+        // that reaches the start of a ray after one or two scatterings, gathered over two rays as the path tracer does it,
+        // is the same without it, with either implementation, and with each beside the equiangular point and the two points
+        // drawn jointly; in a medium that scatters forwards it varies less with it.
+        [TEST("ProductionSampling", "OnceMoreBesideThePath")]
+        public static void OnceMoreBesideThePath()
+        {
+            RGB absorption = new RGB(0.05f, 0.1f, 0.2f), scattering = new RGB(0.4f, 0.6f, 1f);
+            SampledWavelengths[] orders = Orders(0.37f);
+            Ray ray = new Ray(new Point3f(0, 0, 0), new Vector3f(1, 0, 0), 0);
+            string[] kinds = { "homogeneous, g 0.9", "tracked, g 0.9", "tracked, g 0.3, decomposition tracker" };
+            VolumeOnceMore[] ways = { VolumeOnceMore.None, VolumeOnceMore.OnceMore, VolumeOnceMore.OnceMore2 };
+            for (int kind = 0; kind < 3; ++kind)
+            {
+                double reference = 0, referenceError = 0, plain = 0;
+                double[] alone = new double[3];
+                for (int mode = 0; mode < 12; ++mode)
+                {
+                    VolumeOnceMore way = ways[mode % 3];
+                    bool equiangular = (mode / 3) % 2 == 1, jointly = mode >= 6;
+                    Fog fog = new Fog(191);
+                    fog.light = new Point3f(1.2f, 0.12f, 0.05f);
+                    fog.distance = 3;
+                    Float g = kind == 2 ? 0.3f : 0.9f;
+                    Medium medium = kind == 0 ? Homogeneous(absorption, scattering, g, 0) : Grid(absorption, scattering, 0, g);
+                    medium.volumeIntegrator = kind == 2 ? new VolumeIntegrator(VolumeIntegrator.Decomposition(), VolumeIntegrator.Default.transmittance)
+                                                        : Settings(VolumeScattering.Multiple, VolumeDistanceSampling.Density);
+                    medium.volumeIntegrator.scattering = VolumeScattering.Multiple;
+                    medium.volumeIntegrator.distanceSampling = equiangular ? VolumeDistanceSampling.MIS : VolumeDistanceSampling.Density;
+                    medium.volumeIntegrator.doubleScattering = jointly ? VolumeDoubleScattering.Joint : VolumeDoubleScattering.None;
+                    medium.volumeIntegrator.onceMore = way;
+                    bool pathWeights = kind != 2;
+                    RNG choose = new RNG(77);
+                    double sum = 0, squares = 0;
+                    int count = mode == 0 ? 2400000 : 500000;
+                    for (int s = 0; s < count; ++s)
+                    {
+                        VolumeContext ctx = new VolumeContext();
+                        ctx.lambda = orders[s % orders.Length];
+                        MediumProperties here = medium.SamplePoint(ray.o, ctx.lambda);
+                        fog.sigma_t = here.sigma_a + here.sigma_s;
+                        ctx.P = ray.o;
+                        ctx.medium = medium;
+                        ctx.mayScatter = true;
+                        ctx.mayScatterTwice = true;
+                        SampledSpectrum L, T, w;
+                        Point3f P;
+                        Ray wo;
+                        VolumeGeometry gm;
+                        bool hit = Volume.Create(ctx, medium).Integrate(fog, ray, out L, out T, out w, out P, out wo, out gm);
+                        double value = L.Average();
+                        if (hit && !gm.isSurface)
+                        {
+                            ctx.P = P;
+                            Vector3f toLight;
+                            SampledSpectrum arriving, beam, beamR;
+                            fog.GenerateLightSample(ctx, gm.scatter, gm.phase, out toLight, out arriving, out beam, out beamR);
+                            Float direct = gm.direct != null ? gm.direct.For(true, true, fog.light) : 1;
+                            SampledSpectrum beta = w * T;
+                            value += direct * (beta * gm.phase.p(-ray.d, toLight) * arriving * beam / ctx.r.Average()).Average();
+                            if (way != VolumeOnceMore.None)
+                            {
+                                Volume volume = Volume.Create(ctx, medium);
+                                Volume.OnceMoreStart start = new Volume.OnceMoreStart();
+                                start.point = gm.scatter;
+                                start.phase = gm.phase;
+                                value += (beta * (way == VolumeOnceMore.OnceMore ? volume.OnceMoreShare(fog, start, gm.phase, gm.joint, pathWeights)
+                                                                                 : volume.OnceMoreShare2(fog, start, gm.phase, gm.joint, pathWeights))).Average();
+                            }
+                            pstd.optional<PhaseFunctionSample> ps = gm.phase.Sample_p(-ray.d, new Point2f(choose.Uniform<Float>(), choose.Uniform<Float>()));
+                            if (ps && ps.value().pdf > 0)
+                            {
+                                beta *= ps.value().p / ps.value().pdf;
+                                ctx.joint = gm.joint;
+                                if (ctx.joint != null)
+                                {
+                                    ctx.joint.phasePdf = ps.value().pdf;
+                                }
+                                ctx.mayScatterTwice = false;
+                                Ray second = new Ray(P, ps.value().wi, 0);
+                                SampledSpectrum L2, T2, w2;
+                                Point3f P2;
+                                Ray wo2;
+                                VolumeGeometry g2;
+                                bool hit2 = Volume.Create(ctx, medium).Integrate(fog, second, out L2, out T2, out w2, out P2, out wo2, out g2);
+                                value += (beta * L2).Average();
+                                if (hit2 && !g2.isSurface)
+                                {
+                                    ctx.P = P2;
+                                    fog.GenerateLightSample(ctx, g2.scatter, g2.phase, out toLight, out arriving, out beam, out beamR);
+                                    Float direct2 = g2.direct != null ? g2.direct.For(true, true, fog.light) : 1;
+                                    value += direct2 * (beta * w2 * T2 * g2.phase.p(-second.d, toLight) * arriving * beam / ctx.r.Average()).Average();
+                                }
+                            }
+                        }
+                        sum += value;
+                        squares += value * value;
+                    }
+                    double mean = sum / count;
+                    double deviation = Math.Sqrt(Math.Max(0, squares / count - mean * mean)), error = deviation / Math.Sqrt(count);
+                    Console.WriteLine("MEASURE scattered once or twice, {0}: {1,-9} {2,-12} {3,-8}: {4:F6} +- {5:F6}, deviation {6:F4}", kinds[kind], way,
+                                      equiangular ? "equiangular" : "", jointly ? "jointly" : "", mean, error, deviation);
+                    if (mode == 0)
+                    {
+                        reference = mean;
+                        referenceError = error;
+                        plain = deviation;
+                    }
+                    else
+                    {
+                        EXPECT_LT(Math.Abs(mean - reference), 4 * Math.Sqrt(error * error + referenceError * referenceError));
+                    }
+                    if (mode < 3)
+                    {
+                        alone[mode] = deviation;
+                    }
+                }
+                if (kind < 2)
+                {
+                    // (forward scattering: what the technique is for)
+                    EXPECT_LT(alone[1], plain);
+                    EXPECT_LT(alone[2], plain);
+                }
             }
         }
 

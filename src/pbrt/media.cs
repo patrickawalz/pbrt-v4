@@ -223,6 +223,8 @@ namespace pbrt
                 return SampleT_maj<AtmosphereMedium, AtmosphereMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is AggregateMedium)
                 return SampleT_maj<AggregateMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is AggregateMedium2)
+                return SampleT_maj<AggregateMedium2, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is BoundedMedium)
                 return SampleT_maj<BoundedMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");

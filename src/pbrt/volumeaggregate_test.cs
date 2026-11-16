@@ -15,8 +15,13 @@ namespace pbrt
             public Wall(ulong seed, Float distance)
             {
                 rng = new RNG(seed);
+                own = new RNG(seed + 1000);
                 this.distance = distance;
             }
+
+            // (its own generator: a volume copies `rng` for a walk after it asks for a number, and would be given the same
+            // number twice)
+            private RNG own;
 
             public override bool GetNearestHit(Ray ray, out Point3f P, out Float distance, out VolumeGeometry g)
             {
@@ -27,7 +32,7 @@ namespace pbrt
                 return true;
             }
 
-            public override Float GenerateRandomNumber() { return rng.Uniform<Float>(); }
+            public override Float GenerateRandomNumber() { return own.Uniform<Float>(); }
 
             public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, PhaseFunction phase, out Vector3f wi, out SampledSpectrum L,
                                                      out SampledSpectrum beamTransmittance, out SampledSpectrum beamR)
@@ -209,6 +214,131 @@ namespace pbrt
                 Console.WriteLine("MEASURE volume aggregate, transmittance between two points ({0}): {1:F5} +- {2:F5}, quadrature {3:F5}", pair, estimate, error, exact);
                 // (the quadrature is the mean over 400 draws of the wavelengths: its own error is that of the colour)
                 EXPECT_LT(Math.Abs(estimate - exact), 4 * error + 0.01);
+            }
+        }
+
+        // "aggregate2" (volumeaggregate2.cs): the same three volumes behind the interface of a medium, so that the estimators
+        // of the transmittance apply. Each gives the transmittance that the quadrature of the volumes gives, as "aggregate"
+        // does with its own ratio tracking; what they cost and how they vary is measured beside it.
+        [TEST("VolumeAggregate", "Aggregate2Transmittance")]
+        public static void Aggregate2Transmittance()
+        {
+            GridMedium[] volumes;
+            AggregateMedium first = Three(out volumes);
+            Point3f[] from = new Point3f[] { new Point3f(-0.5f, 0.5f, 0.5f), new Point3f(0.2f, -0.4f, 0.3f) };
+            Point3f[] to = new Point3f[] { new Point3f(2.2f, 0.7f, 0.6f), new Point3f(1.4f, 1.6f, 0.9f) };
+            // (the wavelengths: one draw rotated, so that each of the four samples in turn)
+            SampledWavelengths[] orders = new SampledWavelengths[NSpectrumSamples];
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float u = 0.37f + (Float)i / NSpectrumSamples;
+                orders[i] = SampledWavelengths.SampleVisible(u - std.floor(u));
+            }
+            string[] names = { "aggregate", "ratio", "tracklength", "residuallocal", "residualtracking", "raymarching", "nextflight", "unidirectional", "bidirectional",
+                               "pseriescmf" };
+            for (int pair = 0; pair < 2; ++pair)
+            {
+                double exact = 0;
+                foreach (SampledWavelengths lambda in orders)
+                {
+                    int steps = 4000;
+                    SampledSpectrum depth = new SampledSpectrum(0f);
+                    Vector3f along = to[pair] - from[pair];
+                    for (int k = 0; k < steps; ++k)
+                    {
+                        Point3f p = from[pair] + ((k + 0.5f) / steps) * along;
+                        for (int m = 0; m < 3; ++m)
+                        {
+                            if (first.Aggregate().Member(m).Inside(p))
+                            {
+                                MediumProperties mp = volumes[m].SamplePoint(p, lambda);
+                                depth += (mp.sigma_a + mp.sigma_s) * (Length(along) / steps);
+                            }
+                        }
+                    }
+                    exact += Exp(-depth).Average() / orders.Length;
+                }
+                {
+                    // The majorant of every segment bounds the extinction in it, at every wavelength
+                    AggregateMedium2 check = new AggregateMedium2(new Medium[] { volumes[0], volumes[1], volumes[2] }, 2, 6, null);
+                    Vector3f along = to[pair] - from[pair];
+                    int above = 0, looked = 0;
+                    double worst = 0;
+                    foreach (SampledWavelengths lambda in orders)
+                    {
+                        RayMajorantIterator iter = check.SampleRay(new Ray(from[pair], along), 1, lambda);
+                        while (true)
+                        {
+                            pstd.optional<RayMajorantSegment> seg = iter.Next();
+                            if (!seg)
+                            {
+                                break;
+                            }
+                            RayMajorantSegment sg = seg.value();
+                            for (int k = 0; k < 20; ++k)
+                            {
+                                MediumProperties mp = check.SamplePoint(from[pair] + (sg.tMin + (k + 0.5f) / 20 * (sg.tMax - sg.tMin)) * along, lambda);
+                                ++looked;
+                                for (int c = 0; c < NSpectrumSamples; ++c)
+                                {
+                                    if (mp.sigma_a[c] + mp.sigma_s[c] > sg.sigma_maj[c] * 1.0001f + 1e-6f)
+                                    {
+                                        ++above;
+                                        worst = Math.Max(worst, (mp.sigma_a[c] + mp.sigma_s[c]) / Math.Max(1e-9, sg.sigma_maj[c]));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Console.WriteLine("MEASURE aggregate2, majorants ({0}): {1} points, {2} above the majorant of their segment (worst ratio {3:F3})", pair, looked, above, worst);
+                    EXPECT_EQ(0, above);
+                }
+                for (int e = 0; e < names.Length; ++e)
+                {
+                    Medium medium;
+                    if (e == 0)
+                    {
+                        medium = first;
+                    }
+                    else
+                    {
+                        medium = new AggregateMedium2(new Medium[] { volumes[0], volumes[1], volumes[2] }, 2, 6, null);
+                        medium.volumeIntegrator = new VolumeIntegrator(VolumeIntegrator.Default.tracker, VolumeIntegrator.Transmittance(names[e]));
+                    }
+                    Wall rs = new Wall(31 + (ulong)pair, 1);
+                    int count = 80000;
+                    double sum = 0, squares = 0;
+                    for (int s = 0; s < 2000; ++s)
+                    {
+                        VolumeContext warm = new VolumeContext();
+                        warm.lambda = orders[s % orders.Length];
+                        warm.P = from[pair];
+                        warm.medium = medium;
+                        Volume.Create(warm, medium).Transmittance(rs, from[pair], to[pair]);
+                    }
+                    long before = GridMedium.lookups;
+                    System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                    for (int s = 0; s < count; ++s)
+                    {
+                        VolumeContext ctx = new VolumeContext();
+                        ctx.lambda = orders[s % orders.Length];
+                        ctx.P = from[pair];
+                        ctx.medium = medium;
+                        SampledSpectrum T = Volume.Create(ctx, medium).Transmittance(rs, from[pair], to[pair]);
+                        // (ratio tracking and track length sample with one wavelength for the others: the estimate of that
+                        // wavelength is the transmittance, and each samples in turn; the others estimate every wavelength)
+                        double value = e == 1 || e == 2 ? T[0] : (T / ctx.r.Average()).Average();
+                        sum += value;
+                        squares += value * value;
+                    }
+                    double nanoseconds = watch.Elapsed.TotalMilliseconds * 1e6 / count;
+                    double lookups = (double)(GridMedium.lookups - before) / count;
+                    double mean = sum / count, deviation = Math.Sqrt(Math.Max(0, squares / count - mean * mean));
+                    Console.WriteLine("MEASURE aggregate2, transmittance ({0}), {1,-16}: {2:F5} +- {3:F5} (quadrature {4:F5}), deviation {5:F4}, lookups {6:F2}, " +
+                                      "{7:F0} ns, deviation^2 x ns {8:F2}", pair, e == 0 ? "\"aggregate\"" : names[e], mean, deviation / Math.Sqrt(count), exact, deviation, lookups,
+                                      nanoseconds, deviation * deviation * nanoseconds);
+                    EXPECT_LT(Math.Abs(mean - exact), 4 * deviation / Math.Sqrt(count) + 5e-4);
+                }
             }
         }
 

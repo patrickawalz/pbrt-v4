@@ -172,6 +172,20 @@ namespace pbrt
             return w * f * emitted / p_e;
         }
 
+        // Once-more scattered next-event estimation from a point of the path, in the volume there, by the implementation that
+        // the volume asks for
+        private SampledSpectrum OnceMore(Services rs, VolumeContext ctx, Medium medium, Volume.OnceMoreStart start, PhaseFunction proposal, VolumeJoint at)
+        {
+            bool pathWeights = !(medium.volumeIntegrator.tracker is DecompositionTracker);
+            Medium savedMedium = ctx.medium;
+            ctx.medium = medium;
+            Volume volume = Volume.Create(ctx, medium);
+            SampledSpectrum result = medium.volumeIntegrator.onceMore == VolumeOnceMore.OnceMore ? volume.OnceMoreShare(rs, start, proposal, at, pathWeights)
+                                                                                                 : volume.OnceMoreShare2(rs, start, proposal, at, pathWeights);
+            ctx.medium = savedMedium;
+            return result;
+        }
+
         // The length of a ray that leaves the scene, for the volumes that are asked between two points
         private const Float Unbounded = 1e18f;
 
@@ -416,6 +430,7 @@ namespace pbrt
                 if (ls)
                 {
                     chosen.hasPoint = true;
+                    chosen.fixedPoint = light.Type() == LightType.DeltaPosition;
                     chosen.point = ls.value().pLight.p();
                 }
                 return true;
@@ -529,7 +544,7 @@ namespace pbrt
             }
             LightSampleContext origin = new LightSampleContext(new Point3fi(direct.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), direct.ray.time);
             pstd.optional<LightLiSample> pivot = light.SampleLi(origin, sampler.Get2D(), lambda, false);
-            return pivot ? direct.For(true, pivot.value().pLight.p()) : 1;
+            return pivot ? direct.For(true, type == LightType.DeltaPosition, pivot.value().pLight.p()) : 1;
         }
 
         private SampledSpectrum SampleLd(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler, VolumeDirectWeight direct)
@@ -606,6 +621,9 @@ namespace pbrt
             // What weighs the light that arrives straight from a light at the last point of a volume, where the volume gathered
             // a share of that light by itself (VolumeGeometry.direct); null where it did not
             VolumeDirectWeight direct = null;
+            // The collision of a volume that the next ray leaves from, where the volume draws two points jointly
+            // (VolumeGeometry.joint); null otherwise
+            VolumeJoint joint = null;
             bool specularBounce = true;
             LightSampleContext prevIntrCtx = default;
             VolumeContext ctx = new VolumeContext();
@@ -625,6 +643,9 @@ namespace pbrt
                 Point3f P;
                 VolumeGeometry g;
                 bool hit;
+                VolumeJoint pending = joint;
+                VolumeJoint surfaceJoint = null;
+                joint = null;
                 Medium medium = MediumTracking.Current(rs.stack);
                 if (medium != null)
                 {
@@ -635,6 +656,9 @@ namespace pbrt
                     ctx.mayScatterTwice = depth + 1 < maxDepth;
                     ctx.depth = depth;
                     ctx.throughput = beta;
+                    // (the point that this ray leaves from, where a volume draws two points jointly or puts one more scattering
+                    // before a light: for this ray only)
+                    ctx.joint = pending;
                     // The emission that the ray gathers in a medium that the last point of the path also sampled
                     ctx.emissionWeight = 1;
                     if (depth > 0 && !specularBounce && p_b > 0)
@@ -694,10 +718,28 @@ namespace pbrt
                     {
                         L += beta * SampleEmission(rs, ctx, point, false, default, g.phase, sampler, rs.stack, ctx.r, true);
                     }
+                    // One more scattering between this collision and a light at a position, where the volume asks for it
+                    // (Volume.OnceMoreShare): the light of the next collision, which the path may still reach
+                    if (g.joint != null && g.joint.onceMore != VolumeOnceMore.None && depth < maxDepth)
+                    {
+                        Medium here = MediumTracking.Current(rs.stack);
+                        if (here != null)
+                        {
+                            Volume.OnceMoreStart start = new Volume.OnceMoreStart();
+                            start.point = point;
+                            start.phase = g.phase;
+                            L += beta * OnceMore(rs, ctx, here, start, g.phase, g.joint);
+                        }
+                    }
                     pstd.optional<PhaseFunctionSample> ps = g.phase.Sample_p(point.wo, sampler.Get2D());
                     if (!ps || ps.value().pdf == 0)
                     {
                         break;
+                    }
+                    joint = g.joint;
+                    if (joint != null)
+                    {
+                        joint.phasePdf = ps.value().pdf;
                     }
                     beta *= ps.value().p / ps.value().pdf;
                     p_b = ps.value().pdf;
@@ -741,6 +783,34 @@ namespace pbrt
                     if (IsNonSpecular(bsdf.Flags()))
                     {
                         L += beta * SampleLd(rs, ctx, isect, true, bsdf, null, sampler, null);
+                        // One more scattering between this point and a light at a position, in the volume that the path
+                        // came through, where that volume asks for it (Volume.OnceMoreShare)
+                        Medium around = MediumTracking.Current(rs.stack);
+                        if (around != null && around.volumeIntegrator.onceMore != VolumeOnceMore.None && around.volumeIntegrator.scattering == VolumeScattering.Multiple &&
+                            !(around is AggregateMedium) && depth < maxDepth)
+                        {
+                            MediumProperties mp = around.SamplePoint(isect.p(), lambda, ray.time);
+                            if (mp.phase != null)
+                            {
+                                surfaceJoint = new VolumeJoint();
+                                surfaceJoint.side = FaceForward(isect.n, isect.wo);
+                                surfaceJoint.ray = new Ray(isect.p(), -isect.wo, ray.time);
+                                surfaceJoint.t = 0;
+                                surfaceJoint.product = 1;
+                                surfaceJoint.phase = mp.phase;
+                                surfaceJoint.onceMore = around.volumeIntegrator.onceMore;
+                                surfaceJoint.sided = true;
+                                Volume.OnceMoreStart start = new Volume.OnceMoreStart();
+                                start.point = isect;
+                                start.bsdf = bsdf;
+                                start.surface = true;
+                                start.side = surfaceJoint.side;
+                                start.place = new VolumePlace();
+                                start.place.medium = around;
+                                start.place.stack = rs.stack;
+                                L += beta * OnceMore(rs, ctx, around, start, mp.phase, null);
+                            }
+                        }
                         if (emissionLights.Count > 0)
                         {
                             L += beta * SampleEmission(rs, ctx, isect, true, bsdf, null, sampler, rs.stack, ctx.r, true);
@@ -757,6 +827,12 @@ namespace pbrt
                     p_b = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
                     specularBounce = bs.value().IsSpecular();
                     direct = null;
+                    // (the ray that leaves from here is a rival of the scattering that was put between here and a light)
+                    if (surfaceJoint != null && !specularBounce)
+                    {
+                        joint = surfaceJoint;
+                        joint.phasePdf = p_b;
+                    }
                     if (bs.value().IsTransmission())
                     {
                         etaScale *= Sqr(bs.value().eta);

@@ -919,3 +919,82 @@ levels 17.9 s, 0.1094, 0.214; with the walk 22.8 s, 0.1090, 0.271. In this scene
 transmittance's: all are within 7% in RMSE and the time decides.
 
 Not done: the hierarchy on NanoVDB and RGB grid media; data above 128^3; expensive lookups.
+
+## `aggregate2`, and joint double scattering beside the path (uncommitted after be4385a)
+
+**`aggregate2`** (`volumeaggregate2.cs`), beside `aggregate`, which is unchanged. The same octree answering as a medium:
+`SampleRay` gives one segment per leaf (`AggregateMajorantIterator`: majorant, control and mean are the sums over the
+leaf's volumes of the largest, smallest and mean density of each times its extinction; the control fraction is the smallest
+over the wavelengths, the mean fraction their mean), `SamplePoint` the sum of the leaf's volumes that hold the point with
+the mixture of their phase functions. So its volume is whichever `"scattering"` asks for and every tracker, estimator,
+`"distancesampling"`, `"doublescattering"`, `"emission"` applies; `emission_nee` as for `aggregate`. The octree gained the
+mean densities (`AggregateMember.MeanDensity`, `Node.meanDensity`). Not in `aggregate2`: control collisions without a
+lookup (`"tracker" "decomposition"` falls back to the majorant tracker) and spectral tracking among the members.
+
+**Joint double scattering at the path level** (`Volume.JointShare`; `"doublescattering" "joint"` or `"mis"` on a multiple
+scattering volume, homogeneous or tracked). On every ray: c in proportion to 1 / |ac|, then direction and distance of b
+jointly (Georgiev et al. 2013), b before any surface, lit from a light at a fixed position a. Weighed by the balance
+heuristic over the densities of the whole path with null collisions (Miller et al. 2019) against the path (collision c,
+phase function, collision b) and, with `"distancesampling"`, against the equiangular point at b: a three-way weight.
+`VolumeJoint` carries the collision c to the next ray (`VolumeGeometry.joint`, `VolumeContext.joint`),
+`VolumeDirectWeight.For` and `EquiangularShare` add the joint density. Only lights at a position (point, spot, ...): the
+weights are about the one point such a light has. `VolumeIntegrator.Create` no longer drops `"doublescattering"` when
+everything else is default.
+
+Tests:
+- `VolumeAggregate.Aggregate2Transmittance`: every estimator through `aggregate2` against quadrature, beside `aggregate`
+  (deviation; lookups; deviation^2 x ns), two rays: `aggregate` 0.064, 11.0, 25.7 and 0.085, 11.8, 51.5; ratio 0.064, 11.0,
+  31.8; residuallocal 0.0085, 8.3, 0.34 and 0.013, 9.2, 1.18; raymarching 0.0003, 23.5; bidirectional 0.011, 30.4, 1.78;
+  pseriescmf 0.015, 29.4, 2.37; residualtracking 0.053, 7.7, 10.0; unidirectional 0.043, 15.2, 15.8; nextflight 0.080, 7.2,
+  33.1; tracklength 0.157, 2.8, 52.5. Majorants bound the extinction at every wavelength. (The test double `Wall` gave a
+  walk the same random number twice, as `Known` once did; it has its own generator now.)
+- `ProductionSampling.JointBesideThePath`: light scattered once or twice, over two rays as the path tracer does it, in 18
+  combinations (homogeneous / tracked / decomposition x distances density / mis / equiangular x with and without joint): the
+  same mean; deviation, tracked: path 2.70, with MIS 0.76, joint 0.48, joint + MIS 0.28.
+
+Renders (production, 64 spp, 240x180; time without start-up; RMSE against 768 spp of joint + MIS; RMSE^2 x time). The two
+references of each scene (the old way at 1024-2048 spp, the new at 768) agree in mean to 1.0%, 0.45%, 0.35%.
+- three overlapping grid puffs with a point light inside: `aggregate` 12.8 s, 1.338, 22.9; `aggregate2` defaults 13.6 s,
+  1.267, 21.8; residuallocal 13.2 s, 1.234, 20.1; + equiangular MIS 18.5 s, 0.453, 3.80; + joint 18.3 s, 0.582, 6.19; + both
+  21.7 s, 0.314, 2.14.
+- lamp in homogeneous fog: path 8.4 s, 0.298, 0.745; equiangular MIS 11.4 s, 0.108, 0.134; joint 12.8 s, 0.212, 0.574; both
+  15.7 s, 0.061, 0.059.
+- lamp in grid smoke: path 9.6 s, 0.343, 1.127; equiangular MIS 11.6 s, 0.324, 1.217; joint 13.7 s, 0.332, 1.509; both
+  14.6 s, 0.117, 0.198.
+
+Not done: joint sampling for area lights (the pivot of the weights would have to be drawn as the strategy draws it); b in
+another medium or behind a surface; the tabulated phase-function products of the paper.
+
+## Once-more scattered next-event estimation (`"oncemore"`, uncommitted)
+
+Hanika, Weidlich and Droske 2022. `"string oncemore" "omnee" | "omnee2"` on a multiple-scattering medium; off by default.
+From a collision c of the volume, or a surface point with the volume on the side the path came from, one scattering b is
+put between c and a light at a position a (`Volume.OnceMoreShare`, `OnceMoreShare2`, `OnceMoreScattering`, called from
+`ProductionPath`). The deflection angle theta at b and the angle alpha at c parametrise b on the arc of the inscribed angle;
+in (theta, alpha, phi) the two inverse squared distances cancel to 1 / s, so alpha and phi are uniform (the paper's
+equation for t is the same thing) and the density per solid angle and length about c is p(theta) / (2 pi theta) s / |ba|^2.
+
+- `omnee`: as published, turned round to connect to the light. theta from the phase function, forward half only; the
+  transmittances and the phase function / BSDF at c stay in the weight.
+- `omnee2`: theta over all angles (a quarter uniform, so theta / sin(theta) stays bounded); four candidates resampled by
+  f(c -> b) x sigma_s(b) x phase(b) x exp(-mean extinction x length), for the BSDF / phase function at c, a varying sigma_s
+  and the transmittance.
+
+Both are weighed by the balance heuristic over whole-path densities against the path, the equiangular point and the joint
+pair (`VolumeJoint.OnceMore`, `Jointly`; `OnceMoreFinish`), so what one leaves out another covers.
+
+Test `ProductionSampling.OnceMoreBesideThePath`: 36 combinations (homogeneous / tracked g 0.9, decomposition g 0.3 x none /
+omnee / omnee2 x equiangular x joint), same mean. Deviation, homogeneous g 0.9: path 13.5, omnee 1.18, omnee2 1.18;
+decomposition g 0.3 without equiangular: path 2.73, omnee 2.20, omnee2 1.03.
+
+Renders (64 spp, 240x180, RMSE^2 x time against path 1536-2048 spp + omnee2 640-768 spp, which agree in mean to 0.1-0.5%):
+- haze g 0.92: path 9.65; equiangular MIS 8.69; joint + MIS 3.40; omnee 7.22; omnee + MIS 1.60; omnee2 + MIS 1.60.
+- grid haze g 0.92: path 10.5; MIS 6.38; joint + MIS 67.8 (one firefly); omnee + MIS 2.35; omnee2 + MIS 2.36.
+- glossy copper sphere in haze g 0.85: path 2.54; MIS 0.72; joint + MIS 0.84; omnee + MIS 0.62; omnee2 + MIS 0.60.
+- fog g 0.3: path 0.94; MIS 0.20; joint + MIS 0.124; omnee 0.77; omnee2 0.59; omnee + MIS 0.121; omnee2 + MIS 0.119.
+
+`omnee2` only beats `omnee` where nothing else covers the backward angles (no equiangular MIS, moderate g); with MIS the two
+are equal within noise, and the resampling did not show on the glossy sphere. It costs about 10% more.
+
+Not done: surfaces outside the medium that see the light through it (the floor's fireflies in these scenes); area lights;
+b in another medium; aggregates; with several lights the weights assume both points would choose the same one.
