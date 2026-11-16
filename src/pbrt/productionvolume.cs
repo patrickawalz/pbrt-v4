@@ -649,6 +649,23 @@ namespace pbrt
         // itself: int T(P0, x) sigma_a Le dx. An estimate whose densities are divided out already.
         public abstract SampledSpectrum Emission(VolumeServices rs, Point3f P0, Point3f P1);
 
+        // For a volume that may bend a ray (Medium.BendsRays): what Transmit gives, with the emission along the path of the
+        // ray if it is wanted (as EmissionOver gives it, with the densities `density` of the path that reaches the ray). The
+        // transmittance is zero where the ray, as it leaves, does not meet the box `further` (nothing is wanted beyond).
+        public virtual SampledSpectrum Gather(VolumeServices rs, Ray entering, Float tMax, bool gather, SampledSpectrum density, Bounds3f further,
+                                              out SampledSpectrum emitted, out bool bent, out bool hit, out Point3f P, out VolumeGeometry g, out Ray arrival)
+        {
+            bent = false;
+            hit = false;
+            P = default;
+            g = null;
+            arrival = entering;
+            Point3f end = entering.Apply(tMax);
+            emitted = gather ? EmissionOver(rs, entering.o, end, density) : new SampledSpectrum(0f);
+            Float t0, t1;
+            return further.IntersectP(end, entering.d, Infinity, &t0, &t1) ? Transmittance(rs, entering.o, end) : new SampledSpectrum(0f);
+        }
+
         // The same over the mean, over the wavelengths, of the densities of the whole path: those that reach P0, `density`,
         // times those of the tracking between the points where one wavelength samples it for the others. (The mean of a
         // product, and not the product of the means of the path and of the ray: the two lean the same way for a wavelength.)

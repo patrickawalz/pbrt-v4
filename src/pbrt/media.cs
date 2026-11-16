@@ -1917,6 +1917,10 @@ namespace pbrt
 
         public VolumeEmissionLight EmissionLight() { return emissionLight; }
 
+        // Whether the volume of this medium may bend a ray (RefractiveMedium): a ray through it is followed by
+        // Volume.Transmit or Volume.Gather
+        public virtual bool BendsRays() { return false; }
+
         // Next event estimation of the emission: the light that samples it, added to the lights of the scene by the integrators
         public void EnableEmissionSampling(int res, bool fnee)
         {
@@ -2022,6 +2026,11 @@ namespace pbrt
         // light; "float emissionmajorant": the emission-aware majorant
         public void CreateEmissionSampling(ParameterDictionary parameters, FileLoc loc)
         {
+            if (BendsRays())
+            {
+                // (a refractive medium: the settings are those of the medium that it holds, which has read them)
+                return;
+            }
             Float emissionMajorant = parameters.GetOneFloat("emissionmajorant", 0f);
             if (emissionMajorant < 0)
             {

@@ -35,7 +35,12 @@ namespace pbrt
             this.inner = inner;
             this.field = field;
             this.surfacesInside = surfacesInside;
+            // (the light that samples the emission of the held medium is this medium's: the directions that it draws are
+            // followed as the field bends them)
+            emissionLight = inner.emissionLight;
         }
+
+        public override bool BendsRays() { return true; }
 
         // "string medium": the type of the medium that is held, made from the same parameters.
         // "string indexfield" ("grid" | "bump" | "luneburg"):
@@ -107,8 +112,6 @@ namespace pbrt
                 return null;
             }
             Medium inner = held != null ? held : Medium.Create(innerName, parameters, renderFromMedium, loc, alloc);
-            if (inner.emissionLight != null)
-                ErrorExit(loc, "\"refractive\": the sampling of the emission (\"emission_nee\", \"emission_fnee\") is not for a refractive medium yet.");
             SampledSpectrum bound;
             Float control, average;
             if (!inner.MajorantOver(box, SampledWavelengths.SampleUniform(0.5f), out bound, out control, out average))
@@ -804,6 +807,8 @@ namespace pbrt
             }
             path.indexAtStart = path.pieces.Count > 0 ? path.pieces[0].largestIndex : Math.Sqrt(ray.vx * ray.vx + ray.vy * ray.vy + ray.vz * ray.vz);
             RefractivePiece piece;
+            // (the first of the pieces that have not been tested against the surfaces yet)
+            int untested = path.pieces.Count;
             while (ray.Next(out piece))
             {
                 bool curved = piece.ax != 0 || piece.ay != 0 || piece.az != 0;
@@ -814,26 +819,22 @@ namespace pbrt
                 {
                     piece.sigma = atPlane;
                 }
-                if (refractive.surfacesInside && piece.sigma > 0 && Stopped(rs, wi.time, ref piece, curved, path))
+                path.pieces.Add(piece);
+                path.sigma += piece.sigma;
+                if (refractive.surfacesInside && StoppedSoFar(rs, wi.time, path, ref untested, plane))
                 {
-                    path.pieces.Add(piece);
-                    path.sigma += piece.sigma;
                     return path;
                 }
                 if (plane)
                 {
                     double vx = piece.vx + atPlane * piece.ax, vy = piece.vy + atPlane * piece.ay, vz = piece.vz + atPlane * piece.az;
                     double n = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-                    path.pieces.Add(piece);
-                    path.sigma += piece.sigma;
                     path.atPlane = true;
                     path.P = piece.Point(atPlane);
                     path.arrival = new Ray(path.P, new Vector3f((Float)(vx / n), (Float)(vy / n), (Float)(vz / n)), wi.time);
                     path.indexAtEnd = n;
                     return path;
                 }
-                path.pieces.Add(piece);
-                path.sigma += piece.sigma;
                 if (path.pieces.Count > MostPieces)
                 {
                     // (a path that does not come out: it ends here, unseen)
@@ -844,6 +845,10 @@ namespace pbrt
                     path.lost = true;
                     return path;
                 }
+            }
+            if (refractive.surfacesInside && StoppedSoFar(rs, wi.time, path, ref untested, true))
+            {
+                return path;
             }
             // Beyond the field: straight, from a little before the point where the path left it (a surface that bounds the
             // medium may be the face of the box itself)
@@ -927,6 +932,122 @@ namespace pbrt
             }
             sigma = 2 * s / denominator;
             return sigma <= piece.sigma;
+        }
+
+        // The direction of a piece at a sigma
+        private static void DirectionAt(RefractivePiece piece, double sigma, out double dx, out double dy, out double dz)
+        {
+            dx = piece.vx + sigma * piece.ax;
+            dy = piece.vy + sigma * piece.ay;
+            dz = piece.vz + sigma * piece.az;
+            double n = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            dx /= n;
+            dy /= n;
+            dz /= n;
+        }
+
+        // The pieces of the path from `untested` on against the surfaces of the scene, the last one just added: as long
+        // as the path has turned by less than `Together` since the first of them they wait, to be tested as one chord
+        // (which is then within a ten-thousandth of its length of the path); a piece that turns by more than that itself
+        // is tested alone, by its own chords (Stopped). `now`: test what waits. True where a surface stops the path, which
+        // is then cut there.
+        private bool StoppedSoFar(VolumeServices rs, Float time, CurvedPath path, ref int untested, bool now)
+        {
+            const double Together = 4e-4;
+            int last = path.pieces.Count - 1;
+            if (untested > last)
+            {
+                return false;
+            }
+            double ax, ay, az, bx, by, bz;
+            DirectionAt(path.pieces[untested], 0, out ax, out ay, out az);
+            DirectionAt(path.pieces[last], path.pieces[last].sigma, out bx, out by, out bz);
+            double cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+            if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together)
+            {
+                if (last > untested)
+                {
+                    if (StoppedOnChord(rs, time, path, untested, last - 1))
+                    {
+                        return true;
+                    }
+                    untested = last;
+                    DirectionAt(path.pieces[last], 0, out ax, out ay, out az);
+                    cx = ay * bz - az * by;
+                    cy = az * bx - ax * bz;
+                    cz = ax * by - ay * bx;
+                }
+                if (Math.Sqrt(cx * cx + cy * cy + cz * cz) > Together)
+                {
+                    RefractivePiece alone = path.pieces[last];
+                    double whole = alone.sigma;
+                    untested = last + 1;
+                    if (alone.sigma > 0 && Stopped(rs, time, ref alone, true, path))
+                    {
+                        path.pieces[last] = alone;
+                        path.sigma -= whole - alone.sigma;
+                        return true;
+                    }
+                    return false;
+                }
+            }
+            if (now)
+            {
+                if (StoppedOnChord(rs, time, path, untested, last))
+                {
+                    return true;
+                }
+                untested = last + 1;
+            }
+            return false;
+        }
+
+        // Whether a surface stops the pieces `from` to `to` of the path, taken as the chord from the start of the first to
+        // the end of the last; the path is then cut at the piece that the surface is on.
+        private bool StoppedOnChord(VolumeServices rs, Float time, CurvedPath path, int from, int to)
+        {
+            Point3f a = path.pieces[from].Point(0), b = path.pieces[to].Point(path.pieces[to].sigma);
+            Float length = Distance(a, b);
+            if (!(length > 0))
+            {
+                return false;
+            }
+            Ray chord = new Ray(a, (b - a) / length, time);
+            Point3f P;
+            Float distance;
+            VolumeGeometry g;
+            if (!rs.GetNearestHit(chord, out P, out distance, out g) || !(distance <= length * (1 + 1e-4f)))
+            {
+                return false;
+            }
+            // The piece that the surface is on, by how far along the chord its ends are
+            Float before = 0;
+            for (int k = from; k <= to; ++k)
+            {
+                RefractivePiece piece = path.pieces[k];
+                Float after = k == to ? length : Dot(piece.Point(piece.sigma) - a, chord.d);
+                if (distance <= after || k == to)
+                {
+                    double at = after > before ? piece.sigma * Math.Min(Math.Max((distance - before) / (after - before), 0), 1) : 0;
+                    double vx = piece.vx + at * piece.ax, vy = piece.vy + at * piece.ay, vz = piece.vz + at * piece.az;
+                    for (int gone = path.pieces.Count - 1; gone > k; --gone)
+                    {
+                        path.sigma -= path.pieces[gone].sigma;
+                        path.pieces.RemoveAt(gone);
+                    }
+                    path.sigma -= piece.sigma - at;
+                    piece.sigma = at;
+                    path.pieces[k] = piece;
+                    path.hit = true;
+                    path.surface = g;
+                    path.P = P;
+                    path.arrival = chord;
+                    path.indexAtEnd = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                    return true;
+                }
+                before = after;
+            }
+            return false;
         }
 
         // Whether a surface stops a piece of the path: the piece against the scene as a chain of chords, as many as keep
@@ -1100,6 +1221,58 @@ namespace pbrt
             m_ctx.medium = curve;
             Float end = path.hit || path.atPlane ? (Float)path.sigma : Unbounded;
             SampledSpectrum T = Create(m_ctx, curve).Transmittance(along, new Point3f(0, 0, 0), new Point3f(end, 0, 0));
+            rs.rng = along.rng;
+            m_ctx.medium = saved;
+            return T * Seen(path.indexAtStart, path.indexAtEnd);
+        }
+
+        // The emission and the transmittance along the path of a ray, as Transmit follows it
+        public override SampledSpectrum Gather(VolumeServices rs, Ray entering, Float tMax, bool gather, SampledSpectrum density, Bounds3f further,
+                                               out SampledSpectrum emitted, out bool bent, out bool hit, out Point3f P, out VolumeGeometry g, out Ray arrival)
+        {
+            CurvedPath path = Trace(rs, entering);
+            Medium saved = m_ctx.medium;
+            bent = path.bent;
+            hit = path.hit;
+            P = path.P;
+            g = path.surface;
+            arrival = path.arrival;
+            emitted = new SampledSpectrum(0f);
+            if (!path.bent)
+            {
+                m_ctx.medium = refractive.inner;
+                Volume held = Create(m_ctx, refractive.inner);
+                Point3f end = entering.Apply(tMax);
+                if (gather)
+                {
+                    emitted = held.EmissionOver(rs, entering.o, end, density);
+                }
+                Float t0, t1;
+                SampledSpectrum straight = further.IntersectP(end, entering.d, Infinity, &t0, &t1) ? held.Transmittance(rs, entering.o, end) : new SampledSpectrum(0f);
+                m_ctx.medium = saved;
+                return straight;
+            }
+            if (path.lost)
+            {
+                return new SampledSpectrum(0f);
+            }
+            CurvedRayMedium curve = new CurvedRayMedium(refractive.inner, path, entering.time, AlongCurveSettings());
+            AlongCurve along = new AlongCurve();
+            along.renderer = rs;
+            along.path = path;
+            along.curve = curve;
+            along.medium = medium;
+            along.rng = rs.rng;
+            m_ctx.medium = curve;
+            Volume onCurve = Create(m_ctx, curve);
+            Point3f far = new Point3f(path.hit ? (Float)path.sigma : Unbounded, 0, 0);
+            if (gather)
+            {
+                emitted = onCurve.EmissionOver(along, new Point3f(0, 0, 0), far, density);
+            }
+            Float u0, u1;
+            SampledSpectrum T = path.hit && further.IntersectP(path.P, path.arrival.d, Infinity, &u0, &u1) ? onCurve.Transmittance(along, new Point3f(0, 0, 0), far)
+                                                                                                        : new SampledSpectrum(0f);
             rs.rng = along.rng;
             m_ctx.medium = saved;
             return T * Seen(path.indexAtStart, path.indexAtEnd);

@@ -127,6 +127,43 @@ namespace pbrt
             SampledSpectrum T = new SampledSpectrum(1f);
             while (true)
             {
+                Medium medium = MediumTracking.Current(stack);
+                if (medium != null && medium.BendsRays())
+                {
+                    // A volume that may bend the ray: the emission and the transmittance along the ray as it goes, to
+                    // the surface that it reaches
+                    pstd.optional<ShapeIntersection> ahead = Intersect(ray);
+                    ctx.SetP(ray.o);
+                    ctx.medium = medium;
+                    SampledSpectrum reaching = pathR * ctx.r;
+                    SampledSpectrum part;
+                    bool bent, hit;
+                    Point3f P;
+                    VolumeGeometry g;
+                    Ray arrival;
+                    SampledSpectrum through = Volume.Create(ctx, medium).Gather(rs, ray, ahead ? ahead.value().tHit : Unbounded, medium.EmissionLight() == light && (bool)reaching,
+                                                                                reaching, emissionBounds[index], out part, out bent, out hit, out P, out g, out arrival);
+                    emitted += T * part;
+                    T *= through;
+                    if (!bent)
+                    {
+                        hit = (bool)ahead;
+                        arrival = ray;
+                    }
+                    if (!hit || !T)
+                    {
+                        break;
+                    }
+                    SurfaceInteraction reached = bent ? g.surface.intr : ahead.value().intr;
+                    if (ThinCoatMaterial.Blocks(reached, arrival.d))
+                    {
+                        break;
+                    }
+                    ray = reached.SpawnRay(arrival.d);
+                    ray.d = Normalize(ray.d);
+                    MediumTracking.CrossSurface(ref stack, reached, ray.d);
+                    continue;
+                }
                 // (nothing more is gathered once the ray has left the box of the emission)
                 Float t0, t1;
                 if (!emissionBounds[index].IntersectP(ray.o, ray.d, Infinity, &t0, &t1))
@@ -134,7 +171,6 @@ namespace pbrt
                     break;
                 }
                 pstd.optional<ShapeIntersection> si = Intersect(ray);
-                Medium medium = MediumTracking.Current(stack);
                 if (medium != null)
                 {
                     Point3f end = ray.Apply(si ? si.value().tHit : Unbounded);
@@ -165,7 +201,7 @@ namespace pbrt
                 {
                     break;
                 }
-                ray = isect.SpawnRay(wi);
+                ray = isect.SpawnRay(ray.d);
                 MediumTracking.CrossSurface(ref stack, isect, ray.d);
             }
             ctx.r = savedR;
@@ -1178,7 +1214,8 @@ namespace pbrt
                         Float pmf = EmissionPmf(medium.EmissionLight());
                         if (pmf > 0)
                         {
-                            ctx.emissionWeight = p_b / (p_b + pmf * medium.EmissionLight().PdfDirection(prevIntrCtx.p(), unit.d, ray.time));
+                            // (by the direction that the path left its last point in, which a volume may have bent since)
+                            ctx.emissionWeight = p_b / (p_b + pmf * medium.EmissionLight().PdfDirection(prevIntrCtx.p(), Normalize(departure), ray.time));
                         }
                     }
                     Volume volume = Volume.Create(ctx, medium);
