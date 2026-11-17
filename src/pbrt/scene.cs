@@ -937,9 +937,23 @@ namespace pbrt
                     for (ulong k = 0; k < shapeObjects.size(); ++k)
                     {
                         Shape ps = shapeObjects[k];
-                        Light area = Light.CreateArea(areaLightEntity.name, areaLightEntity.parameters,
-                                                      renderFromObject, mi, ps, alphaTex,
-                                                      areaLightEntity.loc, alloc, renderFromObjectAnimated);
+                        Light area;
+                        if (areaLightEntity.name == "thermal" || areaLightEntity.name == "thermal2")
+                        {
+                            // (not in pbrt-v4) A glowing surface: the temperature may be a texture
+                            TextureParameterDictionary thermalParameters = new TextureParameterDictionary(areaLightEntity.parameters, textures);
+                            FloatTexture temperature = thermalParameters.GetFloatTexture("temperature", 1500f, alloc);
+                            area = DiffuseAreaLight.CreateThermal(renderFromObject, mi.outside, areaLightEntity.parameters,
+                                                                  areaLightEntity.parameters.ColorSpace(), temperature, ps, alphaTex,
+                                                                  renderFromObjectAnimated, areaLightEntity.name == "thermal2");
+                            areaLightEntity.parameters.ReportUnused();
+                        }
+                        else
+                        {
+                            area = Light.CreateArea(areaLightEntity.name, areaLightEntity.parameters,
+                                                    renderFromObject, mi, ps, alphaTex,
+                                                    areaLightEntity.loc, alloc, renderFromObjectAnimated);
+                        }
                         if (area != null)
                         {
                             lights.Add(area);
@@ -1113,6 +1127,8 @@ namespace pbrt
 
                             if (opacityTex != null && area is DiffuseAreaLight presentLight)
                                 presentLight.SetPresence(alphaTex);
+                            if (area is DiffuseAreaLight glowingLight && glowingLight.thermal != null)
+                                glowingLight.thermal.SetMaterial(mtl);
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(shapeObjs[j], mtl, ObjectIds.Hash(sh.loc)));
                             else
@@ -1190,6 +1206,8 @@ namespace pbrt
 
                             if (opacityTex != null && area is DiffuseAreaLight presentLight)
                                 presentLight.SetPresence(alphaTex);
+                            if (area is DiffuseAreaLight glowingLight && glowingLight.thermal != null)
+                                glowingLight.thermal.SetMaterial(mtl);
                             if (area == null && !mi.IsMediumTransition() && alphaTex == null)
                                 prims.Add(new SimplePrimitive(s, mtl));
                             else

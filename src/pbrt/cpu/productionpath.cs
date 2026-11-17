@@ -1,4 +1,4 @@
-// (not in pbrt-v4) cpu/productionpath.cs
+﻿// (not in pbrt-v4) cpu/productionpath.cs
 //
 // Integrator "production": the path tracer of Fong et al., "Production Volume Rendering" (SIGGRAPH 2017 course), section 3.
 // It is a surface path tracer (next event estimation and BSDF sampling, combined by the power heuristic) that knows nothing
@@ -20,10 +20,14 @@
 // (Volume.Integrate) is the other strategy for the same integral; the two share it by the densities of the direction
 // (SampleEmission, VolumeContext.emissionWeight).
 //
-// Not here: polarisation (the path is scalar), regularisation, and the equiangular sampling of volpath.
+// "bool polarised": the path carries the polarisation of the light (Li, PolarisedGather), and the sensor measures what
+// "analyser" and "measure" say, as "polpath" does. Not here: regularisation, and the equiangular sampling of volpath.
 
 using System;
 using System.Collections.Generic;
+
+using PLight = pbrt.PolarisedLightSystem.Light;
+using PAttenuation = pbrt.PolarisedLightSystem.Attenuation;
 
 namespace pbrt
 {
@@ -107,7 +111,7 @@ namespace pbrt
             }
             else
             {
-                f = new SampledSpectrum(phase.p(wo, wi));
+                f = phase.pSpectral(wo, wi);
                 scatterPdf = phase.PDF(wo, wi);
             }
             if (!f)
@@ -169,7 +173,21 @@ namespace pbrt
             ctx.r = savedR;
             ctx.SetP(savedP);
             ctx.medium = savedMedium;
-            return w * f * emitted / p_e;
+            SampledSpectrum scattered = w * f * emitted / p_e;
+            if (ctx.polar != null && (bool)scattered)
+            {
+                // The emission of a medium is unpolarised; the scattering towards the path polarises it
+                if (surface)
+                {
+                    ctx.polar.Add(scattered, PolarisedPathIntegrator.ConnectionAttenuation(bsdf, (SurfaceInteraction)intr, wo, wi, TransportMode.Radiance) *
+                                             new PLight(scattered));
+                }
+                else
+                {
+                    ctx.polar.ScatteredUnpolarised(scattered, phase, wo, wi);
+                }
+            }
+            return scattered;
         }
 
         // Once-more scattered next-event estimation from a point of the path, in the volume there, by the implementation that
@@ -216,6 +234,17 @@ namespace pbrt
 
             public override Float GenerateRandomNumber() { return sampler.Get1D(); }
 
+            // The light and the point on it of the light sample that is returned, for the polarisation of what it emits
+            // (PolarisedGather.emitter)
+            private static void Emitter(VolumeContext ctx, Light light, Interaction point)
+            {
+                if (ctx.polar != null)
+                {
+                    ctx.polar.emitter.light = light;
+                    ctx.polar.emitter.point = point;
+                }
+            }
+
             public override bool GenerateLightSample(VolumeContext ctx, MediumInteraction point, PhaseFunction phase, out Vector3f wi, out SampledSpectrum L,
                                                      out SampledSpectrum beamTransmittance, out SampledSpectrum beamR)
             {
@@ -238,6 +267,7 @@ namespace pbrt
                     return false;
                 }
                 wi = ls.value().wi;
+                Emitter(ctx, light, ls.value().pLight);
                 Float p_l = sampledLight.value().p * ls.value().pdf;
                 // (a volume that is scattered in once has no other way to the light: no heuristic)
                 L = ls.value().L / p_l;
@@ -262,6 +292,7 @@ namespace pbrt
                     return false;
                 }
                 wi = ls.value().wi;
+                Emitter(ctx, sampledLight.value().light, ls.value().pLight);
                 L = ls.value().L / (sampledLight.value().p * ls.value().pdf);
                 return true;
             }
@@ -290,6 +321,7 @@ namespace pbrt
                     return false;
                 }
                 wi = ls.value().wi;
+                Emitter(ctx, light, ls.value().pLight);
                 lightPdf = sampledLight.value().p * ls.value().pdf;
                 delta = IsDeltaLight(light.Type());
                 L = ls.value().L / lightPdf;
@@ -304,6 +336,7 @@ namespace pbrt
             {
                 L = new SampledSpectrum(0f);
                 emitted = new SampledSpectrum(0f);
+                Emitter(ctx, null, null);
                 SampledSpectrum T = new SampledSpectrum(1f);
                 BoundaryStack local = stack;
                 LightSampleContext lightContext = new LightSampleContext(point);
@@ -363,6 +396,7 @@ namespace pbrt
                             Float p_l = isect.areaLight == null ? 0 : integrator.lightSampler.PMF(lightContext, isect.areaLight) * isect.areaLight.PDF_Li(lightContext, wi, true);
                             L = PowerHeuristic(1, scatterPdf, 1, p_l) * Le;
                             reached = true;
+                            Emitter(ctx, isect.areaLight, isect);
                         }
                         break;
                     }
@@ -460,6 +494,7 @@ namespace pbrt
                     return false;
                 }
                 wi = ls.value().wi;
+                Emitter(ctx, light.light, ls.value().pLight);
                 L = ls.value().L / (light.probability * ls.value().pdf);
                 BoundaryStack unused;
                 beamTransmittance = integrator.ShadowTransmittance(this, ctx, point, ls.value().pLight, place != null ? place.stack : stack, out beamR, out unused);
@@ -590,7 +625,7 @@ namespace pbrt
             }
             else
             {
-                f = new SampledSpectrum(phase.p(wo, wi));
+                f = phase.pSpectral(wo, wi);
                 scatterPdf = phase.PDF(wo, wi);
             }
             if (!f)
@@ -610,12 +645,45 @@ namespace pbrt
             {
                 return new SampledSpectrum(0f);
             }
-            return DirectWeight(direct, light, sampler, ctx.lambda) * w * f * ls.value().L * T / p_l / r.Average();
+            SampledSpectrum lit = DirectWeight(direct, light, sampler, ctx.lambda) * w * f * ls.value().L * T / p_l / r.Average();
+            if (ctx.polar != null && (bool)lit)
+            {
+                // What the light emits towards the point, through the scattering there towards the path
+                PLight arriving = PolarisedEmission.AtPoint(light, ls.value().pLight, -wi, ctx.lambda, lit);
+                if (surface)
+                {
+                    ctx.polar.Add(lit, PolarisedPathIntegrator.ConnectionAttenuation(bsdf, (SurfaceInteraction)intr, wo, wi, TransportMode.Radiance) * arriving);
+                }
+                else if (PolarisedGather.PhaseMatrix(phase, wo, wi, out PAttenuation towardsLight))
+                {
+                    ctx.polar.Add(lit, towardsLight * arriving);
+                }
+            }
+            return lit;
+        }
+
+        // What a point of the path gathered goes into the light of the path, times the throughput: `gathered` as a spectrum,
+        // and, for the polarised path, as polarised light through the Mueller matrices of the path so far (`relative`: each
+        // over its first element, which the throughput has). What the strategies recorded since the last time is the
+        // polarised part of `gathered`, the rest is unpolarised (PolarisedGather).
+        private void Gather(ref SampledSpectrum L, ref PLight Lp, SampledSpectrum beta, PAttenuation relative, VolumeContext ctx, SampledSpectrum gathered)
+        {
+            L += beta * gathered;
+            if (ctx.polar != null)
+            {
+                Lp += relative * (ctx.polar.Take(gathered) * beta);
+            }
         }
 
         public override SampledSpectrum Li(RayDifferential ray, ref SampledWavelengths lambda, Sampler sampler, ScratchBuffer scratchBuffer, VisibleSurface visibleSurf)
         {
             SampledSpectrum L = new SampledSpectrum(0f), beta = new SampledSpectrum(1f);
+            // The polarised path: the light of the path as polarised light, and the product of the Mueller matrices of the path
+            // so far, each over its first element (Gather)
+            PLight Lp = PLight.Zero();
+            PAttenuation relative = PAttenuation.Identity();
+            Vector3f cameraDirection = -ray.d;
+            Ray cameraRay = new Ray(ray);
             int depth = 0;
             Float p_b = 0, etaScale = 1;
             // What weighs the light that arrives straight from a light at the last point of a volume, where the volume gathered
@@ -629,6 +697,10 @@ namespace pbrt
             VolumeContext ctx = new VolumeContext();
             ctx.lambda = lambda;
             ctx.time = ray.time;
+            if (polarised)
+            {
+                ctx.polar = new PolarisedGather();
+            }
             Services rs = new Services();
             rs.integrator = this;
             rs.sampler = sampler;
@@ -673,7 +745,7 @@ namespace pbrt
                     SampledSpectrum Lv, transmittance, weight;
                     Ray wo;
                     hit = volume.Integrate(rs, unit, out Lv, out transmittance, out weight, out P, out wo, out g);
-                    L += beta * Lv;
+                    Gather(ref L, ref Lp, beta, relative, ctx, Lv);
                     beta *= weight * transmittance;
                     if (!beta || !ctx.r)
                     {
@@ -693,12 +765,12 @@ namespace pbrt
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
                         if (depth == 0 || specularBounce)
                         {
-                            L += beta * Le0 / ctx.r.Average();
+                            Gather(ref L, ref Lp, beta, relative, ctx, Le0 / ctx.r.Average());
                         }
                         else
                         {
                             Float p_l = lightSampler.PMF(prevIntrCtx, light) * light.PDF_Li(prevIntrCtx, ray.d, true);
-                            L += beta * PowerHeuristic(1, p_b, 1, p_l) * Le0 / ctx.r.Average();
+                            Gather(ref L, ref Lp, beta, relative, ctx, PowerHeuristic(1, p_b, 1, p_l) * Le0 / ctx.r.Average());
                         }
                     }
                     break;
@@ -713,10 +785,10 @@ namespace pbrt
                     }
                     MediumInteraction point = g.scatter;
                     direct = g.direct;
-                    L += beta * SampleLd(rs, ctx, point, false, default, g.phase, sampler, direct);
+                    Gather(ref L, ref Lp, beta, relative, ctx, SampleLd(rs, ctx, point, false, default, g.phase, sampler, direct));
                     if (emissionLights.Count > 0)
                     {
-                        L += beta * SampleEmission(rs, ctx, point, false, default, g.phase, sampler, rs.stack, ctx.r, true);
+                        Gather(ref L, ref Lp, beta, relative, ctx, SampleEmission(rs, ctx, point, false, default, g.phase, sampler, rs.stack, ctx.r, true));
                     }
                     // One more scattering between this collision and a light at a position, where the volume asks for it
                     // (Volume.OnceMoreShare): the light of the next collision, which the path may still reach
@@ -728,7 +800,7 @@ namespace pbrt
                             Volume.OnceMoreStart start = new Volume.OnceMoreStart();
                             start.point = point;
                             start.phase = g.phase;
-                            L += beta * OnceMore(rs, ctx, here, start, g.phase, g.joint);
+                            Gather(ref L, ref Lp, beta, relative, ctx, OnceMore(rs, ctx, here, start, g.phase, g.joint));
                         }
                     }
                     pstd.optional<PhaseFunctionSample> ps = g.phase.Sample_p(point.wo, sampler.Get2D());
@@ -741,7 +813,15 @@ namespace pbrt
                     {
                         joint.phasePdf = ps.value().pdf;
                     }
-                    beta *= ps.value().p / ps.value().pdf;
+                    // (the value of the phase function for every wavelength, where it depends on the wavelength: the direction
+                    // was drawn with the first)
+                    beta *= g.phase.pSpectral(point.wo, ps.value().wi) / ps.value().pdf;
+                    if (polarised)
+                    {
+                        // (only the Rayleigh part of a phase function polarises; the others depolarise)
+                        relative *= PolarisedGather.PhaseMatrix(g.phase, point.wo, ps.value().wi, out PAttenuation scatteredPhase)
+                            ? scatteredPhase : PAttenuation.Lambert(new SampledSpectrum(1f));
+                    }
                     p_b = ps.value().pdf;
                     specularBounce = false;
                     prevIntrCtx = new LightSampleContext(point);
@@ -756,22 +836,33 @@ namespace pbrt
                     SampledSpectrum Le = isect.Le(-ray.d, lambda);
                     if ((bool)Le)
                     {
+                        SampledSpectrum seen;
                         if (depth == 0 || specularBounce || isect.areaLight == null)
                         {
-                            L += beta * Le / ctx.r.Average();
+                            seen = Le / ctx.r.Average();
                         }
                         else
                         {
                             Light areaLight = isect.areaLight;
                             Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) * areaLight.PDF_Li(prevIntrCtx, ray.d, true);
-                            L += beta * DirectWeight(direct, areaLight, sampler, ctx.lambda) * PowerHeuristic(1, p_b, 1, p_l) * Le / ctx.r.Average();
+                            seen = DirectWeight(direct, areaLight, sampler, ctx.lambda) * PowerHeuristic(1, p_b, 1, p_l) * Le / ctx.r.Average();
                         }
+                        if (polarised)
+                        {
+                            // (the light of a glowing surface is polarised: PolarisedEmission)
+                            ctx.polar.Add(seen, PolarisedEmission.AtHit(isect, -ray.d, lambda, seen));
+                        }
+                        Gather(ref L, ref Lp, beta, relative, ctx, seen);
                     }
                     BSDF bsdf = isect.GetBSDF(ray, ref lambda, camera, scratchBuffer, sampler);
                     ctx.lambda = lambda;
                     if (!bsdf)
                     {
                         // a surface that only bounds a volume
+                        if (polarised && PolarisedPathIntegrator.PassedCoat(isect, -ray.d, TransportMode.Radiance, out PAttenuation coat))
+                        {
+                            relative *= coat;
+                        }
                         isect.SkipIntersection(ref ray, tHit);
                         MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
                         continue;
@@ -782,7 +873,7 @@ namespace pbrt
                     }
                     if (IsNonSpecular(bsdf.Flags()))
                     {
-                        L += beta * SampleLd(rs, ctx, isect, true, bsdf, null, sampler, null);
+                        Gather(ref L, ref Lp, beta, relative, ctx, SampleLd(rs, ctx, isect, true, bsdf, null, sampler, null));
                         // One more scattering between this point and a light at a position, in the volume that the path
                         // came through, where that volume asks for it (Volume.OnceMoreShare)
                         Medium around = MediumTracking.Current(rs.stack);
@@ -808,22 +899,50 @@ namespace pbrt
                                 start.place = new VolumePlace();
                                 start.place.medium = around;
                                 start.place.stack = rs.stack;
-                                L += beta * OnceMore(rs, ctx, around, start, mp.phase, null);
+                                Gather(ref L, ref Lp, beta, relative, ctx, OnceMore(rs, ctx, around, start, mp.phase, null));
                             }
                         }
                         if (emissionLights.Count > 0)
                         {
-                            L += beta * SampleEmission(rs, ctx, isect, true, bsdf, null, sampler, rs.stack, ctx.r, true);
+                            Gather(ref L, ref Lp, beta, relative, ctx, SampleEmission(rs, ctx, isect, true, bsdf, null, sampler, rs.stack, ctx.r, true));
                         }
                     }
                     Vector3f wo = -ray.d;
                     Float u = sampler.Get1D();
-                    pstd.optional<BSDFSample> bs = bsdf.Sample_f(wo, u, sampler.Get2D());
+                    // (the polarised path asks the BxDFs that follow one path for the matrix of the path itself)
+                    bool pathPolarised = false;
+                    PAttenuation pathMatrix = default;
+                    Point2f u2 = sampler.Get2D();
+                    pstd.optional<BSDFSample> bs = polarised
+                        ? bsdf.Sample_f(wo, u, u2, TransportMode.Radiance, BxDFReflTransFlags.All, out pathPolarised, out pathMatrix)
+                        : bsdf.Sample_f(wo, u, u2);
                     if (!bs)
                     {
                         break;
                     }
                     beta *= bs.value().f * AbsDot(bs.value().wi, isect.shading.n) / bs.value().pdf;
+                    if (polarised)
+                    {
+                        // The matrix of the scattering over its first element (the throughput has that)
+                        PAttenuation scattered;
+                        if (pathPolarised)
+                        {
+                            relative *= pathMatrix;
+                        }
+                        else if (PolarisedPathIntegrator.SpecularAttenuation(bsdf, isect, wo, bs.value(), TransportMode.Radiance, out scattered))
+                        {
+                            relative *= scattered * SafeDiv(new SampledSpectrum(1f), scattered.GetIntensity());
+                        }
+                        else if (PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, wo, bs.value().wi, new SampledSpectrum(1f), TransportMode.Radiance,
+                                                                          out scattered))
+                        {
+                            relative *= scattered;
+                        }
+                        else
+                        {
+                            relative *= PAttenuation.Lambert(new SampledSpectrum(1f));
+                        }
+                    }
                     p_b = bs.value().pdfIsProportional ? bsdf.PDF(wo, bs.value().wi) : bs.value().pdf;
                     specularBounce = bs.value().IsSpecular();
                     direct = null;
@@ -857,6 +976,11 @@ namespace pbrt
                     beta /= 1 - q;
                 }
             }
+            if (polarised)
+            {
+                return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, lambda[0], Lp, analyser, analyserAngle, measurement, cameraDirection,
+                                                                cameraUp);
+            }
             return L;
         }
 
@@ -865,8 +989,21 @@ namespace pbrt
         public static ProductionPathIntegrator Create(ParameterDictionary parameters, Camera camera, Sampler sampler, Primitive aggregate, List<Light> lights,
                                                       FileLoc loc)
         {
-            return new ProductionPathIntegrator(parameters.GetOneInt("maxdepth", 5), camera, sampler, aggregate, lights, parameters.GetOneString("lightsampler", "bvh"));
+            ProductionPathIntegrator integrator = new ProductionPathIntegrator(parameters.GetOneInt("maxdepth", 5), camera, sampler, aggregate, lights,
+                                                                               parameters.GetOneString("lightsampler", "bvh"));
+            // ("bool polarised": the path carries the polarisation of the light, and the sensor measures what "analyser" and
+            // "measure" say, as "polpath" does)
+            integrator.polarised = parameters.GetOneBool("polarised", false);
+            PolarisedPathIntegrator.ParseSensor(parameters, loc, out integrator.analyser, out integrator.analyserAngle, out integrator.measurement);
+            integrator.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
+            return integrator;
         }
+
+        private bool polarised;
+        private bool analyser;
+        private Float analyserAngle;
+        private PolarisedPathIntegrator.Measurement measurement;
+        private Vector3f cameraUp;
 
         private int maxDepth;
         private LightSampler lightSampler;

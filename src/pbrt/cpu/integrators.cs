@@ -1,4 +1,4 @@
-// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
+﻿// pbrt is Copyright(c) 1998-2020 Matt Pharr, Wenzel Jakob, and Greg Humphreys.
 // The pbrt source code is licensed under the Apache License, Version 2.0.
 // SPDX: Apache-2.0
 // cpu/integrators.h / cpu/integrators.cpp
@@ -253,7 +253,11 @@ namespace pbrt
                                         RGBColorSpace colorSpace, FileLoc loc)
         {
             Integrator integrator = null;
-            if (name == "path")
+            // (not in pbrt-v4) "path" with "bool polarised" is the polarised path tracer ("polpath"): polarisation is an option of
+            // the integrators, not another integrator
+            if (name == "path" && parameters.GetOneBool("polarised", false))
+                integrator = PolarisedPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
+            else if (name == "path")
                 integrator = PathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "production")
                 integrator = ProductionPathIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
@@ -2006,6 +2010,8 @@ namespace pbrt
         }
 
         public SampledSpectrum L = new SampledSpectrum(0.0f);
+        // (the same light as polarised light, for polarised bdpt)
+        public PLight Lp = PLight.Zero();
         public int maxDepth;
     }
 
@@ -2062,6 +2068,18 @@ namespace pbrt
             return RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta, pdfDir,
                               maxDepth - 1, TransportMode.Radiance, path, 1, regularize, polarised, emissionEnds,
                               equiangularSink) + 1;
+        }
+
+        // (not in pbrt-v4) The Stokes vector of what the light at a vertex emits toward w, with the intensity `scalar`: lights are
+        // unpolarised except the glowing surfaces (PolarisedEmission)
+        public static PLight EmissionState(Vertex vertex, Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar)
+        {
+            // (a surface vertex gives its radiance by the point, as Vertex.Le asks for it)
+            if (vertex.type == VertexType.Surface && vertex.si != null && vertex.si.areaLight != null)
+                return PolarisedEmission.AtPoint(vertex.si.areaLight, vertex.si, w, lambda, scalar);
+            if (vertex.type == VertexType.Light && vertex.ei != null && vertex.ei.light != null)
+                return PolarisedEmission.AtPoint(vertex.ei.light, vertex.ei, w, lambda, scalar);
+            return new PLight(scalar);
         }
 
         public static int GenerateLightSubpath(Integrator integrator, ref SampledWavelengths lambda,
@@ -2131,9 +2149,11 @@ namespace pbrt
             // Follow light subpath random walk
             SampledSpectrum beta = les.value().L * les.value().AbsCosTheta(ray.d) / (p_l * les.value().pdfDir);
             path[0].stack = stack;
+            // (not in pbrt-v4) The Stokes vector of the emission along the first ray
+            PLight emission = polarised ? EmissionState(path[0], ray.d, lambda, beta) : default;
             int nVertices = RandomWalk(integrator, ref lambda, ray, stack, sampler, camera, scratchBuffer, beta,
                                        les.value().pdfDir, maxDepth - 1, TransportMode.Importance, path, 1,
-                                       regularize, polarised);
+                                       regularize, polarised, null, null, polarised, emission);
             // Correct subpath sampling densities for infinite area lights
             if (path[0].IsInfiniteLight())
             {
@@ -2159,7 +2179,8 @@ namespace pbrt
                                      SampledSpectrum beta, Float pdf, int maxDepth, TransportMode mode,
                                      Vertex[] path, int off, bool regularize, bool polarised = false,
                                      List<MediumEmissionEnd> emissionEnds = null,
-                                     BDPTEquiangularSink equiangularSink = null)
+                                     BDPTEquiangularSink equiangularSink = null, bool emissionPolarised = false,
+                                     PLight emission = default)
         {
             if (maxDepth == 0)
                 return 0;
@@ -2175,7 +2196,9 @@ namespace pbrt
             ctx.camera = camera;
             ctx.scratchBuffer = scratchBuffer;
             ctx.mode = mode;
-            ctx.st = new PathState(beta, new PAttenuation(beta), new PLight(beta), fromCamera, polarised, false);
+            // (a light subpath starts with the Stokes vector of the emission: the light of a glowing surface is polarised)
+            ctx.st = new PathState(beta, new PAttenuation(beta), emissionPolarised ? emission : new PLight(beta), fromCamera, polarised,
+                                   false);
             ctx.st.trackSegment = true;
             BDPTWalkHook hook = new BDPTWalkHook(path, off, maxDepth, pdf, regularize, emissionEnds, equiangularSink);
             try
@@ -2228,6 +2251,13 @@ namespace pbrt
                 segmentPieces = 0;
             }
 
+            // (a piece without a medium is a piece too: the equiangular vertex is for the piece that starts at the vertex, which is
+            // what the weights of the other strategies take it to be, BDPT.FirstPiece)
+            public override void OnBoundaryPassed(WalkContext ctx)
+            {
+                ++segmentPieces;
+            }
+
             public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
             {
                 ++segmentPieces;
@@ -2238,9 +2268,26 @@ namespace pbrt
                 int count = ctx.integrator.EquiangularCount(vIdx);
                 for (int i = 0; i < count; ++i)
                 {
-                    equiangularSink.L += SampleEquiangularVertex(ctx, medium, tMax, count);
+                    SampledSpectrum Lea = SampleEquiangularVertex(ctx, medium, tMax, count);
+                    equiangularSink.L += Lea;
+                    if (ctx.st.polarised && (bool)Lea)
+                    {
+                        // What the light emits towards the point, through the Mueller matrix of the scattering there and those of
+                        // the subpath (which have its throughput)
+                        PLight Lp = PolarisedEmission.AtPoint(equiangularEmitter.light, equiangularEmitter.point, -equiangularWi, ctx.lambda,
+                                                              Lea / BDPT.SafeBeta(ctx.st.beta));
+                        Lp = (PolarisedPathIntegrator.PhaseAttenuation(equiangularPoint.phase, equiangularPoint.wo, equiangularWi, true,
+                                                                       out PAttenuation M)
+                                  ? M : PAttenuation.Lambert(new SampledSpectrum(1.0f))) * Lp;
+                        equiangularSink.Lp += ctx.st.pa * Lp;
+                    }
                 }
             }
+
+            // The point, the direction to the light and the light of the last equiangular vertex, for its polarisation
+            MediumInteraction equiangularPoint;
+            Vector3f equiangularWi;
+            SampledEmitter equiangularEmitter;
 
             // (not in pbrt-v4) The contribution of the path that has a scattering point on the segment that the walk is about to sample,
             // found by choosing a light, a point on it and then the distance along the segment by the angle seen from that point
@@ -2339,6 +2386,7 @@ namespace pbrt
                         return zero;
                     radiance = Lemit * (cosY / r2);
                     target = yIntr;
+                    equiangularWi = wi;
                 }
                 else
                 {
@@ -2347,6 +2395,7 @@ namespace pbrt
                         return zero;
                     radiance = ls.value().L;
                     target = ls.value().pLight;
+                    equiangularWi = ls.value().wi;
                     pdfArea = 1;
                 }
                 EndpointInteraction ei = new EndpointInteraction(light, target);
@@ -2377,6 +2426,9 @@ namespace pbrt
                 Float average = denominator.Average();
                 if (!(average > 0))
                     return zero;
+                equiangularPoint = intr;
+                equiangularEmitter.light = light;
+                equiangularEmitter.point = target;
                 return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_conn * radiance / average;
             }
 
@@ -2851,7 +2903,7 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) The beta of a vertex where the wavelengths without throughput do not divide by zero
-        static SampledSpectrum SafeBeta(SampledSpectrum beta)
+        internal static SampledSpectrum SafeBeta(SampledSpectrum beta)
         {
             SampledSpectrum safe = beta;
             for (int i = 0; i < NSpectrumSamples; ++i)
@@ -2863,12 +2915,16 @@ namespace pbrt
         }
 
         // (not in pbrt-v4) The Mueller matrix of the scattering at a connection vertex toward wi, with the scalar BSDF or phase
-        // function divided out: a Rayleigh scattering in a medium polarises, every other scattering depolarises
+        // function divided out: the Rayleigh scattering in a medium and the surfaces as the path tracers have them
+        // (PolarisedPathIntegrator.ConnectionAttenuation)
         static PAttenuation ConnectionMueller(Vertex v, Vector3f wi, bool fromCamera)
         {
             if (v.type == VertexType.Medium &&
                 PolarisedPathIntegrator.PhaseAttenuation(v.mi.phase, v.mi.wo, wi, fromCamera, out PAttenuation M))
                 return M;
+            if (v.type == VertexType.Surface && v.si != null && (bool)v.bsdf)
+                return PolarisedPathIntegrator.ConnectionAttenuation(v.bsdf, v.si, v.si.wo, wi,
+                                                                     fromCamera ? TransportMode.Radiance : TransportMode.Importance);
             return PAttenuation.Lambert(new SampledSpectrum(1.0f));
         }
 
@@ -2909,6 +2965,9 @@ namespace pbrt
 
             // Perform connection and write contribution to _L_
             Vertex sampled = new Vertex();
+            // (not in pbrt-v4) The direction of the light sample of s = 1, as the light was asked for its radiance: the polarised
+            // emission is asked for the same direction (PolarisedEmission)
+            Vector3f sampledWi = default;
             if (s == 0)
             {
                 // Interpret the camera subpath as a complete path
@@ -2974,6 +3033,7 @@ namespace pbrt
                         if (lightWeight && (bool)lightWeight.value().L && lightWeight.value().pdf > 0)
                         {
                             EndpointInteraction ei = new EndpointInteraction(light, lightWeight.value().pLight);
+                            sampledWi = lightWeight.value().wi;
                             sampled = Vertex.CreateLight(ei, lightWeight.value().L / (lightWeight.value().pdf * p_l), 0);
                             sampled.pdfFwd = sampled.PDFLightOrigin(integrator.infiniteLights, pt, lightSampler);
                             if (volumeLight != null)
@@ -3037,9 +3097,23 @@ namespace pbrt
             {
                 PLight lightSide = new PLight(new SampledSpectrum(1.0f));
                 PAttenuation cameraSide = PAttenuation.Identity();
-                if (s > 0)
+                if (s == 0)
                 {
-                    Vertex qs = s == 1 && t > 1 ? sampled : lightVertices[s - 1];
+                    // The camera subpath ends on the light: what it emits toward the vertex before
+                    Vertex pt = cameraVertices[t - 1];
+                    if (pt.type == VertexType.Surface)
+                        lightSide = EmissionState(pt, Normalize(cameraVertices[t - 2].p() - pt.p()), lambda, new SampledSpectrum(1.0f));
+                }
+                else if (s == 1)
+                {
+                    // The light vertex itself: what it emits toward the vertex that it is connected to
+                    Vertex qs = t > 1 ? sampled : lightVertices[0];
+                    Vector3f toVertex = t == 1 ? toCamera : -sampledWi;
+                    lightSide = EmissionState(qs, toVertex, lambda, new SampledSpectrum(1.0f));
+                }
+                else
+                {
+                    Vertex qs = lightVertices[s - 1];
                     lightSide = qs.plight;
                     lightSide /= SafeBeta(qs.beta);
                     if (s > 1 && t > 0)
@@ -3090,7 +3164,7 @@ namespace pbrt
             : base(camera, sampler, aggregate, EmissionLightsForBDPT(lights))
         {
             // (not in pbrt-v4) Equiangular sampling of the scattering points next to point and area lights (see BDPT.EquiangularTerm)
-            this.bdptEquiangular = equiangular && sensor == null;
+            this.bdptEquiangular = equiangular;
             if (this.bdptEquiangular)
             {
                 List<Light> supported = new List<Light>();
@@ -3249,7 +3323,13 @@ namespace pbrt
             }
 
             if (equiangularSink != null)
-                L += equiangularSink.L;
+            {
+                // (the polarised light of the equiangular vertices, as the sensor measures it)
+                L += sensor != null
+                    ? PolarisedPathIntegrator.MeasureCameraRay(camera, new Ray(ray), lambda[0], equiangularSink.Lp, sensor.analyser,
+                                                               sensor.analyserAngle, sensor.measurement, -ray.d, sensor.cameraUp)
+                    : equiangularSink.L;
+            }
 
             // (not in pbrt-v4) The emission that the camera subpath gathered in media: each end is a path of its own, with the
             // vertices of the subpath before it, and its MIS weight against the strategies that sample the medium as a light
@@ -3329,10 +3409,8 @@ namespace pbrt
             // that sample the media as lights; false leaves the emission to those strategies alone
             bool gatherMediumEmission = parameters.GetOneBool("gathermediumemission", true);
             // (not in pbrt-v4) Equiangular sampling of the scattering points of the camera subpaths next to point and area lights
-            // (Fong et al., 4.2); not with polarised light
+            // (Fong et al., 4.2)
             bool equiangular = parameters.GetOneBool("equiangular", false);
-            if (equiangular && parameters.GetOneBool("polarised", false))
-                Warning(loc, "\"equiangular\" is not used with \"polarised\" bdpt.");
             // (not in pbrt-v4) "all" or "unidirectional" (see Integrator.StrategyAllowed)
             string strategies = parameters.GetOneString("strategies", "all");
             if (strategies != "all" && strategies != "unidirectional")
@@ -5646,7 +5724,7 @@ namespace pbrt
                 // factor of beta, so its first element is beta
                 st = new PathState(new SampledSpectrum(1.0f), PAttenuation.Identity(), PLight.Zero(), true, polarised, true)
             };
-            ctx.st.trackSegment = ((equiangular || uniformDistance) && !polarised) || shadowAware;
+            ctx.st.trackSegment = equiangular || uniformDistance || shadowAware;
             VolPathWalkHook hook = new VolPathWalkHook(this, visibleSurf, -ray.d);
             try
             {
@@ -5708,12 +5786,33 @@ namespace pbrt
             SampledSpectrum scatterRl0;
             Float scatterPdf;
 
+            // The light of a point sampled on the segment (SampleSegmentPoint): for the polarised path, what the light emits
+            // towards the point through the Mueller matrix of the scattering there
+            void SegmentLight(WalkContext ctx, Medium medium, EquiangularSegment seg, bool uniform)
+            {
+                if (!polarised)
+                {
+                    L += vp.SampleSegmentPoint(ctx, medium, seg, uniform, ctx.st.beta, out MediumInteraction _, out Vector3f _, out SampledEmitter _);
+                    return;
+                }
+                SampledSpectrum Ls = vp.SampleSegmentPoint(ctx, medium, seg, uniform, new SampledSpectrum(1.0f), out MediumInteraction at,
+                                                           out Vector3f wi, out SampledEmitter emitter);
+                if (!Ls)
+                {
+                    return;
+                }
+                PLight Lp = PolarisedEmission.AtPoint(emitter.light, emitter.point, -wi, ctx.lambda, Ls);
+                Lp = (PolarisedPathIntegrator.PhaseAttenuation(at.phase, at.wo, wi, true, out PAttenuation M)
+                          ? M : PAttenuation.Lambert(new SampledSpectrum(1.0f))) * Lp;
+                pL += ctx.st.pa * Lp;
+            }
+
             public override void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
             {
                 equiangularSegment.active = false;
-                // The strategies of the walk's segment: equiangular and uniform distances for the scalar path, and the planet's shadow
-                // for both (the polarised path takes the Mueller matrix of the scattering at the point, see SampleShadowAware)
-                bool classic = (vp.equiangular || vp.uniformDistance) && !polarised;
+                // The strategies of the walk's segment: equiangular and uniform distances, and the planet's shadow (the polarised
+                // path takes the Mueller matrix of the scattering at the point of each: SegmentLight)
+                bool classic = vp.equiangular || vp.uniformDistance;
                 AtmosphereMedium atmosphere = vp.shadowAware ? medium as AtmosphereMedium : null;
                 if (!classic && atmosphere == null)
                 {
@@ -5742,12 +5841,12 @@ namespace pbrt
                 {
                     for (int i = 0; i < seg.count; ++i)
                     {
-                        L += vp.SampleSegmentPoint(ctx, medium, seg, false);
+                        SegmentLight(ctx, medium, seg, false);
                     }
                 }
                 if (seg.pdfUniform > 0)
                 {
-                    L += vp.SampleSegmentPoint(ctx, medium, seg, true);
+                    SegmentLight(ctx, medium, seg, true);
                 }
                 if (atmosphere != null)
                 {
@@ -5869,10 +5968,11 @@ namespace pbrt
                 if (polarised)
                 {
                     SampledSpectrum Ld = vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f), ctx.st.r_u,
-                                                     ctx.stack, depth < maxDepth, out Vector3f wiLight, seg);
+                                                     ctx.stack, depth < maxDepth, out Vector3f wiLight, out SampledEmitter emitter, seg);
                     if ((bool)Ld)
                     {
-                        PLight Lp = new PLight(Ld);
+                        // (the light of a glowing surface is polarised: PolarisedEmission)
+                        PLight Lp = PolarisedEmission.AtPoint(emitter.light, emitter.point, -wiLight, ctx.lambda, Ld);
                         PAttenuation M;
                         if (PolarisedPathIntegrator.PhaseAttenuation(mp.phase, intr.wo, wiLight, true, out M))
                             Lp = M * Lp;
@@ -5882,7 +5982,7 @@ namespace pbrt
                 else
                 {
                     L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
-                                     out Vector3f _, seg);
+                                     out Vector3f _, out SampledEmitter _, seg);
                 }
                 phaseBsdf = intr.GetBSDF();
                 return true;
@@ -5977,7 +6077,7 @@ namespace pbrt
                     {
                         L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
                         if (polarised)
-                            pL += ctx.st.pa * new PLight(LeSurf / ctx.st.r_u.Average());
+                            pL += ctx.st.pa * PolarisedEmission.AtHit(isect, -ctx.ray.d, ctx.lambda, LeSurf / ctx.st.r_u.Average());
                     }
                     else
                     {
@@ -6020,7 +6120,8 @@ namespace pbrt
                         ctx.st.r_l *= p_l;
                         L += ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average();
                         if (polarised)
-                            pL += ctx.st.pa * new PLight(LeSurf / (ctx.st.r_u + ctx.st.r_l).Average());
+                            pL += ctx.st.pa * PolarisedEmission.AtHit(isect, -ctx.ray.d, ctx.lambda,
+                                                                      LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average());
                     }
                 }
             }
@@ -6069,16 +6170,20 @@ namespace pbrt
                 {
                     if (polarised)
                     {
-                        PLight Lp = new PLight(vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
-                                                           ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f wiLight));
-                        if (PolarisedPathIntegrator.RoughAttenuation(bsdf, isect, isect.wo, wiLight, new SampledSpectrum(1.0f),
-                                                                     TransportMode.Radiance, out PAttenuation Mr))
-                            Lp = Mr * Lp;
-                        pL += ctx.st.pa * Lp;
+                        SampledSpectrum Ld = vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
+                                                         ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f wiLight,
+                                                         out SampledEmitter emitter);
+                        if ((bool)Ld)
+                        {
+                            PLight Lp = PolarisedEmission.AtPoint(emitter.light, emitter.point, -wiLight, ctx.lambda, Ld);
+                            // (the Mueller matrix of the scattering toward the light, of every material that has one)
+                            Lp = PolarisedPathIntegrator.ConnectionAttenuation(bsdf, isect, -ctx.ray.d, wiLight, TransportMode.Radiance) * Lp;
+                            pL += ctx.st.pa * Lp;
+                        }
                     }
                     else
                         L += vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack,
-                                         depth < maxDepth, out Vector3f _);
+                                         depth < maxDepth, out Vector3f _, out SampledEmitter _);
                     DCHECK(IsInf(L.y(ctx.lambda)) == false);
                 }
                 scatterValid = false;
@@ -6169,11 +6274,15 @@ namespace pbrt
 
                     // Account for attenuated direct illumination subsurface scattering
                     if (polarised)
-                        pL += ctx.st.pa * new PLight(vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
-                                                                 ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f _));
+                    {
+                        SampledSpectrum LdSw = vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, new SampledSpectrum(1.0f),
+                                                           ctx.st.r_u, ctx.stack, depth < maxDepth, out Vector3f wiSw,
+                                                           out SampledEmitter emitterSw);
+                        pL += ctx.st.pa * PolarisedEmission.AtPoint(emitterSw.light, emitterSw.point, -wiSw, ctx.lambda, LdSw);
+                    }
                     else
                         L += vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
-                                         out Vector3f _);
+                                         out Vector3f _, out SampledEmitter _);
 
                     // Sample ray for indirect subsurface scattering
                     Float uSw = ctx.sampler.Get1D();
@@ -6321,8 +6430,14 @@ namespace pbrt
         // collision, then a connection to the light, SampleLd; the direction of the phase function reaching the light; the other
         // sample) are the spectral ones: all are found with the same ratios r_u0 (the path up to the segment) and the segment's null
         // collisions, as the walk (r_u) and as a connection (r_l) samples them.
-        SampledSpectrum SampleSegmentPoint(WalkContext ctx, Medium medium, EquiangularSegment segment, bool uniform)
+        // (`beta`: the throughput of the path, or one for the polarised path, which applies its own; the point, the direction to
+        // the light and the light are returned for the polarisation)
+        SampledSpectrum SampleSegmentPoint(WalkContext ctx, Medium medium, EquiangularSegment segment, bool uniform, SampledSpectrum beta,
+                                           out MediumInteraction scatterPoint, out Vector3f wiOut, out SampledEmitter emitter)
         {
+            scatterPoint = default;
+            wiOut = default;
+            emitter = default;
             SampledSpectrum zero = new SampledSpectrum(0.0f);
             SampledWavelengths lambda = ctx.lambda;
             Sampler sampler = ctx.sampler;
@@ -6500,7 +6615,11 @@ namespace pbrt
                 if ((bool)density)
                     r_total += r_u0 * rl_seg * rl_light * (density * (PmfOrZero(segment.context, light) * pdfSolidAngle));
             }
-            return ctx.st.beta * T_seg * mp.sigma_s * f_hat * T_light * Lemit / r_total.Average();
+            scatterPoint = intr;
+            wiOut = wiLight;
+            emitter.light = light;
+            emitter.point = target;
+            return beta * T_seg * mp.sigma_s * f_hat * T_light * Lemit / r_total.Average();
         }
 
         // (not in pbrt-v4) The density of the shadow-aware strategy for the distance t on the segment, for every wavelength, if the
@@ -6661,10 +6780,12 @@ namespace pbrt
         SampledSpectrum SampleLd(Interaction intr, BSDF? bsdf,
                                  SampledWavelengths lambda, Sampler sampler,
                                  SampledSpectrum beta, SampledSpectrum r_p, BoundaryStack stack, bool volumeEmissionAllowed,
-                                 out Vector3f wiLight, EquiangularSegment equiangularSegment = null)
+                                 out Vector3f wiLight, out SampledEmitter emitter, EquiangularSegment equiangularSegment = null)
         {
-            // (not in pbrt-v4) The direction of the light sample, for the polarisation of the scattering toward it
+            // (not in pbrt-v4) The direction of the light sample, for the polarisation of the scattering toward it, and the light
+            // and the point on it, for the polarisation of its emission
             wiLight = default;
+            emitter = default;
             // Estimate light-sampled direct illumination at _intr_
             // Initialize _LightSampleContext_ for volumetric light sampling
             LightSampleContext ctx = LightContextAt(intr, bsdf.HasValue, bsdf.HasValue ? bsdf.Value.Flags() : default);
@@ -6696,6 +6817,8 @@ namespace pbrt
             if (!ls || !ls.value().L || ls.value().pdf == 0)
                 return new SampledSpectrum(0.0f);
             Float p_l = sampledLight.value().p * ls.value().pdf;
+            emitter.light = light;
+            emitter.point = ls.value().pLight;
 
             // Evaluate BSDF or phase function for light sample direction
             Float scatterPDF;

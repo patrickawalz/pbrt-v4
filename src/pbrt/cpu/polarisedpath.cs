@@ -365,13 +365,15 @@ namespace pbrt
                 SampledSpectrum Le = si.value().intr.Le(-ray.d, lambda);
                 if ((bool)Le)
                 {
+                    // (the light of a glowing surface is polarised: PolarisedEmission)
                     if (depth == 0 || specularBounce)
-                        L += beta * new PLight(Le);
+                        L += beta * PolarisedEmission.AtHit(si.value().intr, -ray.d, lambda, Le, roughPolarisation);
                     else
                     {
                         Light areaLight = si.value().intr.areaLight;
                         Float p_l = lightSampler.PMF(prevIntrCtx, areaLight) * areaLight.PDF_Li(prevIntrCtx, ray.d, true);
-                        L += beta * new PLight(PowerHeuristic(1, p_b, 1, p_l) * Le);
+                        L += beta * PolarisedEmission.AtHit(si.value().intr, -ray.d, lambda, PowerHeuristic(1, p_b, 1, p_l) * Le,
+                                                            roughPolarisation);
                     }
                 }
 
@@ -394,10 +396,10 @@ namespace pbrt
                     // The BxDF gives the matrix with the value it is asked for anyway (one evaluation); the rough conductor and
                     // dielectric of pbrt have theirs built here
                     SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler, out Vector3f wiLight, out bool matrixKnown,
-                                                  out Attenuation M);
+                                                  out Attenuation M, out SampledEmitter emitter);
                     if ((bool)Ld)
                     {
-                        PLight Lp = new PLight(Ld);
+                        PLight Lp = PolarisedEmission.AtPoint(emitter.light, emitter.point, -wiLight, lambda, Ld, roughPolarisation);
                         if (matrixKnown ||
                             (roughPolarisation && StockRough(bsdf) &&
                              RoughAttenuation(bsdf, isect, -ray.d, wiLight, new SampledSpectrum(1.0f), TransportMode.Radiance, out M)))
@@ -505,6 +507,20 @@ namespace pbrt
         }
 
         // Whether the rough matrix of the BSDF is built by RoughAttenuation itself (the BxDFs of pbrt), not by the BxDF
+        // The Mueller matrix of the scattering of a pair of directions at a surface, with the scalar value of the BSDF divided
+        // out: for a connection (a light sample, a connection of bidirectional subpaths), whose scalar factors the integrator
+        // has already. The BxDFs that have a matrix give it with the value; the rough conductor and dielectric of pbrt have
+        // theirs built by RoughAttenuation; every other scattering depolarises.
+        public static Attenuation ConnectionAttenuation(BSDF bsdf, SurfaceInteraction isect, Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            bsdf.f(wo, wi, mode, out bool known, out Attenuation matrix);
+            if (known)
+                return matrix;
+            if (RoughAttenuation(bsdf, isect, wo, wi, new SampledSpectrum(1.0f), mode, out matrix))
+                return matrix;
+            return Attenuation.Lambert(new SampledSpectrum(1.0f));
+        }
+
         static bool StockRough(BSDF bsdf)
         {
             BxDF bxdf = bsdf.GetBxDF();
@@ -512,8 +528,9 @@ namespace pbrt
         }
 
         SampledSpectrum SampleLd(SurfaceInteraction intr, BSDF bsdf, ref SampledWavelengths lambda, Sampler sampler,
-                                 out Vector3f wiLight, out bool matrixKnown, out Attenuation matrix)
+                                 out Vector3f wiLight, out bool matrixKnown, out Attenuation matrix, out SampledEmitter emitter)
         {
+            emitter = default;
             wiLight = default;
             matrixKnown = false;
             matrix = default;
@@ -535,6 +552,8 @@ namespace pbrt
             if (!ls || !ls.value().L || ls.value().pdf == 0)
                 return new SampledSpectrum(0.0f);
 
+            emitter.light = light;
+            emitter.point = ls.value().pLight;
             Vector3f wo = intr.wo, wi = ls.value().wi;
             SampledSpectrum f = (roughPolarisation && !StockRough(bsdf)
                                      ? bsdf.f(wo, wi, TransportMode.Radiance, out matrixKnown, out matrix)

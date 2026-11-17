@@ -396,7 +396,20 @@ namespace pbrt
         {
             // Estimate $(u,v)$ and position differentials at intersection point
             ComputeDifferentials(ray, camera, sampler.SamplesPerPixel());
+            return ResolveBSDF(ray.d, ref lambda, scratchBuffer, sampler);
+        }
 
+        // (not in pbrt-v4) The BSDF of a point that no camera ray reached (the emission of a glowing surface asks for the
+        // reflectance of its own material: see ThermalEmission): there are no differentials, and the textures are not filtered
+        public BSDF GetBSDF(Vector3f rayDirection, ref SampledWavelengths lambda, ScratchBuffer scratchBuffer)
+        {
+            dudx = dudy = dvdx = dvdy = 0;
+            dpdx = dpdy = new Vector3f(0, 0, 0);
+            return ResolveBSDF(rayDirection, ref lambda, scratchBuffer, null);
+        }
+
+        private BSDF ResolveBSDF(Vector3f rayDirection, ref SampledWavelengths lambda, ScratchBuffer scratchBuffer, Sampler sampler)
+        {
             // Resolve _MixMaterial_ if necessary
             // (not in pbrt-v4) The model of the normal map of a mix is the one of the materials in it that have none
             NormalMapParams mixNormalMapModel = null;
@@ -413,7 +426,7 @@ namespace pbrt
                 return default;
             // (not in pbrt-v4) A thin coat that the ray goes through is a null material for this ray
             ThinCoatMaterial coat = material as ThinCoatMaterial;
-            if (coat != null && coat.PassesThrough(this, ray.d))
+            if (coat != null && coat.PassesThrough(this, rayDirection))
                 return default;
 
             Vector3f unperturbedN = (Vector3f)shading.n;
@@ -473,7 +486,7 @@ namespace pbrt
                 if (nm.Valid())
                     bsdf = new BSDF(n, shading.n, shading.dpdu, scratchBuffer.Alloc(nm));
             }
-            if (bsdf && pbrt.GetOptions().forceDiffuse)
+            if (bsdf && sampler != null && pbrt.GetOptions().forceDiffuse)
             {
                 // Override _bsdf_ with diffuse equivalent
                 SampledSpectrum r = bsdf.rho(wo, new pstd.span<Float>(new Float[] { sampler.Get1D() }),
@@ -498,7 +511,13 @@ namespace pbrt
         public SampledSpectrum Le(Vector3f w, SampledWavelengths lambda)
         {
             if (areaLight != null)
+            {
+                // (not in pbrt-v4) A glowing surface knows the whole surface at the hit, not only the point
+                DiffuseAreaLight thermalLight = areaLight as DiffuseAreaLight;
+                if (thermalLight != null && thermalLight.thermal != null)
+                    return thermalLight.L(this, w, lambda);
                 return areaLight.L(p(), n, uv, w, lambda, time);
+            }
             // (not in pbrt-v4) A surface with an OSL shader emits what the emission closures of the shader say
             OSLMaterial oslMaterial = material as OSLMaterial;
             if (oslMaterial != null)

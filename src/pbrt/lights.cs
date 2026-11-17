@@ -1121,6 +1121,44 @@ namespace pbrt
         // an OSL surface is seen from both sides.
         public OSLMaterial oslMaterial = null;
         public int oslObjectId = 0;
+
+        // (not in pbrt-v4) A glowing surface ("thermal"): the radiance is that of a blackbody of the temperature of the surface
+        // times the absorbance of the material of the shape (see ThermalEmission)
+        public ThermalEmission thermal = null;
+
+        // The radiance toward w at a hit of the surface of a glowing light: the tests of L(), with the surface of the hit
+        public SampledSpectrum L(SurfaceInteraction intr, Vector3f w, SampledWavelengths lambda)
+        {
+            if (!twoSided && pbrt.Dot(intr.n, w) < 0)
+                return new SampledSpectrum(0.0f);
+            if (animated == null)
+            {
+                if (AlphaMasked(new Interaction(intr.p(), intr.uv)))
+                    return new SampledSpectrum(0.0f);
+            }
+            else if (alpha != null && AlphaMasked(new Interaction(animated.ApplyInverse(intr.p(), intr.time), intr.uv)))
+            {
+                return new SampledSpectrum(0.0f);
+            }
+            return thermal.Radiance(intr, w, lambda);
+        }
+
+        // The Stokes vector of the radiance toward w of a glowing light, at a hit and at a point sampled on the shape. The tests
+        // are those of the scalar radiance, which the caller has asked for.
+        public PolarisedLightSystem.Light LPolarised(SurfaceInteraction intr, Vector3f w, SampledWavelengths lambda, bool roughPolarisation)
+        {
+            if (!twoSided && pbrt.Dot(intr.n, w) < 0)
+                return PolarisedLightSystem.Light.Zero();
+            return thermal.RadiancePolarised(intr, w, lambda, roughPolarisation);
+        }
+
+        public PolarisedLightSystem.Light LPolarised(Point3f p, Normal3f n, Point2f uv, Vector3f w, SampledWavelengths lambda,
+                                                     bool roughPolarisation)
+        {
+            if (!twoSided && pbrt.Dot(n, w) < 0)
+                return PolarisedLightSystem.Light.Zero();
+            return thermal.RadiancePolarised(p, n, uv, w, lambda, roughPolarisation, animated == null);
+        }
         private bool oslMaxComputed = false;
         private Float oslMaxValue = 0;
 
@@ -1309,6 +1347,9 @@ namespace pbrt
         {
             if (animated != null)
                 return SampleLiAnimated(ctx, u, lambda);
+            // (not in pbrt-v4) "thermal2": the point is resampled by the temperature of the surface
+            if (thermal != null && thermal.candidates > 1)
+                return SampleLiResampled(ctx, u, lambda);
             // Sample point on shape for _DiffuseAreaLight_
             ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, ctx.time);
             pstd.optional<ShapeSample> ss = shape.Sample(shapeCtx, u);
@@ -1330,6 +1371,67 @@ namespace pbrt
             return new LightLiSample(Le, wi, ss.value().pdf, ss.value().intr);
         }
 
+        // (not in pbrt-v4) AreaLightSource "thermal2": the point of a glowing surface whose temperature varies, by resampled
+        // importance sampling (Talbot, Cline and Egbert, "Importance Resampling for Global Illumination", EGSR 2005). Several
+        // candidate points are drawn as the shape draws one (density p, in solid angle from the reference point); one is kept
+        // with a probability in proportion to target / p, where the target is the radiance of a blackbody of the temperature
+        // at the candidate (zero where the surface does not emit towards the reference point); the estimate of the one kept
+        // is its radiance over the target, times the mean of target / p over the candidates. That is unbiased for any number
+        // of candidates and any target that is positive where the radiance is.
+        //
+        // The density that the light reports for the point, in SampleLi and in PDF_Li alike, is about what the resampling
+        // makes of p (ThermalEmission.ResampledDensity). The integrators only use it in the weights against
+        // their other strategies, which are then functions of the path that add to one, whatever the estimator of each
+        // strategy is; the sample is returned with the radiance times what makes the quotient of the two the resampled
+        // estimate. With the plain density there the light sampled by the BSDF would keep the weight, and the noise, that it
+        // has against a light that does not know where it is hot. The random numbers of the candidates come from a hash of
+        // the sample of the first, as the light is given one sample only.
+        private pstd.optional<LightLiSample> SampleLiResampled(LightSampleContext ctx, Point2f u, SampledWavelengths lambda)
+        {
+            ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, ctx.time);
+            RNG rng = new RNG(pbrt.Hash(u), pbrt.Hash(ctx.p()));
+            int count = thermal.candidates;
+            Float sum = 0;
+            Float keptTarget = 0, keptPdf = 0;
+            Interaction kept = null;
+            for (int i = 0; i < count; ++i)
+            {
+                Point2f ui = i == 0 ? u : new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
+                Float choose = rng.Uniform<Float>();
+                pstd.optional<ShapeSample> candidate = shape.Sample(shapeCtx, ui);
+                if (!candidate || candidate.value().pdf == 0 || pbrt.LengthSquared(candidate.value().intr.p() - ctx.p()) == 0)
+                    continue;
+                Interaction point = candidate.value().intr;
+                Vector3f toReference = pbrt.Normalize(ctx.p() - point.p());
+                if (!twoSided && pbrt.Dot(point.n, toReference) < 0)
+                    continue;
+                if (AlphaMasked(point))
+                    continue;
+                Float target = thermal.Target(point);
+                if (!(target > 0))
+                    continue;
+                // (one of the candidates so far, each with a probability in proportion to its weight)
+                Float weight = target / candidate.value().pdf;
+                sum += weight;
+                if (choose * sum < weight)
+                {
+                    kept = point;
+                    keptTarget = target;
+                    keptPdf = candidate.value().pdf;
+                }
+            }
+            if (kept == null || !(sum > 0))
+                return default;
+            kept.mediumInterface = mediumInterface;
+            Vector3f wi = pbrt.Normalize(kept.p() - ctx.p());
+            SampledSpectrum Le = L(kept.p(), kept.n, kept.uv, -wi, lambda, ctx.time);
+            if (!Le)
+                return default;
+            // (the estimate is Le / target * sum / count; the integrator divides by the density that is returned)
+            Float density = keptPdf * thermal.ResampledDensity(keptTarget);
+            return new LightLiSample(Le * (sum / (count * keptTarget) * density), wi, density, kept);
+        }
+
         public override Float PDF_Li(LightSampleContext ctx, Vector3f wi, bool allowIncompletePDF = false)
         {
             if (animated != null)
@@ -1339,7 +1441,16 @@ namespace pbrt
                 return shape.PDF(ShapeContextAnimated(ctx, lightFromRender), wiLight);
             }
             ShapeSampleContext shapeCtx = new ShapeSampleContext(ctx.pi, ctx.n, ctx.ns, ctx.time);
-            return shape.PDF(shapeCtx, wi);
+            Float pdf = shape.PDF(shapeCtx, wi);
+            if (thermal != null && thermal.candidates > 1 && pdf > 0)
+            {
+                // (not in pbrt-v4) "thermal2": the density of the resampled light for the point that the direction reaches
+                // (SampleLiResampled)
+                pstd.optional<ShapeIntersection> hit = shape.Intersect(shapeCtx.SpawnRay(wi), pbrt.Infinity);
+                if (hit)
+                    pdf *= thermal.ResampledDensity(thermal.Target(hit.value().intr));
+            }
+            return pdf;
         }
 
         // (not in pbrt-v4) Equiangular sampling of the scattering point toward an area light (Fong et al., section 4.2.3; Kulla and Fajardo
@@ -1384,6 +1495,8 @@ namespace pbrt
             SampledSpectrum L = new SampledSpectrum(0.0f);
             if (oslMaterial != null)
                 return Pi * 2 * area * OSLAverageEmission(lambda, out Float oslMax);
+            if (thermal != null)
+                return Pi * (twoSided ? 2 : 1) * area * presence * thermal.MeanRadiance(lambda);
             if (image)
             {
                 // Compute average light image emission
@@ -1450,6 +1563,10 @@ namespace pbrt
                 }
                 phi = oslMaxValue;
             }
+            else if (thermal != null)
+            {
+                phi = thermal.MeanRadianceBound() / scale;
+            }
             else if (image)
             {
                 // Compute average _DiffuseAreaLight_ image channel value
@@ -1500,6 +1617,8 @@ namespace pbrt
         {
             if (oslMaterial != null)
                 return oslMaterial.EmissionAt(p, n, uv, w, lambda, oslObjectId);
+            if (thermal != null)
+                return thermal.Radiance(p, n, uv, w, lambda, animated == null);
 
             if (image)
             {
@@ -1604,6 +1723,32 @@ namespace pbrt
         Float scale;
         Image image;
         RGBColorSpace imageColorSpace;
+
+        // (not in pbrt-v4) AreaLightSource "thermal": a glowing surface.
+        //   float or texture temperature   the temperature of the surface in kelvin (1500)
+        //   float scale                    a factor of the radiance (1)
+        //   bool twosided                  both sides emit (true)
+        //   bool opaque                    the light that the material lets through is absorbed behind the surface (false)
+        //   bool blackbody                 the emission of a blackbody whatever the material is, for comparisons (false)
+        //   integer candidates             "thermal2" only: the candidate points of a light sample (8); see SampleLiResampled
+        // The material of the shape is given to the light when the primitive is made (ThermalEmission.SetMaterial).
+        public static DiffuseAreaLight CreateThermal(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
+                                                     RGBColorSpace colorSpace, FloatTexture temperature, Shape shape,
+                                                     FloatTexture alphaTex, AnimatedTransform renderFromLightAnimated, bool resampled)
+        {
+            Float scale = parameters.GetOneFloat("scale", 1);
+            bool twoSided = parameters.GetOneBool("twosided", true);
+            bool opaque = parameters.GetOneBool("opaque", false);
+            DiffuseAreaLight light = new DiffuseAreaLight(renderFromLight, new MediumInterface(medium), colorSpace.illuminant, 1, shape,
+                                                          alphaTex, new Image(), null, twoSided);
+            bool blackbody = parameters.GetOneBool("blackbody", false);
+            light.thermal = new ThermalEmission(shape, temperature, scale, opaque, blackbody);
+            // ("thermal2": the point of a light sample is resampled by the temperature)
+            light.thermal.candidates = resampled ? Math.Max(1, parameters.GetOneInt("candidates", 8)) : 1;
+            light.SetPresence(alphaTex);
+            light.SetMotion(renderFromLightAnimated);
+            return light;
+        }
 
         public static DiffuseAreaLight Create(Transform renderFromLight, Medium medium, ParameterDictionary parameters,
                                               RGBColorSpace colorSpace, FileLoc loc, Allocator alloc, Shape shape,

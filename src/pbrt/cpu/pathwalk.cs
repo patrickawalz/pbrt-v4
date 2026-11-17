@@ -34,6 +34,11 @@ namespace pbrt
         public abstract bool BeginIteration(WalkContext ctx);
 
         // The ray is in a medium and the segment up to tMax (the next surface, or infinity) is about to be sampled
+        // A surface that only bounds media was passed: the next piece of the segment does not start at the vertex
+        public virtual void OnBoundaryPassed(WalkContext ctx)
+        {
+        }
+
         public virtual void BeginSegment(WalkContext ctx, Medium medium, Float tMax)
         {
         }
@@ -171,6 +176,7 @@ namespace pbrt
                     }
                     isect.SkipIntersection(ref ctx.ray, si.value().tHit);
                     MediumTracking.CrossSurface(ref ctx.stack, isect, ctx.ray.d);
+                    hook.OnBoundaryPassed(ctx);
                     continue;
                 }
 

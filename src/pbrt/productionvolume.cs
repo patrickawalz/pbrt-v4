@@ -1,4 +1,4 @@
-// (not in pbrt-v4) productionvolume.cs
+﻿// (not in pbrt-v4) productionvolume.cs
 //
 // The volume integrators of J. Fong, M. Wrenninge, C. Kulla and R. Habel, "Production Volume Rendering" (SIGGRAPH 2017
 // course), section 3, as the course writes them: a volume is a black box to the path tracer.
@@ -246,6 +246,9 @@ namespace pbrt
         public SampledSpectrum r = new SampledSpectrum(1f);
         // The medium that the ray is in at P (of the material that the path entered)
         public Medium medium;
+        // (not null: the path carries polarisation, and what a strategy gathers is also recorded as polarised light:
+        // PolarisedGather)
+        public PolarisedGather polar;
         // Whether the path may still be scattered (its depth): a volume that gathers the light of a scattering by itself asks
         public bool mayScatter = true;
         // Whether it may be scattered twice more (a volume that gathers the double scattering by itself asks)
@@ -638,13 +641,24 @@ namespace pbrt
                 SampledSpectrum rBeam = r * beamR;
                 if ((bool)rBeam)
                 {
-                    sum += w * numerator * phase.p(intr.wo, direction) * light * beam / rBeam.Average();
+                    SampledSpectrum lit = w * numerator * phase.pSpectral(intr.wo, direction) * light * beam / rBeam.Average();
+                    sum += lit;
+                    if (m_ctx.polar != null)
+                    {
+                        m_ctx.polar.Scattered(lit, phase, intr.wo, direction, m_ctx.lambda);
+                    }
                 }
             }
             SampledSpectrum sampledEmission;
+            // (the renderer records the emission that it samples as it returns it; the factor here goes onto what it recorded)
+            PolarisedGather.Mark beforeEmission = m_ctx.polar != null ? m_ctx.polar.Here() : default;
             if (rs.SampleEmission(m_ctx, intr, phase, r, phaseSampling, out sampledEmission))
             {
                 sum += numerator * sampledEmission;
+            }
+            if (m_ctx.polar != null)
+            {
+                m_ctx.polar.ScaleSince(beforeEmission, numerator);
             }
             if (phaseSampling)
             {
@@ -652,18 +666,28 @@ namespace pbrt
                 if (ps && ps.value().pdf > 0)
                 {
                     SampledSpectrum emitted;
-                    Float ratio = ps.value().p / ps.value().pdf;
+                    SampledSpectrum ratio = phase.pSpectral(intr.wo, ps.value().wi) / ps.value().pdf;
                     if (rs.EvaluateLightSample(m_ctx, intr, ps.value().wi, ps.value().pdf, out light, out beam, out beamR, out emitted))
                     {
                         SampledSpectrum rBeam = r * beamR;
                         if ((bool)rBeam)
                         {
-                            sum += numerator * ratio * light * beam / rBeam.Average();
+                            SampledSpectrum lit = numerator * ratio * light * beam / rBeam.Average();
+                            sum += lit;
+                            if (m_ctx.polar != null)
+                            {
+                                m_ctx.polar.Scattered(lit, phase, intr.wo, ps.value().wi, m_ctx.lambda);
+                            }
                         }
                     }
                     if ((bool)emitted)
                     {
-                        sum += numerator * ratio * emitted / r.Average();
+                        SampledSpectrum glow = numerator * ratio * emitted / r.Average();
+                        sum += glow;
+                        if (m_ctx.polar != null)
+                        {
+                            m_ctx.polar.ScatteredUnpolarised(glow, phase, intr.wo, ps.value().wi);
+                        }
                     }
                 }
             }
@@ -732,6 +756,18 @@ namespace pbrt
         //
         // The renderer connects c to b (the volumes and the surfaces between them, and what volume b is in: Connect) and
         // lights b (EvaluateLight); the transmittance to c is this volume's own.
+        protected SampledSpectrum DoubleScatteringOver(VolumeServices rs, Ray wi, Float distance, Float samples)
+        {
+            // (one of `samples` estimates: what it recorded as polarised light is divided as its value is)
+            PolarisedGather.Mark mark = m_ctx.polar != null ? m_ctx.polar.Here() : default;
+            SampledSpectrum result = DoubleScattering(rs, wi, distance) / samples;
+            if (m_ctx.polar != null)
+            {
+                m_ctx.polar.ScaleSince(mark, 1 / samples);
+            }
+            return result;
+        }
+
         protected SampledSpectrum DoubleScattering(VolumeServices rs, Ray wi, Float distance)
         {
             SampledSpectrum none = new SampledSpectrum(0f);
@@ -854,8 +890,14 @@ namespace pbrt
                         r *= betweenR * beamR;
                         if ((bool)r)
                         {
-                            result = toC * mp.sigma_s * mp.phase.p(-wi.d, w) * between * at.sigma_s * at.phase.p(-w, toLight) * arriving * beam /
+                            result = toC * mp.sigma_s * mp.phase.pSpectral(-wi.d, w) * between * at.sigma_s * at.phase.pSpectral(-w, toLight) * arriving * beam /
                                      (pdfT * pdf * r.Average());
+                            if (m_ctx.polar != null)
+                            {
+                                PolarisedLightSystem.Attenuation first;
+                                bool known = PolarisedGather.PhaseMatrix(mp.phase, -wi.d, w, out first);
+                                m_ctx.polar.ScatteredTwice(result, known, first, at.phase, w, toLight, lambda);
+                            }
                         }
                     }
                 }
@@ -908,7 +950,11 @@ namespace pbrt
                 SampledSpectrum rBeam = r * beamR;
                 if ((bool)rBeam)
                 {
-                    result = through * at.sigma_s * at.phase.p(-wi.d, toLight) * arriving * beam * (share / (pdf * rBeam.Average()));
+                    result = through * at.sigma_s * at.phase.pSpectral(-wi.d, toLight) * arriving * beam * (share / (pdf * rBeam.Average()));
+                    if (m_ctx.polar != null)
+                    {
+                        m_ctx.polar.Scattered(result, at.phase, -wi.d, toLight, m_ctx.lambda);
+                    }
                 }
             }
             m_ctx.SetP(saved);
@@ -1014,7 +1060,7 @@ namespace pbrt
 
             public SampledSpectrum f(Vector3f w)
             {
-                return surface ? bsdf.f(point.wo, w) * AbsDot(w, ((SurfaceInteraction)point).shading.n) : new SampledSpectrum(phase.p(point.wo, w));
+                return surface ? bsdf.f(point.wo, w) * AbsDot(w, ((SurfaceInteraction)point).shading.n) : phase.pSpectral(point.wo, w);
             }
 
             public Float PDF(Vector3f w)
@@ -1099,7 +1145,24 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densities * beamR;
                 if ((bool)r)
                 {
-                    result = through * mp.sigma_s * f * mp.phase.p(-w, wl) * arriving * beam * (integrand * share / r.Average());
+                    result = through * mp.sigma_s * f * mp.phase.pSpectral(-w, wl) * arriving * beam * (integrand * share / r.Average());
+                    if (m_ctx.polar != null)
+                    {
+                        // (the scattering at the start: the phase function, or the BSDF of the surface)
+                        PolarisedLightSystem.Attenuation atStart;
+                        bool known;
+                        if (start.surface)
+                        {
+                            atStart = PolarisedPathIntegrator.ConnectionAttenuation(start.bsdf, (SurfaceInteraction)start.point, start.point.wo, w,
+                                                                                  TransportMode.Radiance);
+                            known = true;
+                        }
+                        else
+                        {
+                            known = PolarisedGather.PhaseMatrix(start.phase, start.point.wo, w, out atStart);
+                        }
+                        m_ctx.polar.ScatteredTwice(result, known, atStart, mp.phase, w, wl, m_ctx.lambda);
+                    }
                 }
             }
             m_ctx.SetP(saved);
@@ -1426,7 +1489,13 @@ namespace pbrt
                 SampledSpectrum r = m_ctx.r * densitiesC * densitiesB * beamR;
                 if ((bool)r)
                 {
-                    result = toC * mp.sigma_s * mp.phase.p(-wi.d, w) * toB * at.sigma_s * at.phase.p(-w, wl) * arriving * beam * (share / (pdf * r.Average()));
+                    result = toC * mp.sigma_s * mp.phase.pSpectral(-wi.d, w) * toB * at.sigma_s * at.phase.pSpectral(-w, wl) * arriving * beam * (share / (pdf * r.Average()));
+                    if (m_ctx.polar != null)
+                    {
+                        PolarisedLightSystem.Attenuation first;
+                        bool known = PolarisedGather.PhaseMatrix(mp.phase, -wi.d, w, out first);
+                        m_ctx.polar.ScatteredTwice(result, known, first, at.phase, w, wl, lambda);
+                    }
                 }
             }
             m_ctx.SetP(saved);
@@ -2009,7 +2078,7 @@ namespace pbrt
             }
             for (int k = 0; k < settings.lightSamples; ++k)
             {
-                L += DoubleScattering(rs, wi, distance) / settings.lightSamples;
+                L += DoubleScatteringOver(rs, wi, distance, settings.lightSamples);
             }
             return hit;
         }
@@ -2263,7 +2332,7 @@ namespace pbrt
             }
             for (int k = 0; k < settings.lightSamples; ++k)
             {
-                L += DoubleScattering(rs, wi, distance) / settings.lightSamples;
+                L += DoubleScatteringOver(rs, wi, distance, settings.lightSamples);
             }
             return hit;
         }
@@ -2448,7 +2517,7 @@ namespace pbrt
             }
             for (int k = 0; k < samples; ++k)
             {
-                L += DoubleScattering(rs, wi, distance) / samples;
+                L += DoubleScatteringOver(rs, wi, distance, samples);
             }
             SampledSpectrum rBeam = m_ctx.r;
             transmittance = Track(rs, wi, distance, false, ref rBeam);

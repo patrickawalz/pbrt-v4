@@ -69,13 +69,13 @@ namespace pbrt
             LOG_VERBOSE("Finished creating integrator");
 
             // Helpful warnings
-            if (haveScatteringMedia && parsedScene.integrator.name != "volpath" &&
+            if (haveScatteringMedia && parsedScene.integrator.name != "volpath" && parsedScene.integrator.name != "production" &&
                 parsedScene.integrator.name != "simplevolpath" &&
                 parsedScene.integrator.name != "bdpt" && parsedScene.integrator.name != "mlt" &&
                 parsedScene.integrator.name != "erpt" && parsedScene.integrator.name != "pmcer" &&
                 parsedScene.integrator.name != "jrlt" && parsedScene.integrator.name != "smmc" && parsedScene.integrator.name != "jrsmmc")
                 Warning(StringPrintf("Scene has scattering media but \"%s\" integrator doesn't support " +
-                                     "volume scattering. Consider using \"volpath\", \"simplevolpath\", " +
+                                     "volume scattering. Consider using \"volpath\", \"production\", \"simplevolpath\", " +
                                      "\"bdpt\", or \"mlt\".",
                                      parsedScene.integrator.name));
 
