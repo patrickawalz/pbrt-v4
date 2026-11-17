@@ -2475,7 +2475,11 @@ namespace pbrt
                         end.cumU = path[vIdx - 1].cumU * end.segU;
                         // The density of a collision at the point, per volume: the density of the direction at the previous
                         // vertex, as for the vertices of real scatterings, and the majorant for the distance along the ray
-                        end.pdfFwd = path[vIdx - 1].ConvertDensity(pdfFwd, end) * end.sigmaT0;
+                        // (after a specular bounce the direction has no density: the weights take such a factor as one (remap0),
+                        // and what remains of the density of the collision is the majorant along the ray. Left at zero, the
+                        // majorant would be taken as one too, and the gathered emission behind glass weighed too low against
+                        // the light subpaths.)
+                        end.pdfFwd = pdfFwd == 0 ? end.sigmaT0 : path[vIdx - 1].ConvertDensity(pdfFwd, end) * end.sigmaT0;
                         end.pbeta = ctx.st.pa;
                         end.pbeta *= w;
                         end.stack = ctx.stack;

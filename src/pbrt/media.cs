@@ -227,6 +227,8 @@ namespace pbrt
                 return SampleT_maj<AggregateMedium2, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is BoundedMedium)
                 return SampleT_maj<BoundedMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is GlowDischargeMedium)
+                return SampleT_maj<GlowDischargeMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             LOG_FATAL("SampleT_maj(): ray has no medium");
             return default;
         }
@@ -1846,6 +1848,14 @@ namespace pbrt
             return 0;
         }
 
+        // What the power of the light of the emission is estimated from (VolumeEmissionLight.Phi): sigma_a Le, or for a
+        // spectrum of lines, which a few fixed wavelengths never find, a smooth spectrum of the same luminance
+        public virtual SampledSpectrum EmissionForPower(Point3f p, SampledWavelengths lambda, Float time)
+        {
+            MediumProperties mp = SamplePoint(p, lambda, time);
+            return mp.sigma_a * mp.Le;
+        }
+
         // The majorant that the tracking of a ray uses at the point: that of the first segment of a ray that starts there
         public virtual SampledSpectrum MajorantAt(Point3f p, SampledWavelengths lambda, Float time)
         {
@@ -2034,6 +2044,11 @@ namespace pbrt
             else if (name == "cloud")
             {
                 m = CloudMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "glowdischarge")
+            {
+                // (not in pbrt-v4) The light of a gas in a discharge tube (glowdischarge.cs)
+                m = GlowDischargeMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else if (name == "atmosphere")
             {

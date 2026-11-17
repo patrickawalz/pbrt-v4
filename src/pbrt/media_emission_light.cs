@@ -340,7 +340,7 @@ namespace pbrt
                 if (!SamplePointInVolume(new Point2f(RadicalInverse(0, (uint64_t)i), RadicalInverse(1, (uint64_t)i)),
                                          RadicalInverse(2, (uint64_t)i), StartTime(), out p, out pdfPoint))
                     continue;
-                sum += EmissionAt(p, lambda, StartTime()) / pdfPoint;
+                sum += medium.EmissionForPower(p, lambda, StartTime()) / pdfPoint;
             }
             return 4 * Pi * sum / (Float)pointCount;
         }

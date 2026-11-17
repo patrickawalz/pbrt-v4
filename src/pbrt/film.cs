@@ -597,6 +597,11 @@ namespace pbrt
 
         public override SampledWavelengths SampleWavelengths(Float u)
         {
+            // (not in pbrt-v4) With line spectra in the scene, part of the wavelengths are those of the lines (glowdischarge.cs)
+            if (SpectralLineSampling.Active)
+            {
+                return SpectralLineSampling.SampleVisible(u);
+            }
             return SampledWavelengths.SampleVisible(u);
         }
 
@@ -1149,6 +1154,11 @@ namespace pbrt
 
         public override SampledWavelengths SampleWavelengths(Float u)
         {
+            // (not in pbrt-v4) With line spectra in the scene, part of the wavelengths are those of the lines (glowdischarge.cs)
+            if (SpectralLineSampling.Active)
+            {
+                return SpectralLineSampling.SampleUniform(u, lambdaMin, lambdaMax);
+            }
             return SampledWavelengths.SampleUniform(u, lambdaMin, lambdaMax);
         }
 
@@ -1188,6 +1198,27 @@ namespace pbrt
             // same extend, and can then just average radiance in buckets
             // below.
             L *= weight * CIE_Y_integral;
+
+            // (not in pbrt-v4) With line spectra in the scene the wavelengths are not uniform (SpectralLineSampling): the mean
+            // radiance of a bucket is then estimated with their density, the integral over the bucket over its width, and
+            // every sample counts for every bucket
+            if (SpectralLineSampling.Active)
+            {
+                SampledSpectrum pdf = lambda.PDF();
+                Float perBucket = nBuckets / ((lambdaMax - lambdaMin) * NSpectrumSamples);
+                for (int b = 0; b < nBuckets; ++b)
+                {
+                    pixel.weightSums[b] += weight;
+                }
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    if (pdf[i] > 0 && lambda[i] >= lambdaMin && lambda[i] <= lambdaMax)
+                    {
+                        pixel.bucketSums[LambdaToBucket(lambda[i])] += L[i] / pdf[i] * perBucket;
+                    }
+                }
+                return;
+            }
 
             // Accumulate contributions in spectral buckets.
             for (int i = 0; i < NSpectrumSamples; ++i)
