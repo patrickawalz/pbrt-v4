@@ -2403,6 +2403,16 @@ namespace pbrt
                 material = ThinCoatMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "thinfilm")
                 material = ThinFilmMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "spongecake")
+                material = SpongeCakeMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "layered")
+                material = LayeredMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "coateddiffuse2")
+                material = CoatedDiffuse2Material.Create(parameters, normalMap, loc, alloc);
+            else if (name == "coatedconductor2")
+                material = CoatedConductor2Material.Create(parameters, normalMap, loc, alloc);
+            else if (name == "bragg")
+                material = BraggMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "thindielectric")
                 material = ThinDielectricMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "hair")

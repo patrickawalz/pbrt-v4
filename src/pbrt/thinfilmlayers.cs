@@ -9,6 +9,8 @@
 //   float layersellmeier [...]        instead of "layereta": six coefficients (B1 B2 B3 C1 C2 C3) for each layer
 //   spectrum layereta [...]           instead of "float layereta": a spectrum for each layer (named, or any other spectrum)
 //   texture layerthicknessscale       a float texture that multiplies the thicknesses at the point (default 1)
+//   integer layerrepeat               a Bragg mirror: the layers are one cell, and the stack is this many cells, one after the
+//                                     other (default 1). The cost is that of one cell (FrBraggPolarised()).
 // The colours of the interference follow the index at each wavelength of the ray, so a layer that disperses costs no wavelength:
 // the layers are thin, and the direction of the light that leaves does not depend on their indices.
 
@@ -25,6 +27,10 @@ namespace pbrt
         public Spectrum[] spectra = null;
         // The texture that multiplies the thicknesses: null without one
         public FloatTexture thicknessScale = null;
+        // The number of times that the layers are repeated
+        public int repeat = 1;
+        // The extinction coefficients of films that absorb, as spectra: null if none does (ReadExtinction())
+        public Spectrum[] extinction = null;
 
         public int Count() { return eta.Length; }
 
@@ -104,7 +110,59 @@ namespace pbrt
             }
             layers.spectra = dispersive ? spectra : null;
             layers.thicknessScale = parameters.GetFloatTextureOrNull("layerthicknessscale", alloc);
+            layers.repeat = parameters.GetOneInt("layerrepeat", 1);
+            if (layers.repeat < 1)
+            {
+                pbrt.ErrorExit(loc, "\"layerrepeat\" must be 1 or more.");
+            }
+            layers.ReadExtinction(parameters, loc, alloc);
             return layers;
+        }
+
+        // "layerk": the extinction coefficients of the films, numbers or spectra, one for each
+        public void ReadExtinction(TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
+        {
+            List<Float> numbers = parameters.GetFloatArray("layerk");
+            Spectrum[] given;
+            if (numbers.Count != 0)
+            {
+                given = new Spectrum[numbers.Count];
+                for (int i = 0; i < given.Length; ++i)
+                {
+                    given[i] = new ConstantSpectrum(numbers[i]);
+                }
+            }
+            else
+            {
+                given = parameters.GetSpectrumArray("layerk", SpectrumType.Unbounded, alloc).ToArray();
+            }
+            if (given.Length == 0)
+            {
+                return;
+            }
+            if (given.Length != Count())
+            {
+                pbrt.ErrorExit(loc, "\"layerk\" and \"layerthickness\" need the same number of values.");
+            }
+            extinction = given;
+        }
+
+        private void Absorption(ref ThinFilmStack stack, SampledWavelengths lambda)
+        {
+            if (extinction == null)
+            {
+                return;
+            }
+            stack.layerKAt = new Float[pbrt.NSpectrumSamples][];
+            for (int w = 0; w < pbrt.NSpectrumSamples; ++w)
+            {
+                Float[] values = new Float[extinction.Length];
+                for (int i = 0; i < values.Length; ++i)
+                {
+                    values[i] = extinction[i].Evaluate(lambda[w]);
+                }
+                stack.layerKAt[w] = values;
+            }
         }
 
         // The layers at a point, for the wavelengths of the ray. Arrays are made only for what varies: the indices of layers
@@ -124,7 +182,10 @@ namespace pbrt
             }
             if (spectra == null)
             {
-                return new ThinFilmStack(lambda, eta, thick);
+                ThinFilmStack plain = new ThinFilmStack(lambda, eta, thick);
+                plain.repeat = repeat;
+                Absorption(ref plain, lambda);
+                return plain;
             }
             Float[][] perWavelength = new Float[pbrt.NSpectrumSamples][];
             for (int w = 0; w < pbrt.NSpectrumSamples; ++w)
@@ -136,7 +197,10 @@ namespace pbrt
                 }
                 perWavelength[w] = indices;
             }
-            return new ThinFilmStack(lambda, perWavelength, thick);
+            ThinFilmStack stack = new ThinFilmStack(lambda, perWavelength, thick);
+            stack.repeat = repeat;
+            Absorption(ref stack, lambda);
+            return stack;
         }
     }
 }

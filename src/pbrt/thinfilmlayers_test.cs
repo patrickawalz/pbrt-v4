@@ -110,7 +110,7 @@ namespace pbrt
                 }
                 // On a dielectric, from both sides: what is reflected and what goes through are all the light
                 abbe.Stack(texEval, ctx, lambda).Dielectric(rng.Uniform<Float>() < 0.5f ? cosine : -cosine, 1.52f, out Fs, out Fp, out Ds, out Dp, out SampledSpectrum _,
-                                                            out SampledSpectrum _);
+                                                            out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum _);
                 for (int i = 0; i < NSpectrumSamples; ++i)
                 {
                     EXPECT_GE(Fs[i], 0);

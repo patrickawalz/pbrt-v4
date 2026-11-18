@@ -123,9 +123,8 @@ namespace pbrt
                     double index = (double)f.eta[0], ratio = iorT / iorI;
                     bool outer = Math.Abs(ratio - index) <= Math.Abs(ratio - 1.0 / index);
                     f.stack.Dielectric(Math.Max(cos, 1e-6f) * (outer ? 1 : -1), (Float)index, out Fs, out Fp, out Ds, out Dp, out SampledSpectrum DsThrough,
-                                       out SampledSpectrum DpThrough);
-                    return (reflect ? Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp)
-                                    : Attenuation.Fresnel(S(1), new SampledSpectrum(1f) - Fs, new SampledSpectrum(1f) - Fp, DsThrough, DpThrough))
+                                       out SampledSpectrum DpThrough, out SampledSpectrum TsThrough, out SampledSpectrum TpThrough);
+                    return (reflect ? Attenuation.Fresnel(S(1), Fs, Fp, Ds, Dp) : Attenuation.Fresnel(S(1), TsThrough, TpThrough, DsThrough, DpThrough))
                         .Scattered(a, b, n, fromCamera);
                 }
                 switch (f.kind)

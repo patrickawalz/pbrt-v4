@@ -130,6 +130,172 @@ namespace pbrt
             DpT = (Float)Math.Atan2(transmissionP.Imaginary, transmissionP.Real);
         }
 
+        // (not in pbrt-v4) The reflection of a Bragg mirror: the layers of `layerEta` and `layerThickness` are one cell, and the
+        // stack is `repeat` such cells, one after the other (a one-dimensional photonic crystal), between the ambient medium and
+        // the substrate. Everything else is as in FrThinFilmPolarised(), and with one cell the two are the same.
+        //
+        // The cost does not grow with the number of cells. Each field is a wave that goes down and one that goes up; the
+        // amplitudes above a boundary are those below it times (1 / t) [1 r; r 1], and those at the top of a layer are those at
+        // its bottom times diag(exp(i delta), exp(-i delta)). The matrix C of one cell (its layers, each with the boundary to
+        // the next one, the last one with the boundary back to the first) has determinant one, and the power of such a matrix
+        // is known (the identity of Chebyshev, the theorem of Abeles):
+        //   C^N = U_{N-1}(a) C - U_{N-2}(a) I,   a = trace(C) / 2 = cos(K Lambda),   U_n(cos x) = sin((n + 1) x) / sin x
+        // K is the Bloch wavenumber of the crystal; where |a| > 1 it is complex, the sines grow as hyperbolic ones and the
+        // mirror reflects nearly everything: a photonic band gap. This is the closed form of Yeh ("Optical Waves in Layered
+        // Media", 1988) that Fourneau, Pacanowski and Barla, "Interactive Exploration of Vivid Material Iridescence using Bragg
+        // Mirrors" (2024) use for a cell of two films in a host of the index of the first one; here for any cell, on any
+        // substrate, and with the phases.
+        public static void FrBraggPolarised(Float cosTheta_i, Float etaAmbient, Float[] layerEta, Float[] layerThickness, int repeat,
+                                            bool reversed, Float wavelength, pstd.complex etaSubstrate, out Float Fs,
+                                            out Float Fp, out Float Ds, out Float Dp, out Float DsT, out Float DpT)
+        {
+            FrBraggPolarised(cosTheta_i, etaAmbient, layerEta, null, layerThickness, repeat, reversed, wavelength, etaSubstrate, out Fs, out Fp, out Ds, out Dp,
+                             out DsT, out DpT, out Float _, out Float _);
+        }
+
+        // The same with films that absorb: `layerK` (null: none) has their extinction coefficients, the index of a film being
+        // n - i k. Ts and Tp are the transmittances, the power that reaches the substrate: 1 - Fs and 1 - Fp without absorption,
+        // less with it.
+        public static void FrBraggPolarised(Float cosTheta_i, Float etaAmbient, Float[] layerEta, Float[] layerK, Float[] layerThickness, int repeat,
+                                            bool reversed, Float wavelength, pstd.complex etaSubstrate, out Float Fs,
+                                            out Float Fp, out Float Ds, out Float Dp, out Float DsT, out Float DpT, out Float Ts, out Float Tp)
+        {
+            int count = layerEta.Length;
+            double cosI = Math.Clamp((double)cosTheta_i, 0.0, 1.0);
+            double snell = etaAmbient * Math.Sqrt(Math.Max(0.0, 1.0 - cosI * cosI));
+            Complex* index = stackalloc Complex[count + 2];
+            Complex* cosines = stackalloc Complex[count + 2];
+            Complex* down = stackalloc Complex[count + 2];
+            Complex* up = stackalloc Complex[count + 2];
+            index[0] = etaAmbient;
+            for (int i = 0; i < count; ++i)
+            {
+                int layer = reversed ? count - 1 - i : i;
+                index[i + 1] = layerK != null ? new Complex(layerEta[layer], -Math.Abs(layerK[layer])) : layerEta[layer];
+            }
+            index[count + 1] = new Complex(etaSubstrate.re, etaSubstrate.im > 0 ? -etaSubstrate.im : etaSubstrate.im);
+            cosines[0] = cosI;
+            for (int i = 1; i < count + 2; ++i)
+            {
+                Complex ratio = snell / index[i];
+                Complex cosine = Complex.Sqrt(1.0 - ratio * ratio);
+                cosines[i] = cosine.Imaginary > 0 ? Complex.Conjugate(cosine) : cosine;
+            }
+            Complex imaginary = new Complex(0, 1);
+            for (int i = 1; i <= count; ++i)
+            {
+                // (what a layer does to the wave that goes down and to the one that goes up, the same for both polarisations)
+                Complex turn = 2.0 * Math.PI * index[i] * layerThickness[reversed ? count - i : i - 1] * cosines[i] / wavelength;
+                down[i] = Complex.Exp(imaginary * turn);
+                up[i] = 1.0 / down[i];
+            }
+            Complex reflectionS, reflectionP, transmissionS, transmissionP;
+            BraggAmplitudes(index, cosines, down, up, count, repeat, true, out reflectionS, out transmissionS);
+            BraggAmplitudes(index, cosines, down, up, count, repeat, false, out reflectionP, out transmissionP);
+            Fs = (Float)(reflectionS.Real * reflectionS.Real + reflectionS.Imaginary * reflectionS.Imaginary);
+            Fp = (Float)(reflectionP.Real * reflectionP.Real + reflectionP.Imaginary * reflectionP.Imaginary);
+            Ds = (Float)Math.Atan2(reflectionS.Imaginary, reflectionS.Real);
+            Dp = (Float)Math.Atan2(reflectionP.Imaginary, reflectionP.Real);
+            DsT = (Float)Math.Atan2(transmissionS.Imaginary, transmissionS.Real);
+            DpT = (Float)Math.Atan2(transmissionP.Imaginary, transmissionP.Real);
+            // The power that goes into the substrate, by the flux across the boundary: Re(n cos) for the perpendicular
+            // polarisation and Re(n conj(cos)) for the parallel one, over those of the ambient medium
+            double incident = etaAmbient * cosI;
+            if (incident > 0)
+            {
+                Complex last = index[count + 1], lastCosine = cosines[count + 1];
+                double magnitudeS = transmissionS.Real * transmissionS.Real + transmissionS.Imaginary * transmissionS.Imaginary;
+                double magnitudeP = transmissionP.Real * transmissionP.Real + transmissionP.Imaginary * transmissionP.Imaginary;
+                Ts = (Float)Math.Clamp(magnitudeS * Math.Max(0.0, (last * lastCosine).Real) / incident, 0.0, 1.0);
+                Tp = (Float)Math.Clamp(magnitudeP * Math.Max(0.0, (last * Complex.Conjugate(lastCosine)).Real) / incident, 0.0, 1.0);
+            }
+            else
+            {
+                Ts = 0;
+                Tp = 0;
+            }
+        }
+
+        // The amplitude reflection and transmission coefficients of `repeat` cells for one polarisation
+        static void BraggAmplitudes(Complex* index, Complex* cosines, Complex* down, Complex* up, int count, int repeat, bool perpendicular,
+                                    out Complex reflection, out Complex transmission)
+        {
+            Complex i = new Complex(0, 1);
+            // The matrix of one cell
+            Complex c11 = 1, c12 = 0, c21 = 0, c22 = 1;
+            for (int layer = 1; layer <= count; ++layer)
+            {
+                int next = layer == count ? 1 : layer + 1;
+                Complex r, t;
+                BoundaryAmplitudes(index[layer], index[next], cosines[layer], cosines[next], perpendicular, out r, out t);
+                // (the layer, then its boundary: diag(e, 1 / e) (1 / t) [1 r; r 1])
+                Complex m11 = down[layer] / t, m22 = up[layer] / t;
+                Complex m12 = m11 * r, m21 = m22 * r;
+                Complex n11 = c11 * m11 + c12 * m21, n12 = c11 * m12 + c12 * m22, n21 = c21 * m11 + c22 * m21, n22 = c21 * m12 + c22 * m22;
+                c11 = n11;
+                c12 = n12;
+                c21 = n21;
+                c22 = n22;
+            }
+
+            // Its power, times exp(-N |Im K Lambda|): inside a band gap the power itself would overflow, the reflection does not
+            // depend on the factor, and the transmission is given it back
+            Complex p11 = c11, p12 = c12, p21 = c21, p22 = c22;
+            double scale = 1;
+            if (repeat > 1)
+            {
+                Complex half = 0.5 * (c11 + c22);
+                Complex angle = Complex.Acos(half);
+                Complex sine = Complex.Sin(angle);
+                Complex last, beforeLast;
+                double logScale = 0;
+                if (Complex.Abs(sine) < 1e-9)
+                {
+                    // (the edge of a band gap: U_n(1) = n + 1, U_n(-1) = (n + 1) (-1)^n)
+                    double sign = half.Real < 0 ? -1 : 1;
+                    last = repeat * ((repeat - 1) % 2 == 0 ? 1 : sign);
+                    beforeLast = (repeat - 1) * ((repeat - 2) % 2 == 0 ? 1 : sign);
+                }
+                else
+                {
+                    logScale = repeat * Math.Abs(angle.Imaginary);
+                    last = (Complex.Exp(i * angle * repeat - logScale) - Complex.Exp(-i * angle * repeat - logScale)) / (2.0 * i * sine);
+                    beforeLast = (Complex.Exp(i * angle * (repeat - 1) - logScale) - Complex.Exp(-i * angle * (repeat - 1) - logScale)) / (2.0 * i * sine);
+                }
+                scale = Math.Exp(-logScale);
+                p11 = last * c11 - beforeLast;
+                p12 = last * c12;
+                p21 = last * c21;
+                p22 = last * c22 - beforeLast;
+            }
+
+            // Between the ambient medium and the substrate: the boundary into the first layer, the cells, and the boundary from
+            // the first layer to the substrate (the last boundary of the last cell leads back into the first layer)
+            Complex rTop, tTop, rBottom, tBottom;
+            BoundaryAmplitudes(index[0], index[1], cosines[0], cosines[1], perpendicular, out rTop, out tTop);
+            BoundaryAmplitudes(index[1], index[count + 1], cosines[1], cosines[count + 1], perpendicular, out rBottom, out tBottom);
+            // (the first column of [1 rTop; rTop 1] P [1 rBottom; rBottom 1], over tTop tBottom)
+            Complex q11 = p11 + p12 * rBottom, q21 = p21 + p22 * rBottom;
+            Complex t11 = (q11 + rTop * q21) / (tTop * tBottom), t21 = (rTop * q11 + q21) / (tTop * tBottom);
+            reflection = t21 / t11;
+            transmission = scale / t11;
+        }
+
+        // The amplitude reflection and transmission coefficients of the boundary from the medium a into the medium b
+        static void BoundaryAmplitudes(Complex a, Complex b, Complex ca, Complex cb, bool perpendicular, out Complex r, out Complex t)
+        {
+            if (perpendicular)
+            {
+                r = (a * ca - b * cb) / (a * ca + b * cb);
+                t = 2.0 * a * ca / (a * ca + b * cb);
+            }
+            else
+            {
+                r = (b * ca - a * cb) / (b * ca + a * cb);
+                t = 2.0 * a * ca / (b * ca + a * cb);
+            }
+        }
+
         // The amplitude reflection coefficient of the boundary between medium upper and the one below it
         static Complex Interface(Complex* index, Complex* cosines, int upper, bool perpendicular)
         {

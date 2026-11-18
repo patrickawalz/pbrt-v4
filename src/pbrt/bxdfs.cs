@@ -23,6 +23,9 @@ namespace pbrt
         public DiffuseBxDF() { }
         public DiffuseBxDF(SampledSpectrum R) { this.R = R; }
 
+        // (not in pbrt-v4) For the lobes of a stack of layers (layerstack.cs)
+        public SampledSpectrum Reflectance() { return R; }
+
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
             if (!SameHemisphere(wo, wi))
@@ -574,6 +577,7 @@ namespace pbrt
             this.layerEta = layerEta;
             this.layerThickness = layerThickness;
             this.layerEtaAt = null;
+            this.repeat = 1;
         }
 
         // Layers that disperse: their indices at each wavelength of the path (layerEtaAt[wavelength][layer])
@@ -587,6 +591,89 @@ namespace pbrt
             this.layerEta = layerEtaAt[0];
             this.layerThickness = layerThickness;
             this.layerEtaAt = layerEtaAt;
+            this.repeat = 1;
+        }
+
+        // A Bragg mirror: the layers are one cell, and the stack is `repeat` cells (FrBraggPolarised())
+        public int repeat;
+
+        // `count` of the layers from `first` on, as a stack of their own repeated `cells` times: one of several mirrors
+        public ThinFilmStack Part(int first, int count, int cells)
+        {
+            ThinFilmStack part = this;
+            part.layerThickness = Slice(layerThickness, first, count);
+            part.layerEta = Slice(layerEta, first, count);
+            part.layerEtaAt = Slice(layerEtaAt, first, count);
+            part.layerKAt = Slice(layerKAt, first, count);
+            part.repeat = cells;
+            return part;
+        }
+
+        private static Float[] Slice(Float[] values, int first, int count)
+        {
+            Float[] part = new Float[count];
+            Array.Copy(values, first, part, 0, count);
+            return part;
+        }
+
+        private static Float[][] Slice(Float[][] values, int first, int count)
+        {
+            if (values == null)
+            {
+                return null;
+            }
+            Float[][] part = new Float[values.Length][];
+            for (int i = 0; i < values.Length; ++i)
+            {
+                part[i] = Slice(values[i], first, count);
+            }
+            return part;
+        }
+        // The extinction coefficients of films that absorb, for each wavelength (null: none do)
+        public Float[][] layerKAt;
+
+        // The reflectances, the phases, and the transmittances: 1 - fs and 1 - fp unless the films absorb
+        private void Reflection(Float cosine, Float etaAmbient, int wavelength, bool reversed, pstd.complex etaSubstrate, out Float fs, out Float fp,
+                                out Float ds, out Float dp, out Float dsT, out Float dpT, out Float ts, out Float tp)
+        {
+            Float[] indices = layerEtaAt != null ? layerEtaAt[wavelength] : layerEta;
+            if (layerKAt != null)
+            {
+                pbrt.FrBraggPolarised(cosine, etaAmbient, indices, layerKAt[wavelength], layerThickness, std.max(repeat, 1), reversed, wavelengths[wavelength],
+                                      etaSubstrate, out fs, out fp, out ds, out dp, out dsT, out dpT, out ts, out tp);
+                return;
+            }
+            if (repeat > 1)
+            {
+                pbrt.FrBraggPolarised(cosine, etaAmbient, indices, layerThickness, repeat, reversed, wavelengths[wavelength], etaSubstrate, out fs, out fp,
+                                      out ds, out dp, out dsT, out dpT);
+            }
+            else
+            {
+                pbrt.FrThinFilmPolarised(cosine, etaAmbient, indices, layerThickness, reversed, wavelengths[wavelength], etaSubstrate, out fs, out fp,
+                                         out ds, out dp, out dsT, out dpT);
+            }
+            ts = 1 - fs;
+            tp = 1 - fp;
+        }
+
+        // In a host medium of index hostEta on both sides, for light that arrives with the signed cosine cosTheta in the host
+        // (negative: from below, which meets the layers in the other order)
+        // Ts and Tp are the transmittances: 1 - Fs and 1 - Fp unless the films absorb.
+        public void Embedded(Float cosTheta, Float hostEta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
+                             out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp)
+        {
+            Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
+            Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
+            DsT = new SampledSpectrum(0.0f); DpT = new SampledSpectrum(0.0f);
+            Ts = new SampledSpectrum(0.0f); Tp = new SampledSpectrum(0.0f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float fs, fp, ds, dp, dsT, dpT, ts, tp;
+                pbrt.FrBraggPolarised(std.abs(cosTheta), hostEta, layerEtaAt != null ? layerEtaAt[i] : layerEta, layerKAt != null ? layerKAt[i] : null, layerThickness, std.max(repeat, 1),
+                                      cosTheta < 0, wavelengths[i], new pstd.complex(hostEta), out fs, out fp, out ds, out dp, out dsT, out dpT, out ts, out tp);
+                Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT; Ts[i] = ts; Tp[i] = tp;
+            }
         }
 
         public int Layers() { return layerEta.Length; }
@@ -600,31 +687,30 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
                 Float fs, fp, ds, dp;
-                pbrt.FrThinFilmPolarised(cosine, 1, layerEtaAt != null ? layerEtaAt[i] : layerEta, layerThickness, false, wavelengths[i],
-                                         new pstd.complex(eta[i], k[i]),
-                                         out fs, out fp, out ds, out dp, out Float _, out Float _);
+                Reflection(cosine, 1, i, false, new pstd.complex(eta[i], k[i]), out fs, out fp, out ds, out dp, out Float _, out Float _, out Float _,
+                           out Float _);
                 Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp;
             }
         }
 
         // On a dielectric of index substrateEta, for light that arrives with the signed cosine cosTheta (negative: from the
-        // substrate, which meets the layers in the other order). DsT and DpT are the phases of what goes through; the
-        // transmittances are 1 - Fs and 1 - Fp.
+        // substrate, which meets the layers in the other order). DsT and DpT are the phases of what goes through, Ts and Tp
+        // the transmittances: 1 - Fs and 1 - Fp unless the films absorb.
         public void Dielectric(Float cosTheta, Float substrateEta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
-                               out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT)
+                               out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp)
         {
             Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
             Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
             DsT = new SampledSpectrum(0.0f); DpT = new SampledSpectrum(0.0f);
+            Ts = new SampledSpectrum(0.0f); Tp = new SampledSpectrum(0.0f);
             bool inside = cosTheta < 0;
             Float cosine = std.abs(cosTheta);
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                Float fs, fp, ds, dp, dsT, dpT;
-                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, layerEtaAt != null ? layerEtaAt[i] : layerEta, layerThickness, inside,
-                                         wavelengths[i],
-                                         new pstd.complex(inside ? 1 : substrateEta), out fs, out fp, out ds, out dp, out dsT, out dpT);
-                Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT;
+                Float fs, fp, ds, dp, dsT, dpT, ts, tp;
+                Reflection(cosine, inside ? substrateEta : 1, i, inside, new pstd.complex(inside ? 1 : substrateEta), out fs, out fp, out ds, out dp,
+                           out dsT, out dpT, out ts, out tp);
+                Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT; Ts[i] = ts; Tp[i] = tp;
             }
         }
 
@@ -655,6 +741,11 @@ namespace pbrt
             this.k = k;
             this.maxOrder = maxOrder;
         }
+
+        // For the lobes of a stack of layers (layerstack.cs)
+        public SampledSpectrum Eta() { return eta; }
+        public SampledSpectrum K() { return k; }
+        public MicrofacetDistribution Distribution() { return mfDistrib; }
 
         // The same microsurface with thin films on its microfacets
         public MultiScatterConductorBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, SampledSpectrum eta, SampledSpectrum k,
@@ -1849,6 +1940,10 @@ namespace pbrt
             this.maxOrder = maxOrder;
         }
 
+        // For the lobes of a stack of layers (layerstack.cs)
+        public Float Eta() { return eta; }
+        public MicrofacetDistribution Distribution() { return mfDistrib; }
+
         // The same microsurface with thin films on its microfacets: the reflectance of a microfacet then depends on the
         // wavelength, the walk chooses between reflection and transmission by its average, and carries the rest as a weight
         public MultiScatterDielectricBxDF(MicrofacetDistribution mfDistrib, MicrosurfaceHeight height, Float eta, int maxOrder, ThinFilmStack film)
@@ -2027,20 +2122,23 @@ namespace pbrt
 
         // The reflectance of a microfacet for light that meets it with the cosine `cosine` (positive) from the side
         // `outside` of the walk, which is the other side of the surface when the walk is `flipped`. Returns the probability
-        // with which the walk reflects: the reflectance, or its average over the wavelengths under thin films.
-        private Float Fresnel(Float cosine, bool flipped, bool outside, out SampledSpectrum R)
+        // with which the walk reflects: the reflectance, or its average over the wavelengths under thin films. T is the
+        // transmittance: 1 - R unless the films absorb.
+        private Float Fresnel(Float cosine, bool flipped, bool outside, out SampledSpectrum R, out SampledSpectrum T)
         {
             if (!coated)
             {
                 Float etaAbove = flipped ? 1 / eta : eta;
                 Float reflectance = FrDielectric(cosine, outside ? etaAbove : 1 / etaAbove);
                 R = new SampledSpectrum(reflectance);
+                T = new SampledSpectrum(1 - reflectance);
                 return reflectance;
             }
             bool above = outside != flipped;
             film.Dielectric(above ? cosine : -cosine, eta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
-                            out SampledSpectrum _, out SampledSpectrum _);
+                            out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum Ts, out SampledSpectrum Tp);
             R = (Fs + Fp) * 0.5f;
+            T = (Ts + Tp) * 0.5f;
             return Clamp(R.Average(), 0, 1);
         }
 
@@ -2063,7 +2161,7 @@ namespace pbrt
                 wh = Normalize(wi + wo);
                 cosine = Dot(wi, wh);
                 Float geometry = 0.25f * mfDistrib.PDF_SingleSided(side * wi, side * wh) / cosine;
-                probability = Fresnel(cosine, flipped, outside, out fresnel);
+                probability = Fresnel(cosine, flipped, outside, out fresnel, out SampledSpectrum _);
                 return geometry;
             }
             else
@@ -2079,9 +2177,7 @@ namespace pbrt
                 {
                     return 0;
                 }
-                SampledSpectrum R;
-                probability = 1 - Fresnel(cosine, flipped, outside, out R);
-                fresnel = new SampledSpectrum(1f) - R;
+                probability = 1 - Fresnel(cosine, flipped, outside, out SampledSpectrum _, out fresnel);
                 return Sqr(etaLocal) * mfDistrib.PDF_SingleSided(side * wi, side * wh) *
                        std.max<Float>(0, -Dot(wo, wh)) / Sqr(cosine + etaLocal * Dot(wo, wh));
             }
@@ -2098,8 +2194,8 @@ namespace pbrt
             Point2f u = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
             wm = outside ? mfDistrib.Sample_wm_SingleSided(wi, u) : -mfDistrib.Sample_wm_SingleSided(-wi, u);
             Float cosine = Dot(wi, wm);
-            SampledSpectrum R;
-            Float reflectance = Fresnel(cosine, flipped, outside, out R);
+            SampledSpectrum R, T;
+            Float reflectance = Fresnel(cosine, flipped, outside, out R, out T);
             reflected = rng.Uniform<Float>() < reflectance;
             weight = new SampledSpectrum(1f);
             if (reflected)
@@ -2112,7 +2208,7 @@ namespace pbrt
             }
             if (coated)
             {
-                weight = (new SampledSpectrum(1f) - R) / (1 - reflectance);
+                weight = T / (1 - reflectance);
             }
             outside = !outside;
             Float cosTransmitted = -SafeSqrt(1 - (1 - cosine * cosine) / Sqr(etaLocal));
@@ -2139,13 +2235,12 @@ namespace pbrt
             }
             bool above = outside != flipped;
             film.Dielectric(above ? cosine : -cosine, eta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
-                            out SampledSpectrum DsT, out SampledSpectrum DpT);
-            SampledSpectrum one = new SampledSpectrum(1f), scale = new SampledSpectrum(0f);
+                            out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp);
+            SampledSpectrum scale = new SampledSpectrum(0f);
             bool any = false;
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                Float R = 0.5f * (Fs[i] + Fp[i]);
-                Float norm = reflect ? R : 1 - R;
+                Float norm = reflect ? 0.5f * (Fs[i] + Fp[i]) : 0.5f * (Ts[i] + Tp[i]);
                 scale[i] = norm > 0 ? 1 / norm : 0;
                 any |= norm > 0;
             }
@@ -2153,7 +2248,7 @@ namespace pbrt
             {
                 return false;
             }
-            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, one - Fs, one - Fp, DsT, DpT);
+            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, Ts, Tp, DsT, DpT);
             matrix = matrix.Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
             return true;
         }
@@ -2768,11 +2863,12 @@ namespace pbrt
         public bool IsConductor() { return conductor; }
 
         // The reflectance of the stack for light that arrives with the (signed) cosine cosTheta, and the phases of what goes
-        // through (DsT, DpT; the transmittances are 1 - Fs and 1 - Fp). False when the light cannot arrive from that side
-        // (the substrate of a conductor is opaque)
+        // through (DsT, DpT) and its transmittances (Ts, Tp: 1 - Fs and 1 - Fp unless the films absorb). False when the light
+        // cannot arrive from that side (the substrate of a conductor is opaque)
         public bool Fresnel(Float cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
-                            out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT)
+                            out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp)
         {
+            Ts = new SampledSpectrum(0.0f); Tp = new SampledSpectrum(0.0f);
             if (conductor)
             {
                 DsT = new SampledSpectrum(0.0f); DpT = new SampledSpectrum(0.0f);
@@ -2785,7 +2881,7 @@ namespace pbrt
                 film.Conductor(cosTheta, conductorEta, conductorK, out Fs, out Fp, out Ds, out Dp);
                 return true;
             }
-            film.Dielectric(cosTheta, substrateEta, out Fs, out Fp, out Ds, out Dp, out DsT, out DpT);
+            film.Dielectric(cosTheta, substrateEta, out Fs, out Fp, out Ds, out Dp, out DsT, out DpT, out Ts, out Tp);
             return true;
         }
 
@@ -2816,10 +2912,10 @@ namespace pbrt
             if (!HalfVector(wo, wi, out wm, out reflect, out etap))
                 return new SampledSpectrum(0);
             if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
-                         out SampledSpectrum DsT, out SampledSpectrum DpT))
+                         out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp))
                 return new SampledSpectrum(0);
             if (keep)
-                polarised = FacetMatrix(bsdf, wo, wi, wm, reflect, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+                polarised = FacetMatrix(bsdf, wo, wi, wm, reflect, mode, Fs, Fp, Ds, Dp, DsT, DpT, Ts, Tp, out matrix);
             SampledSpectrum R = (Fs + Fp) * 0.5f;
             Float cosTheta_o = CosTheta(wo), cosTheta_i = CosTheta(wi);
             if (reflect)
@@ -2827,8 +2923,7 @@ namespace pbrt
                 return R * (mfDistrib.DG(wo, wi, wm) / std.abs(4 * cosTheta_i * cosTheta_o));
             }
             Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap) * cosTheta_i * cosTheta_o;
-            SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) *
-                                 (mfDistrib.DG(wo, wi, wm) * std.abs(Dot(wi, wm) * Dot(wo, wm) / denom));
+            SampledSpectrum ft = (Ts + Tp) * 0.5f * (mfDistrib.DG(wo, wi, wm) * std.abs(Dot(wi, wm) * Dot(wo, wm) / denom));
             // Account for non-symmetry with transmission to different medium
             if (mode == TransportMode.Radiance)
                 ft /= Sqr(etap);
@@ -2839,22 +2934,21 @@ namespace pbrt
         // reflect (or let through) any of the wavelengths.
         private bool FacetMatrix(BSDF bsdf, Vector3f wo, Vector3f wi, Vector3f wm, bool reflect, TransportMode mode, SampledSpectrum Fs,
                                  SampledSpectrum Fp, SampledSpectrum Ds, SampledSpectrum Dp, SampledSpectrum DsT, SampledSpectrum DpT,
-                                 out Attenuation matrix)
+                                 SampledSpectrum Ts, SampledSpectrum Tp, out Attenuation matrix)
         {
             matrix = default;
-            SampledSpectrum one = new SampledSpectrum(1.0f), scale = new SampledSpectrum(0.0f);
+            SampledSpectrum scale = new SampledSpectrum(0.0f);
             bool any = false;
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                Float R = 0.5f * (Fs[i] + Fp[i]);
-                Float norm = reflect ? R : 1 - R;
+                Float norm = reflect ? 0.5f * (Fs[i] + Fp[i]) : 0.5f * (Ts[i] + Tp[i]);
                 // A wavelength that the stack does not reflect (or does not let through) has no weight either
                 scale[i] = norm > 0 ? 1 / norm : 0;
                 any |= norm > 0;
             }
             if (!any)
                 return false;
-            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, one - Fs, one - Fp, DsT, DpT);
+            matrix = reflect ? Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp) : Attenuation.Fresnel(scale, Ts, Tp, DsT, DpT);
             matrix = matrix.Scattered(bsdf.LocalToRender(wo), bsdf.LocalToRender(wi), bsdf.LocalToRender(wm), mode == TransportMode.Radiance);
             return true;
         }
@@ -2884,7 +2978,7 @@ namespace pbrt
             {
                 // Sample perfect specular thin film BSDF
                 if (!Fresnel(CosTheta(wo), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
-                             out SampledSpectrum _, out SampledSpectrum _))
+                             out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum Ts, out SampledSpectrum Tp))
                     return default;
                 SampledSpectrum R = (Fs + Fp) * 0.5f;
                 Float pr = Clamp(R[0], 0, 1), pt = 1 - pr;
@@ -2908,7 +3002,7 @@ namespace pbrt
                 Float etap;
                 if (!Refract(wo, new Normal3f(0, 0, 1), substrateEta, &etap, &wt))
                     return default;
-                SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) / AbsCosTheta(wt);
+                SampledSpectrum ft = (Ts + Tp) * 0.5f / AbsCosTheta(wt);
                 if (mode == TransportMode.Radiance)
                     ft /= Sqr(etap);
                 return new BSDFSample(ft, wt, pt / (pr + pt), BxDFFlags.SpecularTransmission, etap);
@@ -2920,7 +3014,7 @@ namespace pbrt
                     return default;
                 Vector3f wm = mfDistrib.Sample_wm(wo, u);
                 if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp,
-                             out SampledSpectrum DsT, out SampledSpectrum DpT))
+                             out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts, out SampledSpectrum Tp))
                     return default;
                 SampledSpectrum R = (Fs + Fp) * 0.5f;
                 // Compute probabilities _pr_ and _pt_ for sampling reflection and transmission
@@ -2939,7 +3033,7 @@ namespace pbrt
                     pdf = mfDistrib.PDF(wo, wm) / (4 * AbsDot(wo, wm)) * pr / (pr + pt);
                     SampledSpectrum fr = R * (mfDistrib.DG(wo, wi, wm) / (4 * CosTheta(wi) * CosTheta(wo)));
                     if (keep)
-                        polarised = FacetMatrix(bsdf, wo, wi, wm, true, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+                        polarised = FacetMatrix(bsdf, wo, wi, wm, true, mode, Fs, Fp, Ds, Dp, DsT, DpT, Ts, Tp, out matrix);
                     return new BSDFSample(fr, wi, pdf, BxDFFlags.GlossyReflection);
                 }
                 else
@@ -2953,14 +3047,14 @@ namespace pbrt
                     Float denom = Sqr(Dot(wi, wm) + Dot(wo, wm) / etap);
                     Float dwm_dwi = AbsDot(wi, wm) / denom;
                     pdf = mfDistrib.PDF(wo, wm) * dwm_dwi * pt / (pr + pt);
-                    SampledSpectrum ft = (new SampledSpectrum(1.0f) - R) *
+                    SampledSpectrum ft = (Ts + Tp) * 0.5f *
                                          (mfDistrib.DG(wo, wi, wm) *
                                           std.abs(Dot(wi, wm) * Dot(wo, wm) / (CosTheta(wi) * CosTheta(wo) * denom)));
                     // Account for non-symmetry with transmission to different medium
                     if (mode == TransportMode.Radiance)
                         ft /= Sqr(etap);
                     if (keep)
-                        polarised = FacetMatrix(bsdf, wo, wi, wm, false, mode, Fs, Fp, Ds, Dp, DsT, DpT, out matrix);
+                        polarised = FacetMatrix(bsdf, wo, wi, wm, false, mode, Fs, Fp, Ds, Dp, DsT, DpT, Ts, Tp, out matrix);
                     return new BSDFSample(ft, wi, pdf, BxDFFlags.GlossyTransmission, etap);
                 }
             }
@@ -2977,7 +3071,7 @@ namespace pbrt
             if (!HalfVector(wo, wi, out wm, out reflect, out etap))
                 return 0;
             if (!Fresnel(Dot(wo, wm), out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
-                         out SampledSpectrum _, out SampledSpectrum _))
+                         out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum _))
                 return 0;
             Float pr, pt;
             Probabilities((Fs + Fp) * 0.5f, sampleFlags, out pr, out pt);
@@ -3070,6 +3164,8 @@ namespace pbrt
         public SampledSpectrum Eta() { return eta; }
 
         public SampledSpectrum K() { return k; }
+
+        public MicrofacetDistribution Distribution() { return mfDistrib; }
 
         public override BxDFFlags Flags()
         {
@@ -3236,12 +3332,16 @@ namespace pbrt
 
         public override SampledSpectrum f(Vector3f wo, Vector3f wi, TransportMode mode)
         {
+            // (as a layer of a BxDF that is evaluated with polarisation: the same walk as its matrix will be asked of. See
+            // `carriedPolarised`.)
+            bool with = carriedPolarised;
+            BSDF frame = carriedFrame;
             if (reciprocal)
             {
-                return 0.5f * (Evaluate(wo, wi, mode, default, false, out Attenuation _, out bool _) +
-                               Evaluate(wi, wo, !mode, default, false, out Attenuation _, out bool _));
+                return 0.5f * (Evaluate(wo, wi, mode, frame, with, out Attenuation _, out bool _) +
+                               Evaluate(wi, wo, !mode, frame, with, out Attenuation _, out bool _));
             }
-            return Evaluate(wo, wi, mode, default, false, out Attenuation _, out bool _);
+            return Evaluate(wo, wi, mode, frame, with, out Attenuation _, out bool _);
         }
 
         // (not in pbrt-v4) The value with the Mueller matrix of the layers for the pair of directions: the one random walk,
@@ -3293,6 +3393,10 @@ namespace pbrt
             hasSum = false;
             SampledSpectrum f = new SampledSpectrum(0f);
             // Estimate _LayeredBxDF_ value _f_ using random sampling
+            // (not in pbrt) An interface can have a value and directions of its own as well (a rough Bragg layer: what its
+            // facets reflect, and the light that goes straight through; a stack with such a layer). It is then an interface
+            // with a value, and those of its samples that are a direction of its own are weighted as the samples of a
+            // specular interface are: nothing else finds their paths. pbrt asks whether the interface has anything specular.
             // Set _wo_ and _wi_ for layered BSDF evaluation
             Float side = 1;
             if (twoSided && wo.z < 0)
@@ -3302,6 +3406,7 @@ namespace pbrt
                 side = -1;
             }
             bool fromCamera = mode == TransportMode.Radiance;
+            Context(polarised, bsdf, side, fromCamera);
             Vector3f directionExit = default, directionEnter = default;
             if (polarised)
             {
@@ -3353,6 +3458,7 @@ namespace pbrt
                 u0.x = r();
                 u0.y = r();
                 Float ucEnter = uc;
+                Carry(enterInterface, new SampledSpectrum(1f));
                 pstd.optional<BSDFSample> wos = enterInterface.Sample_f(wo, uc, u0, mode, BxDFReflTransFlags.Transmission);
                 if (!wos || !(bool)wos.value().f || wos.value().pdf == 0 || wos.value().wi.z == 0)
                     continue;
@@ -3362,6 +3468,7 @@ namespace pbrt
                 Point2f u1 = default;
                 u1.x = r();
                 u1.y = r();
+                Carry(exitInterface, new SampledSpectrum(1f));
                 pstd.optional<BSDFSample> wis = exitInterface.Sample_f(wi, uc, u1, !mode, BxDFReflTransFlags.Transmission);
                 // (the C++ fork) A failed sample (possible for multiple-scattering interfaces, whose flag-restricted sampling is by
                 // rejection, and for refraction past the critical angle) only zeroes the strategy that needs it; the other strategy
@@ -3392,7 +3499,7 @@ namespace pbrt
                 // term is added when the walk first reaches it (below); where it is specular and the entrance is not, here, by
                 // the direction sampled from wi.
                 bool direct = true;
-                if (!SameHemisphere(wo, wi) && haveWis && IsSpecular(exitInterface.Flags()) && !IsSpecular(enterInterface.Flags()))
+                if (!SameHemisphere(wo, wi) && haveWis && wis.value().IsSpecular() && IsNonSpecular(enterInterface.Flags()))
                 {
                     SampledSpectrum across = (bool)albedo ? new SampledSpectrum(Tr(thickness, wis.value().wi)) : Through(wis.value().wi);
                     SampledSpectrum straight = enterInterface.f(wo, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * across * wis.value().f / wis.value().pdf;
@@ -3408,9 +3515,14 @@ namespace pbrt
                 {
                     // Sample next event for layered BSDF evaluation random walk
                     // Possibly terminate layered BSDF random walk with Russian roulette
-                    if (depth > 3 && beta.MaxComponentValue() < 0.25f)
+                    if (polarised)
                     {
-                        Float q = std.max<Float>(0, 1 - beta.MaxComponentValue());
+                        Rebalance(ref beta, ref chain);
+                    }
+                    Float most = beta.MaxComponentValue();
+                    if (depth > 3 && most < 0.25f)
+                    {
+                        Float q = std.max<Float>(0, 1 - most);
                         if (r() < q)
                             break;
                         beta /= 1 - q;
@@ -3440,7 +3552,7 @@ namespace pbrt
                             direct = false;
                             // Account for scattering through _exitInterface_ using _wis_
                             Float wt = 1;
-                            if (haveWis && !IsSpecular(exitInterface.Flags()))
+                            if (haveWis && !wis.value().IsSpecular())
                                 wt = PowerHeuristic(1, wisPdf, 1, phase.PDF(-w, -wis.value().wi));
                             SampledSpectrum scattered = haveWis ? beta * albedo * phase.p(-w, -wis.value().wi) * wt * Tr(zp - exitZ, wis.value().wi) *
                                                                   wis.value().f / wis.value().pdf
@@ -3468,7 +3580,7 @@ namespace pbrt
                                 chain = PolarisedFacet.Compose(chain, true, Attenuation.Lambert(new SampledSpectrum(1f)), fromCamera);
 
                             // Possibly account for scattering through _exitInterface_
-                            if (((z < exitZ && w.z > 0) || (z > exitZ && w.z < 0)) && !IsSpecular(exitInterface.Flags()))
+                            if (((z < exitZ && w.z > 0) || (z > exitZ && w.z < 0)) && IsNonSpecular(exitInterface.Flags()))
                             {
                                 // Account for scattering through _exitInterface_
                                 SampledSpectrum fExit = exitInterface.f(-w, wi, mode);
@@ -3495,7 +3607,7 @@ namespace pbrt
                     // Account for scattering at appropriate interface
                     if (z == exitZ)
                     {
-                        if (direct && !IsSpecular(exitInterface.Flags()))
+                        if (direct && IsNonSpecular(exitInterface.Flags()))
                         {
                             // (not in pbrt) straight from the entrance to the exit interface, and through it to wi
                             SampledSpectrum fStraight = exitInterface.f(-w, wi, mode);
@@ -3515,6 +3627,7 @@ namespace pbrt
                         Point2f u2 = default;
                         u2.x = r();
                         u2.y = r();
+                        Carry(exitInterface, beta, chain, polarised);
                         pstd.optional<BSDFSample> bs = exitInterface.Sample_f(-w, uc2, u2, mode, BxDFReflTransFlags.Reflection);
                         if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                             break;
@@ -3528,11 +3641,11 @@ namespace pbrt
                     {
                         direct = false;
                         // Account for scattering at _nonExitInterface_
-                        if (haveWis && !IsSpecular(nonExitInterface.Flags()))
+                        if (haveWis && IsNonSpecular(nonExitInterface.Flags()))
                         {
                             // Add NEE contribution along presampled _wis_ direction
                             Float wt = 1;
-                            if (!IsSpecular(exitInterface.Flags()))
+                            if (!wis.value().IsSpecular())
                                 wt = PowerHeuristic(1, wisPdf, 1, nonExitInterface.PDF(-w, -wis.value().wi, mode));
                             SampledSpectrum connected = beta * nonExitInterface.f(-w, -wis.value().wi, mode) * AbsCosTheta(wis.value().wi) * wt *
                                                         Through(wis.value().wi) * wis.value().f / wis.value().pdf;
@@ -3552,6 +3665,7 @@ namespace pbrt
                         u3.x = r();
                         u3.y = r();
                         Vector3f woNonExit = -w;
+                        Carry(nonExitInterface, beta, chain, polarised);
                         pstd.optional<BSDFSample> bs = nonExitInterface.Sample_f(-w, uc3, u3, mode, BxDFReflTransFlags.Reflection);
                         if (!bs || !(bool)bs.value().f || bs.value().pdf == 0 || bs.value().wi.z == 0)
                             break;
@@ -3561,14 +3675,14 @@ namespace pbrt
                                                            fromCamera);
                         w = bs.value().wi;
 
-                        if (!IsSpecular(exitInterface.Flags()))
+                        if (IsNonSpecular(exitInterface.Flags()))
                         {
                             // Add NEE contribution along direction from BSDF sample
                             SampledSpectrum fExit = exitInterface.f(-w, wi, mode);
                             if ((bool)fExit)
                             {
                                 Float wt = 1;
-                                if (!IsSpecular(nonExitInterface.Flags()))
+                                if (!bs.value().IsSpecular())
                                 {
                                     // The density with which the exit interface, sampled from wi, gives the direction of this path (wis): from wi to
                                     // -w, with the mode of that sampling
@@ -3593,7 +3707,7 @@ namespace pbrt
         public override pstd.optional<BSDFSample> Sample_f(Vector3f wo, Float uc, Point2f u, TransportMode mode,
                                                            BxDFReflTransFlags sampleFlags)
         {
-            return Sample(default, wo, uc, u, mode, sampleFlags, false, out bool _, out Attenuation _);
+            return Sample(carriedFrame, wo, uc, u, mode, sampleFlags, carriedPolarised, out bool _, out Attenuation _);
         }
 
         // (not in pbrt-v4) The same sample with the matrix of every scattering of the path it followed: the reflection of
@@ -3621,10 +3735,12 @@ namespace pbrt
             }
             Float side = flipWi ? -1 : 1;
             bool fromCamera = mode == TransportMode.Radiance;
+            Context(keep, bsdf, side, fromCamera);
             Attenuation chain = default;
 
             // Sample BSDF at entrance interface to get initial direction _w_
             bool enteredTop = twoSided || wo.z > 0;
+            Carry(enteredTop ? top : bottom, Weight());
             pstd.optional<BSDFSample> bs0 = enteredTop ? top.Sample_f(wo, uc, u, mode) : bottom.Sample_f(wo, uc, u, mode);
             if (!bs0 || !(bool)bs0.value().f || bs0.value().pdf == 0 || bs0.value().wi.z == 0)
                 return default;
@@ -3660,6 +3776,10 @@ namespace pbrt
             {
                 // Follow random walk through layers to sample layered BSDF
                 // Possibly terminate layered BSDF sampling with Russian Roulette
+                if (keep)
+                {
+                    Rebalance(ref f, ref chain);
+                }
                 Float rrBeta = f.MaxComponentValue() / pdf;
                 if (depth > 3 && rrBeta < 0.25f)
                 {
@@ -3732,6 +3852,7 @@ namespace pbrt
                 Point2f u2 = default;
                 u2.x = r();
                 u2.y = r();
+                Carry(iface, Weight() * f / pdf, chain, keep);
                 pstd.optional<BSDFSample> bs1 = iface.Sample_f(-w, uc2, u2, mode);
                 if (!bs1 || !(bool)bs1.value().f || bs1.value().pdf == 0 || bs1.value().wi.z == 0)
                     return default;
@@ -3787,14 +3908,122 @@ namespace pbrt
             return iface;
         }
 
-        private static bool Walked(BxDF iface)
+        // (not in pbrt) What the path carries at each wavelength when this BxDF is sampled as a layer of another one. An
+        // interface that chooses between a reflection and a transmission whose shares differ with the wavelength (a Bragg
+        // mirror) chooses by them: the wavelengths that carry nothing no longer decide, and the weight of a walk between a
+        // mirror and another interface stays bounded. Only the samples use it: f() and PDF() depend on their directions alone.
+        public SampledSpectrum carried;
+
+        private SampledSpectrum Weight()
+        {
+            return (bool)carried ? carried : new SampledSpectrum(1f);
+        }
+
+        // (not in pbrt) With polarisation, the same for the two polarisations: a mirror that reflects one of them more than the
+        // other is reached, after a few reflections between it and another mirror, by light that is nearly all of the one, and
+        // a choice by the mean of the two reflectances then leaves weights that grow with every reflection. So a BxDF that is
+        // evaluated with polarisation gives its layers the frame of the surface and the matrix of the path so far, and a
+        // mirror chooses by what it reflects of that light. A layer in this state follows the same walk whether it is asked
+        // for the scalar or for the matrix as well: the two are asked one after the other (SampledMatrix()).
+        public bool carriedPolarised;
+        public BSDF carriedFrame;
+        public Attenuation carriedChain;
+        public bool carriedHasChain;
+
+        // The state of this evaluation, for its layers
+        private bool tracking, trackingFromCamera;
+        private BSDF trackingFrame;
+
+        // A walk with polarisation carries, at a wavelength, its scalar weight times the first element of its matrix: that
+        // element has the difference between the light of the path and light that is not polarised, and between two mirrors it
+        // grows with every reflection while the scalar weight shrinks. The element is moved into the weight, so that the
+        // roulette goes by what the walk carries (by the scalar alone it would end the walks whose light a mirror reflects
+        // well), and neither number runs out of range. The product is the same.
+        internal static void Rebalance(ref SampledSpectrum weight, ref Attenuation chain)
+        {
+            SampledSpectrum first = chain.GetMuellerMatrix().Get(0, 0);
+            SampledSpectrum inverse = new SampledSpectrum(1f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                if (first[i] > 0 && !IsInf(first[i]))
+                {
+                    weight[i] *= first[i];
+                    inverse[i] = 1 / first[i];
+                }
+            }
+            chain *= inverse;
+        }
+
+        // At the start of an evaluation: `polarised` with the frame `bsdf` (the surface the right way up: side)
+        private void Context(bool polarised, BSDF bsdf, Float side, bool fromCamera)
+        {
+            tracking = polarised;
+            trackingFromCamera = fromCamera;
+            trackingFrame = polarised ? (side < 0 ? bsdf.TurnedOver() : bsdf) : default;
+            Carry(top, new SampledSpectrum(1f));
+            Carry(bottom, new SampledSpectrum(1f));
+        }
+
+        // Before a layer is sampled: what the path carries, and the matrix of the path that led to this BxDF
+        private void Carry(BxDF iface, SampledSpectrum weight)
+        {
+            Hand(iface, weight, carriedChain, carriedPolarised && carriedHasChain);
+        }
+
+        // The same with the matrix of the walk inside this BxDF so far
+        private void Carry(BxDF iface, SampledSpectrum weight, Attenuation chain, bool hasChain)
+        {
+            if (!hasChain)
+            {
+                Carry(iface, weight);
+            }
+            else if (carriedPolarised && carriedHasChain)
+            {
+                Hand(iface, weight, PolarisedFacet.Compose(carriedChain, true, chain, trackingFromCamera), true);
+            }
+            else
+            {
+                Hand(iface, weight, chain, true);
+            }
+        }
+
+        private void Hand(BxDF iface, SampledSpectrum weight, Attenuation chain, bool hasChain)
+        {
+            iface = Unwrap(iface);
+            if (iface is BraggLayerBxDF mirror)
+            {
+                mirror.carried = weight;
+                mirror.carriedPolarised = tracking;
+                mirror.carriedFrame = trackingFrame;
+                mirror.carriedChain = chain;
+                mirror.carriedHasChain = tracking && hasChain;
+            }
+            else if (iface is LayeredBxDF<AnyBxDF, AnyBxDF> stack)
+            {
+                stack.carried = weight;
+                stack.carriedPolarised = tracking;
+                stack.carriedFrame = trackingFrame;
+                stack.carriedChain = chain;
+                stack.carriedHasChain = tracking && hasChain;
+            }
+            else if (iface is LayerStackBxDF flat)
+            {
+                flat.carried = weight;
+                flat.carriedPolarised = tracking;
+                flat.carriedFrame = trackingFrame;
+                flat.carriedChain = chain;
+                flat.carriedHasChain = tracking && hasChain;
+            }
+        }
+
+        internal static bool Walked(BxDF iface)
         {
             iface = Unwrap(iface);
             return !(iface is DielectricBxDF) && !(iface is ConductorBxDF) && iface.HasMuellerMatrix();
         }
 
         // The matrix of the scattering from a to b that was evaluated with f(a, b, mode)
-        private static Attenuation EvaluatedMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, TransportMode mode)
+        internal static Attenuation EvaluatedMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, TransportMode mode)
         {
             if (!Walked(iface))
             {
@@ -3806,7 +4035,7 @@ namespace pbrt
 
         // The matrix of the scattering that Sample_f(a, uc, u, mode, flags) gave, to b. `against`: the sample was taken from the
         // far end of the scattering (wis, with the other mode), and the walk goes from b to a.
-        private static Attenuation SampledMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, Float uc, Point2f u, TransportMode mode,
+        internal static Attenuation SampledMatrix(BSDF bsdf, Float side, BxDF iface, Vector3f a, Vector3f b, Float uc, Point2f u, TransportMode mode,
                                                  BxDFReflTransFlags flags, bool fromCamera, bool against)
         {
             if (!Walked(iface))
@@ -3875,7 +4104,7 @@ namespace pbrt
         }
 
         // Adds the matrix of a path times its scalar contribution to the sum
-        private static void Accumulate(ref Attenuation sum, ref bool hasSum, Attenuation matrix, SampledSpectrum contribution, Vector3f directionExit,
+        internal static void Accumulate(ref Attenuation sum, ref bool hasSum, Attenuation matrix, SampledSpectrum contribution, Vector3f directionExit,
                                        Vector3f directionEnter)
         {
             matrix *= contribution;
@@ -3920,6 +4149,7 @@ namespace pbrt
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
+            Context(false, default, 1, true);
             // (pbrt: sampleFlags == All only; the density of the whole walk is returned for a part of it too)
             // Set _wo_ and _wi_ for layered BSDF evaluation
             if (twoSided && wo.z < 0)
@@ -3965,11 +4195,13 @@ namespace pbrt
                     Point2f ua = default;
                     ua.x = r();
                     ua.y = r();
+                    Carry(tInterface, new SampledSpectrum(1f));
                     wos = tInterface.Sample_f(wo, a0, ua, mode, trans);
                     Float a1 = r();
                     Point2f ub = default;
                     ub.x = r();
                     ub.y = r();
+                    Carry(tInterface, new SampledSpectrum(1f));
                     wis = tInterface.Sample_f(wi, a1, ub, !mode, trans);
 
                     // Update _pdfSum_ accounting for TRT scattering events
@@ -3984,6 +4216,7 @@ namespace pbrt
                             Point2f uc = default;
                             uc.x = r();
                             uc.y = r();
+                            Carry(rInterface, new SampledSpectrum(1f));
                             pstd.optional<BSDFSample> rs = rInterface.Sample_f(-wos.value().wi, a2, uc, mode);
                             if (rs && (bool)rs.value().f && rs.value().pdf > 0)
                             {
@@ -4024,6 +4257,7 @@ namespace pbrt
                     Point2f u = default;
                     u.x = r();
                     u.y = r();
+                    Carry(toInterface, new SampledSpectrum(1f));
                     pstd.optional<BSDFSample> wos = toInterface.Sample_f(wo, uc, u, mode);
                     if (!wos || !(bool)wos.value().f || wos.value().pdf == 0 || wos.value().wi.z == 0 || wos.value().IsReflection())
                         continue;
@@ -4032,13 +4266,14 @@ namespace pbrt
                     u = default;
                     u.x = r();
                     u.y = r();
+                    Carry(tiInterface, new SampledSpectrum(1f));
                     pstd.optional<BSDFSample> wis = tiInterface.Sample_f(wi, uc, u, !mode);
                     if (!wis || !(bool)wis.value().f || wis.value().pdf == 0 || wis.value().wi.z == 0 || wis.value().IsReflection())
                         continue;
 
-                    if (IsSpecular(toInterface.Flags()))
+                    if (!IsNonSpecular(toInterface.Flags()))
                         pdfSum += tiInterface.PDF(-wos.value().wi, wi, mode);
-                    else if (IsSpecular(tiInterface.Flags()))
+                    else if (!IsNonSpecular(tiInterface.Flags()))
                         pdfSum += toInterface.PDF(wo, -wis.value().wi, mode);
                     else
                         pdfSum += (toInterface.PDF(wo, -wis.value().wi, mode) + tiInterface.PDF(-wos.value().wi, wi, mode)) / 2;
@@ -4053,6 +4288,15 @@ namespace pbrt
             return StringPrintf("[ LayeredBxDF top: %s bottom: %s thickness: %f albedo: %s g: %f ]", top, bottom,
                                 thickness, albedo, g);
         }
+
+        // (not in pbrt-v4) The layers, for the same material as one flat stack (layerstack.cs)
+        public TopBxDF TopLayer() { return top; }
+        public BottomBxDF BottomLayer() { return bottom; }
+        public Float Thickness() { return thickness; }
+        public SampledSpectrum Albedo() { return albedo; }
+        public Float G() { return g; }
+        public int MaxDepth() { return maxDepth; }
+        public int NSamples() { return nSamples; }
 
         // LayeredBxDF Private Members
         private readonly bool twoSided;

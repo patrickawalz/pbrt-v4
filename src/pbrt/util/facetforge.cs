@@ -1279,6 +1279,24 @@ namespace pbrt
 
         public static SampledSpectrum FacetFrDielectric(Facet f, double cosI, double iorI, double iorT)
         {
+            return FacetFrDielectric(f, cosI, iorI, iorT, out SampledSpectrum _);
+        }
+
+        // With the transmittance: one minus the reflectance unless the facet has films that absorb
+        public static SampledSpectrum FacetFrDielectric(Facet f, double cosI, double iorI, double iorT, out SampledSpectrum T)
+        {
+            SampledSpectrum R = FacetReflectanceDielectric(f, cosI, iorI, iorT, out T, out bool has);
+            if (!has)
+            {
+                T = new SampledSpectrum(1f) - R;
+            }
+            return R;
+        }
+
+        private static SampledSpectrum FacetReflectanceDielectric(Facet f, double cosI, double iorI, double iorT, out SampledSpectrum T, out bool hasT)
+        {
+            T = default;
+            hasT = false;
             double R0 = DielectricR(cosI, iorT / iorI);
             if (f.hasStack)
             {
@@ -1287,7 +1305,9 @@ namespace pbrt
                 bool outer = Math.Abs(ratio - index) <= Math.Abs(ratio - 1.0 / index);
                 Float signed = (Float)Math.Max(1e-6, cosI) * (outer ? 1 : -1);
                 f.stack.Dielectric(signed, (Float)index, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum _, out SampledSpectrum _,
-                                   out SampledSpectrum _, out SampledSpectrum _);
+                                   out SampledSpectrum _, out SampledSpectrum _, out SampledSpectrum Ts, out SampledSpectrum Tp);
+                T = (Ts + Tp) * 0.5f;
+                hasT = true;
                 return (Fs + Fp) * 0.5f;
             }
             if (!f.film.Enabled())
@@ -1386,7 +1406,7 @@ namespace pbrt
             case FacetKind.Dielectric:
             {
                 double eta = iorT / iorI;
-                SampledSpectrum Rs = FacetFrDielectric(f, wi.z, iorI, iorT);
+                SampledSpectrum Rs = FacetFrDielectric(f, wi.z, iorI, iorT, out SampledSpectrum Ts);
                 double FR = f.Filmed() ? (double)Rs.Average() : DielectricR(wi.z, eta);
                 bool refl = rnd.U() <= FR;
                 if (f.Filmed() && !unit)
@@ -1398,7 +1418,7 @@ namespace pbrt
                     }
                     else
                     {
-                        w *= (new SampledSpectrum(1f) - Rs) / (Float)(1.0 - FR);
+                        w *= Ts / (Float)(1.0 - FR);
                     }
                 }
                 if (refl)
@@ -1470,12 +1490,13 @@ namespace pbrt
             case FacetKind.Dielectric:
             {
                 double eta = iorT / iorI;
-                SampledSpectrum F = FacetFrDielectric(f, wi.z, iorI, iorT);
+                SampledSpectrum F = FacetFrDielectric(f, wi.z, iorI, iorT, out SampledSpectrum through);
                 if (f.Filmed() && unit)
                 {
                     F = new SampledSpectrum((Float)F.Average());
+                    through = new SampledSpectrum(1f) - F;
                 }
-                return wo.z >= 0 ? F : (new SampledSpectrum(1f) - F) * (Float)(eta * eta);
+                return wo.z >= 0 ? F : through * (Float)(eta * eta);
             }
             case FacetKind.Mirror:
                 return unit ? new SampledSpectrum(1f) : f.R;

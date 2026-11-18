@@ -200,7 +200,8 @@ namespace pbrt
             else if (bxdf is ThinFilmBxDF film)
             {
                 if (!film.Fresnel(cosTheta, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds,
-                                  out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT))
+                                  out SampledSpectrum Dp, out SampledSpectrum DsT, out SampledSpectrum DpT, out SampledSpectrum Ts,
+                                  out SampledSpectrum Tp))
                     return false;
                 // The first element is the ratio of the spectral reflectance to the one of the hero wavelength, which chose
                 // between reflection and transmission
@@ -213,11 +214,11 @@ namespace pbrt
                 }
                 else
                 {
+                    // (the probability of the transmission; the transmittances are less than 1 - Fs and 1 - Fp when the films absorb)
                     Float T0 = 1 - R0;
                     if (T0 <= 0)
                         return false;
-                    A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T0 / Sqr(bs.eta) : 1 / T0),
-                                            new SampledSpectrum(1.0f) - Fs, new SampledSpectrum(1.0f) - Fp, DsT, DpT);
+                    A = Attenuation.Fresnel(new SampledSpectrum(mode == TransportMode.Radiance ? 1 / T0 / Sqr(bs.eta) : 1 / T0), Ts, Tp, DsT, DpT);
                 }
             }
             else if (bxdf is ThinCoatBxDF coat)
