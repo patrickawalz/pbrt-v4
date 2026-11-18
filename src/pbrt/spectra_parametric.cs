@@ -331,7 +331,15 @@ namespace pbrt
         //   "float <name>"                            constant index
         //   "spectrum <name>" (or any of the types above)   tabulated / named / parametric spectrum
         // Returns null if none is given.
+        // With "<prefix>extinction" or "<prefix>absorption" that index is the background, and the index is the one that the
+        // absorption makes of it by the Kramers-Kronig relation (anomalousdispersion.cs).
         public static Spectrum Index(TextureParameterDictionary parameters, string name, Allocator alloc)
+        {
+            string prefix = name.Substring(0, name.Length - 3);  // strip "eta"
+            return AnomalousDispersionSpectrum.Create(parameters, prefix, BackgroundIndex(parameters, name, alloc), alloc);
+        }
+
+        private static Spectrum BackgroundIndex(TextureParameterDictionary parameters, string name, Allocator alloc)
         {
             string prefix = name.Substring(0, name.Length - 3);  // strip "eta"
             List<Float> sm = parameters.GetFloatArray(prefix + "sellmeier");
