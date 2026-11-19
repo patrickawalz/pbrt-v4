@@ -14,7 +14,8 @@
 // the solar disc toward its limb; the disc has the diameter of 0.51 degrees. HosekSkyModel is the port of the spectral
 // part of their sample implementation (version 1.4a); the coefficients are in hosekskydata.cs.
 //
-// The light. An infinite light of the radiance of the model above the horizon, with z of "up" as the zenith; "sundir"
+// The light (what it shares with the other sky models is in skydomelight.cs). An infinite light of the radiance of the
+// model above the horizon, with z of "up" as the zenith; "sundir"
 // points to the sun. "bool sun" (true) adds the solar disc. Below the horizon there is nothing, or with "bool ground" a
 // ground of the albedo that the sky and the sun light, seen as from far above (its radiance is its albedo times the
 // irradiance of a level surface, over pi). The radiance is in W m^-2 sr^-1 nm^-1 times 683, the units of the thermal
@@ -34,6 +35,14 @@
 // of the sun's vertical 90 degrees from it (F_90). It is a heuristic, of one degree for all wavelengths and without the
 // neutral points of the real sky, as its authors say; the degree is kept between 0 and 1 (below a turbidity of about 2.5
 // the formula can exceed 1). The solar disc and the ground are not polarised.
+//
+// Other stars. "float startemperature" (K) makes the sky that of an earth-like world of another star: the "alien world"
+// of the authors' implementation (Wilkie and Hosek, "Predicting Sky Dome Appearance on Earth-like Extrasolar Worlds",
+// SCCG 2013). The star is a blackbody of that temperature; each waveband of the sky and of the disc is scaled by what the
+// star emits there over what the sun of the model emits. The disc is given the size at which the star sends as much to the
+// world as the sun to the earth, times "float starintensity" (1): a red star is large in the sky, a blue one small. The
+// pattern of the sky is not changed for the size of the disc, and the darkening toward the limb is the sun's (the
+// authors' caveats). A sky of two stars is two of these lights with the intensities that add up.
 //
 // Sampling. A direction is drawn from the solar disc (uniformly) or from the sky, the two as a mixture by their shares of
 // the light; the density of a direction is that of the mixture, so the light is found by its own samples and by the
@@ -56,10 +65,14 @@ namespace pbrt
     // The spectral sky-dome and solar radiance of Hosek and Wilkie for one sun elevation, turbidity and ground albedo
     public sealed class HosekSkyModel
     {
+        // The angular radius of the terrestrial sun
         public const double SolarRadius = 0.51 * Math.PI / 180 / 2;
 
-        // `solarElevation`: radians, 0 to pi/2; `turbidity`: 1 to 10; `albedo`: of the ground at the eleven wavebands
-        public HosekSkyModel(double solarElevation, double turbidity, double[] albedo)
+        // `solarElevation`: radians, 0 to pi/2; `turbidity`: 1 to 10; `albedo`: of the ground at the eleven wavebands.
+        // `starTemperature` (K), if it is not 0, makes the sky that of an earth-like world of another star (the "alien
+        // world" of the authors' implementation): the star is a blackbody of that temperature, and `starIntensity` is
+        // what it sends to the world as a multiple of what the sun sends to the earth.
+        public HosekSkyModel(double solarElevation, double turbidity, double[] albedo, double starTemperature = 0, double starIntensity = 1)
         {
             this.turbidity = turbidity;
             for (int band = 0; band < Bands; ++band)
@@ -67,8 +80,52 @@ namespace pbrt
                 configs[band] = new double[9];
                 CookConfiguration(HosekSkyData.datasets[band], configs[band], turbidity, albedo[band], solarElevation);
                 radiances[band] = CookRadianceConfiguration(HosekSkyData.datasetsRad[band], turbidity, albedo[band], solarElevation);
+                emissionSky[band] = 1;
+                emissionSun[band] = 1;
+            }
+            discRadius = SolarRadius;
+            if (starTemperature > 0)
+            {
+                // Each waveband is scaled by what the star emits there over what the sun of the model emits. A star of
+                // another colour is given another size, so that a star of the intensity 1 sends what the sun sends (the
+                // mean of the ratios of the nine visible wavebands): the disc is scaled by its size and the sky by the
+                // colour alone.
+                double ratio = 0;
+                for (int band = 0; band < Bands; ++band)
+                {
+                    double wavelength = (320.0 + 40.0 * band) * 1e-9;
+                    emissionSun[band] = Blackbody(starTemperature, wavelength) * BlackbodyScale / OriginalSolarRadiance[band];
+                    if (band >= 2)
+                    {
+                        ratio += emissionSun[band] / 9.0;
+                    }
+                }
+                discRadius = Math.Sqrt(starIntensity) * SolarRadius / Math.Sqrt(ratio);
+                for (int band = 0; band < Bands; ++band)
+                {
+                    emissionSky[band] = starIntensity * emissionSun[band] / ratio;
+                }
             }
         }
+
+        // The angular radius of the disc of the star: that of the sun, or of the star of another world
+        public double DiscRadius
+        {
+            get { return discRadius; }
+        }
+
+        // Planck's formula as the authors' implementation has it (`wavelength` in metres), and the factor that makes a
+        // blackbody of 5800 K match the solar spectrum of the model from 380 to 720 nm
+        private static double Blackbody(double temperature, double wavelength)
+        {
+            const double c1 = 3.74177e-16, c2 = 0.0143878;
+            return c1 / Math.Pow(wavelength, 5.0) / (Math.Exp(c2 / (wavelength * temperature)) - 1.0);
+        }
+
+        private const double BlackbodyScale = 3.19992e-10;
+
+        // The solar spectrum above the atmosphere that the model was fitted with, at the eleven wavebands
+        private static readonly double[] OriginalSolarRadiance = { 7500.0, 12500.0, 21127.5, 26760.5, 30663.7, 27825.0, 25503.8, 25134.2, 23212.1, 21526.7, 19870.8 };
 
         // The quintic Bezier curve of six control values at an index of the data, in the (cube root of the) elevation
         private static double Bezier(double[] data, int offset, int stride, double x)
@@ -124,7 +181,7 @@ namespace pbrt
             double mieM = (1 + cosGamma * cosGamma) / Math.Pow(1 + c[8] * c[8] - 2 * c[8] * cosGamma, 1.5);
             double zenith = Math.Sqrt(cosTheta);
             return (1 + c[0] * Math.Exp(c[1] / (cosTheta + 0.01))) * (c[2] + c[3] * expM + c[5] * rayM + c[6] * mieM + c[7] * zenith) *
-                   radiances[band];
+                   radiances[band] * emissionSky[band];
         }
 
         // The radiance of the sky dome at a wavelength (nm): W m^-2 sr^-1 nm^-1
@@ -179,7 +236,7 @@ namespace pbrt
             {
                 return 0;
             }
-            double sinRadius = Math.Sin(SolarRadius), sinGamma = Math.Sin(gamma);
+            double sinRadius = Math.Sin(discRadius), sinGamma = Math.Sin(gamma);
             double sc2 = 1.0 - sinGamma * sinGamma / (sinRadius * sinRadius);
             if (!(sc2 > 0))
             {
@@ -201,10 +258,11 @@ namespace pbrt
                 low = 9;
                 fraction = 1.0;
             }
-            double direct = (1 - turbidityFraction) * ((1 - fraction) * SolarBand(turbidityLow, low, elevation) +
-                                                        fraction * SolarBand(turbidityLow, low + 1, elevation)) +
-                            turbidityFraction * ((1 - fraction) * SolarBand(turbidityLow + 1, low, elevation) +
-                                                 fraction * SolarBand(turbidityLow + 1, low + 1, elevation));
+            double weightLow = (1 - fraction) * emissionSun[low], weightHigh = fraction * emissionSun[low + 1];
+            double direct = (1 - turbidityFraction) * (weightLow * SolarBand(turbidityLow, low, elevation) +
+                                                        weightHigh * SolarBand(turbidityLow, low + 1, elevation)) +
+                            turbidityFraction * (weightLow * SolarBand(turbidityLow + 1, low, elevation) +
+                                                 weightHigh * SolarBand(turbidityLow + 1, low + 1, elevation));
             // (the darkening toward the limb: a polynomial of the fifth order in the cosine at the surface of the sun)
             double[] limbLow = HosekSkyData.limbDarkeningDatasets[low], limbHigh = HosekSkyData.limbDarkeningDatasets[low + 1];
             double darkening = 0, power = 1;
@@ -220,92 +278,27 @@ namespace pbrt
         private readonly double turbidity;
         private readonly double[][] configs = new double[Bands][];
         private readonly double[] radiances = new double[Bands];
+        // (what the star emits over what the sun emits, by waveband, for the sky and for the disc)
+        private readonly double[] emissionSky = new double[Bands], emissionSun = new double[Bands];
+        private readonly double discRadius;
     }
 
-    public sealed unsafe class HosekSkyLight : LightBase
+    public sealed unsafe class HosekSkyLight : SkyDomeLight
     {
         // `zenith`, `sunDirection`: render space, unit length; `scale`: of the radiance of the model; `albedo`: of the
-        // ground, at the eleven wavebands; `sun`: with the solar disc; `ground`: with the ground below the horizon
+        // ground, at the eleven wavebands; `sun`: with the solar disc; `ground`: with the ground below the horizon;
         // `mixture`: the sky is sampled by the truncated Gaussian mixture and not by the table; `polarised`: the sky dome
-        // has the polarisation of the heuristic
+        // has the polarisation of the heuristic; `starTemperature` (K, not 0) and `starIntensity`: the sky of an earth-like
+        // world of another star
         public HosekSkyLight(Vector3f zenith, Vector3f sunDirection, double turbidity, double[] albedo, Float scale, bool sun, bool ground,
-                             bool mixture, bool polarised)
-            : base(LightType.Infinite, new Transform(), new MediumInterface())
+                             bool mixture, bool polarised, double starTemperature = 0, double starIntensity = 1)
+            : base(zenith, sunDirection, scale, sun, ground)
         {
-            this.zenith = zenith;
-            this.sunDirection = sunDirection;
-            this.scale = scale;
-            this.sun = sun;
             this.polarised = polarised;
             this.turbidity = turbidity;
-            double elevation = Math.Asin(Math.Min(Math.Max((double)pbrt.Dot(zenith, sunDirection), 0.0), 1.0));
+            double elevation = Math.Max(solarElevation, 0.0);
             solarZenith = 0.5 * Math.PI - elevation;
-            model = new HosekSkyModel(elevation, turbidity, albedo);
-            // (the frame of the table: z to the zenith, x toward the sun)
-            frame = pbrt.AbsDot(zenith, sunDirection) < 0.9999f ? Frame.FromXZ(pbrt.Normalize(sunDirection - pbrt.Dot(zenith, sunDirection) * zenith), zenith)
-                                                                : Frame.FromZ(zenith);
-            cosSolarRadius = Math.Cos(HosekSkyModel.SolarRadius);
-            sunSolidAngle = 2 * Math.PI * (1 - cosSolarRadius);
-
-            // The luminance of the sky over the sphere, for the table of the directions; and with it the luminous irradiance
-            // of a level surface, by wavebands, for the ground
-            const int resolution = 128, sub = 2;
-            Float[] luminance = new Float[resolution * resolution];
-            double[] irradiance = new double[HosekSkyModel.Bands];
-            double cell = 4 * Math.PI / (resolution * resolution * sub * sub);
-            for (int pass = 0; pass < 2; ++pass)
-            {
-                if (pass == 1)
-                {
-                    // (the sun on the level surface, by a few rings of its disc)
-                    for (int band = 0; band < HosekSkyModel.Bands && sun; ++band)
-                    {
-                        irradiance[band] += SunIrradiance(elevation, 320 + 40 * band);
-                    }
-                    if (ground)
-                    {
-                        groundRadiance = new double[HosekSkyModel.Bands];
-                        for (int band = 0; band < HosekSkyModel.Bands; ++band)
-                        {
-                            groundRadiance[band] = albedo[band] * irradiance[band] / Math.PI;
-                        }
-                    }
-                }
-                for (int v = 0; v < resolution; ++v)
-                {
-                    for (int u = 0; u < resolution; ++u)
-                    {
-                        double sum = 0;
-                        for (int s = 0; s < sub * sub; ++s)
-                        {
-                            Point2f uv = new Point2f((u + (s % sub + 0.5f) / sub) / resolution, (v + (s / sub + 0.5f) / sub) / resolution);
-                            Vector3f w = frame.FromLocal(pbrt.EqualAreaSquareToSphere(uv));
-                            double cosTheta = pbrt.Dot(w, zenith);
-                            for (int band = 0; band < HosekSkyModel.Bands; ++band)
-                            {
-                                double value = BandRadiance(band, w);
-                                sum += value * BandLuminance[band];
-                                if (pass == 0 && cosTheta > 0)
-                                {
-                                    irradiance[band] += value * cosTheta * cell;
-                                }
-                            }
-                        }
-                        luminance[v * resolution + u] = (Float)(sum / (sub * sub));
-                    }
-                }
-            }
-            double total = 0;
-            foreach (Float value in luminance)
-            {
-                total += value;
-            }
-            double mean = total / luminance.Length;
-            // (a floor, so that no direction of the sphere is left without a density)
-            for (int i = 0; i < luminance.Length; ++i)
-            {
-                luminance[i] = (Float)(luminance[i] + 0.02 * mean);
-            }
+            model = new HosekSkyModel(elevation, turbidity, albedo, starTemperature, starIntensity);
             if (mixture)
             {
                 // The nearest of the fitted skies, and the part of each Gaussian that is within its range
@@ -325,123 +318,69 @@ namespace pbrt
                     cumulative[4 * k + 2] = Cumulative(0, components[5 * k + 1], components[5 * k + 3]);
                     cumulative[4 * k + 3] = Cumulative(0.5 * Math.PI, components[5 * k + 1], components[5 * k + 3]);
                 }
-                // (the share of the ground in the light of the sphere without the disc: the lower half of the table's cells)
-                double below = 0;
-                for (int v = 0; v < resolution; ++v)
-                {
-                    for (int u = 0; u < resolution; ++u)
-                    {
-                        Vector3f w = pbrt.EqualAreaSquareToSphere(new Point2f((u + 0.5f) / resolution, (v + 0.5f) / resolution));
-                        if (w.z < 0)
-                        {
-                            below += luminance[v * resolution + u] - 0.02 * mean;
-                        }
-                    }
-                }
-                groundShare = groundRadiance != null && total > 0 ? Math.Min(Math.Max(below / total, 0.02), 0.9) : 0;
             }
-            else
-            {
-                distribution = new PiecewiseConstant2D(new pstd.span<Float>(luminance), resolution, resolution,
-                                                       new Bounds2f(new Point2f(0, 0), new Point2f(1, 1)));
-            }
-
-            // The shares of the sky and of the disc in the light, by their luminance over the sphere
-            skyLuminance = mean * 4 * Math.PI;
-            double sunLuminance = 0;
-            for (int band = 0; band < HosekSkyModel.Bands && sun; ++band)
-            {
-                sunLuminance += SunIrradiance(Math.PI / 2, 320 + 40 * band, elevation) * BandLuminance[band];
-            }
-            sunShare = sun && sunLuminance > 0 ? Math.Min(Math.Max(sunLuminance / (sunLuminance + skyLuminance), 0.05), 0.95) : 0;
-            totalLuminance = skyLuminance + sunLuminance;
+            Initialise(albedo, !mixture);
         }
 
-        // The weights of the wavebands in the luminance: the luminous efficiency at the waveband times its width (nm)
-        private static readonly double[] BandLuminance = Luminances();
-
-        private static double[] Luminances()
+        protected override int BandCount
         {
-            double[] weights = new double[HosekSkyModel.Bands];
-            for (int band = 0; band < HosekSkyModel.Bands; ++band)
+            get { return HosekSkyModel.Bands; }
+        }
+
+        protected override double BandWavelength(int band)
+        {
+            return 320 + 40 * band;
+        }
+
+        protected override double BandWidth
+        {
+            get { return 40; }
+        }
+
+        protected override double SolarRadius
+        {
+            get { return model.DiscRadius; }
+        }
+
+        protected override void Evaluate(Vector3f local, double theta, double gamma, double wavelength, out double sky, out double solar)
+        {
+            sky = model.Radiance(theta, gamma, wavelength);
+            solar = gamma < model.DiscRadius ? model.SolarRadiance(0.5 * Math.PI - theta, gamma, wavelength) : 0;
+        }
+
+        // (between the wavebands as the sky is: linearly, and to nothing from the last, 720 to 760 nm)
+        protected override void BandsAt(double wavelength, out int low, out int high, out double weightHigh)
+        {
+            low = -1;
+            high = -1;
+            weightHigh = 0;
+            if (wavelength < 320 || wavelength >= 760)
             {
-                weights[band] = 40 * Spectra.Y().Evaluate(320 + 40 * band);
+                return;
             }
-            return weights;
+            low = (int)((wavelength - 320.0) / 40.0);
+            weightHigh = (wavelength - 320.0) / 40.0 - low;
+            high = low + 1 < HosekSkyModel.Bands ? low + 1 : -1;
         }
 
-        // The integral of the radiance of the disc times the cosine at a surface whose normal has the elevation
-        // `normalElevation` of the sun (pi/2: a surface that faces the sun; the elevation of the sun: a level surface is
-        // meant by the two-argument form), for a disc whose centre is at `discElevation`
-        private double SunIrradiance(double normalElevation, double wavelength, double discElevation)
+        protected override bool IsPolarised
         {
-            const int rings = 16;
-            double sum = 0;
-            for (int ring = 0; ring < rings; ++ring)
-            {
-                // (rings of equal solid angle; the elevation of the disc is taken at its centre)
-                double cosGamma = 1 - (ring + 0.5) / rings * (1 - cosSolarRadius);
-                sum += model.SolarRadiance(discElevation, Math.Acos(cosGamma), wavelength) * sunSolidAngle / rings;
-            }
-            return sum * Math.Sin(normalElevation);
+            get { return polarised; }
         }
 
-        private double SunIrradiance(double elevation, double wavelength)
+        protected override double DegreeAt(Vector3f local, double theta, double gamma, double wavelength)
         {
-            return SunIrradiance(elevation, wavelength, elevation);
+            return DegreeOfPolarisation(theta, gamma);
         }
 
-        // The radiance of one waveband of the sky, or of the ground, in a direction (without the solar disc)
-        private double BandRadiance(int band, Vector3f w)
+        protected override double SkyDensity(Vector3f local)
         {
-            double cosTheta = pbrt.Dot(w, zenith);
-            if (!(cosTheta > 0))
-            {
-                return groundRadiance != null ? groundRadiance[band] : 0;
-            }
-            return Math.Max(model.BandRadiance(band, Math.Acos(Math.Min(cosTheta, 1.0)), Gamma(w)), 0.0);
+            return components != null ? MixtureDensity(local) : base.SkyDensity(local);
         }
 
-        // The angle of a direction from the sun, accurate where it is small
-        private double Gamma(Vector3f w)
+        protected override Vector3f SampleSky(Point2f u)
         {
-            Vector3f difference = w - sunDirection;
-            return 2 * Math.Asin(Math.Min(0.5 * Math.Sqrt((double)pbrt.LengthSquared(difference)), 1.0));
-        }
-
-        // The radiance in a direction (render space, unit length)
-        private SampledSpectrum Radiance(Vector3f w, SampledWavelengths lambda)
-        {
-            SampledSpectrum L = new SampledSpectrum(0.0f);
-            double cosTheta = pbrt.Dot(w, zenith);
-            double gamma = Gamma(w);
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                double wavelength = lambda[i];
-                double value;
-                if (!(cosTheta > 0))
-                {
-                    value = 0;
-                    if (groundRadiance != null && wavelength >= 320 && wavelength < 760)
-                    {
-                        // (between the wavebands as the sky is)
-                        int low = (int)((wavelength - 320.0) / 40.0);
-                        double interp = (wavelength - 320.0) / 40.0 - low;
-                        value = (1 - interp) * groundRadiance[low] + (low + 1 < HosekSkyModel.Bands ? interp * groundRadiance[low + 1] : 0);
-                    }
-                }
-                else
-                {
-                    double theta = Math.Acos(Math.Min(cosTheta, 1.0));
-                    value = Math.Max(model.Radiance(theta, gamma, wavelength), 0.0);
-                    if (sun && gamma < HosekSkyModel.SolarRadius)
-                    {
-                        value += Math.Max(model.SolarRadiance(Math.PI / 2 - theta, gamma, wavelength), 0.0);
-                    }
-                }
-                L[i] = (Float)(scale * value);
-            }
-            return L;
+            return components != null ? SampleMixture(u) : base.SampleSky(u);
         }
 
         // The luminance distribution of Perez with the coefficients of Preetham et al. for the turbidity
@@ -469,44 +408,6 @@ namespace pbrt
             double pattern = sinGamma * sinGamma / (1 + cosGamma * cosGamma) * (theta * Math.Cos(theta) + (0.5 * Math.PI - theta) * intensity) / 1.2;
             double degree = Math.Exp(-(turbidity - 0.6) / 4) * pattern;
             return Math.Min(Math.Max(degree, 0.0), 1.0);
-        }
-
-        // The Stokes vector of the light of the sky that travels along w (render space, unit length), of the intensity
-        // `scalar`: the light of the dome polarised at right angles to the plane of the sun and the direction, the rest not
-        public PLight Polarised(Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar)
-        {
-            Vector3f toSky = -w;
-            double cosTheta = pbrt.Dot(toSky, zenith);
-            if (!polarised || !(cosTheta > 0))
-            {
-                return new PLight(scalar);
-            }
-            double gamma = Gamma(toSky);
-            double theta = Math.Acos(Math.Min(cosTheta, 1.0));
-            double degree = DegreeOfPolarisation(theta, gamma);
-            Vector3f across = pbrt.Cross(toSky, sunDirection);
-            if (!(degree > 1e-6) || !(pbrt.LengthSquared(across) > 1e-12f))
-            {
-                return new PLight(scalar);
-            }
-            SampledSpectrum first = (Float)degree * scalar;
-            if (sun && gamma < HosekSkyModel.SolarRadius)
-            {
-                // (in front of the disc: the share of the dome in the light)
-                for (int i = 0; i < NSpectrumSamples; ++i)
-                {
-                    double sky = Math.Max(model.Radiance(theta, gamma, lambda[i]), 0.0);
-                    double disc = Math.Max(model.SolarRadiance(0.5 * Math.PI - theta, gamma, lambda[i]), 0.0);
-                    first[i] = sky + disc > 0 ? (Float)(first[i] * sky / (sky + disc)) : 0;
-                }
-            }
-            StokesVector stokes = new StokesVector(scalar, first, new SampledSpectrum(0.0f), new SampledSpectrum(0.0f));
-            return new PLight(stokes).InDirection(w, pbrt.Normalize(across));
-        }
-
-        public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
-        {
-            return Radiance(pbrt.Normalize(ray.d), lambda);
         }
 
         // The part of the samples of the sky that are uniform over it, beside the mixture: the fits are close where the sky is
@@ -602,92 +503,6 @@ namespace pbrt
             return new Vector3f((Float)(cosElevation * Math.Cos(azimuth)), (Float)(cosElevation * Math.Sin(azimuth)), (Float)Math.Sin(elevation));
         }
 
-        // The density of a direction, per solid angle: the mixture of the disc and of the sky
-        private Float Density(Vector3f w)
-        {
-            double density = (1 - sunShare) * (components != null ? MixtureDensity(frame.ToLocal(w))
-                                                                  : distribution.PDF(pbrt.EqualAreaSphereToSquare(frame.ToLocal(w))) / (4 * Math.PI));
-            if (sunShare > 0 && Gamma(w) < HosekSkyModel.SolarRadius)
-            {
-                density += sunShare / sunSolidAngle;
-            }
-            return (Float)density;
-        }
-
-        private Vector3f SampleDirection(Point2f u)
-        {
-            if (u[0] < sunShare)
-            {
-                Point2f remapped = new Point2f((Float)Math.Min(u[0] / sunShare, (double)FloatOneMinusEpsilon), u[1]);
-                return Frame.FromZ(sunDirection).FromLocal(pbrt.SampleUniformCone(remapped, (Float)cosSolarRadius));
-            }
-            Point2f rest = new Point2f((Float)Math.Min((u[0] - sunShare) / (1 - sunShare), (double)FloatOneMinusEpsilon), u[1]);
-            return frame.FromLocal(components != null ? SampleMixture(rest) : pbrt.EqualAreaSquareToSphere(distribution.Sample(rest)));
-        }
-
-        public override pstd.optional<LightLiSample> SampleLi(LightSampleContext ctx, Point2f u, SampledWavelengths lambda,
-                                                              bool allowIncompletePDF = false)
-        {
-            Vector3f wi = pbrt.Normalize(SampleDirection(u));
-            Float pdf = Density(wi);
-            if (!(pdf > 0))
-            {
-                return default;
-            }
-            SampledSpectrum L = Radiance(wi, lambda);
-            if (!L)
-            {
-                return default;
-            }
-            return new LightLiSample(L, wi, pdf, new Interaction(ctx.p() + wi * (2 * sceneRadius), (MediumInterface)null));
-        }
-
-        public override Float PDF_Li(LightSampleContext ctx, Vector3f w, bool allowIncompletePDF = false)
-        {
-            return Density(pbrt.Normalize(w));
-        }
-
-        public override pstd.optional<LightLeSample> SampleLe(Point2f u1, Point2f u2, ref SampledWavelengths lambda, Float time)
-        {
-            Vector3f toSky = pbrt.Normalize(SampleDirection(u1));
-            Float pdfDir = Density(toSky);
-            if (!(pdfDir > 0))
-            {
-                return default;
-            }
-            Frame wFrame = Frame.FromZ(toSky);
-            Point2f cd = pbrt.SampleUniformDiskConcentric(u2);
-            Point3f pDisk = sceneCenter + sceneRadius * wFrame.FromLocal(new Vector3f(cd.x, cd.y, 0));
-            Ray ray = new Ray(pDisk + sceneRadius * toSky, -toSky, time);
-            return new LightLeSample(Radiance(toSky, lambda), ray, 1 / (Pi * pbrt.Sqr(sceneRadius)), pdfDir);
-        }
-
-        public override void PDF_Le(Ray ray, Float* pdfPos, Float* pdfDir)
-        {
-            *pdfPos = 1 / (Pi * pbrt.Sqr(sceneRadius));
-            *pdfDir = Density(pbrt.Normalize(-ray.d));
-        }
-
-        // The constant spectrum of the luminance of the light over the sphere, on the disc of the scene
-        public override SampledSpectrum Phi(SampledWavelengths lambda)
-        {
-            return new SampledSpectrum((Float)(scale * totalLuminance / CIE_Y_integral * Math.PI * sceneRadius * sceneRadius));
-        }
-
-        public override pstd.optional<LightBounds> Bounds()
-        {
-            return default;
-        }
-
-        public override void Preprocess(Bounds3f sceneBounds)
-        {
-            Point3f c;
-            Float r;
-            sceneBounds.BoundingSphere(&c, &r);
-            sceneCenter = c;
-            sceneRadius = r;
-        }
-
         public override string ToString()
         {
             return pbrt.StringPrintf("[ HosekSkyLight %s sun: %s scale: %f ]", BaseToString(), sunDirection, scale);
@@ -695,8 +510,6 @@ namespace pbrt
 
         public static HosekSkyLight Create(Transform renderFromLight, ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
-            Vector3f up = parameters.GetOneVector3f("up", new Vector3f(0, 0, 1));
-            Vector3f sunDirection = parameters.GetOneVector3f("sundir", new Vector3f(0, 0, 1));
             double turbidity = parameters.GetOneFloat("turbidity", 3.0f);
             Spectrum albedo = parameters.GetOneSpectrum("albedo", new ConstantSpectrum(0.3f), SpectrumType.Albedo, alloc);
             Float scale = parameters.GetOneFloat("scale", 1.0f);
@@ -716,38 +529,33 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, "\"hosek\": \"turbidity\" must be between 1 and 10.");
             }
-            if (pbrt.LengthSquared(up) == 0 || pbrt.LengthSquared(sunDirection) == 0)
+            double starTemperature = parameters.GetOneFloat("startemperature", 0.0f);
+            double starIntensity = parameters.GetOneFloat("starintensity", 1.0f);
+            if (starTemperature < 0 || !(starIntensity > 0))
             {
-                pbrt.ErrorExit(loc, "\"hosek\": \"up\" and \"sundir\" must not be zero.");
+                pbrt.ErrorExit(loc, "\"hosek\": \"startemperature\" (K) must not be negative and \"starintensity\" must be positive.");
             }
-            Vector3f zenith = pbrt.Normalize(renderFromLight.Apply(up));
-            Vector3f toSun = pbrt.Normalize(renderFromLight.Apply(sunDirection));
-            if (pbrt.Dot(zenith, toSun) < 0)
-            {
-                pbrt.ErrorExit(loc, "\"hosek\": the sun is below the horizon; the model is for a sun above it.");
-            }
+            // (the model is for a sun above the horizon)
+            Directions(renderFromLight, parameters, loc, "hosek", 0.0, out Vector3f zenith, out Vector3f toSun);
             double[] bandAlbedo = new double[HosekSkyModel.Bands];
             for (int band = 0; band < HosekSkyModel.Bands; ++band)
             {
                 bandAlbedo[band] = Math.Min(Math.Max((double)albedo.Evaluate(320 + 40 * band), 0.0), 1.0);
             }
-            return new HosekSkyLight(zenith, toSun, turbidity, bandAlbedo, 683.002f * scale, sun, ground, sampling == "tgmm",
-                                     polarisation == "wilkie2004");
+            HosekSkyLight light = new HosekSkyLight(zenith, toSun, turbidity, bandAlbedo, 683.002f * scale, sun, ground, sampling == "tgmm",
+                                                    polarisation == "wilkie2004", starTemperature, starIntensity);
+            if (!(light.model.DiscRadius < 0.25 * Math.PI))
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("\"hosek\": the star of %f K and the intensity %f would have a disc of %f degrees across.",
+                                                      starTemperature, starIntensity, 2 * light.model.DiscRadius * 180 / Math.PI));
+            }
+            return light;
         }
 
         private readonly HosekSkyModel model;
-        private readonly Vector3f zenith, sunDirection;
-        private readonly Frame frame;
-        private readonly Float scale;
-        private readonly bool sun, polarised;
+        private readonly bool polarised;
         private readonly double turbidity, solarZenith;
-        private readonly double[] groundRadiance;
-        private readonly PiecewiseConstant2D distribution;
-        // (the truncated Gaussian mixture of the sky, five numbers a component, and the share of the uniform lower half)
+        // (the truncated Gaussian mixture of the sky, five numbers a component)
         private readonly double[] components, cumulative;
-        private readonly double groundShare;
-        private readonly double cosSolarRadius, sunSolidAngle, sunShare, skyLuminance, totalLuminance;
-        private Point3f sceneCenter;
-        private Float sceneRadius;
     }
 }
