@@ -2791,7 +2791,8 @@ namespace pbrt
         {
             if (light is DiffuseAreaLight areaLight)
                 return areaLight.SupportsEquiangular();
-            return light != null && !(light is VolumeEmissionLight) && light.Type() == LightType.DeltaPosition;
+            // (the points of a laser are many: GaussianBeamLight.IsPointLight)
+            return !(light is VolumeEmissionLight) && GaussianBeamLight.IsPointLight(light);
         }
 
         static Light LightOfVertex(Vertex v)
@@ -5663,7 +5664,8 @@ namespace pbrt
                 List<Light> supported = new List<Light>();
                 foreach (Light light in TextureMedium.AddEmissionLights(lights))
                 {
-                    if (BDPT.EquiangularLight(light))
+                    // (a laser takes part with a distance of its own: where the ray crosses the beam, LaserLight.SampleDistance)
+                    if (BDPT.EquiangularLight(light) || light is GaussianBeamLight)
                     {
                         supported.Add(light);
                     }
@@ -5675,6 +5677,15 @@ namespace pbrt
                 else
                 {
                     this.equiangularLightSampler = LightSampler.Create(lightSampleStrategy, supported.ToArray(), new Allocator());
+                    // (seen from the start of a segment a laser lights nothing, and a sampler that goes by what a light gives
+                    // that point never chooses it: with a laser among the lights, half of the choices are uniform among them)
+                    foreach (Light light in supported)
+                    {
+                        if (light is GaussianBeamLight)
+                        {
+                            this.equiangularLights = supported.ToArray();
+                        }
+                    }
                 }
             }
         }
@@ -6450,6 +6461,7 @@ namespace pbrt
             Point2f uLight = sampler.Get2D();
             Light light = null;
             DiffuseAreaLight areaLight = null;
+            GaussianBeamLight laser = null;
             Interaction yIntr = default;
             Float pdfArea = 0;
             Float pmfChoice = 0;
@@ -6457,16 +6469,25 @@ namespace pbrt
             Float pdfDistance;
             if (!uniform)
             {
-                pstd.optional<SampledLight> sampledLight = equiangularLightSampler.Sample(segment.context, uLightChoice);
-                if (!sampledLight)
+                if (equiangularLights != null && uLightChoice >= 0.5f)
                 {
-                    return zero;
+                    light = equiangularLights[Math.Min((int)((2 * uLightChoice - 1) * equiangularLights.Length), equiangularLights.Length - 1)];
                 }
-                light = sampledLight.value().light;
-                pmfChoice = sampledLight.value().p;
+                else
+                {
+                    pstd.optional<SampledLight> sampledLight = equiangularLightSampler.Sample(
+                        segment.context, equiangularLights != null ? 2 * uLightChoice : uLightChoice);
+                    if (!sampledLight)
+                    {
+                        return zero;
+                    }
+                    light = sampledLight.value().light;
+                }
+                pmfChoice = PmfEquiangularOrZero(segment.context, light);
                 // (Fong 4.2.3) A point on an area light is chosen from the start of the segment
                 areaLight = light as DiffuseAreaLight;
-                Point3f pLight;
+                laser = light as GaussianBeamLight;
+                Point3f pLight = default;
                 if (areaLight != null)
                 {
                     if (!areaLight.SampleArea(uLight, out yIntr, out pdfArea))
@@ -6475,7 +6496,7 @@ namespace pbrt
                     }
                     pLight = yIntr.p();
                 }
-                else
+                else if (laser == null)
                 {
                     pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
                     if (!lsOrigin)
@@ -6484,7 +6505,15 @@ namespace pbrt
                     }
                     pLight = lsOrigin.value().pLight.p();
                 }
-                if (!EquiangularSampling.Sample(segment.origin, segment.direction, segment.tMax, pLight, uDistance, out t, out pdfDistance))
+                // (a laser has no point to take the angle from: the distance is where the ray crosses its beam)
+                if (laser != null)
+                {
+                    if (!laser.SampleDistance(segment.origin, segment.direction, segment.tMax, uDistance, out t, out pdfDistance))
+                    {
+                        return zero;
+                    }
+                }
+                else if (!EquiangularSampling.Sample(segment.origin, segment.direction, segment.tMax, pLight, uDistance, out t, out pdfDistance))
                 {
                     return zero;
                 }
@@ -6555,6 +6584,7 @@ namespace pbrt
                     target = ls.value().pLight;
                     wiLight = ls.value().wi;
                     pmfWalk = PmfOrZero(lightContext, light) * ls.value().pdf;
+                    pdfSolidAngle = ls.value().pdf;
                 }
             }
             else
@@ -6564,6 +6594,7 @@ namespace pbrt
                     return zero;
                 light = sampledLight.value().light;
                 areaLight = light as DiffuseAreaLight;
+                laser = light as GaussianBeamLight;
                 pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
                 if (!ls || !ls.value().L || ls.value().pdf == 0)
                     return zero;
@@ -6594,12 +6625,14 @@ namespace pbrt
             if (!IsDeltaLight(light.Type()))
                 r_total += r_u0 * ru_seg * ru_light * mp.sigma_s * phaseBSDF.PDF(intr.wo, wiLight);
             // Equiangular sampling of the point, if the light takes part
-            if (segment.equiangular && BDPT.EquiangularLight(light))
+            if (segment.equiangular && (BDPT.EquiangularLight(light) || laser != null))
             {
-                Float pdfDistanceEquiangular = uniform
-                    ? EquiangularSampling.Pdf(segment.origin, segment.direction, segment.tMax, target.p(), t)
-                    : pdfDistance;
-                Float pointDensity = 1;
+                Float pdfDistanceEquiangular = !uniform
+                    ? pdfDistance
+                    : (laser != null ? laser.PdfDistance(segment.origin, segment.direction, segment.tMax, t)
+                                     : EquiangularSampling.Pdf(segment.origin, segment.direction, segment.tMax, target.p(), t));
+                // (the point of a laser is the one that the connection samples from the vertex, with its density there)
+                Float pointDensity = laser != null ? pdfSolidAngle : 1;
                 if (areaLight != null)
                 {
                     Float r2 = LengthSquared(target.p() - p);
@@ -6754,7 +6787,9 @@ namespace pbrt
         internal Float PmfEquiangularOrZero(LightSampleContext ctx, Light light)
         {
             Float pmf = equiangularLightSampler.PMF(ctx, light);
-            return Float.IsNaN(pmf) ? 0 : pmf;
+            pmf = Float.IsNaN(pmf) ? 0 : pmf;
+            // (with a laser among the lights: SampleSegmentPoint)
+            return equiangularLights != null ? 0.5f * pmf + 0.5f / equiangularLights.Length : pmf;
         }
 
         Float PmfOrZero(LightSampleContext ctx, Light light)
@@ -6865,13 +6900,23 @@ namespace pbrt
             // (not in pbrt-v4) Equiangular sampling finds the same path (this vertex, this point light) by choosing the light and then
             // the distance along the segment: its probability, with the null collisions of the walk as that way connects them
             SampledSpectrum r_equiangular = new SampledSpectrum(0.0f);
-            if (equiangularSegment != null && equiangularSegment.equiangular && light.Type() == LightType.DeltaPosition && volumeLight == null)
+            if (equiangularSegment != null && equiangularSegment.equiangular && GaussianBeamLight.IsPointLight(light) && volumeLight == null)
             {
                 Float pmfEquiangular = PmfEquiangularOrZero(equiangularSegment.context, light);
                 Float pdfDistance = EquiangularSampling.Pdf(equiangularSegment.origin, equiangularSegment.direction,
                                                             equiangularSegment.tMax, ls.value().pLight.p(), equiangularSegment.t);
                 r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
                                 (equiangularSegment.count * pmfEquiangular * pdfDistance / equiangularSegment.sigmaS0);
+            }
+            // ... and this vertex with the same point of a laser, by the distance where the ray crosses its beam
+            GaussianBeamLight equiangularLaser = light as GaussianBeamLight;
+            if (equiangularSegment != null && equiangularSegment.equiangular && equiangularLaser != null)
+            {
+                Float pmfEquiangular = PmfEquiangularOrZero(equiangularSegment.context, light);
+                Float pdfDistance = equiangularLaser.PdfDistance(equiangularSegment.origin, equiangularSegment.direction,
+                                                                 equiangularSegment.tMax, equiangularSegment.t);
+                r_equiangular = equiangularSegment.r_u0 * equiangularSegment.segL * r_l *
+                                (equiangularSegment.count * pmfEquiangular * pdfDistance * ls.value().pdf / equiangularSegment.sigmaS0);
             }
             // ... and toward an area light, the point on it chosen from the start of the segment (the density per unit area, in
             // the solid angle of the vertex)
@@ -6948,6 +6993,8 @@ namespace pbrt
         int maxDepth;
         LightSampler lightSampler;
         LightSampler equiangularLightSampler;
+        // (the lights of the equiangular strategy, if a laser is among them: half of its choices are uniform among these)
+        Light[] equiangularLights;
         bool regularize;
         bool equiangular;
         int equiangularSamples, equiangularMultipleDepth;

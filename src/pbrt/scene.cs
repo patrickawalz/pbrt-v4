@@ -575,13 +575,15 @@ namespace pbrt
                 if (light.renderFromObject.IsAnimated())
                     Warning(light.loc, "Animated lights aren't supported. Using the start transform.");
 
-                Func<Light> create = () =>
+                // (not as pbrt-v4, which starts the light here: a light may take a named texture, and the textures are made
+                // after the scene is read, so the lights are made in CreateLights)
+                Func<NamedTextures, Light> create = (NamedTextures textures) =>
                 {
                     return Light.Create(light.name, light.parameters, light.renderFromObject.startTransform,
                                         GetCamera().GetCameraTransform(), lightMedium, light.loc,
-                                        new Allocator());
+                                        new Allocator(), textures);
                 };
-                lightJobs.Add(RunAsync<Light>(create));
+                lightCreators.Add(create);
             }
         }
 
@@ -1000,6 +1002,12 @@ namespace pbrt
             LOG_VERBOSE("Starting to consume non-area light futures");
             lock (lightMutex)
             {
+                List<AsyncJob<Light>> lightJobs = new List<AsyncJob<Light>>();
+                foreach (Func<NamedTextures, Light> creator in lightCreators)
+                {
+                    Func<NamedTextures, Light> create = creator;
+                    lightJobs.Add(RunAsync<Light>(() => create(textures)));
+                }
                 foreach (AsyncJob<Light> job in lightJobs)
                     lights.Add(job.GetResult());
             }
@@ -1326,7 +1334,7 @@ namespace pbrt
         List<SceneEntity> materials = new List<SceneEntity>();
 
         object lightMutex = new object();
-        List<AsyncJob<Light>> lightJobs = new List<AsyncJob<Light>>();
+        List<Func<NamedTextures, Light>> lightCreators = new List<Func<NamedTextures, Light>>();
 
         object areaLightMutex = new object();
         List<SceneEntity> areaLights = new List<SceneEntity>();
