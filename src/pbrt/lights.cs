@@ -2554,6 +2554,9 @@ namespace pbrt
                 light = LaserLight2.Create(renderFromLight, outsideMedium,
                                            new TextureParameterDictionary(parameters, textures ?? new NamedTextures()),
                                            parameters.ColorSpace(), loc, alloc);
+            else if (name == "hosek")
+                // (not in pbrt-v4) The sky and sun of Hosek and Wilkie (hoseksky.cs)
+                light = HosekSkyLight.Create(renderFromLight, parameters, loc, alloc);
             else if (name == "goniometric")
                 light = GoniometricLight.Create(renderFromLight, outsideMedium, parameters, parameters.ColorSpace(), loc,
                                                 alloc);
