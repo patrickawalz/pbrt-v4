@@ -158,7 +158,7 @@ namespace pbrt
             {
                 albedo[band] = 0.1 + 0.05 * band;
             }
-            HosekSkyLight light = new HosekSkyLight(zenith, toSun, turbidity, albedo, 1, sun, ground, mixture);
+            HosekSkyLight light = new HosekSkyLight(zenith, toSun, turbidity, albedo, 1, sun, ground, mixture, false);
             light.Preprocess(new Bounds3f(new Point3f(-1, -1, -1), new Point3f(1, 1, 1)));
             return light;
         }
@@ -295,6 +295,78 @@ namespace pbrt
             double error = Math.Sqrt(squares / count / count);
             Console.WriteLine("the disc by the samples " + difference + " +- " + error + ", by rings " + expected);
             EXPECT_LT(Math.Abs(difference - expected), 4 * error + 0.01 * expected);
+        }
+
+        // The polarisation of the sky by the heuristic of Wilkie et al.: none at the sun, most near 90 degrees from it, less in
+        // a hazier sky, never above one; and the light as the integrators ask for it is polarised at right angles to the plane
+        // of the sun and the direction
+        [TEST("HosekSky", "Polarisation")]
+        public static void Polarisation()
+        {
+            double[] albedo = new double[HosekSkyModel.Bands];
+            Vector3f zenith = new Vector3f(0, 0, 1);
+            double elevation = 30 * Math.PI / 180;
+            Vector3f toSun = new Vector3f(0, (Float)Math.Cos(elevation), (Float)Math.Sin(elevation));
+            double previous = 2;
+            foreach (double turbidity in new double[] { 2.5, 4, 7, 10 })
+            {
+                HosekSkyLight light = new HosekSkyLight(zenith, toSun, turbidity, albedo, 1, false, false, false, true);
+                EXPECT_NEAR(0.0, light.DegreeOfPolarisation(Math.PI / 2 - elevation, 0), 1e-12);
+                double largest = 0, largestGamma = 0;
+                for (int i = 1; i < 180; ++i)
+                {
+                    // (along the sun's vertical, through the zenith)
+                    double gamma = i * Math.PI / 180;
+                    double theta = Math.Abs(Math.PI / 2 - elevation - gamma);
+                    if (theta >= Math.PI / 2)
+                    {
+                        continue;
+                    }
+                    double degree = light.DegreeOfPolarisation(theta, gamma);
+                    EXPECT_GE(degree, 0);
+                    EXPECT_LE(degree, 1);
+                    if (degree > largest)
+                    {
+                        largest = degree;
+                        largestGamma = gamma;
+                    }
+                }
+                Console.WriteLine("turbidity " + turbidity + ": largest degree " + largest + " at " + largestGamma * 180 / Math.PI + " degrees from the sun");
+                EXPECT_GT(largestGamma, 70 * Math.PI / 180);
+                EXPECT_LT(largestGamma, 110 * Math.PI / 180);
+                EXPECT_LT(largest, previous);
+                previous = largest;
+            }
+
+            HosekSkyLight sky = new HosekSkyLight(zenith, toSun, 3, albedo, 1, false, false, false, true);
+            sky.Preprocess(new Bounds3f(new Point3f(-1, -1, -1), new Point3f(1, 1, 1)));
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.4f);
+            SampledSpectrum scalar = new SampledSpectrum(2.0f);
+            // (a direction 90 degrees from the sun, to the side of it)
+            Vector3f toSky = Normalize(Cross(toSun, new Vector3f(0.2f, 0, 1)));
+            if (toSky.z < 0)
+            {
+                toSky = -toSky;
+            }
+            double expected = sky.DegreeOfPolarisation(Math.Acos(toSky.z), Math.PI / 2);
+            EXPECT_GT(expected, 0.1);
+            PolarisedLightSystem.Light found = PolarisedEmission.AtInfinity(sky, -toSky, lambda, scalar);
+            Vector3f across = Normalize(Cross(toSky, toSun));
+            StokesVector along = found.RepresentInDirection(-toSky, across).ToStokesVector();
+            EXPECT_NEAR(2.0, along.s0[0], 1e-5);
+            EXPECT_NEAR(2.0 * expected, along.s1[0], 1e-5);
+            EXPECT_NEAR(0.0, along.s2[0], 1e-5);
+            EXPECT_NEAR(0.0, along.s3[0], 1e-5);
+            // (in the frame turned a quarter the sign is the other)
+            StokesVector turned = found.RepresentInDirection(-toSky, Normalize(Cross(-toSky, across))).ToStokesVector();
+            EXPECT_NEAR(-2.0 * expected, turned.s1[0], 1e-5);
+            // (the same by a sample of the light; and none below the horizon or without the option)
+            Interaction point = new Interaction(new Point3f(0, 0, 0), new MediumInterface());
+            StokesVector sampled = PolarisedEmission.AtPoint(sky, point, -toSky, lambda, scalar).RepresentInDirection(-toSky, across).ToStokesVector();
+            EXPECT_NEAR(2.0 * expected, sampled.s1[0], 1e-5);
+            EXPECT_FALSE(PolarisedEmission.AtInfinity(sky, new Vector3f(0, 0, 1), lambda, scalar).IsPolarised());
+            HosekSkyLight plain = new HosekSkyLight(zenith, toSun, 3, albedo, 1, false, false, false, false);
+            EXPECT_FALSE(PolarisedEmission.AtInfinity(plain, -toSky, lambda, scalar).IsPolarised());
         }
     }
 }
