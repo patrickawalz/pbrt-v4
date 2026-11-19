@@ -67,6 +67,13 @@ namespace pbrt
             return 0;
         }
 
+        // The model gives the light of every direction, also below the horizon (an observer above the ground): there is no
+        // ground of the light's own then
+        protected virtual bool WholeSphere
+        {
+            get { return false; }
+        }
+
         protected virtual bool IsPolarised
         {
             get { return false; }
@@ -176,7 +183,7 @@ namespace pbrt
             }
             sunShare = sun && sunLuminance > 0 ? Math.Min(Math.Max(sunLuminance / (sunLuminance + skyLuminance), 0.05), 0.95) : 0;
             totalLuminance = skyLuminance + sunLuminance;
-            darkBelow = true;
+            darkBelow = !WholeSphere;
             for (int band = 0; band < bands && groundRadiance != null; ++band)
             {
                 darkBelow &= !(groundRadiance[band] > 0);
@@ -210,7 +217,7 @@ namespace pbrt
                         ? new Vector3f((Float)(Math.Cos(solarElevation) * Math.Cos(gamma)), (Float)Math.Sin(gamma), (Float)(Math.Sin(solarElevation) * Math.Cos(gamma)))
                         : new Vector3f((Float)Math.Cos(elevation), 0, (Float)Math.Sin(elevation));
                     double theta = Math.Acos(Math.Min(Math.Max((double)local.z, -1.0), 1.0));
-                    if (!(local.z > 0))
+                    if (!(local.z > 0) && (level || !WholeSphere))
                     {
                         continue;
                     }
@@ -225,11 +232,12 @@ namespace pbrt
         // solar disc)
         private double BandRadiance(int band, Vector3f local)
         {
-            if (!(local.z > 0))
+            if (!(local.z > 0) && !WholeSphere)
             {
                 return groundRadiance != null ? groundRadiance[band] : 0;
             }
-            Evaluate(local, Math.Acos(Math.Min((double)local.z, 1.0)), GammaLocal(local), BandWavelength(band), out double sky, out double solar);
+            Evaluate(local, Math.Acos(Math.Min(Math.Max((double)local.z, -1.0), 1.0)), GammaLocal(local), BandWavelength(band), out double sky,
+                     out double solar);
             return Math.Max(sky, 0.0);
         }
 
@@ -257,7 +265,7 @@ namespace pbrt
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
                 double value = 0;
-                if (!(cosTheta > 0))
+                if (!(cosTheta > 0) && !WholeSphere)
                 {
                     if (groundRadiance != null)
                     {
@@ -288,12 +296,12 @@ namespace pbrt
         {
             Vector3f toSky = -w;
             double cosTheta = pbrt.Dot(toSky, zenith);
-            if (!IsPolarised || !(cosTheta > 0))
+            if (!IsPolarised || (!(cosTheta > 0) && !WholeSphere))
             {
                 return new PLight(scalar);
             }
             double gamma = Gamma(toSky);
-            double theta = Math.Acos(Math.Min(cosTheta, 1.0));
+            double theta = Math.Acos(Math.Min(Math.Max(cosTheta, -1.0), 1.0));
             Vector3f across = pbrt.Cross(toSky, sunDirection);
             if (!(pbrt.LengthSquared(across) > 1e-12f))
             {

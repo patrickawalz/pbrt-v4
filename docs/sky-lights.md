@@ -136,6 +136,10 @@ emission) is in `skydomelight.cs`.
 | `bool ground` | false | A ground of the albedo below the horizon, lit by the sky and the sun |
 | `float scale` | 1 | |
 | `string polarisation` | `none` | `dataset`: the polarisation that the dataset holds |
+| `float altitude` | 0 | Height of the observer above the ground, metres, to 15000; needs a dataset with altitudes |
+
+Above the ground the model gives the light of every direction: below the horizon it is the ground and the air in
+front of it, as the model has them, and `ground` is not used (an error with `altitude`).
 
 Values outside what the dataset holds are held at its ends. The radiance is in the units of the thermal emitters, so
 the Y of the film is cd/m^2. A wavelength has the radiance of the 40 nm channel it is in: the model does not
@@ -143,22 +147,48 @@ interpolate between channels (the reference does not either).
 
 ### Datasets
 
-The datasets are not in the repository. The authors publish them; copies are on the release `prague-sky-datasets-v1`
-of this repository.
+The datasets are not in the repository. The authors publish them (Zenodo record 19140728, Apache 2.0); copies and
+the files made from them are on the release `prague-sky-datasets-v1` of this repository.
 
-| File | Channels | Polarisation | Size |
-|---|---|---|---|
-| `PragueSkyModelDatasetSWIR.dat` | 55, 280 to 2480 nm | yes | 574 MB |
-| `PragueSkyModelDatasetGround.dat` | 11, 320 to 760 nm | no | 108 MB |
-| the first, trimmed to 360..830 nm | 12, 360 to 840 nm | yes | 154 MB |
+| File | Channels | Altitudes | Polarisation | Size |
+|---|---|---|---|---|
+| `PragueSkyModelDatasetFull.dat` (on the release in two parts) | 11, 320 to 760 nm | 22, to 15 km | yes | 2397 MB |
+| `PragueSkyModelDatasetSWIR.dat` | 55, 280 to 2480 nm | ground | yes | 574 MB |
+| `PragueSkyModelDatasetGround.dat` | 11, 320 to 760 nm | ground | no | 108 MB |
+| `PragueSkyVisible.dat`: the wide one trimmed to 360..830 nm | 12, 360 to 840 nm | ground | yes | 154 MB |
+| `PragueSkyGround14.dat`: the wide one trimmed to 280..839 nm | 14, 280 to 840 nm | ground | yes | 173 MB |
+| the full one and `PragueSkyGround14.dat` combined | 11 and 14 | 22 and ground | yes | 2571 MB |
 
-Both are ground-level only. The light reads only what it needs: the 16 configurations around its sun elevation,
-visibility and albedo, for the channels the film can sample (360 to 830 nm), by seeking; nothing else is loaded.
+A release file cannot be larger than 2 GiB, so the full dataset is there as two parts and the combined file is not
+there at all:
 
-`praguetrim <dataset> <output> [first nm] [last nm]` (`cmd/praguetrim.cs`) writes a dataset with only the channels
-that hold a wavelength of the range (default 360 to 830), everything else unchanged. The result is a dataset of the
-same format: the authors' reference implementation reads it, and the values are bit-identical to the whole dataset
-(`PragueSky.TrimKeepsTheChannels`). The trimmed wide dataset is the one to use: visible channels with polarisation.
+    cat PragueSkyModelDatasetFull.dat.part1 PragueSkyModelDatasetFull.dat.part2 > PragueSkyModelDatasetFull.dat
+    praguedata combine PragueSkyFullWide.dat PragueSkyModelDatasetFull.dat PragueSkyGround14.dat
+
+(on Windows `copy /b part1 + part2 PragueSkyModelDatasetFull.dat`; its MD5 is dcfa2bd165cf803c1791c469e05d134c).
+
+The light reads only what it needs: the 16 configurations around its sun elevation, visibility, albedo and altitude,
+for the channels the film can sample (360 to 830 nm), by seeking; nothing else is loaded.
+
+### `praguedata` (`cmd/praguedata.cs`)
+
+    praguedata info <file>
+    praguedata trim <input> <output> [first nm] [last nm]
+    praguedata combine <output> <input> <input> ...
+
+* `info`: a line for each dataset of a file: channels, altitudes, sun elevations, visibilities, polarisation, size.
+* `trim`: the input with only the channels that hold a wavelength of the range (default 360 to 830), everything
+  else unchanged. The result is a dataset of the same format: the authors' reference implementation reads it, and the
+  values are bit-identical to the whole dataset (`PragueSky.TrimKeepsTheChannels`).
+* `combine`: the inputs one after another in one file. The format has one set of channels for all its altitudes, so
+  the full dataset cannot itself hold wider channels for the ground; a combined file holds both datasets whole. A
+  reader of one dataset (the reference implementation, LuxCore) finds the first and ignores the rest: with the full
+  dataset first, the combined file is still the full dataset to them (checked with the reference). The `prague` light
+  takes, among the datasets that have the altitude of its observer, the one with the most channels of what the film
+  samples: on the ground the wide channels, above it the full dataset. Each is used exactly as from its own file
+  (`PragueSky.CombineKeepsTheDatasets`; renders from the combined file are identical pixel for pixel to those from the
+  single files). A dataset without polarisation ends where its transmittance ends, so it can only be the last of a
+  file; `combine` refuses another order.
 
 ### Polarisation
 
@@ -172,6 +202,11 @@ solar disc and the ground are unpolarised. A dataset without polarisation is an 
   dataset agree: solar radiance and transmittance to 1e-9 relative, sky radiance and polarisation to 2e-6
   (`PragueSky.ModelIsTheAuthors...`). The tests look for the datasets in the directory `PRAGUE_SKY_DATASETS` and say
   so and pass without it.
+* With the observer at an altitude and directions below the horizon: 80 rows on the full dataset, to the same
+  tolerances (`PragueSky.ModelIsTheAuthorsOnTheFullDataset`). The light at 800 and 9000 m: density against samples,
+  the measure of its samples the whole sphere, its own samples against uniform directions (`PragueSky.LightAloft`).
+  The test scene at 3000 m, mean of the lower half: `path` 7141.7, `volpath` 7143.7, `bdpt` 7140.9, `production`
+  7153.6.
 * The light: density against samples, radiance of a sample against a ray and against the model, the light's own
   samples against uniform directions, sun at 41, 3 and -3 degrees, with and without sun and ground, both datasets
   (`PragueSky.LightSamplesWhatItEmits`); the disc (`PragueSky.SolarDisc`: 1.2073 +- 0.0031 by samples, 1.2068 by the
