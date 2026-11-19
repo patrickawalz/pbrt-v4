@@ -49,7 +49,7 @@ namespace pbrt
 {
     // The Stokes vector of emitted light, for every integrator that carries polarisation. An integrator has the radiance of a
     // light as a spectrum, times the factors of its estimator; these give the same quantity as polarised light. Lights are
-    // unpolarised except a laser (LaserLight) and the glowing surfaces (ThermalEmission), whose Stokes vector is taken
+    // unpolarised except a laser (LaserLight), a sky (HosekSkyLight) and the glowing surfaces (ThermalEmission), whose Stokes vector is taken
     // relative to its intensity:
     // the same point and direction give the same sample of the emission, so the two belong together.
     public static class PolarisedEmission
@@ -76,12 +76,30 @@ namespace pbrt
             {
                 return laser.Polarised(w, scalar);
             }
+            // (the sky: hoseksky.cs)
+            HosekSkyLight sky = light as HosekSkyLight;
+            if (sky != null)
+            {
+                return sky.Polarised(w, lambda, scalar);
+            }
             DiffuseAreaLight area = light as DiffuseAreaLight;
             if (area == null || area.thermal == null)
             {
                 return new PLight(scalar);
             }
             return Scaled(area.LPolarised(point.p(), point.n, point.uv, w, lambda, roughPolarisation), scalar);
+        }
+
+        // `scalar` is the radiance of an infinite light for the direction w that its light travels in (toward the scene) times
+        // any factors: what a ray that leaves the scene finds
+        public static PLight AtInfinity(Light light, Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar)
+        {
+            HosekSkyLight sky = light as HosekSkyLight;
+            if (sky != null)
+            {
+                return sky.Polarised(pbrt.Normalize(w), lambda, scalar);
+            }
+            return new PLight(scalar);
         }
 
         private static PLight Scaled(PLight emitted, SampledSpectrum scalar)

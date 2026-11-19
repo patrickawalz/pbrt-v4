@@ -763,15 +763,22 @@ namespace pbrt
                     foreach (Light light in infiniteLights)
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
+                        SampledSpectrum found;
                         if (depth == 0 || specularBounce)
                         {
-                            Gather(ref L, ref Lp, beta, relative, ctx, Le0 / ctx.r.Average());
+                            found = Le0 / ctx.r.Average();
                         }
                         else
                         {
                             Float p_l = lightSampler.PMF(prevIntrCtx, light) * light.PDF_Li(prevIntrCtx, ray.d, true);
-                            Gather(ref L, ref Lp, beta, relative, ctx, PowerHeuristic(1, p_b, 1, p_l) * Le0 / ctx.r.Average());
+                            found = PowerHeuristic(1, p_b, 1, p_l) * Le0 / ctx.r.Average();
                         }
+                        // (the polarisation of what the light gives there: a sky)
+                        if (ctx.polar != null)
+                        {
+                            ctx.polar.Add(found, PolarisedEmission.AtInfinity(light, -ray.d, lambda, found));
+                        }
+                        Gather(ref L, ref Lp, beta, relative, ctx, found);
                     }
                     break;
                 }
