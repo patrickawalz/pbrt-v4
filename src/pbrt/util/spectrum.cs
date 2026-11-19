@@ -572,6 +572,18 @@ namespace pbrt
             return swl;
         }
 
+        // (not in pbrt-v4) Wavelengths and densities that were sampled elsewhere (SpectralLineSampling)
+        public static SampledWavelengths FromSamples(ReadOnlySpan<Float> lambda, ReadOnlySpan<Float> pdf)
+        {
+            SampledWavelengths swl = new SampledWavelengths();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                swl.lambda[i] = lambda[i];
+                swl.pdf[i] = pdf[i];
+            }
+            return swl;
+        }
+
         // SampledWavelengths Private Members
         private fixed Float lambda[NSpectrumSamples];
         private fixed Float pdf[NSpectrumSamples];

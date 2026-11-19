@@ -2536,14 +2536,24 @@ namespace pbrt
     // Light factory functions (lights.cpp)
     public abstract unsafe partial class Light
     {
+        // (`textures`, not in pbrt-v4: the named textures of the scene, for the lights that take one)
         public static Light Create(string name, ParameterDictionary parameters, Transform renderFromLight,
-                                   CameraTransform cameraTransform, Medium outsideMedium, FileLoc loc, Allocator alloc)
+                                   CameraTransform cameraTransform, Medium outsideMedium, FileLoc loc, Allocator alloc,
+                                   NamedTextures textures = null)
         {
             Light light = null;
             if (name == "point")
                 light = PointLight.Create(renderFromLight, outsideMedium, parameters, parameters.ColorSpace(), loc, alloc);
             else if (name == "spot")
                 light = SpotLight.Create(renderFromLight, outsideMedium, parameters, parameters.ColorSpace(), loc, alloc);
+            else if (name == "laser")
+                // (not in pbrt-v4) A Gaussian beam of one spectral line (laserlight.cs)
+                light = LaserLight.Create(renderFromLight, outsideMedium, parameters, loc, alloc);
+            else if (name == "laser2")
+                // (not in pbrt-v4) The same beam with any spectrum, or an image across it (laserlight2.cs)
+                light = LaserLight2.Create(renderFromLight, outsideMedium,
+                                           new TextureParameterDictionary(parameters, textures ?? new NamedTextures()),
+                                           parameters.ColorSpace(), loc, alloc);
             else if (name == "goniometric")
                 light = GoniometricLight.Create(renderFromLight, outsideMedium, parameters, parameters.ColorSpace(), loc,
                                                 alloc);
