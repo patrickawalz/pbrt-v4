@@ -1,7 +1,10 @@
 name: Fetch Prague sky model datasets
 
-# Downloads two of the Prague Sky Model datasets from Zenodo and attaches them to a release of this repository, so that
-# they can be fetched from GitHub. Runs once, when this branch is pushed.
+# Adds to the release prague-sky-datasets-v1 of this repository:
+#   - PragueSkyVisible.dat: the wide (SWIR) dataset trimmed to the channels of 360 to 840 nm by praguetrim (pbr-lights)
+#   - PragueSkyModelDatasetFull.dat from Zenodo, in two parts (a release asset cannot be larger than 2 GiB):
+#       cat PragueSkyModelDatasetFull.dat.part1 PragueSkyModelDatasetFull.dat.part2 > PragueSkyModelDatasetFull.dat
+# Runs when this branch is pushed.
 on:
   push:
     branches: [prague-data]
@@ -10,22 +13,43 @@ permissions:
   contents: write
 
 jobs:
-  fetch:
+  visible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 313056d
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build praguetrim
+        run: |
+          cd src/pbrt
+          for i in 1 2 3 4 5 6 7 8; do
+            if dotnet build cmd/praguetrim.csproj -c Release; then break; fi
+          done
+          ls -l cmd/bin/Release/net10.0/praguetrim.dll
+      - name: Trim the wide dataset and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download prague-sky-datasets-v1 --repo "$GITHUB_REPOSITORY" --pattern PragueSkyModelDatasetSWIR.dat
+          echo "33b97729ce8cd7fbdfc60317ff2805e7  PragueSkyModelDatasetSWIR.dat" | md5sum -c
+          dotnet src/pbrt/cmd/bin/Release/net10.0/praguetrim.dll PragueSkyModelDatasetSWIR.dat PragueSkyVisible.dat
+          echo "e8ee91e896ae54da6b74c090b1c641d5  PragueSkyVisible.dat" | md5sum -c
+          gh release upload prague-sky-datasets-v1 PragueSkyVisible.dat --repo "$GITHUB_REPOSITORY" --clobber
+  full:
     runs-on: ubuntu-latest
     steps:
       - name: Download from Zenodo and verify
         run: |
-          curl -L --fail --retry 5 --retry-delay 10 -o PragueSkyModelDatasetSWIR.dat "https://zenodo.org/records/19140728/files/PragueSkyModelDatasetSWIR.dat?download=1"
-          curl -L --fail --retry 5 --retry-delay 10 -o PragueSkyModelDatasetGround.dat "https://zenodo.org/records/19140728/files/PragueSkyModelDatasetGround.dat?download=1"
-          echo "33b97729ce8cd7fbdfc60317ff2805e7  PragueSkyModelDatasetSWIR.dat" > sums.md5
-          echo "953864f62c9434269b7f909cdff6c7cd  PragueSkyModelDatasetGround.dat" >> sums.md5
-          md5sum -c sums.md5
+          curl -L --fail --retry 5 --retry-delay 10 -o PragueSkyModelDatasetFull.dat "https://zenodo.org/records/19140728/files/PragueSkyModelDatasetFull.dat?download=1"
+          echo "dcfa2bd165cf803c1791c469e05d134c  PragueSkyModelDatasetFull.dat" | md5sum -c
           ls -l *.dat
-      - name: Publish as a release
+          split -b 1900M -d -a 1 --numeric-suffixes=1 PragueSkyModelDatasetFull.dat PragueSkyModelDatasetFull.dat.part
+          ls -l PragueSkyModelDatasetFull.dat.part*
+      - name: Publish the parts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create prague-sky-datasets-v1 PragueSkyModelDatasetSWIR.dat PragueSkyModelDatasetGround.dat \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Prague Sky Model datasets (SWIR and Ground)" \
-            --notes "Unmodified copies of PragueSkyModelDatasetSWIR.dat and PragueSkyModelDatasetGround.dat from https://zenodo.org/records/19140728 (Prague Sky Model Dataset, Wilkie et al. 2021, Vevoda et al. 2022; source https://github.com/PetrVevoda/pragueskymodel). Licence: Apache License 2.0. MD5 verified against the Zenodo record."
+          gh release upload prague-sky-datasets-v1 PragueSkyModelDatasetFull.dat.part1 PragueSkyModelDatasetFull.dat.part2 --repo "$GITHUB_REPOSITORY" --clobber
