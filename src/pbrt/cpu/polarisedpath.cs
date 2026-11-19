@@ -352,11 +352,11 @@ namespace pbrt
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
                         if (depth == 0 || specularBounce)
-                            L += beta * new PLight(Le0);
+                            L += beta * PolarisedEmission.AtInfinity(light, -ray.d, lambda, Le0);
                         else
                         {
                             Float p_l = lightSampler.PMF(prevIntrCtx, light) * light.PDF_Li(prevIntrCtx, ray.d, true);
-                            L += beta * new PLight(PowerHeuristic(1, p_b, 1, p_l) * Le0);
+                            L += beta * PolarisedEmission.AtInfinity(light, -ray.d, lambda, PowerHeuristic(1, p_b, 1, p_l) * Le0);
                         }
                     }
 
