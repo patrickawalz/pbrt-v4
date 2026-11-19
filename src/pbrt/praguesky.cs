@@ -14,6 +14,13 @@
 // ground of the albedo below the horizon, lit by the sky and the sun. "scale" multiplies the radiance, which is in the
 // units of the thermal emitters (W m^-2 sr^-1 nm^-1 times 683: the Y of the film is cd/m^2).
 //
+// "float altitude" (0) is the height of the observer above the ground in metres, to 15000, for a dataset that has
+// altitudes (the full one). Above the ground the model gives the light of every direction: below the horizon the ground
+// and the air before it, as the model has them, and "ground" is not used. "filename" may be a file of several datasets
+// (praguedata combine): the one with the most channels of what the film samples is taken among those that have the
+// altitude of the observer, so that a file of the full dataset and of a wider ground dataset gives the wider channels to
+// an observer on the ground.
+//
 // A wavelength has the radiance of the channel of the dataset that it is in (40 nm wide): the model does not interpolate
 // between its channels. The channels that the film can find (360 to 830 nm) are the ones used.
 //
@@ -33,12 +40,15 @@ namespace pbrt
 
         // `zenith`, `sunDirection`: render space, unit length; `filename`: the dataset; `visibility`: km; `albedo`: of the
         // ground; `scale`: of the radiance of the model; `sun`: with the solar disc; `ground`: with the ground below the
-        // horizon; `polarised`: the sky dome has the polarisation of the dataset
+        // horizon; `polarised`: the sky dome has the polarisation of the dataset; `altitude`: of the observer above the
+        // ground, metres (above the ground the model gives the light of every direction, and there is no ground of the
+        // light's own)
         public PragueSkyLight(Vector3f zenith, Vector3f sunDirection, string filename, double visibility, Spectrum albedo, Float scale, bool sun,
-                              bool ground, bool polarised)
-            : base(zenith, sunDirection, scale, sun, ground)
+                              bool ground, bool polarised, double altitude = 0)
+            : base(zenith, sunDirection, scale, sun, ground && !(altitude > 0))
         {
-            model = new PragueSkyModel(filename, solarElevation, visibility, albedo);
+            aloft = altitude > 0;
+            model = new PragueSkyModel(filename, solarElevation, visibility, albedo, altitude);
             this.polarised = polarised && model.HasPolarisation;
             // The channels that the film can find
             firstChannel = Math.Max((int)Math.Floor((Lambda_min - model.ChannelStart) / model.ChannelWidth), 0);
@@ -103,6 +113,11 @@ namespace pbrt
             }
         }
 
+        protected override bool WholeSphere
+        {
+            get { return aloft; }
+        }
+
         protected override bool IsPolarised
         {
             get { return polarised; }
@@ -129,6 +144,15 @@ namespace pbrt
             bool sun = parameters.GetOneBool("sun", true);
             bool ground = parameters.GetOneBool("ground", false);
             string polarisation = parameters.GetOneString("polarisation", "none");
+            double altitude = parameters.GetOneFloat("altitude", 0.0f);
+            if (altitude < 0 || altitude > 15000)
+            {
+                pbrt.ErrorExit(loc, "\"prague\": \"altitude\" must be between 0 and 15000 (metres).");
+            }
+            if (altitude > 0 && ground)
+            {
+                pbrt.ErrorExit(loc, "\"prague\": above the ground (\"altitude\") the model has the ground in it: \"ground\" is for an observer on the ground.");
+            }
             if (filename.Length == 0)
             {
                 pbrt.ErrorExit(loc, "\"prague\": \"filename\" must name a dataset of the Prague sky model.");
@@ -145,7 +169,11 @@ namespace pbrt
             PragueSkyLight light = null;
             try
             {
-                light = new PragueSkyLight(zenith, toSun, filename, visibility, albedo, 683.002f * scale, sun, ground, polarisation == "dataset");
+                light = new PragueSkyLight(zenith, toSun, filename, visibility, albedo, 683.002f * scale, sun, ground, polarisation == "dataset", altitude);
+            }
+            catch (System.IO.InvalidDataException e)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: %s.", filename, e.Message));
             }
             catch (System.IO.IOException e)
             {
@@ -163,7 +191,7 @@ namespace pbrt
         }
 
         private readonly PragueSkyModel model;
-        private readonly bool polarised;
+        private readonly bool polarised, aloft;
         private readonly int firstChannel, channelCount;
     }
 }

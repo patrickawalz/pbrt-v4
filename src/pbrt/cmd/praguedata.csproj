@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AssemblyName>praguetrim</AssemblyName>
+    <AssemblyName>praguedata</AssemblyName>
     <TargetFramework>net10.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
@@ -14,7 +14,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="praguetrim.cs" />
+    <Compile Include="praguedata.cs" />
     <ProjectReference Include="../pbrt_lib.csproj" />
   </ItemGroup>
 </Project>
