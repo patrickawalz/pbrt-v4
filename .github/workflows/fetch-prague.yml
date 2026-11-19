@@ -1,0 +1,31 @@
+name: Fetch Prague sky model datasets
+
+# Downloads two of the Prague Sky Model datasets from Zenodo and attaches them to a release of this repository, so that
+# they can be fetched from GitHub. Runs once, when this branch is pushed.
+on:
+  push:
+    branches: [prague-data]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download from Zenodo and verify
+        run: |
+          curl -L --fail --retry 5 --retry-delay 10 -o PragueSkyModelDatasetSWIR.dat "https://zenodo.org/records/19140728/files/PragueSkyModelDatasetSWIR.dat?download=1"
+          curl -L --fail --retry 5 --retry-delay 10 -o PragueSkyModelDatasetGround.dat "https://zenodo.org/records/19140728/files/PragueSkyModelDatasetGround.dat?download=1"
+          echo "33b97729ce8cd7fbdfc60317ff2805e7  PragueSkyModelDatasetSWIR.dat" > sums.md5
+          echo "953864f62c9434269b7f909cdff6c7cd  PragueSkyModelDatasetGround.dat" >> sums.md5
+          md5sum -c sums.md5
+          ls -l *.dat
+      - name: Publish as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create prague-sky-datasets-v1 PragueSkyModelDatasetSWIR.dat PragueSkyModelDatasetGround.dat \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Prague Sky Model datasets (SWIR and Ground)" \
+            --notes "Unmodified copies of PragueSkyModelDatasetSWIR.dat and PragueSkyModelDatasetGround.dat from https://zenodo.org/records/19140728 (Prague Sky Model Dataset, Wilkie et al. 2021, Vevoda et al. 2022; source https://github.com/PetrVevoda/pragueskymodel). Licence: Apache License 2.0. MD5 verified against the Zenodo record."
