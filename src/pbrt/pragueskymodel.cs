@@ -65,6 +65,8 @@ namespace pbrt
             public int dDim, aDim, rankTrans;
             public double[] altitudesTrans, visibilitiesTrans;
             public long transmittanceUStart, transmittanceVStart;
+            // (where the dataset starts and ends in its file)
+            public long start, end;
 
             public long Configs()
             {
@@ -96,6 +98,7 @@ namespace pbrt
         private static Layout ReadLayout(BinaryReader reader, long length)
         {
             Layout layout = new Layout();
+            layout.start = reader.BaseStream.Position;
             layout.visibilities = ReadGrid(reader, "visibilities", 1);
             layout.albedos = ReadGrid(reader, "albedos", 1);
             layout.altitudes = ReadGrid(reader, "altitudes", 1);
@@ -169,23 +172,86 @@ namespace pbrt
                 layout.polarisationStart = reader.BaseStream.Position;
                 layout.polarisationConfigBytes = 4L * polarisation.sunStride * polarisation.rank;
             }
+            layout.end = layout.polarisation != null ? layout.polarisationStart + layout.polarisationConfigBytes * layout.Configs() : afterTransmittance;
+            if (layout.end > length)
+            {
+                throw new InvalidDataException("Prague sky dataset: the file ends before its data");
+            }
             return layout;
         }
 
+        // The datasets of a file. A file is one dataset, or several one after another (Combine): a reader of one dataset,
+        // as the reference implementation, finds the first.
+        private static List<Layout> ReadLayouts(BinaryReader reader, long length)
+        {
+            List<Layout> layouts = new List<Layout>();
+            long position = 0;
+            while (position < length)
+            {
+                reader.BaseStream.Position = position;
+                Layout layout;
+                try
+                {
+                    layout = ReadLayout(reader, length);
+                }
+                catch (EndOfStreamException)
+                {
+                    throw new InvalidDataException("Prague sky dataset: the file ends before its data");
+                }
+                layouts.Add(layout);
+                position = layout.end;
+            }
+            if (layouts.Count == 0)
+            {
+                throw new InvalidDataException("Prague sky dataset: the file is empty");
+            }
+            return layouts;
+        }
+
+        // The channels of a dataset that hold a wavelength of the range (nm)
+        private static int ChannelsWithin(Layout layout, double firstWavelength, double lastWavelength)
+        {
+            int first = Math.Max((int)Math.Floor((firstWavelength - layout.channelStart) / layout.channelWidth), 0);
+            int last = Math.Min((int)Math.Floor((lastWavelength - layout.channelStart) / layout.channelWidth), layout.channels - 1);
+            return Math.Max(last - first + 1, 0);
+        }
+
         // `solarElevation`: of the sun at the ground, radians; `visibility`: the meteorological range at the ground, km;
-        // `albedo`: of the ground, taken at the middle of each wavelength channel. Values beyond the dataset are held at its
-        // ends, as the reference does.
-        public PragueSkyModel(string filename, double solarElevation, double visibility, Spectrum albedo)
+        // `albedo`: of the ground, taken at the middle of each wavelength channel; `observerAltitude`: of the observer above
+        // the ground, metres. Values beyond the dataset are held at its ends, as the reference does.
+        //
+        // Of a file of several datasets the one is taken that has the most channels of what the film samples, among those
+        // that have the altitude of the observer (a dataset of the ground alone is only for an observer on the ground);
+        // of equals the one with polarisation, then the first.
+        public PragueSkyModel(string filename, double solarElevation, double visibility, Spectrum albedo, double observerAltitude = 0)
         {
             this.solarElevation = solarElevation;
+            // (the model takes the observer at least at the safety altitude: ComputeAngles)
+            height = Math.Max(observerAltitude, 0.0) + SafetyAltitude;
             using (FileStream stream = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read))
             using (BinaryReader reader = new BinaryReader(stream))
             {
-                layout = ReadLayout(reader, stream.Length);
+                int best = -1;
+                foreach (Layout candidate in ReadLayouts(reader, stream.Length))
+                {
+                    if (observerAltitude > 0 && candidate.altitudes.Length < 2)
+                    {
+                        continue;
+                    }
+                    int channels = ChannelsWithin(candidate, Lambda_min, Lambda_max);
+                    if (layout == null || channels > best || (channels == best && candidate.polarisation != null && layout.polarisation == null))
+                    {
+                        layout = candidate;
+                        best = channels;
+                    }
+                }
+                if (layout == null)
+                {
+                    throw new InvalidDataException("Prague sky dataset: only the ground level is in the file, and the observer is above it");
+                }
 
                 InterpolationParameter visibilityParameter = GetInterpolationParameter(visibility, layout.visibilities);
-                // (the observer stands on the ground, which the model takes at the safety altitude: ComputeAngles)
-                InterpolationParameter altitudeParameter = GetInterpolationParameter(SafetyAltitude, layout.altitudes);
+                InterpolationParameter altitudeParameter = GetInterpolationParameter(height, layout.altitudes);
                 InterpolationParameter elevationParameter = GetInterpolationParameter(solarElevation * 180 / Math.PI, layout.elevations);
                 visibilityFactor = visibilityParameter.factor;
                 altitudeFactor = altitudeParameter.factor;
@@ -235,7 +301,7 @@ namespace pbrt
 
                 // The transmittance: the base functions of the two altitudes about the observer, and all of the weights
                 transVisibility = GetInterpolationParameter(visibility, layout.visibilitiesTrans);
-                transAltitude = GetInterpolationParameter(SafetyAltitude, layout.altitudesTrans);
+                transAltitude = GetInterpolationParameter(height, layout.altitudesTrans);
                 int baseCount = layout.dDim * layout.aDim * layout.rankTrans;
                 transU = new float[2][];
                 for (int k = 0; k < 2; ++k)
@@ -315,12 +381,18 @@ namespace pbrt
             get { return layout.polarisation != null; }
         }
 
+        // The highest observer of the dataset, metres (0: the ground alone)
+        public double HighestAltitude
+        {
+            get { return layout.altitudes[layout.altitudes.Length - 1]; }
+        }
+
         // The angles of a viewing direction of unit length in the frame of the sky: z to the zenith, the sun in the half
-        // plane of x and z with x positive. The observer is on the ground at the origin.
+        // plane of x and z with x positive. The observer is above the origin.
         public Angles ComputeAngles(double x, double y, double z)
         {
             Angles angles;
-            double distanceToView = PlanetRadius + SafetyAltitude;
+            double distanceToView = PlanetRadius + height;
             double sunX = Math.Cos(solarElevation), sunZ = Math.Sin(solarElevation);
             // (the direction as it is seen from the ground below the observer)
             double correction = Math.Sqrt(distanceToView * distanceToView - PlanetRadius * PlanetRadius) / distanceToView;
@@ -570,10 +642,10 @@ namespace pbrt
             }
             int channel = (int)Math.Floor((wavelength - layout.channelStart) / layout.channelWidth);
 
-            // Where the ray ends: at the ground, or else at the edge of the atmosphere (the observer is at the safety altitude,
-            // which is not what the reference calls a low altitude)
+            // Where the ray ends: at the ground, or else at the edge of the atmosphere (the observer is at the safety altitude
+            // or above, which is not what the reference calls a low altitude)
             double rayDirX = Math.Sin(angles.theta), rayDirY = Math.Cos(angles.theta);
-            double rayPosY = PlanetRadius + SafetyAltitude;
+            double rayPosY = PlanetRadius + height;
             double distanceToIntersection = IntersectRayWithCircle2D(rayDirX, rayDirY, rayPosY, PlanetRadius);
             if (distanceToIntersection < 0.0)
             {
@@ -612,68 +684,141 @@ namespace pbrt
             }
         }
 
-        // Writes the dataset `inputName` to `outputName` with only the wavelength channels that hold a wavelength between
-        // `firstWavelength` and `lastWavelength` (nm). Everything else is as it was: the result is a dataset of the same
-        // format, for this reader and for the reference implementation.
+        // Writes the datasets of `inputName` to `outputName` with only the wavelength channels that hold a wavelength between
+        // `firstWavelength` and `lastWavelength` (nm). Everything else is as it was: the result is of the same format, for
+        // this reader and for the reference implementation. A dataset without a channel there is left out.
         public static void Trim(string inputName, string outputName, double firstWavelength, double lastWavelength)
         {
             using (FileStream input = new FileStream(inputName, FileMode.Open, FileAccess.Read, FileShare.Read))
             using (BinaryReader reader = new BinaryReader(input))
-            using (FileStream output = new FileStream(outputName, FileMode.Create, FileAccess.Write))
-            using (BinaryWriter writer = new BinaryWriter(output))
             {
-                Layout layout = ReadLayout(reader, input.Length);
-                int first = Math.Max((int)Math.Floor((firstWavelength - layout.channelStart) / layout.channelWidth), 0);
-                int last = Math.Min((int)Math.Floor((lastWavelength - layout.channelStart) / layout.channelWidth), layout.channels - 1);
-                if (last < first)
+                List<Layout> layouts = ReadLayouts(reader, input.Length);
+                layouts.RemoveAll(layout => ChannelsWithin(layout, firstWavelength, lastWavelength) == 0);
+                if (layouts.Count == 0)
                 {
                     throw new ArgumentException("Prague sky dataset: no channel between the two wavelengths");
                 }
-                int kept = last - first + 1;
-                long outerConfigs = layout.Configs() / layout.channels;
-
-                // The grids as they are, but for the channels
-                long gridsEnd = 4 + 8L * layout.visibilities.Length + 4 + 8L * layout.albedos.Length + 4 + 8L * layout.altitudes.Length + 4 +
-                                8L * layout.elevations.Length;
-                Copy(input, output, 0, gridsEnd);
-                writer.Write(kept);
-                writer.Write(layout.channelStart + first * layout.channelWidth);
-                writer.Write(layout.channelWidth);
-                writer.Flush();
-                Copy(input, output, gridsEnd + 4 + 8 + 8, layout.radianceStart - (gridsEnd + 4 + 8 + 8));
-
-                // The radiance: the channel is the innermost index of a configuration
-                for (long outer = 0; outer < outerConfigs; ++outer)
+                CheckOrder(layouts);
+                using (FileStream output = new FileStream(outputName, FileMode.Create, FileAccess.Write))
+                using (BinaryWriter writer = new BinaryWriter(output))
                 {
-                    Copy(input, output, layout.radianceStart + layout.radianceConfigBytes * (outer * layout.channels + first),
-                         layout.radianceConfigBytes * kept);
-                }
-
-                // The transmittance: its grids and base functions as they are; of the weights (by visibility, altitude,
-                // channel) the channels that are kept
-                Copy(input, output, layout.transmittanceStart, layout.transmittanceVStart - layout.transmittanceStart);
-                long weightsOuter = (long)layout.visibilitiesTrans.Length * layout.altitudesTrans.Length;
-                for (long outer = 0; outer < weightsOuter; ++outer)
-                {
-                    Copy(input, output, layout.transmittanceVStart + 4L * layout.rankTrans * (outer * layout.channels + first),
-                         4L * layout.rankTrans * kept);
-                }
-
-                if (layout.polarisation != null)
-                {
-                    long afterTransmittance = layout.transmittanceVStart + 4L * layout.rankTrans * weightsOuter * layout.channels;
-                    Copy(input, output, afterTransmittance, layout.polarisationStart - afterTransmittance);
-                    for (long outer = 0; outer < outerConfigs; ++outer)
+                    foreach (Layout layout in layouts)
                     {
-                        Copy(input, output, layout.polarisationStart + layout.polarisationConfigBytes * (outer * layout.channels + first),
-                             layout.polarisationConfigBytes * kept);
+                        TrimOne(input, output, writer, layout, firstWavelength, lastWavelength);
                     }
                 }
             }
         }
 
+        private static void TrimOne(FileStream input, FileStream output, BinaryWriter writer, Layout layout, double firstWavelength, double lastWavelength)
+        {
+            int first = Math.Max((int)Math.Floor((firstWavelength - layout.channelStart) / layout.channelWidth), 0);
+            int kept = ChannelsWithin(layout, firstWavelength, lastWavelength);
+            long outerConfigs = layout.Configs() / layout.channels;
+
+            // The grids as they are, but for the channels
+            long gridsEnd = layout.start + 4 + 8L * layout.visibilities.Length + 4 + 8L * layout.albedos.Length + 4 + 8L * layout.altitudes.Length + 4 +
+                            8L * layout.elevations.Length;
+            Copy(input, output, layout.start, gridsEnd - layout.start);
+            writer.Write(kept);
+            writer.Write(layout.channelStart + first * layout.channelWidth);
+            writer.Write(layout.channelWidth);
+            writer.Flush();
+            Copy(input, output, gridsEnd + 4 + 8 + 8, layout.radianceStart - (gridsEnd + 4 + 8 + 8));
+
+            // The radiance: the channel is the innermost index of a configuration
+            for (long outer = 0; outer < outerConfigs; ++outer)
+            {
+                Copy(input, output, layout.radianceStart + layout.radianceConfigBytes * (outer * layout.channels + first), layout.radianceConfigBytes * kept);
+            }
+
+            // The transmittance: its grids and base functions as they are; of the weights (by visibility, altitude, channel)
+            // the channels that are kept
+            Copy(input, output, layout.transmittanceStart, layout.transmittanceVStart - layout.transmittanceStart);
+            long weightsOuter = (long)layout.visibilitiesTrans.Length * layout.altitudesTrans.Length;
+            for (long outer = 0; outer < weightsOuter; ++outer)
+            {
+                Copy(input, output, layout.transmittanceVStart + 4L * layout.rankTrans * (outer * layout.channels + first), 4L * layout.rankTrans * kept);
+            }
+
+            if (layout.polarisation != null)
+            {
+                long afterTransmittance = layout.transmittanceVStart + 4L * layout.rankTrans * weightsOuter * layout.channels;
+                Copy(input, output, afterTransmittance, layout.polarisationStart - afterTransmittance);
+                for (long outer = 0; outer < outerConfigs; ++outer)
+                {
+                    Copy(input, output, layout.polarisationStart + layout.polarisationConfigBytes * (outer * layout.channels + first),
+                         layout.polarisationConfigBytes * kept);
+                }
+            }
+        }
+
+        // A dataset without polarisation ends where its transmittance ends, so nothing can follow it in a file: what
+        // followed would be read as its polarisation
+        private static void CheckOrder(List<Layout> layouts)
+        {
+            for (int i = 0; i + 1 < layouts.Count; ++i)
+            {
+                if (layouts[i].polarisation == null)
+                {
+                    throw new ArgumentException("Prague sky dataset: a dataset without polarisation can only be the last of a file");
+                }
+            }
+        }
+
+        // Writes the datasets of the files `inputNames`, as they are and in their order, to the one file `outputName`. A
+        // reader of one dataset (the reference implementation) finds the first; this reader takes the one that suits the
+        // light (the constructor). Only the last may be without polarisation.
+        public static void Combine(string[] inputNames, string outputName)
+        {
+            List<Layout> all = new List<Layout>();
+            foreach (string inputName in inputNames)
+            {
+                using (FileStream input = new FileStream(inputName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (BinaryReader reader = new BinaryReader(input))
+                {
+                    all.AddRange(ReadLayouts(reader, input.Length));
+                }
+            }
+            CheckOrder(all);
+            using (FileStream output = new FileStream(outputName, FileMode.Create, FileAccess.Write))
+            {
+                foreach (string inputName in inputNames)
+                {
+                    using (FileStream input = new FileStream(inputName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        Copy(input, output, 0, input.Length);
+                    }
+                }
+            }
+        }
+
+        // A line for each dataset of a file: what it holds
+        public static string[] Describe(string filename)
+        {
+            using (FileStream input = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (BinaryReader reader = new BinaryReader(input))
+            {
+                List<Layout> layouts = ReadLayouts(reader, input.Length);
+                string[] lines = new string[layouts.Count];
+                for (int i = 0; i < layouts.Count; ++i)
+                {
+                    Layout layout = layouts[i];
+                    System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+                    lines[i] = string.Format(culture, "dataset {0}: {1} channels, {2} to {3} nm; {4} altitudes, to {5} m; {6} sun elevations, {7} to {8} degrees; " +
+                                             "{9} visibilities, {10} to {11} km; {12} albedos; polarisation {13}; {14} bytes",
+                                             i + 1, layout.channels, layout.channelStart, layout.channelStart + layout.channels * layout.channelWidth,
+                                             layout.altitudes.Length, layout.altitudes[layout.altitudes.Length - 1], layout.elevations.Length,
+                                             layout.elevations[0], layout.elevations[layout.elevations.Length - 1], layout.visibilities.Length,
+                                             layout.visibilities[0], layout.visibilities[layout.visibilities.Length - 1], layout.albedos.Length,
+                                             layout.polarisation != null ? "yes" : "no", layout.end - layout.start);
+                }
+                return lines;
+            }
+        }
+
         private readonly Layout layout;
-        private readonly double solarElevation;
+        private readonly double solarElevation, height;
         private readonly double visibilityFactor, altitudeFactor, elevationFactor;
         private readonly double[] albedoFactor;
         // (by channel, the sixteen configurations about the one of the light)
