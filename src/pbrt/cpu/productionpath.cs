@@ -464,7 +464,7 @@ namespace pbrt
                 if (ls)
                 {
                     chosen.hasPoint = true;
-                    chosen.fixedPoint = light.Type() == LightType.DeltaPosition;
+                    chosen.fixedPoint = GaussianBeamLight.IsPointLight(light);
                     chosen.point = ls.value().pLight.p();
                 }
                 return true;
@@ -579,7 +579,7 @@ namespace pbrt
             }
             LightSampleContext origin = new LightSampleContext(new Point3fi(direct.ray.o), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), direct.ray.time);
             pstd.optional<LightLiSample> pivot = light.SampleLi(origin, sampler.Get2D(), lambda, false);
-            return pivot ? direct.For(true, type == LightType.DeltaPosition, pivot.value().pLight.p()) : 1;
+            return pivot ? direct.For(true, GaussianBeamLight.IsPointLight(light), pivot.value().pLight.p()) : 1;
         }
 
         private SampledSpectrum SampleLd(Services rs, VolumeContext ctx, Interaction intr, bool surface, BSDF bsdf, PhaseFunction phase, Sampler sampler, VolumeDirectWeight direct)
