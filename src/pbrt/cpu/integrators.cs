@@ -2232,8 +2232,25 @@ namespace pbrt
 
         // (not in pbrt-v4) The Stokes vector of what the light at a vertex emits toward w, with the intensity `scalar`: lights are
         // unpolarised except the glowing surfaces (PolarisedEmission)
-        public static PLight EmissionState(Vertex vertex, Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar)
+        public static PLight EmissionState(Vertex vertex, Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar,
+                                           List<Light> infiniteLights = null)
         {
+            // (a ray that left the scene: the infinite lights, each with its share of the light there)
+            if (infiniteLights != null && vertex.type == VertexType.Light && vertex.IsInfiniteLight() && (vertex.ei == null || vertex.ei.light == null))
+            {
+                SampledSpectrum total = new SampledSpectrum(0.0f);
+                foreach (Light light in infiniteLights)
+                    total += light.Le(new Ray(vertex.p(), -w), lambda);
+                PLight state = PLight.Zero();
+                foreach (Light light in infiniteLights)
+                {
+                    SampledSpectrum share = light.Le(new Ray(vertex.p(), -w), lambda);
+                    for (int i = 0; i < NSpectrumSamples; ++i)
+                        share[i] = total[i] != 0 ? scalar[i] * share[i] / total[i] : 0;
+                    state += PolarisedEmission.AtInfinity(light, w, lambda, share);
+                }
+                return (bool)total ? state : new PLight(scalar);
+            }
             // (a surface vertex gives its radiance by the point, as Vertex.Le asks for it)
             if (vertex.type == VertexType.Surface && vertex.si != null && vertex.si.areaLight != null)
                 return PolarisedEmission.AtPoint(vertex.si.areaLight, vertex.si, w, lambda, scalar);
@@ -3338,8 +3355,10 @@ namespace pbrt
                 {
                     // The camera subpath ends on the light: what it emits toward the vertex before
                     Vertex pt = cameraVertices[t - 1];
-                    if (pt.type == VertexType.Surface)
-                        lightSide = EmissionState(pt, Normalize(cameraVertices[t - 2].p() - pt.p()), lambda, new SampledSpectrum(1.0f));
+                    // (a surface that emits, or a ray that left the scene to the infinite lights)
+                    if (pt.type == VertexType.Surface || (pt.type == VertexType.Light && pt.IsInfiniteLight()))
+                        lightSide = EmissionState(pt, Normalize(cameraVertices[t - 2].p() - pt.p()), lambda, new SampledSpectrum(1.0f),
+                                                  integrator.infiniteLights);
                 }
                 else if (s == 1)
                 {
@@ -5912,7 +5931,7 @@ namespace pbrt
                                 LightLayers.Add(light, layered);
                             }
                             if (polarised)
-                                pL += ctx.st.pa * new PLight(Le / ctx.st.r_u.Average());
+                                pL += ctx.st.pa * PolarisedEmission.AtInfinity(light, -ctx.ray.d, ctx.lambda, Le / ctx.st.r_u.Average());
                         }
                         else
                         {
@@ -5949,7 +5968,8 @@ namespace pbrt
                                 LightLayers.Add(light, layered);
                             }
                             if (polarised)
-                                pL += ctx.st.pa * new PLight(Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average());
+                                pL += ctx.st.pa * PolarisedEmission.AtInfinity(light, -ctx.ray.d, ctx.lambda,
+                                                                               Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average());
                         }
                     }
                 }

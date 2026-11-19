@@ -18,8 +18,22 @@
 // points to the sun. "bool sun" (true) adds the solar disc. Below the horizon there is nothing, or with "bool ground" a
 // ground of the albedo that the sky and the sun light, seen as from far above (its radiance is its albedo times the
 // irradiance of a level surface, over pi). The radiance is in W m^-2 sr^-1 nm^-1 times 683, the units of the thermal
-// emitters, so that the Y of the film is cd/m^2; "scale" multiplies it. The light is not polarised: the model has no
-// polarisation.
+// emitters, so that the Y of the film is cd/m^2; "scale" multiplies it.
+//
+// Polarisation. The model has none. With "string polarisation" "wilkie2004" the light of the sky dome is given the
+// polarisation of Wilkie, Ulbricht, Tobler, Zotti and Purgathofer, "An Analytical Model for Skylight Polarisation"
+// (EGSR 2004), which is made to go with any sky model: the light is linearly polarised at right angles to the plane of
+// the sun and the direction that is looked in, to the degree
+//
+//   D = Mp(T) P(gamma, theta),   Mp(T) = exp(-(T - 0.6) / 4),
+//   P = 1/1.2  sin^2(gamma) / (1 + cos^2(gamma))  ( theta cos(theta) + (pi/2 - theta) I(gamma, theta) ),
+//   I = (1/F(theta, gamma) - 1/F_sun)  F_90 F_sun / (F_sun - F_90)
+//
+// with theta from the zenith, gamma from the sun, T the turbidity, and F the luminance distribution of Perez with the
+// coefficients of Preetham, Shirley and Smits for the turbidity, at the direction, at the sun (F_sun) and at the point
+// of the sun's vertical 90 degrees from it (F_90). It is a heuristic, of one degree for all wavelengths and without the
+// neutral points of the real sky, as its authors say; the degree is kept between 0 and 1 (below a turbidity of about 2.5
+// the formula can exceed 1). The solar disc and the ground are not polarised.
 //
 // Sampling. A direction is drawn from the solar disc (uniformly) or from the sky, the two as a mixture by their shares of
 // the light; the density of a direction is that of the mixture, so the light is found by its own samples and by the
@@ -35,6 +49,7 @@
 //       uniformly, by its share of the light.
 
 using System;
+using PLight = pbrt.PolarisedLightSystem.Light;
 
 namespace pbrt
 {
@@ -211,16 +226,20 @@ namespace pbrt
     {
         // `zenith`, `sunDirection`: render space, unit length; `scale`: of the radiance of the model; `albedo`: of the
         // ground, at the eleven wavebands; `sun`: with the solar disc; `ground`: with the ground below the horizon
-        // `mixture`: the sky is sampled by the truncated Gaussian mixture and not by the table
+        // `mixture`: the sky is sampled by the truncated Gaussian mixture and not by the table; `polarised`: the sky dome
+        // has the polarisation of the heuristic
         public HosekSkyLight(Vector3f zenith, Vector3f sunDirection, double turbidity, double[] albedo, Float scale, bool sun, bool ground,
-                             bool mixture)
+                             bool mixture, bool polarised)
             : base(LightType.Infinite, new Transform(), new MediumInterface())
         {
             this.zenith = zenith;
             this.sunDirection = sunDirection;
             this.scale = scale;
             this.sun = sun;
+            this.polarised = polarised;
+            this.turbidity = turbidity;
             double elevation = Math.Asin(Math.Min(Math.Max((double)pbrt.Dot(zenith, sunDirection), 0.0), 1.0));
+            solarZenith = 0.5 * Math.PI - elevation;
             model = new HosekSkyModel(elevation, turbidity, albedo);
             // (the frame of the table: z to the zenith, x toward the sun)
             frame = pbrt.AbsDot(zenith, sunDirection) < 0.9999f ? Frame.FromXZ(pbrt.Normalize(sunDirection - pbrt.Dot(zenith, sunDirection) * zenith), zenith)
@@ -423,6 +442,66 @@ namespace pbrt
                 L[i] = (Float)(scale * value);
             }
             return L;
+        }
+
+        // The luminance distribution of Perez with the coefficients of Preetham et al. for the turbidity
+        private double Perez(double theta, double gamma)
+        {
+            double a = 0.1787 * turbidity - 1.4630, b = -0.3554 * turbidity + 0.4275, c = -0.0227 * turbidity + 5.3251;
+            double d = 0.1206 * turbidity - 2.5771, e = -0.0670 * turbidity + 0.3703;
+            double cosTheta = Math.Cos(theta), cosGamma = Math.Cos(gamma);
+            // (at the horizon the first exponential is that of minus infinity, for the turbidities above 1.2 that make b negative)
+            double horizon = cosTheta > 1e-9 ? Math.Exp(b / cosTheta) : (b < 0 ? 0 : double.PositiveInfinity);
+            return (1 + a * horizon) * (1 + c * Math.Exp(d * gamma) + e * cosGamma * cosGamma);
+        }
+
+        // The degree of linear polarisation of the sky at the angle theta from the zenith and gamma from the sun, by the
+        // heuristic of Wilkie et al. (2004)
+        public double DegreeOfPolarisation(double theta, double gamma)
+        {
+            double atSun = Perez(solarZenith, 0), at90 = Perez(0.5 * Math.PI - solarZenith, 0.5 * Math.PI), here = Perez(theta, gamma);
+            if (!(here > 0) || !(atSun > at90) || double.IsInfinity(here))
+            {
+                return 0;
+            }
+            double intensity = (1 / here - 1 / atSun) * at90 * atSun / (atSun - at90);
+            double sinGamma = Math.Sin(gamma), cosGamma = Math.Cos(gamma);
+            double pattern = sinGamma * sinGamma / (1 + cosGamma * cosGamma) * (theta * Math.Cos(theta) + (0.5 * Math.PI - theta) * intensity) / 1.2;
+            double degree = Math.Exp(-(turbidity - 0.6) / 4) * pattern;
+            return Math.Min(Math.Max(degree, 0.0), 1.0);
+        }
+
+        // The Stokes vector of the light of the sky that travels along w (render space, unit length), of the intensity
+        // `scalar`: the light of the dome polarised at right angles to the plane of the sun and the direction, the rest not
+        public PLight Polarised(Vector3f w, SampledWavelengths lambda, SampledSpectrum scalar)
+        {
+            Vector3f toSky = -w;
+            double cosTheta = pbrt.Dot(toSky, zenith);
+            if (!polarised || !(cosTheta > 0))
+            {
+                return new PLight(scalar);
+            }
+            double gamma = Gamma(toSky);
+            double theta = Math.Acos(Math.Min(cosTheta, 1.0));
+            double degree = DegreeOfPolarisation(theta, gamma);
+            Vector3f across = pbrt.Cross(toSky, sunDirection);
+            if (!(degree > 1e-6) || !(pbrt.LengthSquared(across) > 1e-12f))
+            {
+                return new PLight(scalar);
+            }
+            SampledSpectrum first = (Float)degree * scalar;
+            if (sun && gamma < HosekSkyModel.SolarRadius)
+            {
+                // (in front of the disc: the share of the dome in the light)
+                for (int i = 0; i < NSpectrumSamples; ++i)
+                {
+                    double sky = Math.Max(model.Radiance(theta, gamma, lambda[i]), 0.0);
+                    double disc = Math.Max(model.SolarRadiance(0.5 * Math.PI - theta, gamma, lambda[i]), 0.0);
+                    first[i] = sky + disc > 0 ? (Float)(first[i] * sky / (sky + disc)) : 0;
+                }
+            }
+            StokesVector stokes = new StokesVector(scalar, first, new SampledSpectrum(0.0f), new SampledSpectrum(0.0f));
+            return new PLight(stokes).InDirection(w, pbrt.Normalize(across));
         }
 
         public override SampledSpectrum Le(Ray ray, SampledWavelengths lambda)
@@ -628,6 +707,11 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: sampling unknown (table, tgmm).", sampling));
             }
+            string polarisation = parameters.GetOneString("polarisation", "none");
+            if (polarisation != "none" && polarisation != "wilkie2004")
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: polarisation unknown (none, wilkie2004).", polarisation));
+            }
             if (!(turbidity >= 1) || !(turbidity <= 10))
             {
                 pbrt.ErrorExit(loc, "\"hosek\": \"turbidity\" must be between 1 and 10.");
@@ -647,14 +731,16 @@ namespace pbrt
             {
                 bandAlbedo[band] = Math.Min(Math.Max((double)albedo.Evaluate(320 + 40 * band), 0.0), 1.0);
             }
-            return new HosekSkyLight(zenith, toSun, turbidity, bandAlbedo, 683.002f * scale, sun, ground, sampling == "tgmm");
+            return new HosekSkyLight(zenith, toSun, turbidity, bandAlbedo, 683.002f * scale, sun, ground, sampling == "tgmm",
+                                     polarisation == "wilkie2004");
         }
 
         private readonly HosekSkyModel model;
         private readonly Vector3f zenith, sunDirection;
         private readonly Frame frame;
         private readonly Float scale;
-        private readonly bool sun;
+        private readonly bool sun, polarised;
+        private readonly double turbidity, solarZenith;
         private readonly double[] groundRadiance;
         private readonly PiecewiseConstant2D distribution;
         // (the truncated Gaussian mixture of the sky, five numbers a component, and the share of the uniform lower half)
