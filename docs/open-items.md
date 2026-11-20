@@ -998,3 +998,12 @@ are equal within noise, and the resampling did not show on the glossy sphere. It
 
 Not done: surfaces outside the medium that see the light through it (the floor's fireflies in these scenes); area lights;
 b in another medium; aggregates; with several lights the weights assume both points would choose the same one.
+
+## Glints (`glint` material, docs/glint.md)
+
+1. The cluster hierarchy of Wu et al. 2025 for large footprints, as an option beside the tiles (it simplifies the map: an
+   approximation, to be measured against the exact distribution).
+2. Closed forms for the two-facet walks of a dielectric that have a refraction in them, and for three facets of a
+   conductor: now found by the sampling of the BSDF only.
+3. Wu et al.'s analytic filtering of a normal-mapped diffuse surface.
+4. A procedural map of flakes (no image), and a diffuse or coated base under the facets.

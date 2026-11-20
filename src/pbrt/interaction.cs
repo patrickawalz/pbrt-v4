@@ -262,8 +262,15 @@ namespace pbrt
                 mediumInterface = primMediumInterface;
         }
 
+        // (not in pbrt-v4) The camera and the samples of a pixel that the differentials were computed with, for a material
+        // that needs the footprint of the pixel as the camera alone gives it, whatever the ray that came here (glint.cs)
+        public Camera differentialsCamera;
+        public int differentialsSamples;
+
         public void ComputeDifferentials(RayDifferential ray, Camera camera, int samplesPerPixel)
         {
+            differentialsCamera = camera;
+            differentialsSamples = samplesPerPixel;
             if (pbrt.GetOptions().disableTextureFiltering)
             {
                 dudx = dudy = dvdx = dvdy = 0;

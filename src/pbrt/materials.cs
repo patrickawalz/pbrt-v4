@@ -2371,6 +2371,9 @@ namespace pbrt
                 material = ExactPolyGrainMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "polygrain")
                 material = PolyGrainMaterial.Create(parameters, normalMap, loc, alloc);
+            else if (name == "glint")
+                // (not in pbrt-v4) Glints from a normal map (glint.cs)
+                material = GlintMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "facetforge")
                 material = FacetForgeMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "facetcoateddiffuse")
