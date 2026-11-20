@@ -4,6 +4,7 @@
 // util/facetforge.cs (the namespace pbrt::ff).
 
 using System;
+using System.Collections.Generic;
 using Attenuation = pbrt.PolarisedLightSystem.Attenuation;
 
 namespace pbrt
@@ -448,6 +449,9 @@ namespace pbrt
     //                        vmf/nullstudentt: constant, isotropic
     //     float gamma[N]     Student-T shape, > 1.5 (default 3); nullstudentt needs >= 2
     //     float weight[N]    mixture weight (default 1; weights are normalised)
+    //     float transform[N] [m00 m01 m10 m11]   (ours, opt-in) microsurface transformation of the component (Atanasov et al.
+    //                        2022): its microsurface is mapped by this matrix of the tangent plane. Every NDF takes it, the null
+    //                        ones too (an anisotropic or sheared vmf); "literalnull" is not used for a transformed component.
     //   Biscale: "inner.ndf", "inner.roughness"/"inner.uroughness"/"inner.vroughness", "inner.gamma" (and inner.ndf1...,
     //            inner.weight...); inner anisotropy follows the projected macro tangent. Triscale: "inner2." likewise.
     //   string facet         "conductor" (default; eta, k), "dielectric" (ior), "diffuse" (reflectance), "mirror" (reflectance,
@@ -465,6 +469,9 @@ namespace pbrt
     //                        stochastic next-event estimate for every order)
     //   int maxwalk          random walk length (default 32)
     //   string sampler       Student-T visible normals: "exact" (default) or "paper" (fitted)
+    //   string nullsampler   (ours) visible normals of a vmf: "lobe" (default; normals drawn from the vMF lobe by the stable
+    //                        inversion of Tokuyoshi 2025 and kept with the probability max(0, wi . m): the same density, 1 / alpha^2
+    //                        times fewer rejections) or "disc" (the rejection from the uniform disc of the reference code)
     //   bool literalnull     use the reference code's literal null-collision walk for a single null NDF (otherwise the equivalent
     //                        thinned form)
     //   float retroreflectivity   the retroreflective blend of the BxDF (0)
@@ -479,6 +486,7 @@ namespace pbrt
             public Float gamma = 3;
             public Float alpha = 1;    // null NDFs: constant roughness
             public ff.NullTable tab = null;
+            public Float[] transform = null;  // m00 m01 m10 m11
         }
 
         public sealed class LevelSpec
@@ -583,6 +591,14 @@ namespace pbrt
                         ay = TrowbridgeReitzDistribution.RoughnessToAlpha(ay);
                     }
                     c.InitHeightfield(cs.kind, ax, ay, cs.gamma);
+                }
+                if (cs.transform != null)
+                {
+                    c.SetTransform(cs.transform[0], cs.transform[1], cs.transform[2], cs.transform[3]);
+                }
+                else
+                {
+                    c.ClearTransform();
                 }
             }
             s.ndf.Normalize();
@@ -735,6 +751,19 @@ namespace pbrt
                     ErrorExit(loc, "null Student-T \"gamma\" must be >= 2");
                 }
                 c.weight = parameters.GetOneFloat(pre + "weight" + sx, 1f);
+                List<Float> transform = parameters.GetFloatArray(pre + "transform" + sx);
+                if (transform.Count != 0)
+                {
+                    if (transform.Count != 4)
+                    {
+                        ErrorExit(loc, StringPrintf("\"%s\" takes the four numbers m00 m01 m10 m11", pre + "transform" + sx));
+                    }
+                    if (!(std.abs(transform[0] * transform[3] - transform[1] * transform[2]) > 1e-8f))
+                    {
+                        ErrorExit(loc, StringPrintf("\"%s\" has no inverse", pre + "transform" + sx));
+                    }
+                    c.transform = new Float[] { transform[0], transform[1], transform[2], transform[3] };
+                }
                 FloatTexture u = parameters.GetFloatTextureOrNull(pre + "uroughness" + sx, alloc);
                 FloatTexture v = parameters.GetFloatTextureOrNull(pre + "vroughness" + sx, alloc);
                 if (u == null)
@@ -752,6 +781,12 @@ namespace pbrt
                     c.alpha = parameters.GetOneFloat(pre + "roughness" + sx, 1f);
                     ff.NullTable tab = new ff.NullTable();
                     tab.Init(c.kind, c.alpha, c.gamma);
+                    string nullSampler = parameters.GetOneString("nullsampler", "lobe");
+                    if (nullSampler != "disc" && nullSampler != "lobe")
+                    {
+                        ErrorExit(loc, "\"nullsampler\" must be \"disc\" or \"lobe\"");
+                    }
+                    tab.lobeSampler = nullSampler == "lobe";
                     c.tab = tab;
                 }
                 ls.n++;

@@ -12,6 +12,9 @@
 //                      the "intertwined" mixture of the hazy gloss paper)
 //                      "asymmetric": the components are strata of the heights, from the top down, each with the share `weight`
 //                      of the heights (LayeredDistribution; d'Eon et al. 2023, "Microfacet theory for non-uniform heightfields")
+//   "float transform" [m00 m01 m10 m11]  "float transform1" ...   (opt-in) the microsurface transformation of a component: its
+//                      microsurface is mapped by this matrix of the tangent plane (TransformedDistribution; Atanasov et al. 2022).
+//                      [s 0 0 s] divides the roughness by s, a rotation turns the anisotropy, [1 k 0 1] shears it.
 // A material with several distributions gives a prefix: "interface.distribution1", "conductor.weight", ...
 
 using System;
@@ -27,12 +30,45 @@ namespace pbrt
         // (weights[0] is that of the distribution of the material; the others follow)
         public List<Float> weights = new List<Float>();
         public bool layered;
+        // The transformation of each component (null: none); transforms[0] is that of the distribution of the material
+        public List<Float[]> transforms = new List<Float[]>();
+        public bool transformed;
+
+        private static Float[] ParseTransform(TextureParameterDictionary parameters, string name, FileLoc loc)
+        {
+            List<Float> values = parameters.GetFloatArray(name);
+            if (values.Count == 0)
+            {
+                return null;
+            }
+            if (values.Count != 4)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\" takes the four numbers m00 m01 m10 m11", name));
+            }
+            Float determinant = values[0] * values[3] - values[1] * values[2];
+            if (!(std.abs(determinant) > 1e-8f))
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\" has no inverse", name));
+            }
+            return new Float[] { values[0], values[1], values[2], values[3] };
+        }
+
+        private static MicrofacetDistribution Transform(MicrofacetDistribution distribution, Float[] m)
+        {
+            if (m == null)
+            {
+                return distribution;
+            }
+            return new TransformedDistribution(distribution, m[0], m[1], m[2], m[3]);
+        }
 
         // Null when the parameters give one distribution only
         public static DistributionBlend Parse(TextureParameterDictionary parameters, string prefix, FileLoc loc, Allocator alloc)
         {
             DistributionBlend blend = new DistributionBlend();
             blend.weights.Add(parameters.GetOneFloat(prefix + "weight", 1f));
+            blend.transforms.Add(ParseTransform(parameters, prefix + "transform", loc));
+            blend.transformed = blend.transforms[0] != null;
             for (int i = 1; ; ++i)
             {
                 string suffix = i.ToString();
@@ -44,6 +80,7 @@ namespace pbrt
                 blend.types.Add(MicrofacetDistribution.ParseType(name, loc));
                 blend.gammas.Add(parameters.GetOneFloat(prefix + "gamma" + suffix, 2f));
                 blend.weights.Add(parameters.GetOneFloat(prefix + "weight" + suffix, 1f));
+                blend.transforms.Add(ParseTransform(parameters, prefix + "transform" + suffix, loc));
                 FloatTexture u = parameters.GetFloatTextureOrNull(prefix + "uroughness" + suffix, alloc);
                 FloatTexture v = parameters.GetFloatTextureOrNull(prefix + "vroughness" + suffix, alloc);
                 if (u == null)
@@ -70,7 +107,7 @@ namespace pbrt
                     pbrt.ErrorExit(loc, "the \"weight\" of a distribution must not be negative");
                 }
             }
-            return blend.types.Count == 0 ? null : blend;
+            return blend.types.Count == 0 && !blend.transformed ? null : blend;
         }
 
         // The distribution of the material, `first`, with the others of the blend (first itself when blend is null)
@@ -79,6 +116,11 @@ namespace pbrt
             where TextureEvaluator : ITextureEvaluator
         {
             if (blend == null)
+            {
+                return first;
+            }
+            first = Transform(first, blend.transforms[0]);
+            if (blend.types.Count == 0)
             {
                 return first;
             }
@@ -95,7 +137,7 @@ namespace pbrt
                     ax = TrowbridgeReitzDistribution.RoughnessToAlpha(ax);
                     ay = TrowbridgeReitzDistribution.RoughnessToAlpha(ay);
                 }
-                parts[i] = MicrofacetDistribution.Create(blend.types[i - 1], ax, ay, blend.gammas[i - 1]);
+                parts[i] = Transform(MicrofacetDistribution.Create(blend.types[i - 1], ax, ay, blend.gammas[i - 1]), blend.transforms[i]);
                 shares[i] = blend.weights[i];
             }
             if (blend.layered)

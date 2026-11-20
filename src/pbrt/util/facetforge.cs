@@ -644,6 +644,20 @@ namespace pbrt
             public Kind kind = Kind.VMF;
             public double alpha = 1, gamma = 2, M = 1;
             public double[] sig = new double[N];
+            // (ours, opt-in) vMF: the visible normals are proposed from the lobe itself instead of the uniform disc
+            public bool lobeSampler = false;
+
+            // A normal of the vMF lobe about the z axis, by the numerically stable inversion of Tokuyoshi 2025 ("A Numerically
+            // Stable Implementation of the von Mises-Fisher Distribution on S2"): with kappa = 2 / alpha^2,
+            //     r = log1p(u expm1(-2 kappa)) / kappa,  cos(theta) = 1 + r,  sin(theta) = sqrt(-(r r + 2 r))
+            public V3 SampleLobe(double u0, double u1)
+            {
+                double kappa = 2.0 / (alpha * alpha);
+                double r = Log1p(u0 * Expm1(-2.0 * kappa)) / kappa;
+                double sine = Math.Sqrt(Math.Max(0.0, -Math.FusedMultiplyAdd(r, r, 2.0 * r)));
+                double phi = 2 * ffPi * u1;
+                return new V3(sine * Math.Cos(phi), sine * Math.Sin(phi), 1.0 + r);
+            }
 
             // physical density
             public double Dphys(double u)
@@ -741,6 +755,32 @@ namespace pbrt
             public double gamma = 2;             // Student-T shape
             public SlopeDist sd;                 // heightfield slope marginals
             public NullTable tab = null;         // null NDFs
+            // (ours) Microsurface transformation (Atanasov et al. 2022): the microsurface is mapped by the matrix
+            // [m00 m01; m10 m11] of the tangent plane (the heights are kept)
+            public bool transformed = false;
+            public double m00 = 1, m01 = 0, m10 = 0, m11 = 1;
+            public double i00 = 1, i01 = 0, i10 = 0, i11 = 1;
+            public double determinant = 1;
+
+            public void SetTransform(double t00, double t01, double t10, double t11)
+            {
+                double d = t00 * t11 - t01 * t10;
+                transformed = true;
+                m00 = t00;
+                m01 = t01;
+                m10 = t10;
+                m11 = t11;
+                i00 = t11 / d;
+                i01 = -t01 / d;
+                i10 = -t10 / d;
+                i11 = t00 / d;
+                determinant = Math.Abs(d);
+            }
+
+            public void ClearTransform()
+            {
+                transformed = false;
+            }
 
             public Comp Clone()
             {
@@ -769,6 +809,18 @@ namespace pbrt
             // null NDFs: D_phys = D_rel / pi.
             public double D(V3 m)
             {
+                if (!transformed)
+                {
+                    return OriginalD(m);
+                }
+                // D(h) = |det M| D0(M^T h / |M^T h|) / |M^T h|^4
+                V3 u = new V3(m00 * m.x + m10 * m.y, m01 * m.x + m11 * m.y, m.z);
+                double squared = Dot(u, u);
+                return determinant * OriginalD((1 / Math.Sqrt(squared)) * u) / (squared * squared);
+            }
+
+            private double OriginalD(V3 m)
+            {
                 if (m.z <= 0 && !IsNull())
                 {
                     return 0;
@@ -795,6 +847,18 @@ namespace pbrt
             // projected area / cross section
             public double Sigma(V3 wi)
             {
+                if (!transformed)
+                {
+                    return OriginalSigma(wi);
+                }
+                // sigma(v) = |M^-1 v| sigma0(M^-1 v / |M^-1 v|)
+                V3 w = new V3(i00 * wi.x + i01 * wi.y, i10 * wi.x + i11 * wi.y, wi.z);
+                double length = Math.Sqrt(Dot(w, w));
+                return length * OriginalSigma((1 / length) * w);
+            }
+
+            private double OriginalSigma(V3 wi)
+            {
                 if (IsNull())
                 {
                     return tab.Sigma(wi.z);
@@ -815,6 +879,26 @@ namespace pbrt
             // incidence plane, u1 inverts the conditional transverse slope CDF.
             public V3 SampleVisibleU(V3 wi, double u0, double u1)
             {
+                if (!transformed)
+                {
+                    return OriginalSampleVisibleU(wi, u0, u1);
+                }
+                return FromOriginal(OriginalSampleVisibleU(ToOriginal(wi), u0, u1));
+            }
+
+            // The direction on the original microsurface, M^-1 v, and the normal of the transformed one, M^-T u
+            private V3 ToOriginal(V3 v)
+            {
+                return ff.Normalize(new V3(i00 * v.x + i01 * v.y, i10 * v.x + i11 * v.y, v.z));
+            }
+
+            private V3 FromOriginal(V3 u)
+            {
+                return ff.Normalize(new V3(i00 * u.x + i10 * u.y, i01 * u.x + i11 * u.y, u.z));
+            }
+
+            private V3 OriginalSampleVisibleU(V3 wi, double u0, double u1)
+            {
                 V3 ws = ff.Normalize(new V3(ax * wi.x, ay * wi.y, wi.z));
                 double u = ws.z, s = Math.Sqrt(Math.Max(0.0, 1 - u * u));
                 double phi = Math.Atan2(ws.y, ws.x);
@@ -833,6 +917,29 @@ namespace pbrt
             // visible normal sampling, exact
             public V3 SampleVisible(V3 wi, Rnd rnd, bool paperSampler)
             {
+                if (!transformed)
+                {
+                    return OriginalSampleVisible(wi, rnd, paperSampler);
+                }
+                return FromOriginal(OriginalSampleVisible(ToOriginal(wi), rnd, paperSampler));
+            }
+
+            private V3 OriginalSampleVisible(V3 wi, Rnd rnd, bool paperSampler)
+            {
+                if (kind == Kind.VMF && tab.lobeSampler)
+                {
+                    // (ours) a normal of the lobe, kept with the probability max(0, wi . m): the density D(m) max(0, wi . m) / sigma
+                    // exactly, and the share of the proposals kept is sigma(wi) / alpha^2 instead of sigma(wi)
+                    for (int it = 0; it < 200000; ++it)
+                    {
+                        V3 mn = tab.SampleLobe(rnd.U(), rnd.U());
+                        if (rnd.U() < Dot(wi, mn))
+                        {
+                            return mn;
+                        }
+                    }
+                    return wi;
+                }
                 if (IsNull())
                 {
                     for (int it = 0; it < 200000; ++it)
@@ -1120,7 +1227,7 @@ namespace pbrt
                     return SampleHeightLayered(wr, hr, flip, rnd, ref wm, ref layer);
                 }
                 layer = -1;
-                if (literalNull && n == 1 && c[0].IsNull())
+                if (literalNull && n == 1 && c[0].IsNull() && !c[0].transformed)
                 {
                     // literal null-collision walk of the reference code (constant majorant, sigma_t = 1)
                     double hn = Math.Min(0.0, hr) - Log1p(-rnd.U()) * wr.z / c[0].tab.M;
