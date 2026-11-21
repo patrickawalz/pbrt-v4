@@ -651,3 +651,212 @@ times as small by the same split, only after a whole first proposal. Validation,
 16 runs: fogball (512 mutations/pixel) 0.9981 +- 0.0042 (18.5 over 12 blocks), glossy (256) 0.9971 +- 0.0030 (6.5 over 12).
 Fogball, 8 runs of 256: relative RMSE 0.2395 +- 0.0045, 135 s: the same as without this stage (0.238 +- 0.003, 135 s).
 The tree before this stage is `/home/claude/scratch/pathspace_v4_dr.cs`.
+
+## Chains of two vertices for the `polynomial` solver (`TwoBounceChains`; "sneepairtriangles", default 100000)
+
+Not the two-bounce scheme of Fan et al. 2024. A chain is given by the direction that leaves x, so the seeds are four points
+of every specular triangle, with every kind of vertex of the two surfaces that the ray meets; one step of the walk says
+where the first vertex of the exact chain would be, and the walk is run only if that is within 2.5 times the size of the
+triangle of the seed. `InSneeClass` counts chains of two vertices on triangles for this solver. Finding every chain is not
+proved (as for `slopespace`): a chain that no seed reaches would be missing light.
+
+Test, `slab.py` (point light over a glass slab, rippled top and flat bottom), 48x36, Monte Carlo mode, 16 samples/pixel,
+8 runs, bdpt 4096 spp references:
+
+| specular triangles | solver | mean / reference | blocks (of 12) | time of 8 runs |
+|---|---|---|---|---|
+| 16 | polynomial | 0.9950 +- 0.0069 | 6.8 | 38 s |
+| 16 | newton | 0.9957 +- 0.0124 | 9.1 | 10 s |
+| 100 | polynomial | 0.9941 +- 0.0067 | 7.3 | 167 s |
+| 100 | newton | 0.9932 +- 0.0132 | 10.8 | 9 s |
+
+Two earlier versions were right and slower, and are not in the tree: every pair of triangles with the one-bounce polynomial
+as seed (244 s with 16 triangles), and the same under a hierarchy of spheres and cones of normals (239 s). A profile of the
+latter with 100 triangles: of 9900 pairs a query the hierarchy left 2336, the cone test of the triangles took none of those
+away (the slab is thin against its triangles), 300 walks a query of which 253 found a chain already known; 45 of 62 ms a
+query were the polynomial solves.
+
+## Two reflections by pairs of triangles and their resultant (`cpu/specularpairs.cs`; "sneepairs", default false)
+
+After reading the authors' code of "Specular Polynomials" (not copied): the pairs of triangles by interval arithmetic over
+trees of boxes of positions and normals (the path cuts of Wang et al. 2020, `SpecularPairs.Pairs`), and each pair by the
+bivariate polynomials of the case RR (coplanarity of degree 8 and angle of degree 15 at the second vertex, through the
+rational coordinate mapping) with u eliminated by the resultant, whose roots in v are looked for by the changes of sign of
+the determinant (`SpecularPairs.TwoReflections`). The roots seed the manifold walk.
+
+NOT USABLE YET. Test, `mirrors.py` (a point light, two mirrors of 32 triangles each with rippled normals, a floor):
+- the interval test leaves 800 of 4032 pairs a query;
+- the sign of the determinant is noise in floating point for most pairs (with the Bezout matrix of 15 and with the matrix
+  of Sylvester of 23): nearly every sample looks like a root, 5 to 6 s a query, 0.2 roots a query kept.
+The authors' code cuts the matrix and the resultant down before the roots (`cutoff_matrix`, `cutoff_resultant`,
+`cutoff_eps_resultant`), which is not done here. Without "sneepairs" two reflections go by the seeds, as the other kinds:
+`mirrors.py`, 48x36, Monte Carlo mode, 16 samples/pixel, 8 runs, bdpt 2048 spp reference: polynomial 1.013 +- 0.021
+(17.5 over 12 blocks), 47 s; newton 1.003 +- 0.020 (18.5 over 12), 5 s.
+
+After reading how the authors' code keeps the resultant stable: it cuts both bivariate polynomials to a low degree
+(`cutoff_matrix`, 6 or 8) before the Bezout matrix, in world units, which is an approximation that holds when the
+triangles are small against the distances. Done here (degree 8, lengths in units of the distance from x0 to the first
+triangle, Bezout matrix 8 by 8; the Sylvester variant is `/home/claude/scratch/specularpairs_sylvester.cs`): on the same
+tiny run the resultants take 348 ms a query in the place of 6062 (0.43 ms a pair, 800 pairs), and 0.06 roots a query are
+kept against 0.16 to 0.18 before. Whether the cut loses chains is not measured; the option stays off.
+
+## Thermal area lights ("thermal", "thermal2")
+
+Followed as any area light: their points are sampled evenly (`SampleArea`), whatever the light's own sampling does with
+the temperature, so "thermal" and "thermal2" give the same paths. Test, `scene.py` kind `thermal` (the box with the light
+at 2600 K), 96x72, references volpath 4096 spp and bdpt 1024 spp (bdpt / volpath 1.00003):
+
+| | mean / volpath |
+|---|---|
+| volbidirmlt, Monte Carlo mode, blackbody, 6 runs | 0.9991 +- 0.0002 |
+| volbidirmlt, 16 runs of 256 | 0.9935 +- 0.0005 |
+| volbidirmlt, blackbody, 8 runs | 0.9945 +- 0.0006 |
+| the same with 1000000 bootstrap samples | 0.9942 +- 0.0007 |
+| volbidirjrlt, blackbody, 8 runs | 0.9950 +- 0.0008 |
+| pbrt's `mlt`, blackbody, one run of 2048 | 0.981 |
+
+RETRACTED: the 0.55% was the test, not the chains. At scale 1 the image is beyond what a half float of the EXR file holds
+(65504): more than half of the values of every one of these images are clipped there, references and runs alike, and a
+noisier image loses more to the clip. The numbers of the table above mean nothing. The same test with the light at a
+brightness that does not clip (`THERMALSCALE=0.0003`, reference volpath 2048 spp, largest value 2546), 8 runs of 256:
+
+| | mean / volpath | blocks (of 12) |
+|---|---|---|
+| volbidirmlt, emissivity of the material | 0.9988 +- 0.0012 | 8.4 |
+| volbidirmlt, blackbody | 0.9988 +- 0.0012 | 8.4 |
+| volbidirjrlt, emissivity of the material | 0.9961 +- 0.0039 | 7.6 |
+| volbidirmlt, the ordinary light with a blackbody spectrum of 2600 K | 0.9988 +- 0.0012 | 7.0 |
+
+(Check the largest value of an image before comparing means: `exrstat` gives it.)
+
+## Distant lights
+
+A distant light is followed as the point of a light without an area, put `PathSpace.distantLength` (twice the radius of the
+scene: where `DistantLight.SampleLi()` sends its shadow ray) before the first vertex of the path, against its direction;
+its intensity is its irradiance times the square of that length and the density of its directions that of its disk times
+the same, so the length cancels in every term. The vertex is put again whenever the first vertex is made or moves
+(`PlaceDistantLight`: the regeneration, the lens perturbation); a proposal that leaves it behind is refused
+(`DistantLightPlaced`: the caustic perturbation at the light, the chain perturbations). Specular next-event estimation does
+not look for chains to a distant light. With a medium around the camera no walk starts from a distant light
+(`distantWalks`): the caustics of a distant light through such a medium are then not sampled (OPEN).
+
+A first version was wrong by +-5% in blocks of the image: with the light kept and the vertices after it made again, only
+the walks from the light put the light again, and the density of the mixture of the splits counted the others too.
+
+Tests, `scene.py` kinds `sun` (the box without its ceiling and light, a distant light) and `sunglass` (the same with the
+glass sphere), 96x72, 256 mutations/pixel:
+
+| | reference | mean / reference | blocks (of 12) |
+|---|---|---|---|
+| sun, volbidirmlt, Monte Carlo mode, 4 runs | volpath 2048 | 1.0010 +- 0.0013 | 25.7 |
+| sun, volbidirmlt, 16 runs | volpath 2048 | 0.9994 +- 0.0010 | 14.0 |
+| sun, volbidirjrlt, 8 runs | volpath 2048 | 1.0040 +- 0.0053 | 13.4 |
+| sunglass, volbidirmlt, 16 runs | bdpt 1024 | 0.9999 +- 0.0009 | 21.4 |
+| sunglass, volpathmlt, 8 runs | bdpt 1024 | 1.0004 +- 0.0013 | 27.1 |
+
+(The sums of the blocks do not count the noise of the references. Largest values of the references 0.83: no clipping.)
+
+## Infinite lights (one at most)
+
+A vertex of a sphere of radius `distantLength` around the first vertex of the path (see "Distant lights"): radiance inward
+with the cosine 1, density over the area the density of the direction over the square of the length; a walk from the camera
+that leaves the scene ends on it (`TraceSegment` with `emissionEnds`), and the camera sees it (paths of one segment).
+Tests, 96x72, 256 mutations/pixel, an infinite light of one radiance over the box without ceiling (`sky`, `skyglass`):
+volbidirmlt Monte Carlo mode 0.9992 +- 0.0012 (4 runs); volbidirmlt 1.0005 +- 0.0013 (16 runs, 7.8 over 12 blocks, volpath
+2048); with the glass sphere 1.0000 +- 0.0017 (16 runs, 28.0 over 12, bdpt 1024). With an image (kinds `map`, `mapglass`, `out/mcmc/envmap.pfm`: three bright patches, sampled by the light's own
+importance sampling): volbidirmlt 0.9983 +- 0.0012 (16 runs, 9.1 over 12 blocks, volpath 2048); volbidirjrlt
+1.0063 +- 0.0095 (8 runs, 11.6); with the glass sphere 0.9988 +- 0.0015 (16 runs, 13.8, bdpt 1024). The polarised option
+with distant and infinite lights is not tested.
+
+## Tiles for the seeds of the "newton" solver ("sneetiles", default 0)
+
+Hong et al. 2025, sections 3.3 and 3.4 only (no prior over the tiles, no resampling). At a vertex in a medium or on a
+surface that only reflects diffusely, the two numbers of the direction are in a grid; a walk gives up when its direction
+leaves the 3 by 3 tiles around its seed's (`SpecularManifold.Walk` with `stay`), and the trials for the inverse probability
+draw their seeds in the 3 by 3 tiles around the chain found, with their number divided by the share of those tiles.
+
+Monte Carlo mode, 8 runs each (mean / reference, time of the 8 runs):
+glass, 96x72, 64 samples/pixel: no tiles 0.9983 +- 0.0028, 318 s; 8 tiles 0.9957 +- 0.0054, 128 s; 32 tiles
+0.9901 +- 0.0069, 79 s. Pool (clear), 128x96, 64 samples/pixel: no tiles 0.9949 +- 0.0034, 54 s; 16 tiles
+0.9955 +- 0.0105, 43 s. Without bias within the noise; faster and noisier, and worse at equal time (variance times time
+1.5 times as large on the glass, about 7 times on the pool): the paper makes up for the lost walks with its prior.
+
+The prior over the tiles (Hong et al. 2025, section 4.1; "sneepriorsamples", default 0, and "sneepriorblock", 8 pixels):
+before the render, for every block of pixels and every length of the walk from the camera, trials without tiles mark the
+tiles of the directions of the chains that they find; a seed is then drawn in a marked tile with the probability 0.8 and
+anywhere otherwise, and the trials for the inverse probability from the same density held to the 3 by 3 tiles
+(`BuildSneePriors`, `SneePriorOf`). Monte Carlo mode, 8 runs (mean / reference, time of the 8 runs):
+pool: 16 tiles 0.9989 +- 0.0070, 50 s (0.0105 without the prior; 0.0034 in 54 s without tiles); 32 tiles
+0.9824 +- 0.0112, 47 s; 32 tiles and 256 trials a block 0.9949 +- 0.0139, 56 s.
+glass: 8 tiles 1.0014 +- 0.0069, 171 s; 16 tiles 0.9895 +- 0.0034 over 32 runs, with the block of the caustic at 0.856
+(-3.6 standard errors); the same block is 0.858 with 32 tiles and no prior (8 runs), 0.954 with 8 tiles, 0.968 with none.
+OPEN: the caustic under the glass sphere is under the reference with fine tiles. No estimate is stopped at the limit of the
+trials (0 against 6 without tiles). Either the tail (near the focus a walk that starts in the 3 by 3 tiles of its chain
+mostly leaves them before it comes back, so the chain is found rarely and with a very large weight) or a bias: not told
+apart. The options stay off.
+
+The tiles and the prior of Hong et al. 2025 were rolled back (not in the tree; the last tree with them is
+`/home/claude/scratch/pathspace_v11_tiles.cs` plus the prior of the session's patch).
+
+## Regional adaptive perturbations ("adaptive" none|global|grid|quadtree; Otsu et al. 2024)
+
+The film is cut into regions (one; a grid of "adaptivegrid", 16; or a quadtree that splits a leaf visited more than
+"adaptivesplit", 2000, times in a round), each with the size of the lens perturbation (pixels) and of the caustic
+perturbation (radians) of the paths that it sees: Gaussian moves, the logarithm of the variance raised or lowered toward
+the acceptance "adaptivetarget" (0.5) by the paper's algorithm 1 (L = 10, steps min(1, 5 / sqrt(n))). Unlike the paper, the
+sizes are learned by 64 chains that run "adaptivewarmup" (0.1) of the mutations of the render before it and are thrown
+away (`Warmup`), and do not change during the render: a fixed proposal whose densities both ways are in the acceptance.
+With it, the second stage of a delayed rejection is not used for these two perturbations.
+
+Tests, 96x72, 256 mutations/pixel, volbidirmlt unless said:
+box, quadtree, 16 runs 0.9997 +- 0.0007 (6.3 over 12 blocks); volbidirjrlt 8 runs 1.0004 +- 0.0036 (12.9).
+glass, 8 runs (mean / reference, relative RMSE): none 0.9981, 0.271 +- 0.039; global 0.9985, 0.281 +- 0.039; quadtree
+0.9978, 0.269 +- 0.049. door, 8 runs: none 1.47 +- 0.25; quadtree 1.22 +- 0.19 (the same time, 120 s).
+Learned on the door: one region 1.5 pixels and 0.064 radian; quadtree (25 regions) 0.3 to 19 pixels, 0.005 to 0.36 radian.
+No bias seen; no gain shown beyond the noise of 8 runs.
+
+
+## Parked (21 November 2026): what is needed to finish
+
+The branch is parked here. Everything above is the record; this is the list of what is left.
+
+Test scenes: `docs/path-space-mcmc-scenes/` has the generators that the tests above name (`scene.py`, `pool.py`,
+`sheet.py`, `slab.py`, `mirrors.py`, `cornell.py`, `envmap.py`) and the comparison scripts (`compare.py`, `noise.py`,
+`ratio.py`). They write to `/home/claude/out/...` and import `exrstat` from `/home/claude`: change the paths to use them.
+Check the largest value of an image before comparing means (an EXR half float stops at 65504).
+
+Validations that have not been run or did not finish:
+- medium emission, 16 runs of the Metropolis chain after the change to `maxdepth` segments (the Monte Carlo mode passed);
+- the Nelder-Mead solver on the glass scene, Monte Carlo mode, 16 runs;
+- the pool with the newton, neldermead, slopespace and polynomial solvers, several runs each;
+- the sheet scene: the bounds table and newton agree with each other and are 0.3% over the bdpt reference, with two
+  blocks 1.0 to 1.4% over: a second reference is needed to tell noise from bias;
+- the Cornell box of `cornell.py` has no reference;
+- the earlier tests have not been checked again for clipped values (their scenes are far dimmer than the one that clipped);
+- the polarised option with distant and infinite lights;
+- regional adaptive perturbations: no gain shown beyond the noise of 8 runs (door 1.47 -> 1.22, glass none): longer runs.
+
+Open in the integrators:
+- more than one infinite light is refused;
+- with a medium around the camera no walk starts from a distant or infinite light, so their caustics through that medium
+  are not sampled (missing light);
+- specular next-event estimation does not look for chains to distant or infinite lights, and cannot seed Jump Restore
+  tours (the pool with `volbidirjrlt` is 38% too bright in a short run: do not use it there);
+- cameras other than the perspective camera;
+- BxDFs that sample by a random walk are sampled anew in the sample-space step, not inverted.
+
+Paper items not implemented:
+- Fan et al. 2025 (Bernstein bounds): the paper's irradiance bound, then the mixture of it with the present weight; tuples
+  of two vertices; the hierarchy; distant lights; then bounds for any light and for receivers in media;
+- Otsu et al. 2020: the portal perturbation;
+- Loubet et al. 2020: the hierarchy that prunes triangles; the rough (GGX) integrals;
+- Zeltner et al. 2020: the two-stage sampling of glints; seeds sampled on the specular shape;
+- Hanika et al. 2015: the plane-plane domain with a clip by the roughness;
+- Otsu et al. 2017: inverses of the point on the light, the wavelengths and the lens for the sample-space step;
+- Otsu et al. 2024: regions over the direction of the secondary ray; the adaptive multi-chain perturbation.
+
+In the tree but not for use: "sneepairs" (`cpu/specularpairs.cs`: two reflections by pairs of triangles and their
+resultant: slow, and its cut of the polynomials is an approximation); the second stage of the delayed rejection for the
+sample-space step (no gain measured). Removed after trials: the geometry-aware step sizes, the tiles, trust regions and
+prior of Hong et al. 2025. Left out on purpose: the single-solution estimator of the MNEE talk (biased), resampling
+(ReSTIR), Rao-Blackwellized MCMC.

@@ -144,6 +144,21 @@ namespace pbrt
                 // Handle escaped rays after no medium scattering event
                 if (!si)
                 {
+                    if (emissionEnds && infiniteLight != null)
+                    {
+                        // The walk ends on the infinite light: its vertex, which the caller puts before the vertex it left
+                        Vector3f arriving = Normalize(ray.d);
+                        Vertex far = Vertex.CreateLight(new EndpointInteraction(infiniteLight, new Ray(ray.o + distantLength * arriving, -arriving, ray.time)),
+                                                        new SampledSpectrum(1.0f), 0);
+                        far.step = new SampledSpectrum(1.0f);
+                        far.stack = stack;
+                        far.segU = st.segU;
+                        far.segL = st.segL;
+                        far.vtx = st.vtx;
+                        next = far;
+                        lambda = lam;
+                        return true;
+                    }
                     return false;
                 }
 
@@ -280,6 +295,59 @@ namespace pbrt
             return vertex.ei.light is DiffuseAreaLight;
         }
 
+        // A distant or an infinite light (not in pbrt-v4 as a vertex of this kind): it is followed as a point that sits
+        // distantLength before the first vertex of the path that it lights, against the direction of its light (the wCam of
+        // the light vertex): twice the radius of the scene, the point that DistantLight.SampleLi() traces its shadow ray to.
+        // A distant light is then the point of a light without an area whose intensity is its irradiance times the square of
+        // that length; an infinite light is a point of a sphere of that radius around the first vertex, which emits its
+        // radiance inward (cosine 1) and whose density over the area is the density of its direction over the square of the
+        // length. The density of the directions of a walk from either is the density of its disk times that square. The
+        // length cancels in every term; the vertex has to be put again whenever the first vertex is made or moves
+        // (PlaceDistantLight()). distantWalks: whether a walk starts from such a light (not with a medium around the scene,
+        // where the ray from the disk and the shadow ray would not see the same of the medium). infiniteLight: the infinite
+        // light of the scene (one at most is followed), which a walk from the camera reaches by leaving the scene.
+        public static Float distantLength;
+        public static bool distantWalks;
+        public static Point3f sceneCenter;
+        public static Float sceneRadius;
+        public static Light infiniteLight;
+
+        public static bool OnDistantLight(Vertex vertex)
+        {
+            return vertex.type == VertexType.Light && vertex.ei.light != null &&
+                   (vertex.ei.light.Type() == LightType.DeltaDirection || vertex.ei.light.Type() == LightType.Infinite);
+        }
+
+        public static bool OnInfiniteLight(Vertex vertex)
+        {
+            return vertex.type == VertexType.Light && vertex.ei.light != null && vertex.ei.light.Type() == LightType.Infinite;
+        }
+
+        // The direction that a distant light sends its light along
+        public static Vector3f DistantDirection(Light light, SampledWavelengths lambda, Float time)
+        {
+            pstd.optional<LightLeSample> les = light.SampleLe(new Point2f(0.5f, 0.5f), new Point2f(0.5f, 0.5f), ref lambda, time);
+            return Normalize(les.value().ray.d);
+        }
+
+        // Puts a distant or infinite light vertex before the first vertex of its path, against its wCam
+        public static void PlaceDistantLight(Vertex light, Point3f first, Float time)
+        {
+            light.ei = new EndpointInteraction(light.ei.light, new Ray(first - distantLength * light.wCam, light.wCam, time));
+        }
+
+        // Whether the distant or infinite light of a path (if it has one) is where its first vertex puts it
+        public static bool DistantLightPlaced(PathSpacePath path)
+        {
+            Vertex light = path.v[0];
+            if (!OnDistantLight(light) || path.k < 1)
+            {
+                return true;
+            }
+            Vector3f w = OnInfiniteLight(light) ? Normalize(path.v[1].p() - light.p()) : DistantDirection(light.ei.light, path.lambda, path.time);
+            return Distance(light.p(), path.v[1].p() - distantLength * w) <= 1e-5f * distantLength;
+        }
+
         // Whether a light vertex is a point of a medium that emits: only a walk from the camera ends there (the port's bdpt
         // gathers the emission of the media in the same way), and it emits the same in every direction
         public static bool InEmittingMedium(Vertex vertex)
@@ -390,6 +458,23 @@ namespace pbrt
                 return (bool)vertex.emitted;
             }
             DiffuseAreaLight area = vertex.ei.light as DiffuseAreaLight;
+            if (OnInfiniteLight(vertex))
+            {
+                // (the radiance that arrives along wCam, the density of that direction, and the density of the disk)
+                Light light = vertex.ei.light;
+                vertex.emitted = light.Le(new Ray(vertex.ei.p(), -vertex.wCam, time), lambda);
+                if (!vertex.emitted)
+                {
+                    return false;
+                }
+                LightSampleContext ctx = new LightSampleContext(new Point3fi(sceneCenter), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), time);
+                Float pdfDirection = light.PDF_Li(ctx, -vertex.wCam, false);
+                light.PDF_Le(new Ray(vertex.ei.p(), vertex.wCam, time), &pdfPos, &pdfDir);
+                vertex.connectI = vertex.emitted;
+                vertex.stepI = distantWalks && pdfPos > 0 ? vertex.connectI / (pdfPos * distantLength * distantLength) : new SampledSpectrum(0.0f);
+                vertex.pdfLight = lightSampler.PMF(light) * pdfDirection / (distantLength * distantLength);
+                return true;
+            }
             if (area == null)
             {
                 Light light = vertex.ei.light;
@@ -402,6 +487,11 @@ namespace pbrt
                 }
                 vertex.emitted = ls.value().L;
                 light.PDF_Le(new Ray(vertex.ei.p(), vertex.wCam, time), &pdfPos, &pdfDir);
+                if (light.Type() == LightType.DeltaDirection)
+                {
+                    vertex.emitted *= distantLength * distantLength;
+                    pdfDir = distantWalks ? pdfPos * distantLength * distantLength : 0;
+                }
                 vertex.connectI = vertex.emitted;
                 vertex.stepI = pdfDir > 0 ? vertex.connectI / pdfDir : new SampledSpectrum(0.0f);
                 vertex.pdfLight = lightSampler.PMF(light);
@@ -558,6 +648,20 @@ namespace pbrt
             if (vertex.type == VertexType.Light && !OnAreaLight(vertex))
             {
                 // A light without an area samples its own directions (always anew: its sampling has no inverse here)
+                if (OnDistantLight(vertex))
+                {
+                    // (a ray from the disk across the direction of the light, wCam, that holds the scene: the caller puts the
+                    // vertex where the ray lands asks for it)
+                    if (!distantWalks)
+                    {
+                        return false;
+                    }
+                    Point2f disk = SampleUniformDiskConcentric(sampler.Get2D());
+                    Frame frame = Frame.FromZ(vertex.wCam);
+                    Point3f origin = sceneCenter + sceneRadius * (frame.FromLocal(new Vector3f(disk.x, disk.y, 0)) - vertex.wCam);
+                    ray = new RayDifferential(new Ray(origin, vertex.wCam, time));
+                    return true;
+                }
                 pstd.optional<LightLeSample> les = vertex.ei.light.SampleLe(sampler.Get2D(), sampler.Get2D(), ref lambda, time);
                 if (!les || les.value().pdfDir == 0 || !les.value().L)
                 {
@@ -651,14 +755,14 @@ namespace pbrt
             SampledSpectrum W = new SampledSpectrum(1.0f);
             int first = Math.Max(a, 0);
             // (a light without an area is not seen by the camera, as in volpath and bdpt: it would be one bright point)
-            if (path.k == 1 && !OnAreaLight(v[0]) && !InEmittingMedium(v[0]))
+            if (path.k == 1 && !OnAreaLight(v[0]) && !InEmittingMedium(v[0]) && !OnInfiniteLight(v[0]))
             {
                 return new SampledSpectrum(0.0f);
             }
             if (a == -1 && l == 0)
             {
                 // A walk from the camera side that ends on the light
-                if (!OnAreaLight(v[0]) && !InEmittingMedium(v[0]))
+                if (!OnAreaLight(v[0]) && !InEmittingMedium(v[0]) && !OnInfiniteLight(v[0]))
                 {
                     return new SampledSpectrum(0.0f);
                 }
@@ -882,14 +986,17 @@ namespace pbrt
                 mutationsPerPixel = Options.pixelSamples.value();
             }
             Float largeStepProbability = parameters.GetOneFloat("largestepprobability", 0.3f);
+            int infinite = 0;
             foreach (Light light in lights)
             {
-                DiffuseAreaLight area = light as DiffuseAreaLight;
-                if ((area == null && light.Type() != LightType.DeltaPosition) || (area != null && area.thermal != null))
+                if (light.Type() == LightType.Infinite)
                 {
-                    Warning(loc, StringPrintf("\"%s\" does not follow distant, infinite and thermal lights yet: their light is not in the image.", name));
-                    break;
+                    ++infinite;
                 }
+            }
+            if (infinite > 1)
+            {
+                ErrorExit(loc, StringPrintf("\"%s\" follows one infinite light at most.", name));
             }
             if (jumpRestore && parameters.GetOneBool("specularnee", false))
             {
@@ -934,7 +1041,23 @@ namespace pbrt
                                               parameters.GetOneBool("montecarlo", false), sneeSolver, jumpRestore,
                                               parameters.GetOneFloat("tourlength", 30), parameters.GetOneFloat("sneetuples", 8));
             // (a second, smaller or renewed, proposal after a rejection: Tierney and Mira 1999, Rioux-Lavoie et al. 2020)
+            // (the chains of two vertices of the "polynomial" solver go over every specular triangle)
+            integrator.sneePairTriangles = parameters.GetOneInt("sneepairtriangles", 100000);
+            // (two reflections by the pairs of triangles and their resultant: not usable yet, see docs/path-space-mcmc.md)
+            integrator.sneePairs = parameters.GetOneBool("sneepairs", false);
             integrator.delayedRejection = parameters.GetOneBool("delayedrejection", false);
+            // (regional adaptive perturbations: the regions, the share of the mutations spent on learning before the render,
+            // the side of the grid, the visits that split a leaf of the quadtree, and the acceptance aimed at)
+            string adaptive = parameters.GetOneString("adaptive", "none");
+            integrator.adaptiveMode = adaptive == "none" ? 0 : adaptive == "global" ? 1 : adaptive == "grid" ? 2 : adaptive == "quadtree" ? 3 : -1;
+            if (integrator.adaptiveMode < 0)
+            {
+                ErrorExit(loc, StringPrintf("\"%s\": unknown \"adaptive\"; expected \"none\", \"global\", \"grid\" or \"quadtree\".", adaptive));
+            }
+            integrator.adaptiveWarmup = parameters.GetOneFloat("adaptivewarmup", 0.1f);
+            integrator.adaptiveGrid = parameters.GetOneInt("adaptivegrid", 16);
+            integrator.adaptiveSplit = parameters.GetOneInt("adaptivesplit", 2000);
+            integrator.adaptiveTarget = parameters.GetOneFloat("adaptivetarget", 0.5f);
             integrator.delayedRejectionScale = parameters.GetOneFloat("delayedrejectionscale", 0.125f);
             return integrator;
         }
@@ -1312,6 +1435,15 @@ namespace pbrt
                         return null;
                     }
                 }
+                else if (index == 0 && PathSpace.OnInfiniteLight(next))
+                {
+                    // The walk left the scene: the infinite light, in the direction that it left along
+                    PathSpace.PlaceDistantLight(next, last.p(), path.time);
+                    if (!PathSpace.SetLightTerms(next, lightSampler, path.lambda, path.time))
+                    {
+                        return null;
+                    }
+                }
                 else if (index == 0)
                 {
                     // The walk has to end on a light: the vertex is the light's
@@ -1320,7 +1452,7 @@ namespace pbrt
                         return null;
                     }
                     DiffuseAreaLight area = next.si.areaLight as DiffuseAreaLight;
-                    if (area == null || area.thermal != null)
+                    if (area == null)
                     {
                         return null;
                     }
@@ -1396,6 +1528,10 @@ namespace pbrt
                 {
                     return null;
                 }
+                if (PathSpace.OnDistantLight(lightEnd))
+                {
+                    PathSpace.PlaceDistantLight(lightEnd, next.p(), path.time);
+                }
                 // (the segment is kept at its light-side vertex)
                 lightEnd.segU = next.segU;
                 lightEnd.segL = next.segL;
@@ -1409,6 +1545,12 @@ namespace pbrt
             }
 
             // Connect the ends of the two walks
+            // (a distant light goes where the vertex that it is joined to asks for it, kept or not: every split then makes
+            // the same paths, which the density of their mixture takes for granted)
+            if (PathSpace.OnDistantLight(lightEnd))
+            {
+                PathSpace.PlaceDistantLight(lightEnd, last.p(), path.time);
+            }
             if (!Connect(path, lightEnd, last, sampler))
             {
                 return null;
@@ -1512,6 +1654,17 @@ namespace pbrt
             // Turn the direction: an angle between theta1 and theta2 with a density that falls as 1 / theta, about the old one
             Float theta2 = causticPerturbationAngle * scale, theta1 = std.min<Float>(0.0001f, theta2);
             Float theta = theta2 * std.exp(-std.log(theta2 / theta1) * sampler.Get1D());
+            Float sigma = 0;
+            if (adaptiveMode != 0 && scale == 1)
+            {
+                // (regional adaptive: a turn whose angle is Gaussian, cut at pi, with the size of the region of the current path)
+                sigma = AdaptiveSigma(current.pRaster, 1);
+                theta = sigma * std.sqrt(-2 * std.log(std.max<Float>(1e-12f, 1 - sampler.Get1D())));
+                if (!(theta < Pi))
+                {
+                    return null;
+                }
+            }
             Float phi = 2 * Pi * sampler.Get1D();
             Vector3f local = new Vector3f(std.sin(theta) * std.cos(phi), std.sin(theta) * std.sin(phi), std.cos(theta));
             Vector3f direction = Normalize(Frame.FromZ(v[i].wCam).FromLocal(local));
@@ -1535,6 +1688,11 @@ namespace pbrt
             path.v[i] = from;
             from.wCam = direction;
             RayDifferential ray;
+            if (PathSpace.OnDistantLight(from))
+            {
+                // (the direction of a distant or infinite light does not turn about a point)
+                return null;
+            }
             if (from.type == VertexType.Light)
             {
                 if (!PathSpace.SetLightTerms(from, lightSampler, path.lambda, path.time))
@@ -1603,6 +1761,13 @@ namespace pbrt
             }
             weightProposed = LightFormValue(path, i).y(path.lambda) / (DistanceSquared(last.p(), cameraVertex.p()) * last.segL[0]);
             weightCurrent = LightFormValue(current, i).y(current.lambda) / (DistanceSquared(v[k - 1].p(), v[k].p()) * v[k - 1].segL[0]);
+            if (sigma > 0)
+            {
+                // (the turn back is drawn with the size of the region of the new path; each density is of the cut Gaussian)
+                double back = AdaptiveSigma(path.pRaster, 1), there = sigma, squared = (double)theta * theta, cut = Pi * Pi;
+                weightProposed *= Math.Exp(-squared / (2 * back * back) + squared / (2 * there * there)) * (there * there) / (back * back) *
+                                  (1 - Math.Exp(-cut / (2 * there * there))) / (1 - Math.Exp(-cut / (2 * back * back)));
+            }
             return path;
         }
 
@@ -1636,6 +1801,13 @@ namespace pbrt
             Bounds2f sampleBounds = camera.GetFilm().SampleBounds();
             LensRadii(scale, out Float r1, out Float r2);
             Float radius = r2 * std.exp(-std.log(r2 / r1) * sampler.Get1D());
+            Float sigma = 0;
+            if (adaptiveMode != 0 && scale == 1)
+            {
+                // (regional adaptive: a Gaussian move whose size is that of the region of the current path)
+                sigma = AdaptiveSigma(current.pRaster, 0);
+                radius = sigma * std.sqrt(-2 * std.log(std.max<Float>(1e-12f, 1 - sampler.Get1D())));
+            }
             Float phi = 2 * Pi * sampler.Get1D();
             Point2f pRaster = new Point2f(current.pRaster.x + radius * std.cos(phi), current.pRaster.y + radius * std.sin(phi));
             placed = true;
@@ -1690,6 +1862,10 @@ namespace pbrt
 
             // Connect the new vertex j to the vertex j - 1, which now sees a new direction on its camera side
             Vertex target = v[j - 1].Clone();
+            if (PathSpace.OnDistantLight(target))
+            {
+                PathSpace.PlaceDistantLight(target, last.p(), path.time);
+            }
             if (target.type == VertexType.Surface)
             {
                 // (the vertex has to be reached from the same side of its surface: its stacks of media are those of the side)
@@ -1719,6 +1895,12 @@ namespace pbrt
                              (DistanceSquared(target.p(), last.p()) * target.segL[0]);
             weightCurrent = PathSpace.UnsampledValue(current).y(current.lambda) * PathSpace.GeometricCosine(v[j - 1], v[j - 1].wCam) /
                             (DistanceSquared(v[j - 1].p(), v[j].p()) * v[j - 1].segL[0]);
+            if (sigma > 0)
+            {
+                // (the move back is drawn with the size of the region of the new path: the densities differ both ways)
+                double back = AdaptiveSigma(path.pRaster, 0), there = sigma, squared = (double)radius * radius;
+                weightProposed *= Math.Exp(-squared / (2 * back * back) + squared / (2 * there * there)) * (there * there) / (back * back);
+            }
             return path;
         }
 
@@ -2770,7 +2952,9 @@ namespace pbrt
             }
             Light sampled = sampledLight.value().light;
             DiffuseAreaLight area = sampled as DiffuseAreaLight;
-            if (area != null && area.thermal == null)
+            // (a glowing surface, "thermal", is an area light like any other here: its points are sampled evenly, whatever the
+            // light's own sampling does with its temperature)
+            if (area != null)
             {
                 if (!area.SampleArea(uLight, out Interaction y, out Float pdfArea))
                 {
@@ -2779,9 +2963,27 @@ namespace pbrt
                 y.time = path.time;
                 return LightVertex(area, y);
             }
-            else if (sampled.Type() == LightType.DeltaPosition)
+            else if (sampled.Type() == LightType.Infinite)
             {
-                // A light without an area: its point (the origin of any ray that it emits)
+                // A direction of the infinite light, by its own sampling; the vertex is put where the path asks for it, later
+                LightSampleContext ctx = new LightSampleContext(new Point3fi(PathSpace.sceneCenter), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0),
+                                                                path.time);
+                pstd.optional<LightLiSample> ls = sampled.SampleLi(ctx, uLight, path.lambda, false);
+                if (!ls || ls.value().pdf == 0)
+                {
+                    return null;
+                }
+                Vector3f toLight = Normalize(ls.value().wi);
+                Vertex far = Vertex.CreateLight(new EndpointInteraction(sampled, new Ray(PathSpace.sceneCenter + PathSpace.distantLength * toLight,
+                                                                                         -toLight, path.time)), new SampledSpectrum(1.0f), 0);
+                far.step = new SampledSpectrum(1.0f);
+                far.wCam = -toLight;
+                return far;
+            }
+            else if (sampled.Type() == LightType.DeltaPosition || sampled.Type() == LightType.DeltaDirection)
+            {
+                // A light without an area: its point (the origin of any ray that it emits). A distant light is put where the
+                // first vertex of the path asks for it, later.
                 SampledWavelengths lam = path.lambda;
                 pstd.optional<LightLeSample> les = sampled.SampleLe(uLight, new Point2f(0.5f, 0.5f), ref lam, path.time);
                 if (!les)
@@ -2791,6 +2993,8 @@ namespace pbrt
                 Vertex point = Vertex.CreateLight(new EndpointInteraction(sampled, new Ray(les.value().ray.o, les.value().ray.d, path.time)),
                                                   new SampledSpectrum(1.0f), 0);
                 point.step = new SampledSpectrum(1.0f);
+                // (the direction of the light of a distant light, which its vertex is put by)
+                point.wCam = Normalize(les.value().ray.d);
                 return point;
             }
             return null;
@@ -3074,7 +3278,7 @@ namespace pbrt
         {
             count = 0;
             List<ManifoldVertex[]> solutions = new List<ManifoldVertex[]>();
-            List<SurfaceInteraction> solutionHits = new List<SurfaceInteraction>();
+            List<SurfaceInteraction[]> solutionHits = new List<SurfaceInteraction[]>();
             Point3f px = x.p();
             SurfaceInteraction[] walkHits = new SurfaceInteraction[3];
             List<Point3f> candidates = new List<Point3f>();
@@ -3260,10 +3464,14 @@ namespace pbrt
                         if (!known)
                         {
                             solutions.Add(exact);
-                            solutionHits.Add(exactHit);
+                            solutionHits.Add(new SurfaceInteraction[] { null, exactHit });
                         }
                     }
                 }
+            }
+            if (sneeSolver == 3 && twoBounce)
+            {
+                TwoBounceChains(x, target, tracer, sampler, solutions, solutionHits);
             }
             count = solutions.Count;
             if (count == 0)
@@ -3273,9 +3481,229 @@ namespace pbrt
             int chosen = Math.Min((int)(sampler.Get1D() * count), count - 1);
             if (hits != null)
             {
-                hits[1] = solutionHits[chosen];
+                for (int i = 1; i < solutionHits[chosen].Length; ++i)
+                {
+                    hits[i] = solutionHits[chosen][i];
+                }
             }
             return solutions[chosen];
+        }
+
+        // A specular triangle of the scene, for the chains of two vertices: its corners, their normals, its plane's normal on
+        // the side of those, and the kind of its mesh
+        sealed class SpecularTriangle
+        {
+            public Point3f p0, p1, p2;
+            public Vector3f n0, n1, n2, ng;
+            public CausticBounds.MeshKind kind;
+        }
+
+        // The specular triangles of the scene; the chains of two vertices are looked for only if they are not too many
+        // ("sneepairtriangles"), because every one of them is gone over for every chain
+        void BuildSpecularTriangles()
+        {
+            Dictionary<TriangleMesh, CausticBounds.MeshKind> kinds = MeshKinds();
+            specularTriangles = new List<SpecularTriangle>();
+            foreach (TriangleMesh mesh in Triangle.AllMeshes())
+            {
+                CausticBounds.MeshKind kind = kinds[mesh];
+                if (!kind.reflects && kind.eta == 0)
+                {
+                    continue;
+                }
+                for (int triangle = 0; triangle < mesh.nTriangles; ++triangle)
+                {
+                    int i0 = mesh.vertexIndices[3 * triangle], i1 = mesh.vertexIndices[3 * triangle + 1], i2 = mesh.vertexIndices[3 * triangle + 2];
+                    SpecularTriangle t = new SpecularTriangle();
+                    t.p0 = mesh.p[i0];
+                    t.p1 = mesh.p[i1];
+                    t.p2 = mesh.p[i2];
+                    Vector3f ng = Cross(t.p1 - t.p0, t.p2 - t.p0);
+                    if (LengthSquared(ng) == 0)
+                    {
+                        continue;
+                    }
+                    ng = Normalize(ng);
+                    t.n0 = mesh.n != null ? (Vector3f)mesh.n[i0] : ng;
+                    t.n1 = mesh.n != null ? (Vector3f)mesh.n[i1] : ng;
+                    t.n2 = mesh.n != null ? (Vector3f)mesh.n[i2] : ng;
+                    t.ng = Dot(ng, t.n0) < 0 ? -ng : ng;
+                    t.kind = kind;
+                    specularTriangles.Add(t);
+                }
+            }
+            twoBounce = specularTriangles.Count >= 2 && specularTriangles.Count <= sneePairTriangles;
+            // (a tree for the triangles of every mesh that reflects: they are next to each other in the list)
+            reflectorRoots = new List<SpecularPairs.Node>();
+            for (int start = 0; start < specularTriangles.Count;)
+            {
+                int end = start + 1;
+                while (end < specularTriangles.Count && ReferenceEquals(specularTriangles[end].kind, specularTriangles[start].kind))
+                {
+                    ++end;
+                }
+                if (specularTriangles[start].kind.reflects)
+                {
+                    List<SpecularPairs.Triangle> triangles = new List<SpecularPairs.Triangle>();
+                    for (int i = start; i < end; ++i)
+                    {
+                        SpecularPairs.Triangle t = new SpecularPairs.Triangle();
+                        t.p0 = specularTriangles[i].p0;
+                        t.p1 = specularTriangles[i].p1;
+                        t.p2 = specularTriangles[i].p2;
+                        t.n0 = specularTriangles[i].n0;
+                        t.n1 = specularTriangles[i].n1;
+                        t.n2 = specularTriangles[i].n2;
+                        triangles.Add(t);
+                    }
+                    reflectorRoots.Add(SpecularPairs.Build(triangles, 0, triangles.Count));
+                }
+                start = end;
+            }
+            if (!Options.quiet)
+            {
+                Console.WriteLine("specular polynomials: {0} specular triangles, chains of two vertices {1}", specularTriangles.Count,
+                                  twoBounce ? "looked for" : "not looked for");
+            }
+        }
+
+        // Every chain of two specular vertices on the triangles of the scene between x and the target, added to `solutions`
+        // (not the two-bounce scheme of Fan et al. 2024: seeds and the manifold walk, so the chains are exact). A chain is
+        // given by the direction that leaves x, so the seeds are points of every specular triangle (its centre and the points
+        // half way to its corners), each with every kind of vertex that its surface has; the ray through a seed is followed
+        // to the second surface, with every kind of vertex of that one. One step of the walk says where the first vertex of
+        // the exact chain would be: if that is far from the triangle of the seed the chain is left to the seeds of the
+        // triangles there; otherwise the walk brings the seed to the exact chain. The chains that several seeds lead to are
+        // counted once.
+        void TwoBounceChains(Vertex x, Point3f target, ChainTracer tracer, Sampler sampler, List<ManifoldVertex[]> solutions,
+                             List<SurfaceInteraction[]> solutionHits)
+        {
+            Point3f px = x.p();
+            foreach (SpecularTriangle first in specularTriangles)
+            {
+                Point3f centre = first.p0 + ((first.p1 - first.p0) + (first.p2 - first.p0)) / 3;
+                Float extent = std.max<Float>(Distance(centre, first.p0), std.max<Float>(Distance(centre, first.p1), Distance(centre, first.p2)));
+                for (int place = 0; place < 4; ++place)
+                {
+                    Point3f guess = place == 0 ? centre : centre + ((place == 1 ? first.p0 : place == 2 ? first.p1 : first.p2) - centre) / 2;
+                    // (with "sneepairs", two reflections are found by the pairs of triangles, below)
+                    if (first.kind.reflects)
+                    {
+                        TwoBounceSeed(px, target, guess, true, false, centre, extent, tracer, sampler, solutions, solutionHits);
+                        if (!sneePairs)
+                        {
+                            TwoBounceSeed(px, target, guess, true, true, centre, extent, tracer, sampler, solutions, solutionHits);
+                        }
+                    }
+                    if (first.kind.eta != 0)
+                    {
+                        TwoBounceSeed(px, target, guess, false, true, centre, extent, tracer, sampler, solutions, solutionHits);
+                        TwoBounceSeed(px, target, guess, false, false, centre, extent, tracer, sampler, solutions, solutionHits);
+                    }
+                }
+            }
+
+            // Two reflections: the pairs of triangles that interval arithmetic leaves (SpecularPairs.Pairs), each solved by the
+            // Bezout resultant of its bivariate specular polynomials (SpecularPairs.TwoReflections); the roots are seeds
+            if (!sneePairs)
+            {
+                return;
+            }
+            List<SpecularPairs.Triangle> pairs = new List<SpecularPairs.Triangle>();
+            foreach (SpecularPairs.Node first in reflectorRoots)
+            {
+                foreach (SpecularPairs.Node second in reflectorRoots)
+                {
+                    SpecularPairs.Pairs(first, second, px, target, pairs);
+                }
+            }
+            List<Point3f> roots = new List<Point3f>();
+            for (int i = 0; i < pairs.Count; i += 2)
+            {
+                roots.Clear();
+                SpecularPairs.TwoReflections(px, target, pairs[i], pairs[i + 1], roots);
+                foreach (Point3f root in roots)
+                {
+                    TwoBounceSeed(px, target, root, true, true, root, -1, tracer, sampler, solutions, solutionHits);
+                }
+            }
+        }
+
+        // Follows the ray from x through a seed point with the kinds of two specular vertices, and brings the chain to the
+        // exact one by the manifold walk; a new chain is added to `solutions`. With a positive `extent`, the walk is run only
+        // if its first step leaves the first vertex within 2.5 times that of `centre`.
+        void TwoBounceSeed(Point3f px, Point3f target, Point3f guess, bool reflectionFirst, bool reflectionSecond, Point3f centre, Float extent,
+                           ChainTracer tracer, Sampler sampler, List<ManifoldVertex[]> solutions, List<SurfaceInteraction[]> solutionHits)
+        {
+            Vector3f direction = Normalize(guess - px);
+            SurfaceInteraction hit = tracer.Trace(null, px, direction);
+            if (hit == null || DistanceSquared(hit.p(), guess) > 1e-4f * DistanceSquared(px, guess) ||
+                !SpecularLobe(tracer.BsdfOf(hit), direction, reflectionFirst, sampler, out Float etaFirst))
+            {
+                return;
+            }
+            ManifoldVertex vertexFirst = ManifoldVertex.Of(hit);
+            vertexFirst.reflection = reflectionFirst;
+            vertexFirst.eta = etaFirst;
+            if (!SpecularManifold.SpecularDirection(vertexFirst, -direction, out Vector3f leaving))
+            {
+                return;
+            }
+            SurfaceInteraction hitSecond = tracer.Trace(hit, hit.p(), leaving);
+            if (hitSecond == null || !hitSecond.onTriangle ||
+                !SpecularLobe(tracer.BsdfOf(hitSecond), leaving, reflectionSecond, sampler, out Float etaSecond))
+            {
+                return;
+            }
+            ManifoldVertex vertexSecond = ManifoldVertex.Of(hitSecond);
+            vertexSecond.reflection = reflectionSecond;
+            vertexSecond.eta = etaSecond;
+            ManifoldVertex end = ManifoldVertex.Free(target, target - hitSecond.p());
+            ManifoldVertex[] seed = new ManifoldVertex[] { ManifoldVertex.Free(px, direction), vertexFirst, vertexSecond, end };
+            if (extent > 0)
+            {
+                ManifoldVertex[] traced = SpecularManifold.TraceChain(seed, hit.p(), tracer.Trace, null, end);
+                if (traced == null)
+                {
+                    return;
+                }
+                // Where one step of the walk puts the first vertex
+                ManifoldVertex last = traced[3];
+                Vector3f toTarget = target - last.p;
+                Float uu = Dot(last.dpdu, last.dpdu), uv = Dot(last.dpdu, last.dpdv), vv = Dot(last.dpdv, last.dpdv);
+                Float determinant = uu * vv - uv * uv;
+                if (determinant == 0)
+                {
+                    return;
+                }
+                Float du = (vv * Dot(last.dpdu, toTarget) - uv * Dot(last.dpdv, toTarget)) / determinant;
+                Float dv = (uu * Dot(last.dpdv, toTarget) - uv * Dot(last.dpdu, toTarget)) / determinant;
+                Point2f[] offsets = new Point2f[2];
+                if (!SpecularManifold.Offsets(traced, new Point2f(du, dv), offsets))
+                {
+                    return;
+                }
+                Point3f stepped = traced[1].p + traced[1].dpdu * offsets[0].x + traced[1].dpdv * offsets[0].y;
+                if (!(Distance(stepped, centre) <= 2.5f * extent))
+                {
+                    return;
+                }
+            }
+            SurfaceInteraction[] walkHits = new SurfaceInteraction[4];
+            ManifoldVertex[] exact = SpecularManifold.Walk(seed, target, tracer.Trace, walkHits, end);
+            if (exact == null || walkHits[1] == null || walkHits[2] == null || !walkHits[1].onTriangle || !walkHits[2].onTriangle)
+            {
+                return;
+            }
+            foreach (ManifoldVertex[] solution in solutions)
+            {
+                if (SameChain(solution, exact))
+                {
+                    return;
+                }
+            }
+            solutions.Add(exact);
+            solutionHits.Add(new SurfaceInteraction[] { null, walkHits[1], walkHits[2] });
         }
 
         // Whether two chains are the same solution: the same kinds of vertices at the same places
@@ -3309,7 +3737,7 @@ namespace pbrt
             {
                 ++j;
             }
-            if (!(j >= 2 && j < path.k))
+            if (!(j >= 2 && j < path.k) || PathSpace.OnDistantLight(path.v[0]))
             {
                 return false;
             }
@@ -3322,7 +3750,11 @@ namespace pbrt
             {
                 // (the table of bounds: a point light, a specular triangle, a point of a receiving triangle)
                 return j == 2 && path.v[1].si.onTriangle && path.v[2].type == VertexType.Surface && path.v[2].si.onTriangle &&
-                       !PathSpace.OnAreaLight(path.v[0]) && !PathSpace.InEmittingMedium(path.v[0]);
+                       !PathSpace.OnAreaLight(path.v[0]) && !PathSpace.InEmittingMedium(path.v[0]) && !PathSpace.OnDistantLight(path.v[0]);
+            }
+            if (sneeSolver == 3 && twoBounce && j == 3)
+            {
+                return path.v[1].si.onTriangle && path.v[2].si.onTriangle;
             }
             return j == 2 && (sneeSolver == 1 || path.v[1].si.onTriangle);
         }
@@ -3330,7 +3762,7 @@ namespace pbrt
         // The tables of caustic bounds, one a point light (CausticBounds; Fan et al. 2025), built before the render. The kind of
         // every mesh comes from a ray onto its first triangle: whether its BSDF has a specular reflection, the index of a
         // specular transmission, or neither (then it receives).
-        void BuildCausticBounds()
+        Dictionary<TriangleMesh, CausticBounds.MeshKind> MeshKinds()
         {
             Dictionary<TriangleMesh, CausticBounds.MeshKind> kinds = new Dictionary<TriangleMesh, CausticBounds.MeshKind>();
             IndependentSampler sampler = SamplerOf(0, 9);
@@ -3371,6 +3803,13 @@ namespace pbrt
                 kind.eta = SpecularLobe(bsdf, -ng, false, sampler, out Float eta) ? eta : 0;
                 kind.receives = !kind.reflects && kind.eta == 0;
             }
+            return kinds;
+        }
+
+        void BuildCausticBounds()
+        {
+            Dictionary<TriangleMesh, CausticBounds.MeshKind> kinds = MeshKinds();
+            SampledWavelengths lambda = camera.GetFilm().SampleWavelengths(0.5f);
             causticBounds = new List<CausticBounds>();
             Timer timer = new Timer();
             foreach (Light light in lights)
@@ -3402,7 +3841,7 @@ namespace pbrt
         {
             inverse = 0;
             if (causticBounds == null || x.type != VertexType.Surface || !x.si.onTriangle || x.si.triangleMesh == null ||
-                PathSpace.OnAreaLight(light) || PathSpace.InEmittingMedium(light))
+                PathSpace.OnAreaLight(light) || PathSpace.InEmittingMedium(light) || PathSpace.OnDistantLight(light))
             {
                 return null;
             }
@@ -3529,7 +3968,8 @@ namespace pbrt
                 x = next;
             }
             Vertex light = SampleLightVertex(path, sampler);
-            if (light == null)
+            // (the chain to a distant light ends at a direction, not at a point: not looked for)
+            if (light == null || PathSpace.OnDistantLight(light))
             {
                 return null;
             }
@@ -3682,6 +4122,184 @@ namespace pbrt
             return path;
         }
 
+        // Regional adaptive perturbations (Otsu, Herveau, Hanika, Nowrouzezahrai and Dachsbacher 2024, "Regional Adaptive
+        // Metropolis Light Transport"; not in pbrt-v4). The film is cut into regions (one, a grid, or a quadtree that splits
+        // where the chains go), and each holds the size of the lens perturbation and of the caustic perturbation of the paths
+        // that it sees: the logarithm of the variance of a Gaussian move, raised when the moves from the region are accepted
+        // more often than the target and lowered when less, by steps that shrink (the paper's algorithm 1). Unlike the paper,
+        // the sizes are learned by chains that are run before the render and thrown away (Warmup()), and do not change
+        // during it: the render is then that of a fixed proposal, whose density both ways is in the acceptance.
+        sealed class AdaptiveNode
+        {
+            public AdaptiveNode[] children;
+            public double[] lambda = new double[2], sum = new double[2];
+            public long[] count = new long[2], updates = new long[] { 1, 1 };
+            public long visits;
+        }
+
+        AdaptiveNode AdaptiveLeaf(Point2f pRaster)
+        {
+            Vector2f offset = camera.GetFilm().SampleBounds().Offset(pRaster);
+            Float x = Clamp(offset.x, 0, OneMinusEpsilon), y = Clamp(offset.y, 0, OneMinusEpsilon);
+            AdaptiveNode node = adaptiveRoot;
+            while (node.children != null)
+            {
+                x *= 2;
+                y *= 2;
+                int child = (x >= 1 ? 1 : 0) + (y >= 1 ? 2 : 0);
+                x -= x >= 1 ? 1 : 0;
+                y -= y >= 1 ? 1 : 0;
+                node = node.children[child];
+            }
+            return node;
+        }
+
+        // The size of a perturbation (0 the lens perturbation, in pixels; 1 the caustic perturbation, an angle) for a path
+        Float AdaptiveSigma(Point2f pRaster, int kind)
+        {
+            return (Float)Math.Exp(0.5 * Volatile.Read(ref AdaptiveLeaf(pRaster).lambda[kind]));
+        }
+
+        // The acceptance of a move from a region, and the update of its size after every 10 of them
+        void AdaptiveRecord(Point2f pRaster, int kind, Float accept)
+        {
+            AdaptiveNode node = AdaptiveLeaf(pRaster);
+            lock (node)
+            {
+                ++node.visits;
+                node.sum[kind] += accept;
+                if (++node.count[kind] >= 10)
+                {
+                    double step = Math.Min(1.0, 5.0 / Math.Sqrt(node.updates[kind]));
+                    double mean = node.sum[kind] / node.count[kind];
+                    // (not below a hundredth of a pixel or 1e-5 radian, nor above the film or a radian)
+                    double least = kind == 0 ? 2 * Math.Log(0.01) : 2 * Math.Log(1e-5);
+                    double most = kind == 0 ? 2 * Math.Log(Math.Max(1.0, adaptiveExtent)) : 0;
+                    node.lambda[kind] = Math.Clamp(node.lambda[kind] + step * Math.Sign(mean - adaptiveTarget), least, most);
+                    node.sum[kind] = 0;
+                    node.count[kind] = 0;
+                    ++node.updates[kind];
+                }
+            }
+        }
+
+        static AdaptiveNode AdaptiveChild(AdaptiveNode parent, long updatesShare)
+        {
+            AdaptiveNode child = new AdaptiveNode();
+            child.lambda[0] = parent.lambda[0];
+            child.lambda[1] = parent.lambda[1];
+            child.updates[0] = Math.Max(1, parent.updates[0] / updatesShare);
+            child.updates[1] = Math.Max(1, parent.updates[1] / updatesShare);
+            return child;
+        }
+
+        // Splits the leaves that were visited often (once each, as the paper does) and starts the count of visits again
+        int AdaptiveRefine(AdaptiveNode node, int depth)
+        {
+            if (node.children != null)
+            {
+                int leaves = 0;
+                foreach (AdaptiveNode child in node.children)
+                {
+                    leaves += AdaptiveRefine(child, depth + 1);
+                }
+                return leaves;
+            }
+            bool split = node.visits > adaptiveSplit && depth < 8;
+            node.visits = 0;
+            if (!split)
+            {
+                return 1;
+            }
+            node.children = new AdaptiveNode[] { AdaptiveChild(node, 4), AdaptiveChild(node, 4), AdaptiveChild(node, 4), AdaptiveChild(node, 4) };
+            return 4;
+        }
+
+        void AdaptiveRange(AdaptiveNode node, ref double leastLens, ref double mostLens, ref double leastCaustic, ref double mostCaustic)
+        {
+            if (node.children != null)
+            {
+                foreach (AdaptiveNode child in node.children)
+                {
+                    AdaptiveRange(child, ref leastLens, ref mostLens, ref leastCaustic, ref mostCaustic);
+                }
+                return;
+            }
+            leastLens = Math.Min(leastLens, node.lambda[0]);
+            mostLens = Math.Max(mostLens, node.lambda[0]);
+            leastCaustic = Math.Min(leastCaustic, node.lambda[1]);
+            mostCaustic = Math.Max(mostCaustic, node.lambda[1]);
+        }
+
+        // Learns the sizes: chains from the bootstrap paths run a share of the mutations of the render ("adaptivewarmup"),
+        // in rounds between which the quadtree is refined, and are thrown away
+        void Warmup(AliasTable bootstrapTable, long nTotalMutations, ThreadLocal<ScratchBuffer> threadScratchBuffers)
+        {
+            Bounds2f sampleBounds = camera.GetFilm().SampleBounds();
+            adaptiveExtent = std.max<Float>(sampleBounds.pMax.x - sampleBounds.pMin.x, sampleBounds.pMax.y - sampleBounds.pMin.y);
+            adaptiveRoot = new AdaptiveNode();
+            adaptiveRoot.lambda[0] = 2 * Math.Log(Math.Max(0.01, 0.5 * lensPerturbationRadius * adaptiveExtent));
+            adaptiveRoot.lambda[1] = 2 * Math.Log(Math.Max(1e-5, 0.5 * causticPerturbationAngle));
+            if (adaptiveMode == 2)
+            {
+                // (a grid: the quadtree split evenly, and left as it is)
+                List<AdaptiveNode> level = new List<AdaptiveNode> { adaptiveRoot };
+                for (int side = 1; side < adaptiveGrid; side *= 2)
+                {
+                    List<AdaptiveNode> next = new List<AdaptiveNode>();
+                    foreach (AdaptiveNode node in level)
+                    {
+                        node.children = new AdaptiveNode[] { AdaptiveChild(node, 1), AdaptiveChild(node, 1), AdaptiveChild(node, 1), AdaptiveChild(node, 1) };
+                        next.AddRange(node.children);
+                    }
+                    level = next;
+                }
+            }
+            Timer timer = new Timer();
+            const int Chains = 64;
+            int rounds = adaptiveMode == 3 ? 8 : 1, leaves = adaptiveMode == 2 ? AdaptiveRefine(adaptiveRoot, 8) : 1;
+            long mutations = Math.Max(1, (long)(adaptiveWarmup * nTotalMutations) / (Chains * rounds));
+            PathSpacePath[] states = new PathSpacePath[Chains];
+            adapting = true;
+            for (int round = 0; round < rounds; ++round)
+            {
+                ParallelFor(0, Chains, (long start, long end) =>
+                {
+                    ScratchBuffer buf = threadScratchBuffers.Get();
+                    for (long chain = start; chain < end; ++chain)
+                    {
+                        IndependentSampler sampler = SamplerOf(chain + 4096L * round, 17);
+                        if (states[chain] == null)
+                        {
+                            states[chain] = BootstrapPath(bootstrapTable.Sample(sampler.Get1D()), buf, out double weight, bidirectional);
+                            if (states[chain] == null)
+                            {
+                                continue;
+                            }
+                        }
+                        for (long mutation = 0; mutation < mutations; ++mutation)
+                        {
+                            states[chain] = Mutate(states[chain], sampler, buf, out PathSpacePath proposed, out Float accept);
+                        }
+                    }
+                });
+                if (adaptiveMode == 3)
+                {
+                    leaves = AdaptiveRefine(adaptiveRoot, 0);
+                }
+            }
+            adapting = false;
+            if (!Options.quiet)
+            {
+                double leastLens = double.PositiveInfinity, mostLens = double.NegativeInfinity, leastCaustic = double.PositiveInfinity,
+                       mostCaustic = double.NegativeInfinity;
+                AdaptiveRange(adaptiveRoot, ref leastLens, ref mostLens, ref leastCaustic, ref mostCaustic);
+                Console.WriteLine("regional adaptive: {0} mutations in {1:F1} s, {2} regions; lens move {3:F2} to {4:F2} pixels, caustic turn {5:G3} to {6:G3} radians",
+                                  mutations * Chains * rounds, timer.ElapsedSeconds(), leaves, Math.Exp(0.5 * leastLens), Math.Exp(0.5 * mostLens),
+                                  Math.Exp(0.5 * leastCaustic), Math.Exp(0.5 * mostCaustic));
+            }
+        }
+
         // One mutation of a chain: the next state. The proposal and its acceptance probability are returned for the splats.
         PathSpacePath Mutate(PathSpacePath current, Sampler sampler, ScratchBuffer buf, out PathSpacePath proposed, out Float accept)
         {
@@ -3774,6 +4392,11 @@ namespace pbrt
                     }
                 }
             }
+            // (a proposal that moved the first vertex of a path and left its distant light behind is not a path)
+            if (ratio > 0 && !PathSpace.DistantLightPlaced(proposed))
+            {
+                ratio = 0;
+            }
             bool valued = false;
             if (ratio > 0 && PathSpace.UnsampledValue(proposed).y(proposed.lambda) > 0)
             {
@@ -3786,7 +4409,11 @@ namespace pbrt
                 }
                 valued = proposed.polarisation > 0;
             }
-            if (!delayedRejection)
+            if (adapting && (stage == 1 || stage == 2))
+            {
+                AdaptiveRecord(current.pRaster, stage - 1, accept);
+            }
+            if (!delayedRejection || (adaptiveMode != 0 && (stage == 1 || stage == 2)))
             {
                 return sampler.Get1D() < accept ? proposed : current;
             }
@@ -4092,6 +4719,15 @@ namespace pbrt
 
         public override void Render()
         {
+            // (a distant light: twice the radius of the scene before the vertex that it lights, as its shadow rays go)
+            Point3f sceneCenter;
+            Float sceneRadius;
+            aggregate.Bounds().BoundingSphere(&sceneCenter, &sceneRadius);
+            PathSpace.distantLength = 2 * sceneRadius;
+            PathSpace.sceneCenter = sceneCenter;
+            PathSpace.sceneRadius = sceneRadius;
+            PathSpace.infiniteLight = infiniteLights.Count > 0 ? infiniteLights[0] : null;
+            PathSpace.distantWalks = camera.GetMedium() == null;
             if (diagnose < 0)
             {
                 DiagnoseSplits();
@@ -4107,6 +4743,10 @@ namespace pbrt
             if (specularNee && sneeSolver == 4)
             {
                 BuildCausticBounds();
+            }
+            if (specularNee && sneeSolver == 3)
+            {
+                BuildSpecularTriangles();
             }
             ThreadLocal<ScratchBuffer> threadScratchBuffers = new ThreadLocal<ScratchBuffer>(() => new ScratchBuffer());
 
@@ -4162,6 +4802,10 @@ namespace pbrt
             Float b = (Float)(integral / nIntegral);
 
             long nTotalMutations = (long)mutationsPerPixel * (long)film.SampleBounds().Area();
+            if (adaptiveMode != 0)
+            {
+                Warmup(bootstrapTable, nTotalMutations, threadScratchBuffers);
+            }
             if (jumpRestore)
             {
                 // Jump Restore in path space (Holl, Singh and Seidel 2025, "Jump Restore Light Transport"). A tour starts from a
@@ -4352,6 +4996,14 @@ namespace pbrt
         private Float multiChainPerturbationProbability, halfVectorPerturbationPixels;
         private bool specularNee, monteCarlo, jumpRestore;
         private bool delayedRejection;
+        private int adaptiveMode, adaptiveGrid, adaptiveSplit;
+        private Float adaptiveWarmup, adaptiveTarget, adaptiveExtent;
+        private AdaptiveNode adaptiveRoot;
+        private volatile bool adapting;
+        private int sneePairTriangles;
+        private bool twoBounce, sneePairs;
+        private List<SpecularTriangle> specularTriangles;
+        private List<SpecularPairs.Node> reflectorRoots;
         private Float delayedRejectionScale;
         private Float tourLength, sneeTuples;
         private List<CausticBounds> causticBounds;
