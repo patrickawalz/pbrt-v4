@@ -35,6 +35,13 @@ namespace pbrt
         public abstract pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u);
         public abstract Float PDF(Vector3f wo, Vector3f wi);
 
+        // (not in pbrt-v4) The inverse of Sample_p(): the random numbers that give wi from wo (see BxDF.InvertSample()). Unset
+        // for a phase function whose sampling has no inverse.
+        public virtual pstd.optional<Point2f> InvertSample_p(Vector3f wo, Vector3f wi)
+        {
+            return default;
+        }
+
         // (not in pbrt-v4) A phase function that is not the same at every wavelength (the atmosphere mixes the phase functions of the air and of
         // the aerosols with weights that depend on the wavelength). p() and PDF() are then those of the hero wavelength, which sample the
         // direction, and pSpectral() is the value at each wavelength of the sample; the weight of a path is pSpectral() / PDF().

@@ -282,6 +282,15 @@ namespace pbrt
                 integrator = BDPTIntegrator.Create(parameters, camera, sampler, aggregate, lights, loc);
             else if (name == "mlt")
                 integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc);
+            else if (name == "volpathmlt")
+                integrator = PathSpaceMLTIntegrator.Create(parameters, camera, aggregate, lights, loc, false);
+            else if (name == "volbidirmlt")
+                integrator = PathSpaceMLTIntegrator.Create(parameters, camera, aggregate, lights, loc, true);
+            // (not in pbrt-v4) The same two as Jump Restore processes in path space (Holl et al. 2025): see cpu/pathspace.cs
+            else if (name == "volpathjrlt")
+                integrator = PathSpaceMLTIntegrator.Create(parameters, camera, aggregate, lights, loc, false, true);
+            else if (name == "volbidirjrlt")
+                integrator = PathSpaceMLTIntegrator.Create(parameters, camera, aggregate, lights, loc, true, true);
             else if (name == "erpt")
                 integrator = MLTIntegrator.Create(parameters, camera, aggregate, lights, loc, "erpt");
             else if (name == "pmcer")
@@ -1661,6 +1670,26 @@ namespace pbrt
         public SampledSpectrum cumU = new SampledSpectrum(1.0f), emissionMaj = new SampledSpectrum(1.0f);
         // (not in pbrt-v4) The scattering coefficient of the hero wavelength at a vertex in a medium
         public Float sigmaS0 = 0;
+        // (not in pbrt-v4) The local terms of a vertex of a path of the path-space Markov chains (cpu/pathspace.cs), for the
+        // directions the vertex has in its path: step is the value of the scattering toward the light side times its cosine,
+        // over the density of sampling that direction from the camera side (the camera ray's weight at the camera); connect is
+        // that value times the cosine alone (for a specular lobe, delta, the factor of its Dirac delta). At the vertex on the
+        // light, emitted is the emitted radiance toward the next vertex, pdfLight the density per area of sampling the point on
+        // the lights, and GLight the cosine at the light over the squared distance to the next vertex. The existing bdpt does
+        // not read these.
+        public SampledSpectrum step = new SampledSpectrum(1.0f), connect = new SampledSpectrum(0.0f), emitted = new SampledSpectrum(0.0f);
+        public Float pdfLight = 0, GLight = 0;
+        // (whether the sampled direction was a reflection: a perturbation that follows a specular chain keeps the kind of each lobe)
+        public bool reflected = false;
+        // (not in pbrt-v4) the index of the light side over that of the camera side of a specular vertex (1 for a reflection)
+        public Float eta = 1;
+        // (the bidirectional chains: the directions to the camera-side and to the light-side neighbour; stepI is connectI over the
+        // density of sampling the camera-side direction from the light side, and connectI is connect times the geometric cosine
+        // on the camera side over that on the light side (at the light: the emitted radiance times its cosine); stack is the stack
+        // of media on the camera-side segment and stackLight on the light-side one)
+        public Vector3f wCam, wLight;
+        public SampledSpectrum stepI = new SampledSpectrum(0.0f), connectI = new SampledSpectrum(0.0f);
+        public BoundaryStack stackLight;
 
         // Vertex Public Methods
         public Vertex() { ei = new EndpointInteraction(); }
@@ -1690,6 +1719,8 @@ namespace pbrt
             delta = v.delta; pdfFwd = v.pdfFwd; pdfRev = v.pdfRev; stack = v.stack; pbeta = v.pbeta; plight = v.plight;
             emission = v.emission; sigmaT0 = v.sigmaT0;
             segU = v.segU; segL = v.segL; vtx = v.vtx; cumU = v.cumU; emissionMaj = v.emissionMaj; sigmaS0 = v.sigmaS0;
+            step = v.step; connect = v.connect; emitted = v.emitted; pdfLight = v.pdfLight; GLight = v.GLight; reflected = v.reflected;
+            wCam = v.wCam; wLight = v.wLight; stepI = v.stepI; connectI = v.connectI; stackLight = v.stackLight; eta = v.eta;
         }
 
         public Vertex Clone() { Vertex v = new Vertex(); v.Assign(this); return v; }

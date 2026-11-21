@@ -133,6 +133,15 @@ namespace pbrt
             return Sample_f(woRender, u, u2, TransportMode.Radiance, BxDFReflTransFlags.All);
         }
 
+        // (not in pbrt-v4) The inverse of Sample_f(): see BxDF.InvertSample()
+        public pstd.optional<BxDFSampleInverse> InvertSample(Vector3f woRender, Vector3f wiRender, TransportMode mode)
+        {
+            Vector3f wo = RenderToLocal(woRender), wi = RenderToLocal(wiRender);
+            if ((wo.z == 0 || wi.z == 0) && !isVolume)
+                return default;
+            return bxdf.InvertSample(wo, wi, mode);
+        }
+
         // (not in pbrt-v4) The sample with the Mueller matrix of the path that was sampled (see BxDF)
         public pstd.optional<BSDFSample> Sample_f(Vector3f woRender, Float u, Point2f u2, TransportMode mode,
                                                   BxDFReflTransFlags sampleFlags, out bool polarised,

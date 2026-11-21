@@ -669,6 +669,14 @@ namespace pbrt
         public Normal3f dndu, dndv;
         public Shading shading;
         public int faceIndex = 0;
+        // (not in pbrt-v4) Whether the surface is a triangle of a mesh (for the solver of specular next-event estimation that
+        // goes over the triangles)
+        public bool onTriangle = false;
+        // (not in pbrt-v4) The triangle itself and the barycentric weights of its second and third corners at the point (for the
+        // table of caustic bounds, which is kept by receiving triangle)
+        public TriangleMesh triangleMesh = null;
+        public int triangleIndex = 0;
+        public Point2f triangleCoordinates;
         // (not in pbrt-v4) The edges of the face that was hit, for the wireframe texture (wireframe.cs). edgeKind 1: a
         // triangle, the point is its first vertex + edgeCoordinates[0] edgeU + edgeCoordinates[1] edgeV with edgeU and edgeV
         // its two edges from that vertex; 2: a bilinear patch, the same with its coordinates in [0,1]^2 and the derivatives

@@ -186,6 +186,34 @@ namespace pbrt
         public bool pdfIsProportional;
     }
 
+    // BxDFSampleInverse Definition
+    // (not in pbrt-v4) The random numbers that make Sample_f() return a direction: the two of u, and the interval of uc that
+    // chooses the lobe of that direction (the whole of [0, 1] when uc is not used). A specular lobe does not use u: any u
+    // gives the direction (anyU), and an inverse has to take one uniformly, as it takes uc uniformly in its interval, or the
+    // numbers would say more than the direction does.
+    public struct BxDFSampleInverse
+    {
+        public BxDFSampleInverse(Float ucMin, Float ucMax, Point2f u)
+        {
+            this.ucMin = ucMin;
+            this.ucMax = ucMax;
+            this.u = u;
+            this.anyU = false;
+        }
+
+        public BxDFSampleInverse(Float ucMin, Float ucMax)
+        {
+            this.ucMin = ucMin;
+            this.ucMax = ucMax;
+            this.u = new Point2f(0.5f, 0.5f);
+            this.anyU = true;
+        }
+
+        public Float ucMin, ucMax;
+        public Point2f u;
+        public bool anyU;
+    }
+
     // BxDF Definition
     public abstract unsafe partial class BxDF
     {
@@ -204,6 +232,14 @@ namespace pbrt
             return Sample_f(wo, uc, u, TransportMode.Radiance, BxDFReflTransFlags.All);
         }
         public abstract Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags);
+
+        // (not in pbrt-v4) The inverse of Sample_f() with every lobe allowed: the random numbers that give wi from wo (Otsu et
+        // al. 2017, "Fusing State Spaces for Markov Chain Monte Carlo Rendering": the inverse of path sampling). Unset for a
+        // BxDF whose sampling has no inverse (a random walk, a rejection): a chain then draws that direction anew.
+        public virtual pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            return default;
+        }
 
         // (not in pbrt-v4) Whether the f below builds a Mueller matrix: asked before f is evaluated only for its matrix
         public virtual bool HasMuellerMatrix() { return false; }

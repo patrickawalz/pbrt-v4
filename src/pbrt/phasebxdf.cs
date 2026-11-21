@@ -44,6 +44,14 @@ namespace pbrt
             return new BSDFSample(new SampledSpectrum(ps.value().p), ps.value().wi, ps.value().pdf, Flags());
         }
 
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            pstd.optional<Point2f> u = phase.InvertSample_p(wo, wi);
+            if (!u)
+                return default;
+            return new BxDFSampleInverse(0, 1, u.value());
+        }
+
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             return phase.PDF(wo, wi);

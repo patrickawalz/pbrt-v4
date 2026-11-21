@@ -47,6 +47,14 @@ namespace pbrt
             return new BSDFSample(R * InvPi, wi, pdf, BxDFFlags.DiffuseReflection);
         }
 
+        // (not in pbrt-v4)
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi))
+                return default;
+            return new BxDFSampleInverse(0, 1, InvertCosineHemisphereSample(new Vector3f(wi.x, wi.y, std.abs(wi.z))));
+        }
+
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             if ((sampleFlags & BxDFReflTransFlags.Reflection) == 0 || !SameHemisphere(wo, wi))
@@ -2439,6 +2447,19 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4)
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            Float pr = R.MaxComponentValue(), pt = T.MaxComponentValue();
+            if (pr == 0 && pt == 0)
+                return default;
+            Float split = pr / (pr + pt);
+            Point2f u = InvertCosineHemisphereSample(new Vector3f(wi.x, wi.y, std.abs(wi.z)));
+            if (SameHemisphere(wo, wi))
+                return pr > 0 ? new BxDFSampleInverse(0, split, u) : default(pstd.optional<BxDFSampleInverse>);
+            return pt > 0 ? new BxDFSampleInverse(split, 1, u) : default(pstd.optional<BxDFSampleInverse>);
+        }
+
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             // Compute reflection and transmission probabilities for diffuse BSDF
@@ -2602,6 +2623,35 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4)
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            bool reflect = SameHemisphere(wo, wi);
+            if (eta == 1 || mfDistrib.EffectivelySmooth())
+            {
+                // (a specular lobe: any u, and the interval of uc that takes the lobe)
+                Float R = FrDielectric(CosTheta(wo), eta);
+                if (reflect)
+                    return R > 0 ? new BxDFSampleInverse(0, R) : default(pstd.optional<BxDFSampleInverse>);
+                return R < 1 ? new BxDFSampleInverse(R, 1) : default(pstd.optional<BxDFSampleInverse>);
+            }
+            // The microfacet normal of the two directions, on the upper side
+            Float etap = 1;
+            if (!reflect)
+                etap = CosTheta(wo) > 0 ? eta : (1 / eta);
+            Vector3f wm = wi * etap + wo;
+            if (LengthSquared(wm) == 0)
+                return default;
+            wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+            Point2f u;
+            if (!mfDistrib.InvertSample_wm(wo, wm, out u))
+                return default;
+            Float Rm = FrDielectric(Dot(wo, wm), eta);
+            if (reflect)
+                return Rm > 0 ? new BxDFSampleInverse(0, Rm, u) : default(pstd.optional<BxDFSampleInverse>);
+            return Rm < 1 ? new BxDFSampleInverse(Rm, 1, u) : default(pstd.optional<BxDFSampleInverse>);
+        }
+
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
         {
             if (eta == 1 || mfDistrib.EffectivelySmooth())
@@ -2754,6 +2804,19 @@ namespace pbrt
                 SampledSpectrum ft = new SampledSpectrum(T / AbsCosTheta(wi));
                 return new BSDFSample(ft, wi, pt / (pr + pt), BxDFFlags.SpecularTransmission);
             }
+        }
+
+        // (not in pbrt-v4)
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            Float R = FrDielectric(AbsCosTheta(wo), eta), T = 1 - R;
+            if (R < 1)
+            {
+                R += Sqr(T) * R / (1 - Sqr(R));
+            }
+            if (SameHemisphere(wo, wi))
+                return R > 0 ? new BxDFSampleInverse(0, R) : default(pstd.optional<BxDFSampleInverse>);
+            return R < 1 ? new BxDFSampleInverse(R, 1) : default(pstd.optional<BxDFSampleInverse>);
         }
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)
@@ -3226,6 +3289,23 @@ namespace pbrt
             SampledSpectrum F = FrComplex(AbsDot(wo, wm), eta, k);
 
             return mfDistrib.DG(wo, wi, wm) * F / (4 * cosTheta_i * cosTheta_o);
+        }
+
+        // (not in pbrt-v4)
+        public override pstd.optional<BxDFSampleInverse> InvertSample(Vector3f wo, Vector3f wi, TransportMode mode)
+        {
+            if (!SameHemisphere(wo, wi))
+                return default;
+            if (mfDistrib.EffectivelySmooth())
+                return new BxDFSampleInverse(0, 1);
+            Vector3f wm = wo + wi;
+            if (LengthSquared(wm) == 0)
+                return default;
+            wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
+            Point2f u;
+            if (!mfDistrib.InvertSample_wm(wo, wm, out u))
+                return default;
+            return new BxDFSampleInverse(0, 1, u);
         }
 
         public override Float PDF(Vector3f wo, Vector3f wi, TransportMode mode, BxDFReflTransFlags sampleFlags)

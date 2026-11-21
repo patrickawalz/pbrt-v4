@@ -265,6 +265,14 @@ namespace pbrt
             return (1 - rayleigh) * HenyeyGreenstein(Dot(wo, wi), g) + rayleigh * RayleighPhase(Dot(wo, wi));
         }
 
+        // (not in pbrt-v4) Henyey-Greenstein alone: the mixture with Rayleigh scattering uses one number twice
+        public override pstd.optional<Point2f> InvertSample_p(Vector3f wo, Vector3f wi)
+        {
+            if (rayleigh != 0)
+                return default;
+            return InvertHenyeyGreensteinSample(wo, wi, g);
+        }
+
         public override pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u)
         {
             Float pdf;

@@ -238,6 +238,19 @@ namespace pbrt
             return Sample_wm_SingleSided(w.z < 0 ? -w : w, u);
         }
 
+        // (not in pbrt-v4) The inverse of Sample_wm(): the random numbers that give the normal wm (on the upper side) for the
+        // direction w. False for a distribution whose sampling has no inverse (a rejection).
+        public bool InvertSample_wm(Vector3f w, Vector3f wm, out Point2f u)
+        {
+            return InvertSample_wm_SingleSided(w.z < 0 ? -w : w, wm, out u);
+        }
+
+        public virtual bool InvertSample_wm_SingleSided(Vector3f w, Vector3f wm, out Point2f u)
+        {
+            u = default;
+            return false;
+        }
+
         public Float PDF_SingleSided(Vector3f w, Vector3f wm)
         {
             Float sigma = Sigma(w);
@@ -538,6 +551,44 @@ namespace pbrt
             }
             Float inv = 1 / scale;
             return Normalize(new Vector3f(px * inv, py * inv, hz * inv));
+        }
+
+        // (not in pbrt-v4) The inverse of the spherical cap sampling: the half vector of the stretched space is along
+        // (wm.x / alpha_x, wm.y / alpha_y, wm.z), at the length that puts its end on the unit sphere about the stretched direction
+        public override bool InvertSample_wm_SingleSided(Vector3f w, Vector3f wm, out Point2f u)
+        {
+            u = default;
+            if (!(wm.z > 0))
+            {
+                return false;
+            }
+            Float len2 = Sqr(alpha_x * w.x) + Sqr(alpha_y * w.y);
+            Float t = std.sqrt(len2 + Sqr(w.z));
+            Float invT = 1 / t;
+            Float sx = alpha_x * w.x * invT, sy = alpha_y * w.y * invT;
+            Float capHeight = (w.z >= 0 ? t + w.z : len2 / (t - w.z)) * invT;
+            Float sz = capHeight - 1;
+            Vector3f g = Normalize(new Vector3f(wm.x / alpha_x, wm.y / alpha_y, wm.z));
+            Float along = g.x * sx + g.y * sy + g.z * sz;
+            Float discriminant = Sqr(along) - (Sqr(sx) + Sqr(sy) + Sqr(sz)) + 1;
+            if (discriminant < 0)
+            {
+                return false;
+            }
+            Float length = along + std.sqrt(discriminant);
+            Float qx = length * g.x - sx, qy = length * g.y - sy, qz = length * g.z - sz;
+            Float u1 = (1 - qz) / capHeight;
+            if (!(capHeight > 0) || u1 < 0 || u1 > 1)
+            {
+                return false;
+            }
+            Float phi = std.atan2(qy, qx);
+            if (phi < 0)
+            {
+                phi += 2 * Pi;
+            }
+            u = new Point2f(std.min<Float>(phi / (2 * Pi), OneMinusEpsilon), std.min<Float>(u1, OneMinusEpsilon));
+            return true;
         }
 
         // Note that this should probably instead be "return Sqr(roughness)" to

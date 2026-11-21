@@ -815,6 +815,23 @@ namespace pbrt
             return u;
         }
 
+        // (not in pbrt-v4) The inverse of SampleHenyeyGreenstein()
+        public static Point2f InvertHenyeyGreensteinSample(Vector3f wo, Vector3f wi, Float g)
+        {
+            g = Clamp(g, (Float)(-.99), (Float).99);
+            Vector3f local = Frame.FromZ(wo).ToLocal(wi);
+            Float cosTheta = Clamp(local.z, -1, 1);
+            Float u0;
+            if (std.abs(g) < 1e-3f)
+                u0 = (1 - cosTheta) / 2;
+            else
+                u0 = (1 + g - (1 - Sqr(g)) / SafeSqrt(1 + Sqr(g) + 2 * g * cosTheta)) / (2 * g);
+            Float phi = std.atan2(local.y, local.x);
+            if (phi < 0)
+                phi += 2 * Pi;
+            return new Point2f(Clamp(u0, 0, OneMinusEpsilon), std.min<Float>(phi / (2 * Pi), OneMinusEpsilon));
+        }
+
         public static Vector3f SampleHenyeyGreenstein(Vector3f wo, Float g, Point2f u, Float* pdf = null)
         {
             // When g \approx -1 and u[0] \approx 0 or with g \approx 1 and u[0]

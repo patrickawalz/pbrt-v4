@@ -1092,6 +1092,9 @@ namespace pbrt
         });
 
         static List<TriangleMesh> allMeshes;
+        // (not in pbrt-v4) The meshes of the scene, for what has to go over the triangles themselves (specular next-event
+        // estimation by the triangles, Loubet et al. 2020)
+        public static List<TriangleMesh> AllMeshes() { return allMeshes; }
         const Float MinSphericalSampleArea = 3e-4f;
         const Float MaxSphericalSampleArea = 6.22f;
 
@@ -1274,6 +1277,10 @@ namespace pbrt
                 isect.SetShadingGeometry(ns, ss, ts, dndu, dndv, true);
             }
 
+            isect.onTriangle = true;
+            isect.triangleMesh = mesh;
+            isect.triangleIndex = triIndex;
+            isect.triangleCoordinates = new Point2f(ti.b1, ti.b2);
             return isect;
         }
 

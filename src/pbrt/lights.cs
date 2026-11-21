@@ -1484,6 +1484,12 @@ namespace pbrt
             return true;
         }
 
+        // (not in pbrt-v4) Whether both sides of the surface emit
+        public bool TwoSided()
+        {
+            return twoSided;
+        }
+
         // The density per unit area of SampleArea
         public Float PdfArea()
         {
