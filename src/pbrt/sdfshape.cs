@@ -106,6 +106,8 @@ namespace pbrt
         // one place in memory that every thread would write to
         public bool countEvaluations = false;
         public bool pruneCompile = true;
+        // The number of hits in a cell after which the field of the cell is compiled
+        public int pruneCompileHits = 16;
         // Whether the fields of the cells are cut down level by level: a block of cells first, then each half of it along every
         // axis from the field of the block, down to the cells
         public bool pruneHierarchy = true;
@@ -359,16 +361,39 @@ namespace pbrt
             {
                 return field;
             }
-            if (compiledCells != null && !(cell is SdfCompiledNode))
+            return cell;
+        }
+
+        // Counts a hit in the cell of p and, once the cell has had enough of them, gives it the compiled form of its field.
+        // Compiling a field takes about as long as 300000 values of it save, and a field serves several cells: a cell that
+        // few rays hit keeps the field that is walked, and a short render does not pay for functions it hardly calls. Every
+        // 64 hits a cell also takes the compiled form if another cell with the same field has had it made.
+        private void CountHit(SdfVector p)
+        {
+            int ix = (int)Math.Floor((p.x - lower.x) / cellSize.x), iy = (int)Math.Floor((p.y - lower.y) / cellSize.y);
+            int iz = (int)Math.Floor((p.z - lower.z) / cellSize.z);
+            if (ix < 0 || iy < 0 || iz < 0 || ix >= cellsX || iy >= cellsY || iz >= cellsZ)
             {
-                // The first time a cell is reached: the compiled form of its field, made once for all the cells that share it
-                cell = compiledCells.GetOrAdd(cell, (SdfNode source) =>
+                return;
+            }
+            int index = (iz * cellsY + iy) * cellsX + ix;
+            SdfNode cell = cellFields[index];
+            if (cell == null || cell is SdfCompiledNode)
+            {
+                return;
+            }
+            int hits = ++cellHits[index];
+            if (hits >= options.pruneCompileHits)
+            {
+                cellFields[index] = compiledCells.GetOrAdd(cell, (SdfNode source) =>
                 {
                     return SdfCompiledNode.Compile(source);
                 });
-                cellFields[index] = cell;
             }
-            return cell;
+            else if ((hits & 63) == 0 && compiledCells.TryGetValue(cell, out SdfNode made))
+            {
+                cellFields[index] = made;
+            }
         }
 
         // A cut-down field for every cell that the surface may cross (SdfNode.Prune over the ball about the cell), compiled once
@@ -416,12 +441,13 @@ namespace pbrt
             return shared;
         }
 
-        // The fields of the cells are compiled when a ray first reaches them (FieldAt): compiling them all took most of the time
-        // that the cells take to set up, and paid for itself only in the cells that many rays cross
+        // The fields of the cells are compiled once enough rays have hit them (CountHit): compiling them all took most of the
+        // time that the cells take to set up, and paid for itself only in the cells that many rays cross
         private void CompileCells(Dictionary<string, SdfNode> made, bool compile)
         {
             prunedFields = made.Count;
             compiledCells = compile ? new System.Collections.Concurrent.ConcurrentDictionary<SdfNode, SdfNode>() : null;
+            cellHits = compile ? new int[cellFields.Length] : null;
         }
 
         // The cells and their fields at once, from the top down (the hierarchy of Barbier et al., "Lipschitz pruning: hierarchical
@@ -685,7 +711,7 @@ namespace pbrt
                     break;
                 }
                 u = next;
-                f = field.Evaluate(o + w * u);
+                f = FieldAt(o + w * u).Evaluate(o + w * u);
             }
             return u;
         }
@@ -771,10 +797,12 @@ namespace pbrt
             return new ShapeIntersection(intr, (Float)tHit);
         }
 
-        // The unit outward normal (the normalized gradient) at an object space point
+        // The unit outward normal (the normalized gradient) at an object space point, from the field of the cell of the point:
+        // the whole field has the same values, at the cost of all its parts (a hit asks for four normals around it and
+        // three values besides the normal itself, which with the whole field took four times as long as finding the hit)
         private SdfVector NormalAt(SdfVector p)
         {
-            return field.Gradient(p, gradientStep, options.analyticGradient).Normalized();
+            return FieldAt(p).Gradient(p, gradientStep, options.analyticGradient).Normalized();
         }
 
         // The mapping from the position to (u, v), with the gradients of u and v with respect to the position
@@ -859,6 +887,10 @@ namespace pbrt
 
         private SurfaceInteraction InteractionFromPoint(SdfVector pObject, Vector3f woObject, Float time, double normalStep)
         {
+            if (compiledCells != null)
+            {
+                CountHit(pObject);
+            }
             SdfVector n = FieldAt(pObject).Gradient(pObject, normalStep, options.analyticGradient).Normalized();
             UvMapping(pObject, n, out Point2f uv, out SdfVector gradU, out SdfVector gradV);
 
@@ -887,7 +919,7 @@ namespace pbrt
             SdfVector dndu = NormalDerivative(pObject, dpdu), dndv = NormalDerivative(pObject, dpdv);
 
             // The residual of the field bounds the distance of the point to the true surface
-            double residual = Math.Abs(field.Evaluate(pObject)) / Math.Max(lipschitz, 1e-300);
+            double residual = Math.Abs(FieldAt(pObject).Evaluate(pObject)) / Math.Max(lipschitz, 1e-300);
             Vector3f pError = pbrt.gamma(5) * pbrt.Abs(new Vector3f((Float)pObject.x, (Float)pObject.y, (Float)pObject.z)) +
                               new Vector3f((Float)residual, (Float)residual, (Float)residual);
 
@@ -961,7 +993,7 @@ namespace pbrt
                 normal *= -1;
             }
             UvMapping(pObject, n, out Point2f uv, out SdfVector gradU, out SdfVector gradV);
-            double residual = Math.Abs(field.Evaluate(pObject)) / Math.Max(lipschitz, 1e-300);
+            double residual = Math.Abs(FieldAt(pObject).Evaluate(pObject)) / Math.Max(lipschitz, 1e-300);
             Vector3f pError = pbrt.gamma(5) * pbrt.Abs(new Vector3f((Float)pObject.x, (Float)pObject.y, (Float)pObject.z)) +
                               new Vector3f((Float)residual, (Float)residual, (Float)residual);
             Point3fi pi = renderFromObject.Apply(
@@ -1186,6 +1218,7 @@ namespace pbrt
             options.slopeRelaxation = parameters.GetOneBool("sloperelaxation", false);
             options.rayBounds = parameters.GetOneBool("raybounds", false);
             options.pruneHierarchy = parameters.GetOneBool("prunehierarchy", true);
+            options.pruneCompileHits = parameters.GetOneInt("prunecompilehits", 16);
             options.pruneCompile = parameters.GetOneBool("compile", true) && parameters.GetOneBool("prunecompile", true);
             if (options.ddaResolution > 0 && SdfCarving.MovesWithTime(expression))
             {
@@ -1273,6 +1306,7 @@ namespace pbrt
         private readonly SdfVector lower, upper;
         private bool[] occupied;
         private SdfNode[] cellFields;
+        private int[] cellHits;
         private System.Collections.Concurrent.ConcurrentDictionary<SdfNode, SdfNode> compiledCells;
         private int prunedFields;
         // The values of the field asked for by the marching so far (a count for tests and timings; not exact across threads)

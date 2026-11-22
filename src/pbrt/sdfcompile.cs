@@ -27,6 +27,12 @@ namespace pbrt
             statements = new List<Expression>();
             shared = new List<Dictionary<(SdfNode, Expression, Expression, Expression), Expression>>();
             shared.Add(new Dictionary<(SdfNode, Expression, Expression, Expression), Expression>());
+            defined = new List<Dictionary<Expression, Expression>>();
+            defined.Add(new Dictionary<Expression, Expression>());
+            stored = new HashSet<ParameterExpression>();
+            changing = new HashSet<ParameterExpression>();
+            constants = new Dictionary<long, Expression>();
+            built = new Dictionary<(string, Expression, Expression), Expression>();
         }
 
         // Compiles a child at the point (x, y, z); the result is a variable that holds the value of the child
@@ -54,89 +60,315 @@ namespace pbrt
             {
                 // No compiled form: call the node's own Evaluate
                 Expression point = Expression.New(vectorConstructor, x, y, z);
-                value = Define(Expression.Call(Expression.Constant(node, typeof(SdfNode)), evaluateMethod, point));
+                // By the node's own class: a call to a sealed class needs no look-up of the method, and can be put in line
+                Type type = node.GetType();
+                value = Define(Expression.Call(Expression.Constant(node, type), type.GetMethod("Evaluate", new Type[] { typeof(SdfVector) }), point));
             }
             scope[key] = value;
             return value;
         }
 
-        // Stores a value in a new variable (so that a value that is used twice is computed once)
+        // Stores a value in a new variable (so that a value that is used twice is computed once). A constant and a variable
+        // that is set once are their own store, and a value that was stored before, in statements that are sure to have run,
+        // is not stored again: the functions below give one and the same expression for one and the same operation on the
+        // same operands, which is how two values are seen to be the same (the transforms of two parts by the same amounts,
+        // say).
         public Expression Define(Expression value)
         {
+            if (value is ConstantExpression || (value is ParameterExpression && stored.Contains((ParameterExpression)value)))
+            {
+                return value;
+            }
+            bool fixedValue = IsFixed(value);
+            if (fixedValue)
+            {
+                for (int i = defined.Count - 1; i >= 0; --i)
+                {
+                    if (defined[i].TryGetValue(value, out Expression known))
+                    {
+                        return known;
+                    }
+                }
+            }
             ParameterExpression variable = Expression.Variable(typeof(double));
             variables.Add(variable);
+            stored.Add(variable);
             statements.Add(Expression.Assign(variable, value));
+            if (fixedValue)
+            {
+                defined[defined.Count - 1][value] = variable;
+            }
             return variable;
         }
 
-        public Expression Constant(double value)
+        // A variable that is set more than once: a value made from it is not the same value every time
+        public ParameterExpression Changing(Type type)
         {
-            return Expression.Constant(value, typeof(double));
+            ParameterExpression variable = Expression.Variable(type);
+            variables.Add(variable);
+            changing.Add(variable);
+            return variable;
         }
 
+        public bool IsChanging(ParameterExpression variable)
+        {
+            return changing.Contains(variable);
+        }
+
+        // For a variable that was not made by Changing
+        public void MarkChanging(ParameterExpression variable)
+        {
+            changing.Add(variable);
+        }
+
+        // Whether a value is made only of constants, the point and variables that are set once
+        private bool IsFixed(Expression value)
+        {
+            if (value is ConstantExpression)
+            {
+                return true;
+            }
+            if (value is ParameterExpression)
+            {
+                return !changing.Contains((ParameterExpression)value);
+            }
+            if (value is BinaryExpression)
+            {
+                return IsFixed(((BinaryExpression)value).Left) && IsFixed(((BinaryExpression)value).Right);
+            }
+            if (value is UnaryExpression)
+            {
+                return IsFixed(((UnaryExpression)value).Operand);
+            }
+            if (value is ConditionalExpression)
+            {
+                ConditionalExpression choice = (ConditionalExpression)value;
+                return IsFixed(choice.Test) && IsFixed(choice.IfTrue) && IsFixed(choice.IfFalse);
+            }
+            if (value is MethodCallExpression)
+            {
+                MethodCallExpression call = (MethodCallExpression)value;
+                if (call.Object != null && !IsFixed(call.Object))
+                {
+                    return false;
+                }
+                foreach (Expression argument in call.Arguments)
+                {
+                    if (!IsFixed(argument))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+        // One constant for one value
+        public Expression Constant(double value)
+        {
+            long bits = BitConverter.DoubleToInt64Bits(value);
+            if (!constants.TryGetValue(bits, out Expression constant))
+            {
+                constant = Expression.Constant(value, typeof(double));
+                constants.Add(bits, constant);
+            }
+            return constant;
+        }
+
+        private static bool IsConstant(Expression a, out double value)
+        {
+            if (a is ConstantExpression && ((ConstantExpression)a).Value is double)
+            {
+                value = (double)((ConstantExpression)a).Value;
+                return true;
+            }
+            value = 0;
+            return false;
+        }
+
+        // One expression for one operation on the same operands
+        private Expression Built(string operation, Expression a, Expression b, Func<Expression> make)
+        {
+            (string, Expression, Expression) key = (operation, a, b);
+            if (!built.TryGetValue(key, out Expression expression))
+            {
+                expression = make();
+                built.Add(key, expression);
+            }
+            return expression;
+        }
+
+        // The operations below work out what they can when the function is made: an operation on constants is a constant, and
+        // adding 0, multiplying by 1 or by 0 and the like leave no operation at all. (The compiler of the function may not do
+        // this itself: for it x * 0 is not 0 for every x, and x + 0 not x.) A transform that only moves a part is then three
+        // additions and not the nine multiplications and nine additions of a matrix with ones and zeros in it.
         public Expression Add(Expression a, Expression b)
         {
-            return Expression.Add(a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(va + vb);
+            }
+            if (ca && va == 0)
+            {
+                return b;
+            }
+            if (cb && vb == 0)
+            {
+                return a;
+            }
+            return Built("+", a, b, () => Expression.Add(a, b));
         }
 
         public Expression Subtract(Expression a, Expression b)
         {
-            return Expression.Subtract(a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(va - vb);
+            }
+            if (cb && vb == 0)
+            {
+                return a;
+            }
+            if (ca && va == 0)
+            {
+                return Negate(b);
+            }
+            return Built("-", a, b, () => Expression.Subtract(a, b));
         }
 
         public Expression Multiply(Expression a, Expression b)
         {
-            return Expression.Multiply(a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(va * vb);
+            }
+            if ((ca && va == 0) || (cb && vb == 0))
+            {
+                return Constant(0);
+            }
+            if (ca && va == 1)
+            {
+                return b;
+            }
+            if (cb && vb == 1)
+            {
+                return a;
+            }
+            if (ca && va == -1)
+            {
+                return Negate(b);
+            }
+            if (cb && vb == -1)
+            {
+                return Negate(a);
+            }
+            return Built("*", a, b, () => Expression.Multiply(a, b));
         }
 
+        // A division by a constant is a multiplication by its inverse, which can differ from the division in the last place
         public Expression Divide(Expression a, Expression b)
         {
-            return Expression.Divide(a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(va / vb);
+            }
+            if (cb)
+            {
+                return Multiply(a, Constant(1 / vb));
+            }
+            return Built("/", a, b, () => Expression.Divide(a, b));
         }
 
         public Expression Negate(Expression a)
         {
-            return Expression.Negate(a);
+            if (IsConstant(a, out double va))
+            {
+                return Constant(-va);
+            }
+            if (a is UnaryExpression && a.NodeType == ExpressionType.Negate)
+            {
+                return ((UnaryExpression)a).Operand;
+            }
+            return Built("neg", a, null, () => Expression.Negate(a));
         }
 
         public Expression Sqrt(Expression a)
         {
-            return Expression.Call(sqrtMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Sqrt(va)) : Built("sqrt", a, null, () => Expression.Call(sqrtMethod, a));
         }
 
         public Expression Abs(Expression a)
         {
-            return Expression.Call(absMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Abs(va)) : Built("abs", a, null, () => Expression.Call(absMethod, a));
         }
 
+        // (A comparison in the place of Math.Min and Math.Max was tried: it was slower in every field that was timed, by a
+        // third for a union of 200 parts and by more for small fields.)
         public Expression Min(Expression a, Expression b)
         {
-            return Expression.Call(minMethod, a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(Math.Min(va, vb));
+            }
+            if (a == b || (cb && double.IsPositiveInfinity(vb)))
+            {
+                return a;
+            }
+            if (ca && double.IsPositiveInfinity(va))
+            {
+                return b;
+            }
+            return Built("min", a, b, () => Expression.Call(minMethod, a, b));
         }
 
         public Expression Max(Expression a, Expression b)
         {
-            return Expression.Call(maxMethod, a, b);
+            bool ca = IsConstant(a, out double va), cb = IsConstant(b, out double vb);
+            if (ca && cb)
+            {
+                return Constant(Math.Max(va, vb));
+            }
+            if (a == b || (cb && double.IsNegativeInfinity(vb)))
+            {
+                return a;
+            }
+            if (ca && double.IsNegativeInfinity(va))
+            {
+                return b;
+            }
+            return Built("max", a, b, () => Expression.Call(maxMethod, a, b));
+        }
+
+        // A value that can be written twice without being worked out twice
+        public Expression Simple(Expression a)
+        {
+            return a is ConstantExpression || a is ParameterExpression ? a : Define(a);
         }
 
         public Expression Sin(Expression a)
         {
-            return Expression.Call(sinMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Sin(va)) : Built("sin", a, null, () => Expression.Call(sinMethod, a));
         }
 
         public Expression Cos(Expression a)
         {
-            return Expression.Call(cosMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Cos(va)) : Built("cos", a, null, () => Expression.Call(cosMethod, a));
         }
 
         public Expression Floor(Expression a)
         {
-            return Expression.Call(floorMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Floor(va)) : Built("floor", a, null, () => Expression.Call(floorMethod, a));
         }
 
         public Expression Round(Expression a)
         {
-            return Expression.Call(roundMethod, a);
+            return IsConstant(a, out double va) ? Constant(Math.Round(va)) : Built("round", a, null, () => Expression.Call(roundMethod, a));
         }
 
         // min(max(value, lower), upper)
@@ -167,8 +399,7 @@ namespace pbrt
             {
                 return null;
             }
-            ParameterExpression result = Expression.Variable(typeof(double));
-            variables.Add(result);
+            ParameterExpression result = Changing(typeof(double));
             statements.Add(Expression.Assign(result, Constant(double.PositiveInfinity)));
             // The operands without a box are always asked
             foreach (SdfNode operand in open)
@@ -229,23 +460,24 @@ namespace pbrt
                                 Expression z)
         {
             Expression squared = BoxDistance(lower, upper, x, y, z);
-            ParameterExpression result = Expression.Variable(typeof(double));
-            variables.Add(result);
-            Expression inside = Block(() => statements.Add(Expression.Assign(result, Compile(child, x, y, z))));
+            ParameterExpression result = Changing(typeof(double));
+            Expression inside = Scoped(() => statements.Add(Expression.Assign(result, Compile(child, x, y, z))));
             statements.Add(Expression.IfThenElse(Expression.GreaterThan(squared, Constant(margin * margin)),
                                                  Expression.Assign(result, Multiply(Sqrt(squared), Constant(lipschitz))), inside));
             return result;
         }
 
         // The statements made by `emit`, as one block
-        private Expression Block(Action emit)
+        public Expression Scoped(Action emit)
         {
             List<Expression> outer = statements;
             statements = new List<Expression>();
             // What is computed inside the block may not have run when the code after it does
             shared.Add(new Dictionary<(SdfNode, Expression, Expression, Expression), Expression>());
+            defined.Add(new Dictionary<Expression, Expression>());
             emit();
             shared.RemoveAt(shared.Count - 1);
+            defined.RemoveAt(defined.Count - 1);
             Expression block = statements.Count > 0 ? Expression.Block(statements) : Expression.Empty();
             statements = outer;
             return block;
@@ -283,13 +515,11 @@ namespace pbrt
             Box(right, out SdfVector rightLower, out SdfVector rightUpper);
             Expression leftSquared = BoxDistance(leftLower, leftUpper, x, y, z);
             Expression rightSquared = BoxDistance(rightLower, rightUpper, x, y, z);
-            ParameterExpression leftFirst = Expression.Variable(typeof(bool)), pass = Expression.Variable(typeof(int));
-            variables.Add(leftFirst);
-            variables.Add(pass);
+            ParameterExpression leftFirst = Changing(typeof(bool)), pass = Changing(typeof(int));
             statements.Add(Expression.Assign(leftFirst, Expression.LessThanOrEqual(leftSquared, rightSquared)));
             statements.Add(Expression.Assign(pass, Expression.Constant(0)));
-            Expression leftBlock = Block(() => UnionTree(left, result, x, y, z));
-            Expression rightBlock = Block(() => UnionTree(right, result, x, y, z));
+            Expression leftBlock = Scoped(() => UnionTree(left, result, x, y, z));
+            Expression rightBlock = Scoped(() => UnionTree(right, result, x, y, z));
             LabelTarget done = Expression.Label();
             // In the first pass the left half if it is the nearer one, in the second the other half
             Expression body = Expression.Block(
@@ -302,17 +532,19 @@ namespace pbrt
         }
 
         // The smooth minimum of SdfBlend.SmoothMin for a width k > 0
-        public Expression SmoothMin(Expression a, Expression b, double k, SdfBlendKind kind)
+        public Expression SmoothMin(Expression first, Expression second, double k, SdfBlendKind kind)
         {
+            ++blends;
+            Expression a = Simple(first), b = Simple(second);
             if (kind == SdfBlendKind.Polynomial)
             {
                 Expression h = Define(Divide(Max(Subtract(Constant(k), Abs(Subtract(a, b))), Constant(0)), Constant(k)));
-                return Subtract(Min(a, b), Multiply(Multiply(Multiply(h, h), Constant(k)), Constant(0.25)));
+                return Subtract(Min(a, b), Multiply(Multiply(h, h), Constant(k * 0.25)));
             }
             if (kind == SdfBlendKind.Cubic)
             {
                 Expression h = Define(Divide(Max(Subtract(Constant(k), Abs(Subtract(a, b))), Constant(0)), Constant(k)));
-                return Subtract(Min(a, b), Multiply(Multiply(Multiply(Multiply(h, h), h), Constant(k)), Constant(1.0 / 6.0)));
+                return Subtract(Min(a, b), Multiply(Multiply(Multiply(h, h), h), Constant(k * (1.0 / 6.0))));
             }
             return Expression.Call(smoothMinMethod, a, b, Constant(k), Expression.Constant(kind));
         }
@@ -324,9 +556,15 @@ namespace pbrt
 
         // SdfCompileContext Public Members
         public int nativeNodes;
+        // The number of smooth minima and maxima in the compiled form
+        public int blends;
         public readonly List<ParameterExpression> variables;
         public List<Expression> statements;
         private readonly List<Dictionary<(SdfNode, Expression, Expression, Expression), Expression>> shared;
+        private readonly List<Dictionary<Expression, Expression>> defined;
+        private readonly HashSet<ParameterExpression> stored, changing;
+        private readonly Dictionary<long, Expression> constants;
+        private readonly Dictionary<(string, Expression, Expression), Expression> built;
         // Whether chains of unions skip the operands that are too far to matter (UnionChain)
         public bool cull;
 
@@ -405,8 +643,26 @@ namespace pbrt
             return source.RayLipschitz(a, b);
         }
 
+        // The gradient from one compiled function with the value (sdfgradient.cs), made when it is first asked for; the
+        // gradients of the nodes if there is none
         public override SdfVector AnalyticGradient(SdfVector p, double h)
         {
+            if (!gradientTried)
+            {
+                lock (gradientLock)
+                {
+                    if (!gradientTried)
+                    {
+                        gradient = SdfGradientCompiler.Compile(source, h);
+                        gradientTried = true;
+                    }
+                }
+            }
+            if (gradient != null)
+            {
+                gradient(p.x, p.y, p.z, out double gx, out double gy, out double gz);
+                return new SdfVector(gx, gy, gz);
+            }
             return source.AnalyticGradient(p, h);
         }
 
@@ -441,6 +697,9 @@ namespace pbrt
         // SdfCompiledNode Private Members
         private readonly SdfNode source;
         private readonly Func<double, double, double, double> function;
+        private SdfGradientFunction gradient;
+        private volatile bool gradientTried;
+        private readonly object gradientLock = new object();
         private readonly double lipschitz;
         private readonly bool rigorous, localBounds;
     }

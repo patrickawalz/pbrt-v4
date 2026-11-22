@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
@@ -805,6 +806,8 @@ namespace pbrt
             return true;
         }
 
+        // (called from the compiled form of a field: put in line there, see SdfCompileContext.Compile)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double wx = Math.Sqrt(p.x * p.x + p.z * p.z), wy = p.y - height;
@@ -881,6 +884,8 @@ namespace pbrt
             return true;
         }
 
+        // (called from the compiled form of a field: put in line there, see SdfCompileContext.Compile)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             SdfVector scaled = new SdfVector(p.x / radii.x, p.y / radii.y, p.z / radii.z);
@@ -955,6 +960,8 @@ namespace pbrt
             return SdfExtent.Symmetric(size, size, size, out lower, out upper, out grows);
         }
 
+        // (called from the compiled form of a field: put in line there, see SdfCompileContext.Compile)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double x = Math.Abs(p.x), y = Math.Abs(p.y), z = Math.Abs(p.z);
@@ -1940,6 +1947,13 @@ namespace pbrt
             return (1 - t) * a.Evaluate(p) + t * b.Evaluate(p);
         }
 
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression t = context.Define(context.Clamp(context.Compile(weight, x, y, z), 0, 1));
+            Expression da = context.Compile(a, x, y, z), db = context.Compile(b, x, y, z);
+            return context.Add(context.Multiply(context.Subtract(context.Constant(1), t), da), context.Multiply(t, db));
+        }
+
         public override double Lipschitz()
         {
             return lipschitz;
@@ -2262,6 +2276,19 @@ namespace pbrt
         {
             this.child = child;
             m = (double[])matrix.Clone();
+            // A turn by a quarter has entries that are 0 and 1 but for the last place of the cosine: made exact, which also
+            // lets the compiled form leave their products out
+            for (int i = 0; i < 9; ++i)
+            {
+                if (Math.Abs(m[i]) < 1e-15)
+                {
+                    m[i] = 0;
+                }
+                else if (Math.Abs(Math.Abs(m[i]) - 1) < 1e-15)
+                {
+                    m[i] = Math.Sign(m[i]);
+                }
+            }
             this.translation = translation;
             // The operator norm of the matrix, by power iteration on M^T M
             SdfVector v = new SdfVector(1, 0.7, 0.3).Normalized();
@@ -2429,19 +2456,39 @@ namespace pbrt
 
         public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
         {
-            Expression nx = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[0]), x),
-                                                                                context.Multiply(context.Constant(m[1]), y)),
-                                                                    context.Multiply(context.Constant(m[2]), z)),
-                                                        context.Constant(translation.x)));
-            Expression ny = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[3]), x),
-                                                                                context.Multiply(context.Constant(m[4]), y)),
-                                                                    context.Multiply(context.Constant(m[5]), z)),
-                                                        context.Constant(translation.y)));
-            Expression nz = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(m[6]), x),
-                                                                                context.Multiply(context.Constant(m[7]), y)),
-                                                                    context.Multiply(context.Constant(m[8]), z)),
-                                                        context.Constant(translation.z)));
-            return context.Compile(child, nx, ny, nz);
+            // Transforms one inside the other are one transform: p -> N (M p + t) + u = (N M) p + (N t + u)
+            double[] matrix = m;
+            SdfVector offset = translation;
+            SdfNode inner = child;
+            while (inner is SdfAffine)
+            {
+                SdfAffine next = (SdfAffine)inner;
+                double[] product = new double[9];
+                for (int row = 0; row < 3; ++row)
+                {
+                    for (int column = 0; column < 3; ++column)
+                    {
+                        product[3 * row + column] = next.m[3 * row] * matrix[column] + next.m[3 * row + 1] * matrix[3 + column] +
+                                                    next.m[3 * row + 2] * matrix[6 + column];
+                    }
+                }
+                offset = next.Linear(offset) + next.translation;
+                matrix = product;
+                inner = next.child;
+            }
+            Expression nx = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(matrix[0]), x),
+                                                                                context.Multiply(context.Constant(matrix[1]), y)),
+                                                                    context.Multiply(context.Constant(matrix[2]), z)),
+                                                        context.Constant(offset.x)));
+            Expression ny = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(matrix[3]), x),
+                                                                                context.Multiply(context.Constant(matrix[4]), y)),
+                                                                    context.Multiply(context.Constant(matrix[5]), z)),
+                                                        context.Constant(offset.y)));
+            Expression nz = context.Define(context.Add(context.Add(context.Add(context.Multiply(context.Constant(matrix[6]), x),
+                                                                                context.Multiply(context.Constant(matrix[7]), y)),
+                                                                    context.Multiply(context.Constant(matrix[8]), z)),
+                                                        context.Constant(offset.z)));
+            return context.Compile(inner, nx, ny, nz);
         }
 
         public override void Weights(SdfVector p, SdfWeights w, double weight)
@@ -2891,7 +2938,7 @@ namespace pbrt
                             r = new SdfVector(r.x - Jitter(ix + jx, iy + jy, iz + jz, 0), r.y - Jitter(ix + jx, iy + jy, iz + jz, 1),
                                               r.z - Jitter(ix + jx, iy + jy, iz + jz, 2));
                         }
-                        double value = child.Evaluate(r);
+                        double value = (compiledChild ?? child).Evaluate(r);
                         if (value < best)
                         {
                             best = value;
@@ -2962,6 +3009,11 @@ namespace pbrt
 
         public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
         {
+            // The search of the neighbours, which is a call, asks the child in its own compiled form
+            if (compiledChild == null)
+            {
+                compiledChild = SdfCompiledNode.Compile(child);
+            }
             Expression ix = Index(context, x, period.x), iy = Index(context, y, period.y), iz = Index(context, z, period.z);
             Expression nx = Shift(context, x, ix, period.x), ny = Shift(context, y, iy, period.y), nz = Shift(context, z, iz, period.z);
             Expression own;
@@ -3031,6 +3083,7 @@ namespace pbrt
         private readonly int count;
         private readonly double jitter;
         private readonly int seed;
+        private SdfNode compiledChild;
         private readonly bool boxed;
         private readonly SdfVector boxLower, boxUpper;
         private readonly int reachX, reachY, reachZ;
@@ -3220,14 +3273,27 @@ namespace pbrt
 
         public override double Evaluate(SdfVector p)
         {
+            return child.Evaluate(p) + Offset(p.x, p.y, p.z);
+        }
+
+        // What the noise adds to the child at a point
+        public double Offset(double x, double y, double z)
+        {
             double value = 0, weight = 1, scale = frequency;
             for (int i = 0; i < octaves; ++i)
             {
-                value += weight * Sample(p.x * scale, p.y * scale, p.z * scale);
+                value += weight * Sample(x * scale, y * scale, z * scale);
                 weight *= roughness;
                 scale *= 2;
             }
-            return child.Evaluate(p) + amplitude * value;
+            return amplitude * value;
+        }
+
+        // The child is compiled; the noise is a call
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Add(context.Compile(child, x, y, z),
+                               Expression.Call(Expression.Constant(this), typeof(SdfNoiseDisplacement).GetMethod("Offset"), x, y, z));
         }
 
         public override double Lipschitz()

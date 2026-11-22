@@ -8,6 +8,7 @@
 // others are worked out from their outlines and faces.
 
 using System;
+using System.Runtime.CompilerServices;
 
 namespace pbrt
 {
@@ -55,6 +56,7 @@ namespace pbrt
             return SdfExtent.Symmetric(halfExtent.x + thickness, halfExtent.y + thickness, halfExtent.z + thickness, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double px = Math.Abs(p.x) - halfExtent.x, py = Math.Abs(p.y) - halfExtent.y, pz = Math.Abs(p.z) - halfExtent.z;
@@ -88,6 +90,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double x = Math.Abs(p.x);
@@ -122,6 +125,7 @@ namespace pbrt
             return SdfExtent.Symmetric(majorRadius + minorRadius, halfLength + majorRadius + minorRadius, minorRadius, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double y = Math.Max(Math.Abs(p.y) - halfLength, 0);
@@ -146,6 +150,7 @@ namespace pbrt
             return SdfExtent.Symmetric(apothem * 1.1547005383792517, apothem * 1.1547005383792517, halfHeight, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             const double kx = -0.8660254037844386, ky = 0.5, kz = 0.5773502691896258;
@@ -178,6 +183,7 @@ namespace pbrt
             return SdfExtent.Symmetric(size, size * 1.1547005383792517, halfHeight, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             const double k = 1.7320508075688772;
@@ -226,6 +232,7 @@ namespace pbrt
             return SdfExtent.Symmetric(radius, halfHeight, radius, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z);
@@ -284,6 +291,7 @@ namespace pbrt
             return SdfExtent.Symmetric(Math.Max(r1, r2), halfHeight, Math.Max(r1, r2), out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = p.y;
@@ -332,6 +340,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = p.y;
@@ -370,6 +379,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = p.y;
@@ -402,6 +412,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = p.y;
@@ -437,6 +448,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = p.y;
@@ -465,6 +477,7 @@ namespace pbrt
             return SdfExtent.Symmetric(ra, ra, ra, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double x = p.x, y = Math.Sqrt(p.y * p.y + p.z * p.z);
@@ -494,6 +507,7 @@ namespace pbrt
             return SdfExtent.Symmetric(la + rounding, halfHeight, lb + rounding, out lower, out upper, out grows);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double x = Math.Abs(p.x), y = Math.Abs(p.y), z = Math.Abs(p.z);
@@ -530,6 +544,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             // (by the symmetries, the point is taken to the wedge x >= |z|: its nearest face is the one over the edge x = 0.5)
@@ -614,6 +629,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             return Distance(p, a, b, c) - thickness;
@@ -643,6 +659,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             return Math.Min(SdfTriangle.Distance(p, a, b, c), SdfTriangle.Distance(p, a, c, d)) - thickness;
@@ -666,6 +683,7 @@ namespace pbrt
             return length > 0 ? new SdfVector(p.x / length, 0, p.z / length) : new SdfVector(1, 0, 0);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             return Math.Sqrt(p.x * p.x + p.z * p.z) - radius;
@@ -684,6 +702,7 @@ namespace pbrt
             cosine = Math.Cos(angle);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             double q = Math.Sqrt(p.x * p.x + p.z * p.z), y = -p.y;
@@ -738,6 +757,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             return SdfNorm.Length(SdfNorm.Length(p.x, p.z, ringPower) - majorRadius, p.y, tubePower) - minorRadius;
@@ -762,6 +782,7 @@ namespace pbrt
             return true;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override double Evaluate(SdfVector p)
         {
             return SdfNorm.Length(p.x, p.y, p.z, power) - radius;

@@ -685,6 +685,23 @@ namespace pbrt
             return child.Evaluate(p) - (offset + height * texture.Sample(p, n));
         }
 
+        // What the image takes off the child at a point, for a projection that does not ask for the normal
+        public double Height(double x, double y, double z)
+        {
+            return offset + height * texture.Sample(new SdfVector(x, y, z), new SdfVector(0, 0, 1));
+        }
+
+        // The child is compiled and the image is a call, unless the projection needs the gradient of the child
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            if (texture.NeedsNormal())
+            {
+                return null;
+            }
+            return context.Subtract(context.Compile(child, x, y, z),
+                                    Expression.Call(Expression.Constant(this), typeof(SdfTextureDisplace).GetMethod("Height"), x, y, z));
+        }
+
         public override double Lipschitz()
         {
             return lipschitz;
@@ -732,6 +749,13 @@ namespace pbrt
                 return b.Evaluate(p);
             }
             return (1 - t) * a.Evaluate(p) + t * b.Evaluate(p);
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression t = context.Define(Expression.Call(typeof(SdfTime).GetMethod("Clamped")));
+            Expression da = context.Compile(a, x, y, z), db = context.Compile(b, x, y, z);
+            return context.Add(context.Multiply(context.Subtract(context.Constant(1), t), da), context.Multiply(t, db));
         }
 
         public override double Lipschitz()
@@ -782,6 +806,14 @@ namespace pbrt
         public override double Evaluate(SdfVector p)
         {
             return child.Evaluate(p - velocity * SdfTime.Clamped());
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            Expression t = context.Define(Expression.Call(typeof(SdfTime).GetMethod("Clamped")));
+            return context.Compile(child, context.Define(context.Subtract(x, context.Multiply(context.Constant(velocity.x), t))),
+                                   context.Define(context.Subtract(y, context.Multiply(context.Constant(velocity.y), t))),
+                                   context.Define(context.Subtract(z, context.Multiply(context.Constant(velocity.z), t))));
         }
 
         public override double Lipschitz()
@@ -884,15 +916,27 @@ namespace pbrt
 
         public override double Evaluate(SdfVector p)
         {
+            return child.Evaluate(p) + Offset(p.x, p.y, p.z);
+        }
+
+        // What the moving noise adds to the child at a point
+        public double Offset(double x, double y, double z)
+        {
             double shift = speed * SdfTime.Clamped();
             double value = 0, weight = 1, scale = frequency;
             for (int i = 0; i < octaves; ++i)
             {
-                value += weight * pbrt.Noise(p.x * scale, p.y * scale, p.z * scale + shift * scale);
+                value += weight * pbrt.Noise(x * scale, y * scale, z * scale + shift * scale);
                 weight *= roughness;
                 scale *= 2;
             }
-            return child.Evaluate(p) + amplitude * value;
+            return amplitude * value;
+        }
+
+        public override Expression Compile(SdfCompileContext context, Expression x, Expression y, Expression z)
+        {
+            return context.Add(context.Compile(child, x, y, z),
+                               Expression.Call(Expression.Constant(this), typeof(SdfTimeDisplacement).GetMethod("Offset"), x, y, z));
         }
 
         public override double Lipschitz()
