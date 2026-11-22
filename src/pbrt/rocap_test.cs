@@ -240,6 +240,124 @@ namespace pbrt
             return new RocapShape(settings, segment);
         }
 
+        // A straight strand of the radius 0.2 from (0, 0, 0) to (3, 0, 0)
+        private static RocapShape StraightShape(bool flat)
+        {
+            BezierSurfaceSettings settings = new BezierSurfaceSettings();
+            settings.renderFromObject = new Transform();
+            settings.objectFromRender = new Transform();
+            settings.epsilon = 1e-6;
+            SdfVector[] p = { new SdfVector(0, 0, 0), new SdfVector(1, 0, 0), new SdfVector(2, 0, 0), new SdfVector(3, 0, 0) };
+            RocapSegment segment = new RocapSegment(p, new double[] { 0.2, 0.2, 0.2, 0.2 }, 0, 1);
+            segment.FlatCaps = flat;
+            return new RocapShape(settings, segment);
+        }
+
+        // The samples by area: the density of a sample is the density that the shape gives for its point, the mean of 1 / pdf
+        // is the area (of the tube and the two caps: known for the straight strand), and the caps get their share
+        [TEST("Rocap", "AreaDensityMatchesTheSamples")]
+        public static void AreaDensityMatchesTheSamples()
+        {
+            for (int which = 0; which < 4; ++which)
+            {
+                bool flat = which % 2 == 1;
+                RocapShape shape = which < 2 ? StraightShape(flat) : LightShape(0.25, 0.2, 0.15, 0.2, flat);
+                Random random = new Random(21);
+                const int count = 200000;
+                int mismatched = 0, valid = 0, onCaps = 0;
+                double sum = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    pstd.optional<ShapeSample> ss = shape.Sample(new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                    if (!ss)
+                    {
+                        continue;
+                    }
+                    ++valid;
+                    sum += 1.0 / ss.value().pdf;
+                    Float pdf = shape.PDF(ss.value().intr);
+                    if (Math.Abs(pdf - ss.value().pdf) > 1e-3 * ss.value().pdf)
+                    {
+                        if (++mismatched <= 6)
+                        {
+                            Console.WriteLine("  density " + pdf + " against " + ss.value().pdf + " at u " + ss.value().intr.uv.x + " v " + ss.value().intr.uv.y + " p " + ss.value().intr.p());
+                        }
+                    }
+                    Float along = ss.value().intr.uv.x;
+                    onCaps += along == 0 || along == 1 ? 1 : 0;
+                }
+                double area = sum / count;
+                Console.WriteLine("rocap area (" + (which < 2 ? "straight" : "hook") + (flat ? ", flat caps" : ", round caps") + "): by samples " + area + ", Area() " +
+                                  shape.Area() + "; " + valid + " of " + count + " samples valid, " + onCaps + " on the caps, " + mismatched + " densities differ");
+                // (a point within rounding of the circle where a round cap meets the tube can be taken for either)
+                CHECK_LE(mismatched, count / 20000);
+                // (the flat caps of the hook are small: the planes of its ends cut the strand elsewhere too)
+                CHECK_GT(onCaps, which == 3 ? 100 : count / 100);
+                CHECK_LT(Math.Abs(area - shape.Area()) / area, 0.02);
+                if (which < 2)
+                {
+                    double expected = 2 * Math.PI * 0.2 * 3 + (flat ? 2 * Math.PI * 0.04 : 4 * Math.PI * 0.04);
+                    CHECK_LT(Math.Abs(area - expected) / expected, 0.01);
+                }
+            }
+        }
+
+        // From a point that looks at the end of the strand the caps are most of what is seen: the solid angle by the directions
+        // that have a density and by the samples agree, with round and with flat caps, and most samples face the point
+        [TEST("Rocap", "CapsAndTheNearSideAreSampled")]
+        public static void CapsAndTheNearSideAreSampled()
+        {
+            for (int which = 0; which < 3; ++which)
+            {
+                RocapShape shape = StraightShape(which == 1);
+                Point3f reference = which < 2 ? new Point3f(6.0f, 0.3f, 0.1f) : new Point3f(1.5f, 2.0f, 1.0f);
+                ShapeSampleContext ctx = new ShapeSampleContext(new Point3fi(reference, new Vector3f(0, 0, 0)), new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), 0);
+                Random random = new Random(23);
+                const int count = 300000;
+                Vector3f toCenter = pbrt.Normalize(new Point3f(which < 2 ? 3.0f : 1.5f, 0, 0) - reference);
+                double cosineCone = Math.Cos(which < 2 ? 0.25 : 1.2);
+                double coneSolidAngle = 2 * Math.PI * (1 - cosineCone);
+                Vector3f helper = Math.Abs(toCenter.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
+                Vector3f side = pbrt.Normalize(pbrt.Cross(toCenter, helper));
+                Vector3f up = pbrt.Cross(toCenter, side);
+                int hits = 0, any = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    double cosTheta = 1 - random.NextDouble() * (1 - cosineCone);
+                    double sinTheta = Math.Sqrt(Math.Max(0, 1 - cosTheta * cosTheta));
+                    double phi = 2 * Math.PI * random.NextDouble();
+                    Vector3f wi = toCenter * (Float)cosTheta + side * (Float)(sinTheta * Math.Cos(phi)) + up * (Float)(sinTheta * Math.Sin(phi));
+                    hits += shape.PDF(ctx, wi) > 0 ? 1 : 0;
+                    any += shape.IntersectP(ctx.SpawnRay(wi)) ? 1 : 0;
+                }
+                double byDirections = coneSolidAngle * hits / count;
+                double bySamples = 0;
+                int seen = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    pstd.optional<ShapeSample> ss = shape.Sample(ctx, new Point2f((Float)random.NextDouble(), (Float)random.NextDouble()));
+                    if (!ss)
+                    {
+                        continue;
+                    }
+                    Vector3f wi = pbrt.Normalize(ss.value().intr.p() - reference);
+                    pstd.optional<ShapeIntersection> hit = shape.Intersect(ctx.SpawnRay(wi));
+                    if (hit && pbrt.Distance(hit.value().intr.p(), ss.value().intr.p()) < 1e-3)
+                    {
+                        bySamples += 1.0 / ss.value().pdf;
+                        ++seen;
+                    }
+                }
+                bySamples /= count;
+                Console.WriteLine("rocap from " + (which < 2 ? "its end" : "its side") + (which == 1 ? ", flat caps" : ", round caps") + ": solid angle by directions " + byDirections +
+                                  ", by samples " + bySamples + "; " + hits + " of the " + any + " directions that hit have a density; " + seen + " of " + count + " samples are seen");
+                // Nearly every direction that hits the strand has a density (not the ones that graze it, where the hit is not
+                // told from the tube well enough): the caps are no longer left to the directions of the BSDF alone
+                CHECK_GE(hits, any - any / 100);
+                CHECK_LT(Math.Abs(bySamples - byDirections) / byDirections, 0.03);
+            }
+        }
+
         [TEST("Rocap", "SolidAnglePdfMatchesTheSampler")]
         public static void SolidAnglePdfMatchesTheSampler()
         {

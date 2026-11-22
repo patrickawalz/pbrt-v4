@@ -9,6 +9,10 @@ namespace pbrt
 {
     public sealed unsafe class RocapShape : Shape
     {
+        // Whether the samples for a reference point are spread close to the solid angle of the strand (see Shares) instead of by
+        // the area of the side that faces the point
+        public bool SolidAngleSampling = true;
+
         public RocapShape(BezierSurfaceSettings settings, RocapSegment segment, int strandColors = 0)
         {
             this.strandColors = strandColors;
@@ -53,66 +57,62 @@ namespace pbrt
             return Trace(ray, tMax, out double t, out double u, out SdfVector normal, out SdfVector hitPoint, out double length);
         }
 
-        // The area of the tube (the envelope of the spheres; the caps at the ends are not counted)
+        // The area of the tube (the envelope of the spheres) and of the caps at the ends of the strand
         public override Float Area()
         {
             return (Float)Table().area;
         }
 
-        // The tube is sampled, not the caps (the caps of an emitter are reached by the sampling of the directions of the BSDF only, which stays unbiased): a bin of the
-        // parameter u by the mass 2 pi r slant, then the angle around the strand uniformly
+        // The surface that is sampled is the tube and the caps at the two ends of the strand (the first and the last segment of
+        // a chain; the ends of the segments between are inside their neighbours). One of the three is chosen in proportion to
+        // its area. The tube: a bin of the parameter u by the mass 2 pi r slant, then the angle around the strand uniformly. A
+        // round cap (the part of the sphere at the end beyond the circle where the tube leaves it): uniformly. A flat cap (the
+        // cut of the solid by the plane of the end): uniformly in a disk of the plane that holds the cut, and no sample for a
+        // point of the disk that is not on the surface, which leaves the density of the points that are as it is.
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
-            SamplingTable table = Table();
-            if (!(table.total > 0))
-            {
-                return default;
-            }
-            int bin = 0;
-            double target = u.x * table.total;
-            int low = 0, high = table.cumulative.Length - 1;
-            while (low < high)
-            {
-                int middle = (low + high) / 2;
-                if (table.cumulative[middle + 1] > target)
-                {
-                    high = middle;
-                }
-                else
-                {
-                    low = middle + 1;
-                }
-            }
-            bin = low;
-            double mass = table.cumulative[bin + 1] - table.cumulative[bin];
-            if (!(mass > 0))
-            {
-                return default;
-            }
-            double fraction = Math.Min(1, (target - table.cumulative[bin]) / mass);
-            double parameter = (bin + fraction) / table.bins;
-            double angle = 2 * Math.PI * u.y;
-            if (!Surface(parameter, angle, out Point3f p, out Normal3f n, out double jacobian) || !(jacobian > 0))
-            {
-                return default;
-            }
-            double pdf = AreaDensity(table, parameter) / (2 * Math.PI) / jacobian;
-            if (!(pdf > 0) || double.IsInfinity(pdf))
-            {
-                return default;
-            }
-            Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
-            return new ShapeSample(new Interaction(new Point3fi(p, pError), n, new Point2f((Float)((segment.index + parameter) / segment.count), (Float)u.y)), (Float)pdf);
+            return SampleSurface(u, false, new SdfVector(0, 0, 0));
         }
 
+        // The density of Sample(u) at a point of the surface, by area
         public override Float PDF(Interaction intr)
         {
-            return 0;
+            SamplingTable table = Table();
+            Point3f po = settings.objectFromRender.Apply(intr.p());
+            SdfVector point = new SdfVector(po.x, po.y, po.z);
+            double parameter = Math.Max(0, Math.Min(1, (double)intr.uv.x * segment.count - segment.index));
+            Normal3f no = settings.objectFromRender.Apply(intr.n);
+            SdfVector normalObject = new SdfVector(no.x, no.y, no.z).Normalized();
+            for (int end = 0; end < 2; ++end)
+            {
+                if (OnCap(end, parameter, point, normalObject, table, 0))
+                {
+                    return (Float)CapDensity(end, table, CapNormal(end, point));
+                }
+            }
+            // The tube: the angle around the strand of the point
+            if (!InsideSlab(point))
+            {
+                return 0;
+            }
+            SdfVector radial = point - segment.Position(parameter);
+            SdfVector e1 = Frame(parameter, out SdfVector e2);
+            double angle = Math.Atan2(SdfVector.Dot(radial, e2), SdfVector.Dot(radial, e1));
+            if (!Surface(parameter, angle, out Point3f p, out Normal3f n, out double jacobian) || !(jacobian > 0))
+            {
+                return 0;
+            }
+            double pdf = table.tubeShare * AreaDensity(table, parameter) / (2 * Math.PI) / jacobian;
+            return double.IsInfinity(pdf) || double.IsNaN(pdf) ? 0 : (Float)pdf;
         }
 
+        // From a reference point only the side of the tube that faces the point is sampled: at the parameter u the normals
+        // n = s t + c (e1 cos + e2 sin) that see the point D = reference - q(u) are those with n . D > r, an arc of the angle
+        // about the direction of D across the strand
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
-            return PatchSampling.ToSolidAngle(Sample(u), ctx);
+            Point3f reference = settings.objectFromRender.Apply(ctx.p());
+            return PatchSampling.ToSolidAngle(SampleSurface(u, true, new SdfVector(reference.x, reference.y, reference.z)), ctx);
         }
 
         public override Float PDF(ShapeSampleContext ctx, Vector3f wi)
@@ -122,7 +122,28 @@ namespace pbrt
             {
                 return 0;
             }
-            // The hit of a cap (the sphere at an end, or the disk) is not on the tube
+            SamplingTable table = Table();
+            Point3f referencePoint = settings.objectFromRender.Apply(ctx.p());
+            SdfVector toward = new SdfVector(referencePoint.x, referencePoint.y, referencePoint.z);
+            Span<double> weights = stackalloc double[Nodes + 1];
+            Shares(toward, table, weights, out double total, out double tubeShare, out double startShare, out double endShare);
+            for (int end = 0; end < 2; ++end)
+            {
+                if (!OnCap(end, u, hitPoint, normal, table, 1e-4))
+                {
+                    continue;
+                }
+                double capPdf = CapDensity(end, table, CapNormal(end, hitPoint)) * (end == 0 ? startShare : endShare) / table.capShare[end];
+                if (!(capPdf > 0))
+                {
+                    return 0;
+                }
+                SdfVector outward = CapNormal(end, hitPoint);
+                Normal3f capNormal = pbrt.Normalize(settings.renderFromObject.Apply(new Normal3f((Float)outward.x, (Float)outward.y, (Float)outward.z)));
+                Point3f capPoint = settings.renderFromObject.Apply(new Point3f((Float)hitPoint.x, (Float)hitPoint.y, (Float)hitPoint.z));
+                return PatchSampling.AreaToSolidAngle(capPdf, capNormal, capPoint, ctx, wi);
+            }
+            // The hit of the end of a segment inside the strand (the sphere there, or the plane) is not on the tube
             SdfVector tangent = segment.Velocity(u);
             double speed = tangent.Length();
             if (!(speed > 0))
@@ -137,7 +158,6 @@ namespace pbrt
             {
                 return 0;
             }
-            SamplingTable table = Table();
             SdfVector e1 = Frame(u, out SdfVector e2);
             double angle = Math.Atan2(SdfVector.Dot(normal, e2), SdfVector.Dot(normal, e1));
             if (angle < 0)
@@ -148,8 +168,421 @@ namespace pbrt
             {
                 return 0;
             }
-            double areaPdf = AreaDensity(table, u) / (2 * Math.PI) / jacobian;
+            double halfArc = VisibleArc(u, toward, out double middle, out double cosine, out double amplitude);
+            if (!(halfArc > 0))
+            {
+                return 0;
+            }
+            double offset = angle - middle;
+            offset -= 2 * Math.PI * Math.Round(offset / (2 * Math.PI));
+            double areaPdf = tubeShare * ParameterDensity(table, weights, total, u) * AngleDensity(Math.Max(-halfArc, Math.Min(halfArc, offset)), halfArc, cosine, amplitude) / jacobian;
             return PatchSampling.AreaToSolidAngle(areaPdf, n, p, ctx, wi);
+        }
+
+        // A point of the tube or of a cap; with a reference point (object space) only of the side of the tube that faces it
+        private pstd.optional<ShapeSample> SampleSurface(Point2f u, bool facing, SdfVector reference)
+        {
+            SamplingTable table = Table();
+            if (!(table.total > 0))
+            {
+                return default;
+            }
+            Span<double> weights = stackalloc double[Nodes + 1];
+            double total = 0, tubeShare = table.tubeShare, startShare = table.capShare[0], endShare = table.capShare[1];
+            if (facing)
+            {
+                Shares(reference, table, weights, out total, out tubeShare, out startShare, out endShare);
+            }
+            double choice = u.x;
+            if (choice >= tubeShare)
+            {
+                // A cap: the start, then the end
+                choice -= tubeShare;
+                int end = choice < startShare ? 0 : 1;
+                double share = end == 0 ? startShare : endShare;
+                if (end == 1)
+                {
+                    choice -= startShare;
+                }
+                if (!(share > 0) || !(table.capShare[end] > 0))
+                {
+                    return default;
+                }
+                pstd.optional<ShapeSample> cap = SampleCap(end, table, Math.Min(choice / share, 1 - 1e-12), u.y);
+                if (!cap)
+                {
+                    return default;
+                }
+                ShapeSample result = cap.value();
+                result.pdf *= (Float)(share / table.capShare[end]);
+                return result;
+            }
+            double parameter = SampleParameter(table, weights, total, Math.Min(choice / tubeShare, 1 - 1e-12));
+            double angle = 2 * Math.PI * u.y, anglePdf = 1 / (2 * Math.PI);
+            if (facing)
+            {
+                double halfArc = VisibleArc(parameter, reference, out double center, out double cosine, out double amplitude);
+                if (!(halfArc > 0))
+                {
+                    return default;
+                }
+                double offset = SampleAngle(u.y, halfArc, cosine, amplitude);
+                angle = center + offset;
+                anglePdf = AngleDensity(offset, halfArc, cosine, amplitude);
+            }
+            if (!Surface(parameter, angle, out Point3f p, out Normal3f n, out double jacobian) || !(jacobian > 0))
+            {
+                return default;
+            }
+            // With flat caps the solid is cut by the planes of the two ends: what the tube has beyond them is not there
+            if (segment.FlatCaps && ObjectPoint(parameter, angle, out SdfVector position, out SdfVector outward) && !InsideSlab(position))
+            {
+                return default;
+            }
+            double pdf = tubeShare * ParameterDensity(table, weights, total, parameter) * anglePdf / jacobian;
+            if (!(pdf > 0) || double.IsInfinity(pdf))
+            {
+                return default;
+            }
+            double around = angle / (2 * Math.PI);
+            around -= Math.Floor(around);
+            Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
+            return new ShapeSample(new Interaction(new Point3fi(p, pError), n, new Point2f((Float)((segment.index + parameter) / segment.count), (Float)around)), (Float)pdf);
+        }
+
+        // Sampling close to the solid angle (not from a paper). Along the strand the tube is a cylinder at every u, and the
+        // light that the ring at u sends to a point x is, with D = x - q(u) and the angle phi around the strand from the
+        // direction of D, proportional to
+        //     (area of the ring per angle) (n . (x - P))+ / |x - P|^3,   n . (x - P) = A (cos phi - k),
+        // A = c |D across the strand|, k = (r - s D . t) / A (s the slope -r' / |q'|, c = sqrt(1 - s^2)): the cosine at the
+        // surface is a cosine of the angle less a constant, positive on the arc |phi| < acos k that faces x. So
+        //   - the angle is sampled with the density (cos phi - k) / (2 (sin a - k a)) on the arc of half width a = acos k,
+        //     which takes the cosine at the surface out of the estimate;
+        //   - the parameter u is sampled by the integral of the above over the arc with |x - P| taken as |D|,
+        //     W(u) = (mass(u) / 2 pi) 2 A (sin a - k a) / |D|^3, at Nodes + 1 values of u joined by lines, which takes out the
+        //     fall-off with the distance and the foreshortening of the strand seen along its length;
+        //   - the tube and the two caps are chosen by the same measure (a cap by its area, how it is turned to x and its
+        //     distance).
+        // What is left in the estimate is the change of |x - P| around the ring and of the area of the ring around a bend.
+        // A tenth of the choices of u and of the shares go by area, so that every point that faces x has a density
+        // whatever the weights at the nodes say.
+        private const int Nodes = 32;
+
+        // The weights W at the nodes for a reference point, their integral, and the shares of the tube and the two caps
+        private void Shares(SdfVector reference, SamplingTable table, Span<double> weights, out double total, out double tubeShare, out double startShare,
+                            out double endShare)
+        {
+            total = 0;
+            tubeShare = table.tubeShare;
+            startShare = table.capShare[0];
+            endShare = table.capShare[1];
+            if (!SolidAngleSampling)
+            {
+                return;
+            }
+            for (int i = 0; i <= Nodes; ++i)
+            {
+                double u = (double)i / Nodes;
+                double halfArc = VisibleArc(u, reference, out double middle, out double cosine, out double amplitude);
+                double distance = (reference - segment.Position(u)).Length();
+                double integral = amplitude > 0 ? 2 * amplitude * (Math.Sin(halfArc) - cosine * halfArc) : (halfArc > 0 ? 2 * Math.PI * (-cosine) : 0);
+                weights[i] = halfArc > 0 && distance > 0 ? Math.Max(0, Mass(u) / (2 * Math.PI) * integral / (distance * distance * distance)) : 0;
+            }
+            for (int i = 0; i < Nodes; ++i)
+            {
+                total += 0.5 * (weights[i] + weights[i + 1]) / Nodes;
+            }
+            Span<double> caps = stackalloc double[2];
+            for (int end = 0; end < 2; ++end)
+            {
+                caps[end] = 0;
+                if (!(table.capShare[end] > 0))
+                {
+                    continue;
+                }
+                SdfVector axis = EndAxis(end, out double slope);
+                SdfVector toReference = reference - segment.Position(end);
+                double distance = toReference.Length();
+                if (distance > 0)
+                {
+                    double turned = SdfVector.Dot(end == 0 ? -axis : axis, toReference) / distance;
+                    caps[end] = table.capArea[end] * (0.25 + Math.Max(0, turned)) / (distance * distance);
+                }
+            }
+            double all = total + caps[0] + caps[1];
+            if (!(all > 0) || double.IsInfinity(all))
+            {
+                total = 0;
+                return;
+            }
+            tubeShare = (1 - Defence) * total / all + Defence * table.tubeShare;
+            startShare = (1 - Defence) * caps[0] / all + Defence * table.capShare[0];
+            endShare = (1 - Defence) * caps[1] / all + Defence * table.capShare[1];
+        }
+
+        // The share of the choices that go by area
+        private const double Defence = 0.1;
+
+        // The parameter u for a number in [0, 1): by the weights at the nodes (total > 0), or by the area
+        private double SampleParameter(SamplingTable table, Span<double> weights, double total, double choice)
+        {
+            if (total > 0 && choice >= Defence)
+            {
+                double target = (choice - Defence) / (1 - Defence) * total;
+                for (int i = 0; i < Nodes; ++i)
+                {
+                    double mass = 0.5 * (weights[i] + weights[i + 1]) / Nodes;
+                    if (target < mass || i == Nodes - 1)
+                    {
+                        // Inside the bin the density is the line from weights[i] to weights[i + 1]
+                        double a = weights[i], b = weights[i + 1];
+                        double x = mass > 0 ? Math.Max(0, Math.Min(1, target / mass)) : 0.5;
+                        double within = Math.Abs(b - a) <= 1e-12 * (a + b) ? x : (Math.Sqrt(Math.Max(0, a * a + (b * b - a * a) * x)) - a) / (b - a);
+                        return (i + Math.Max(0, Math.Min(1, within))) / Nodes;
+                    }
+                    target -= mass;
+                }
+            }
+            double areaTarget = (total > 0 ? choice / Defence : choice) * table.total;
+            int low = 0, high = table.cumulative.Length - 1;
+            while (low < high)
+            {
+                int middle = (low + high) / 2;
+                if (table.cumulative[middle + 1] > areaTarget)
+                {
+                    high = middle;
+                }
+                else
+                {
+                    low = middle + 1;
+                }
+            }
+            double binMass = table.cumulative[low + 1] - table.cumulative[low];
+            double fraction = binMass > 0 ? Math.Min(1, (areaTarget - table.cumulative[low]) / binMass) : 0.5;
+            return (low + fraction) / table.bins;
+        }
+
+        // The density of SampleParameter at u
+        private double ParameterDensity(SamplingTable table, Span<double> weights, double total, double u)
+        {
+            double area = AreaDensity(table, u);
+            if (!(total > 0))
+            {
+                return area;
+            }
+            double position = Math.Max(0, Math.Min(1, u)) * Nodes;
+            int bin = Math.Min(Nodes - 1, (int)position);
+            double within = position - bin;
+            return (1 - Defence) * ((1 - within) * weights[bin] + within * weights[bin + 1]) / total + Defence * area;
+        }
+
+        // The angle from the middle of the arc for a number in [0, 1): with the density (cos phi - k) / (2 (sin a - k a)), or
+        // evenly over the arc (by area, and where the reference is on the axis of the ring)
+        private double SampleAngle(double choice, double halfArc, double cosine, double amplitude)
+        {
+            if (!SolidAngleSampling || !(amplitude > 0))
+            {
+                return (2 * choice - 1) * halfArc;
+            }
+            // sin phi - k phi rises over the arc: the angle at which it is the wanted share of the way from one end to the other
+            double wanted = (2 * choice - 1) * (Math.Sin(halfArc) - cosine * halfArc);
+            double low = -halfArc, high = halfArc;
+            for (int i = 0; i < 48; ++i)
+            {
+                double middle = 0.5 * (low + high);
+                if (Math.Sin(middle) - cosine * middle < wanted)
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+            return 0.5 * (low + high);
+        }
+
+        private double AngleDensity(double offset, double halfArc, double cosine, double amplitude)
+        {
+            if (!SolidAngleSampling || !(amplitude > 0))
+            {
+                return 1 / (2 * halfArc);
+            }
+            double norm = 2 * (Math.Sin(halfArc) - cosine * halfArc);
+            return norm > 0 ? Math.Max(0, Math.Cos(offset) - cosine) / norm : 0;
+        }
+
+        // Half of the arc of the angle around the strand at u whose points face the reference point (0 if no point of the ring
+        // faces it, pi if all do), the middle of the arc, and the A and k of n . (x - P) = A (cos phi - k) (with A = 0, for a
+        // reference on the axis of the ring, the cosine is n . (x - P) itself with the sign turned)
+        private double VisibleArc(double u, SdfVector reference, out double middle, out double cosine, out double amplitude)
+        {
+            middle = 0;
+            cosine = 1;
+            amplitude = 0;
+            SdfVector velocity = segment.Velocity(u);
+            double speed = velocity.Length(), radius = segment.Radius(u);
+            if (!(speed > 0) || !(radius > 0))
+            {
+                return 0;
+            }
+            double slope = -segment.RadiusDerivative(u) / speed;
+            if (Math.Abs(slope) >= 1 - 1e-9)
+            {
+                return 0;
+            }
+            SdfVector axis = velocity / speed;
+            SdfVector e1 = Frame(u, out SdfVector e2);
+            SdfVector toReference = reference - segment.Position(u);
+            double alongAxis = SdfVector.Dot(toReference, axis);
+            double x = SdfVector.Dot(toReference, e1), y = SdfVector.Dot(toReference, e2);
+            double across = Math.Sqrt(x * x + y * y), ring = Math.Sqrt(1 - slope * slope);
+            // n . D = slope alongAxis + ring across cos(angle - middle) > radius
+            double needed = radius - slope * alongAxis;
+            if (!(across * ring > 0))
+            {
+                cosine = needed;
+                return needed < 0 ? Math.PI : 0;
+            }
+            middle = Math.Atan2(y, x);
+            amplitude = across * ring;
+            cosine = needed / amplitude;
+            if (cosine >= 1)
+            {
+                return 0;
+            }
+            return cosine <= -1 ? Math.PI : Math.Acos(cosine);
+        }
+
+        // Whether a point is between the planes of the two ends (always, without flat caps)
+        private bool InsideSlab(SdfVector point)
+        {
+            if (!segment.FlatCaps)
+            {
+                return true;
+            }
+            SdfVector first = EndAxis(0, out double firstSlope), second = EndAxis(1, out double secondSlope);
+            return SdfVector.Dot(point - segment.Position(0), first) >= 0 && SdfVector.Dot(point - segment.Position(1), second) <= 0;
+        }
+
+        // The unit tangent of the curve at an end, and the slope -r' / |q'| of the tube there
+        private SdfVector EndAxis(int end, out double slope)
+        {
+            SdfVector velocity = segment.Velocity(end);
+            double speed = velocity.Length();
+            slope = speed > 0 ? -segment.RadiusDerivative(end) / speed : 0;
+            return speed > 0 ? velocity / speed : new SdfVector(0, 0, 1);
+        }
+
+        // Whether the strand has a cap at the end (0 the start, 1 the end) of this segment that is sampled
+        private bool HasCap(int end)
+        {
+            return (end == 0 ? segment.index == 0 : segment.index == segment.count - 1) && segment.Radius(end) > 0 && segment.Velocity(end).LengthSquared() > 0;
+        }
+
+        // The outward unit normal of the cap at a point of it (object space)
+        private SdfVector CapNormal(int end, SdfVector point)
+        {
+            SdfVector axis = EndAxis(end, out double slope);
+            if (segment.FlatCaps)
+            {
+                return end == 0 ? -axis : axis;
+            }
+            SdfVector radial = point - segment.Position(end);
+            return radial.LengthSquared() > 0 ? radial.Normalized() : (end == 0 ? -axis : axis);
+        }
+
+        // Whether a point of the surface with its normal, found at the parameter u, is on the cap of an end that is sampled. A
+        // point of a flat cap is found by a sphere near the end, at any parameter: it is told by lying in the plane of the end
+        // with the normal of the plane (the tube crosses the plane too, with other normals). A point of a round cap is on the
+        // sphere of the end, beyond the circle where the tube leaves it.
+        private bool OnCap(int end, double u, SdfVector point, SdfVector normal, SamplingTable table, double margin)
+        {
+            if (!(table.capShare[end] > 0))
+            {
+                return false;
+            }
+            SdfVector axis = EndAxis(end, out double slope);
+            SdfVector radial = point - segment.Position(end);
+            double radius = segment.Radius(end), distance = radial.Length();
+            double along = SdfVector.Dot(radial, axis);
+            if (segment.FlatCaps)
+            {
+                return Math.Abs(SdfVector.Dot(normal, axis)) >= 1 - 1e-6 && Math.Abs(along) <= 1e-4 * table.capRadius[end] &&
+                       distance <= table.capRadius[end] * (1 + 1e-6);
+            }
+            if (!(distance > 0) || (end == 0 ? u > 1e-6 : u < 1 - 1e-6))
+            {
+                return false;
+            }
+            along /= distance;
+            return end == 0 ? along < slope - margin : along > slope + margin;
+        }
+
+        // The density by area (render space) of the cap at a point of it with the outward normal (object space)
+        private double CapDensity(int end, SamplingTable table, SdfVector normal)
+        {
+            double scale = AreaScale(normal);
+            if (!(table.capArea[end] > 0) || !(scale > 0))
+            {
+                return 0;
+            }
+            return table.capShare[end] / (table.capArea[end] * scale);
+        }
+
+        // The area in render space of a unit of area of object space with the given unit normal
+        private double AreaScale(SdfVector normal)
+        {
+            SdfVector helper = Math.Abs(normal.x) < 0.9 ? new SdfVector(1, 0, 0) : new SdfVector(0, 1, 0);
+            SdfVector first = SdfVector.Cross(normal, helper).Normalized(), second = SdfVector.Cross(normal, first);
+            Vector3f a = settings.renderFromObject.Apply(new Vector3f((Float)first.x, (Float)first.y, (Float)first.z));
+            Vector3f b = settings.renderFromObject.Apply(new Vector3f((Float)second.x, (Float)second.y, (Float)second.z));
+            return pbrt.Length(pbrt.Cross(a, b));
+        }
+
+        // The point of a cap for two numbers in [0, 1) (object space), with its outward normal; false for a point of the disk
+        // of a flat cap that is not on the surface
+        private bool CapPoint(int end, SamplingTable table, double first, double second, out SdfVector point, out SdfVector normal)
+        {
+            SdfVector axis = EndAxis(end, out double slope);
+            SdfVector e1 = Frame(end, out SdfVector e2);
+            double angle = 2 * Math.PI * second;
+            SdfVector across = e1 * Math.Cos(angle) + e2 * Math.Sin(angle);
+            if (segment.FlatCaps)
+            {
+                normal = end == 0 ? -axis : axis;
+                point = segment.Position(end) + across * (table.capRadius[end] * Math.Sqrt(first));
+                // On the surface if a ray that comes at the plane from outside hits it there
+                double offset = 1e-2 * table.capRadius[end];
+                return segment.Intersect(point + normal * offset, -1 * normal, 0, 1e30, out double t, out double u, out SdfVector hitNormal) &&
+                       Math.Abs(t - offset) <= 1e-3 * offset;
+            }
+            // Uniform in the cosine to the tangent: from -1 to the slope at the start, from the slope to 1 at the end
+            double along = end == 0 ? -1 + first * (1 + slope) : slope + first * (1 - slope);
+            normal = axis * along + across * Math.Sqrt(Math.Max(0, 1 - along * along));
+            point = segment.Position(end) + normal * segment.Radius(end);
+            return true;
+        }
+
+        private pstd.optional<ShapeSample> SampleCap(int end, SamplingTable table, double first, double second)
+        {
+            if (!CapPoint(end, table, first, second, out SdfVector point, out SdfVector normal))
+            {
+                return default;
+            }
+            double pdf = CapDensity(end, table, normal);
+            if (!(pdf > 0) || double.IsInfinity(pdf))
+            {
+                return default;
+            }
+            Point3f p = settings.renderFromObject.Apply(new Point3f((Float)point.x, (Float)point.y, (Float)point.z));
+            Normal3f n = pbrt.Normalize(settings.renderFromObject.Apply(new Normal3f((Float)normal.x, (Float)normal.y, (Float)normal.z)));
+            if (settings.reverseOrientation ^ settings.transformSwapsHandedness)
+            {
+                n = -n;
+            }
+            Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
+            return new ShapeSample(new Interaction(new Point3fi(p, pError), n, new Point2f((Float)((segment.index + end) / (double)segment.count), (Float)second)), (Float)pdf);
         }
 
         public override string ToString()
@@ -167,7 +600,14 @@ namespace pbrt
             public int bins;
             public double[] cumulative;
             public double total;
+            // The area of the tube and the caps in render space (the cut of a flat cap by a count of the points of its disk)
             public double area;
+            // The share of the samples that go to the tube and to the cap of each end
+            public double tubeShare;
+            public double[] capShare = new double[2];
+            // The area in object space that a cap is sampled over (the part of the sphere, or the whole disk of a flat cap),
+            // and the radius of that disk
+            public double[] capArea = new double[2], capRadius = new double[2];
         }
 
         // The density of the parameter u: the mass of its bin over the total and the width of the bin
@@ -195,21 +635,92 @@ namespace pbrt
                 result.total = result.cumulative[result.bins];
                 // The exact area of the tube in render space
                 double sum = 0;
-                const int nu = 128, nv = 16;
+                const int nu = 512, nv = 32;
                 for (int i = 0; i < nu; ++i)
                 {
                     for (int j = 0; j < nv; ++j)
                     {
-                        if (Surface((i + 0.5) / nu, 2 * Math.PI * (j + 0.5) / nv, out Point3f p, out Normal3f n, out double jacobian))
+                        if (Surface((i + 0.5) / nu, 2 * Math.PI * (j + 0.5) / nv, out Point3f p, out Normal3f n, out double jacobian) &&
+                            (!segment.FlatCaps || (ObjectPoint((i + 0.5) / nu, 2 * Math.PI * (j + 0.5) / nv, out SdfVector position, out SdfVector outward) && InsideSlab(position))))
                         {
                             sum += jacobian;
                         }
                     }
                 }
-                result.area = sum * (2 * Math.PI / nv) / nu;
+                double tubeArea = sum * (2 * Math.PI / nv) / nu;
+                result.area = tubeArea;
+                double[] weight = new double[2];
+                for (int end = 0; end < 2; ++end)
+                {
+                    if (!HasCap(end))
+                    {
+                        continue;
+                    }
+                    SdfVector axis = EndAxis(end, out double slope);
+                    double radius = segment.Radius(end);
+                    if (segment.FlatCaps)
+                    {
+                        result.capRadius[end] = FlatCapRadius(end);
+                        result.capArea[end] = Math.PI * result.capRadius[end] * result.capRadius[end];
+                    }
+                    else
+                    {
+                        result.capArea[end] = 2 * Math.PI * radius * radius * Math.Max(0, end == 0 ? 1 + slope : 1 - slope);
+                    }
+                    if (!(result.capArea[end] > 0))
+                    {
+                        continue;
+                    }
+                    // The area in render space: the points of a grid that are on the surface, each with its scale
+                    result.capShare[end] = 1;
+                    const int grid = 96;
+                    double capSum = 0;
+                    for (int i = 0; i < grid; ++i)
+                    {
+                        for (int j = 0; j < grid; ++j)
+                        {
+                            if (CapPoint(end, result, (i + 0.5) / grid, (j + 0.5) / grid, out SdfVector point, out SdfVector normal))
+                            {
+                                capSum += AreaScale(normal);
+                            }
+                        }
+                    }
+                    weight[end] = result.capArea[end] * capSum / (grid * grid);
+                    result.area += weight[end];
+                }
+                double all = tubeArea + weight[0] + weight[1];
+                result.tubeShare = all > 0 ? tubeArea / all : 1;
+                result.capShare[0] = all > 0 ? weight[0] / all : 0;
+                result.capShare[1] = all > 0 ? weight[1] / all : 0;
                 table = result;
             }
             return result;
+        }
+
+        // The radius of a disk about the end point, in the plane of the end, that holds the cut of the solid by that plane. A
+        // sphere of the strand reaches the plane if its center is no farther from it than the largest radius; the disk holds
+        // the centers of those, seen in the plane, and the largest radius around them. The centers are looked at in steps,
+        // with what the curve can move in half a step added.
+        private double FlatCapRadius(int end)
+        {
+            SdfVector axis = EndAxis(end, out double slope);
+            SdfVector origin = segment.Position(end);
+            double[] radii = segment.Radii;
+            double largest = Math.Max(Math.Max(radii[0], radii[1]), Math.Max(radii[2], radii[3]));
+            SdfVector[] points = segment.ControlPoints;
+            double speed = 3 * Math.Max((points[1] - points[0]).Length(), Math.Max((points[2] - points[1]).Length(), (points[3] - points[2]).Length()));
+            const int steps = 256;
+            double slack = 0.5 * speed / steps, reach = 0;
+            for (int i = 0; i <= steps; ++i)
+            {
+                SdfVector offset = segment.Position((double)i / steps) - origin;
+                double depth = Math.Abs(SdfVector.Dot(offset, axis));
+                if (depth <= largest + slack)
+                {
+                    reach = Math.Max(reach, (offset - axis * SdfVector.Dot(offset, axis)).Length() + slack);
+                }
+            }
+            return reach + largest;
         }
 
         // The mass of the density of the parameter u: 2 pi r slant (the area of a ring of the tube)
@@ -281,10 +792,14 @@ namespace pbrt
             return true;
         }
 
+        // In double precision: the density of the area is a difference of such points a hundred thousandth of the parameter
+        // apart, which the single precision of Transform.Apply left right to three places only
         private SdfVector ToRender(SdfVector point)
         {
-            Point3f q = settings.renderFromObject.Apply(new Point3f((Float)point.x, (Float)point.y, (Float)point.z));
-            return new SdfVector(q.x, q.y, q.z);
+            SquareMatrix4 m = settings.renderFromObject.GetMatrix();
+            return new SdfVector(m[0][0] * point.x + m[0][1] * point.y + m[0][2] * point.z + m[0][3],
+                                 m[1][0] * point.x + m[1][1] * point.y + m[1][2] * point.z + m[1][3],
+                                 m[2][0] * point.x + m[2][1] * point.y + m[2][2] * point.z + m[2][3]);
         }
 
         private bool ObjectPoint(double u, double angle, out SdfVector position, out SdfVector normal)
@@ -457,13 +972,15 @@ namespace pbrt
             }
             int strandColors = colorList.Count > 0 ? StrandColors.Register(colorList.ToArray(), true) : 0;
             bool flatCaps = parameters.GetOneBool("flatcaps", false);
+            // "bool solidanglesampling" (true): the samples of an emitting strand close to its solid angle from the lit point; false: by the area of the side that faces it
+            bool solidAngle = parameters.GetOneBool("solidanglesampling", true);
             int count = (points.Length - 1) / 3;
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
             for (int s = 0; s < count; ++s)
             {
                 SdfVector[] p = new SdfVector[] { points[3 * s], points[3 * s + 1], points[3 * s + 2], points[3 * s + 3] };
                 double[] r = new double[] { radii[3 * s], radii[3 * s + 1], radii[3 * s + 2], radii[3 * s + 3] };
-                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }, strandColors));
+                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }, strandColors) { SolidAngleSampling = solidAngle });
             }
             return shapes;
         }
