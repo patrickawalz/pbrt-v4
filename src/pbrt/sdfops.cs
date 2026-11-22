@@ -74,6 +74,48 @@ namespace pbrt
             this.label = label;
         }
 
+        public override bool IsExactOutside()
+        {
+            return child.IsExactOutside();
+        }
+
+        public override bool IsExactInside()
+        {
+            return child.IsExactInside();
+        }
+
+        public override SdfVector AnalyticGradient(SdfVector p, double h)
+        {
+            return child.AnalyticGradient(p, h);
+        }
+
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            return child.Bounds(out lower, out upper, out grows);
+        }
+
+        // The label plays no part in the value
+        public override SdfNode Prune(SdfVector center, double radius, out double lower, out double upper)
+        {
+            return child.Prune(center, radius, out lower, out upper);
+        }
+
+        public override int NodeCount()
+        {
+            return 1 + child.NodeCount();
+        }
+
+        public override SdfNode WithProxies(int threshold, double blend)
+        {
+            SdfNode wrapped = SdfProxy.Wrap(child, threshold, blend);
+            return wrapped == child ? this : new SdfLabel(wrapped, label);
+        }
+
+        public override double RayLipschitz(SdfVector from, SdfVector to)
+        {
+            return child.RayLipschitz(from, to);
+        }
+
         public override double Evaluate(SdfVector p)
         {
             return child.Evaluate(p);
@@ -120,6 +162,26 @@ namespace pbrt
         {
             this.shape = shape;
             this.materials = materials;
+        }
+
+        public override bool IsExactOutside()
+        {
+            return shape.IsExactOutside();
+        }
+
+        public override bool IsExactInside()
+        {
+            return shape.IsExactInside();
+        }
+
+        public override SdfVector AnalyticGradient(SdfVector p, double h)
+        {
+            return shape.AnalyticGradient(p, h);
+        }
+
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            return shape.Bounds(out lower, out upper, out grows);
         }
 
         public override double Evaluate(SdfVector p)
@@ -171,6 +233,25 @@ namespace pbrt
             this.edge = Math.Max(edge, 1e-9);
         }
 
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            if (!a.Bounds(out lower, out upper, out grows))
+            {
+                return false;
+            }
+            if (depth >= 0)
+            {
+                return true;
+            }
+            // A negative depth raises the surface by up to its size
+            if (!grows)
+            {
+                return SdfExtent.None(out lower, out upper, out grows);
+            }
+            SdfExtent.Expand(ref lower, ref upper, -depth);
+            return true;
+        }
+
         public override double Evaluate(SdfVector p)
         {
             return a.Evaluate(p) + depth * Weight(b.Evaluate(p));
@@ -217,6 +298,11 @@ namespace pbrt
             this.a = a;
             this.b = b;
             this.width = width;
+        }
+
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            return a.Bounds(out lower, out upper, out grows);
         }
 
         public override double Evaluate(SdfVector p)
@@ -373,6 +459,27 @@ namespace pbrt
             }
             // The kernel has slope 6 s (1 - s^2)^2 / r, at most 1.7165 / r
             gradientBound = Math.Max(sum, 1e-12);
+        }
+
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            // A kernel ends at the radius of its ball
+            grows = false;
+            if (count == 0)
+            {
+                return SdfExtent.None(out lower, out upper, out grows);
+            }
+            double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+            double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+            for (int i = 0; i < count; ++i)
+            {
+                double r = Math.Abs(balls[5 * i + 3]);
+                minX = Math.Min(minX, balls[5 * i] - r); minY = Math.Min(minY, balls[5 * i + 1] - r); minZ = Math.Min(minZ, balls[5 * i + 2] - r);
+                maxX = Math.Max(maxX, balls[5 * i] + r); maxY = Math.Max(maxY, balls[5 * i + 1] + r); maxZ = Math.Max(maxZ, balls[5 * i + 2] + r);
+            }
+            lower = new SdfVector(minX, minY, minZ);
+            upper = new SdfVector(maxX, maxY, maxZ);
+            return true;
         }
 
         public override double Evaluate(SdfVector p)
@@ -608,6 +715,11 @@ namespace pbrt
             this.b = b;
         }
 
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            return SdfExtent.Merge(a, b, out lower, out upper, out grows);
+        }
+
         public override double Evaluate(SdfVector p)
         {
             double t = SdfTime.Clamped();
@@ -650,6 +762,21 @@ namespace pbrt
         {
             this.child = child;
             this.velocity = velocity;
+        }
+
+        public override bool IsExactOutside()
+        {
+            return child.IsExactOutside();
+        }
+
+        public override bool IsExactInside()
+        {
+            return child.IsExactInside();
+        }
+
+        public override SdfVector AnalyticGradient(SdfVector p, double h)
+        {
+            return child.AnalyticGradient(p - velocity * SdfTime.Clamped(), h);
         }
 
         public override double Evaluate(SdfVector p)
@@ -698,6 +825,16 @@ namespace pbrt
             double x2 = cb * x1 + sb * z1, y2 = y1, z2 = -sb * x1 + cb * z1;
             double cc = Math.Cos(a), sc = Math.Sin(-a);
             return new SdfVector(x2, cc * y2 - sc * z2, sc * y2 + cc * z2);
+        }
+
+        public override bool IsExactOutside()
+        {
+            return child.IsExactOutside();
+        }
+
+        public override bool IsExactInside()
+        {
+            return child.IsExactInside();
         }
 
         public override double Evaluate(SdfVector p)
@@ -845,6 +982,7 @@ namespace pbrt
                 pbrt.ErrorExit(loc, "sdflabel texture: the \"string sdf\" expression is required.");
             }
             SdfParseContext context = new SdfParseContext();
+            context.legacyPhases = parameters.GetOneBool("legacyphases", false);
             context.domainRadius = parameters.GetOneFloat("domainradius", 2);
             context.meshLoader = SdfMeshLoader.Load;
             context.vdbLoader = SdfVdbLoader.Load;

@@ -157,6 +157,7 @@ namespace pbrt
                 pbrt.ErrorExit(loc, "sdf texture: the \"string sdf\" expression is required.");
             }
             SdfParseContext context = new SdfParseContext();
+            context.legacyPhases = parameters.GetOneBool("legacyphases", false);
             context.domainRadius = parameters.GetOneFloat("domainradius", 2);
             context.meshLoader = SdfMeshLoader.Load;
             context.vdbLoader = SdfVdbLoader.Load;
@@ -187,6 +188,13 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unknown sdf texture \"mode\".", modeName));
                 mode = SdfDensityMode.Solid;
+            }
+            // A depth below the surface is only right where the field is the exact distance inside
+            if ((mode == SdfDensityMode.Distance || mode == SdfDensityMode.Shell) && !field.IsExactInside())
+            {
+                pbrt.Warning(loc, pbrt.StringPrintf("sdf texture mode \"%s\" reads the distance inside the solid, where this field is a " +
+                                                    "bound and not the exact distance (a union is not exact inside): the depth that " +
+                                                    "the density is made from is too small where the bound is loose.", modeName));
             }
             return new SdfFloatTexture(renderFromTexture, field, mode, parameters.GetOneFloat("blur", 0),
                                        parameters.GetOneFloat("falloff", 0.1f), parameters.GetOneFloat("thickness", 0.1f),

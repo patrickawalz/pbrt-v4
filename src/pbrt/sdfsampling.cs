@@ -18,7 +18,7 @@ namespace pbrt
     {
         // renderFromObject is the 3x4 matrix (row major, 12 values) that takes object space to the space the area is measured in
         public SdfSurfaceSampler(SdfNode field, double lipschitz, SdfVector lower, SdfVector upper, double[] renderFromObject,
-                                 int resolution, int subdivisions, double gradientStep)
+                                 int resolution, int subdivisions, double gradientStep, bool analyticGradient = false)
         {
             this.field = field;
             this.lipschitz = lipschitz;
@@ -26,6 +26,7 @@ namespace pbrt
             this.upper = upper;
             this.renderFromObject = renderFromObject;
             this.gradientStep = gradientStep;
+            this.analyticGradient = analyticGradient;
             this.subdivisions = Math.Max(1, subdivisions);
             Tessellate(Math.Max(4, resolution));
             MeasureAreas();
@@ -66,7 +67,7 @@ namespace pbrt
                 {
                     break;
                 }
-                SdfVector g = field.Gradient(p, gradientStep);
+                SdfVector g = field.Gradient(p, gradientStep, analyticGradient);
                 double lengthSquared = g.LengthSquared();
                 if (lengthSquared == 0)
                 {
@@ -279,7 +280,7 @@ namespace pbrt
             SdfVector sum = new SdfVector(0, 0, 0);
             for (int k = 0; k < 8; ++k)
             {
-                normal[k] = field.Gradient(corner[k], gradientStep).Normalized();
+                normal[k] = field.Gradient(corner[k], gradientStep, analyticGradient).Normalized();
                 sum = sum + normal[k];
             }
             SdfVector mean = sum.Normalized();
@@ -459,7 +460,7 @@ namespace pbrt
             {
                 SdfVector a = Vertex(t, 0), b = Vertex(t, 1), c = Vertex(t, 2);
                 // The side of the triangle that the gradient points to is the outside
-                SdfVector gradient = field.Gradient(Project((a + b + c) / 3.0), gradientStep);
+                SdfVector gradient = field.Gradient(Project((a + b + c) / 3.0), gradientStep, analyticGradient);
                 double orientation = SdfVector.Dot(SdfVector.Cross(b - a, c - a), gradient) >= 0 ? 1 : -1;
                 SdfVector ra = ToRender(a), rb = ToRender(b), rc = ToRender(c);
                 SdfVector normal = SdfVector.Cross(rb - ra, rc - ra).Normalized() * (orientation * handedness);
@@ -501,6 +502,7 @@ namespace pbrt
         private readonly SdfNode field;
         private SdfLightTree lightTree;
         private readonly double lipschitz, gradientStep;
+        private readonly bool analyticGradient;
         private readonly SdfVector lower, upper;
         private readonly double[] renderFromObject;
         private readonly int subdivisions;

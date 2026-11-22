@@ -429,16 +429,25 @@ namespace pbrt
             return a + ab * (vb * denominator) + ac * (vc * denominator);
         }
 
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            VertexBounds(out lower, out upper);
+            grows = true;
+            return true;
+        }
+
         public override double Evaluate(SdfVector p)
         {
             return Signed(p, signMode);
         }
 
-        private double Signed(SdfVector p, int mode)
+        // The squared distance from p to the mesh, with the closest triangle, the feature of it that is closest and the point
+        private double Nearest(SdfVector p, out int bestTriangle, out int bestFeature, out SdfVector bestPoint)
         {
             double best = double.MaxValue;
-            int bestTriangle = -1, bestFeature = 0;
-            SdfVector bestPoint = new SdfVector(0, 0, 0);
+            bestTriangle = -1;
+            bestFeature = 0;
+            bestPoint = new SdfVector(0, 0, 0);
             Span<int> stack = stackalloc int[64];
             int stackSize = 0;
             stack[stackSize++] = 0;
@@ -481,13 +490,32 @@ namespace pbrt
                     stack[stackSize++] = first;
                 }
             }
+            return best;
+        }
+
+        private double Signed(SdfVector p, int mode)
+        {
+            double best = Nearest(p, out int bestTriangle, out int bestFeature, out SdfVector bestPoint);
             if (bestTriangle < 0)
             {
                 return double.MaxValue;
             }
+            double distance = Math.Sqrt(best);
+            return IsInside(p, bestPoint, bestTriangle, bestFeature, mode) ? -distance : distance;
+        }
+
+        // Whether p is inside, given the triangle, feature and point of the mesh that are closest to it: by the way the mesh
+        // tells its sign
+        public bool IsInside(SdfVector p, SdfVector bestPoint, int bestTriangle, int bestFeature)
+        {
+            return IsInside(p, bestPoint, bestTriangle, bestFeature, signMode);
+        }
+
+        private bool IsInside(SdfVector p, SdfVector bestPoint, int bestTriangle, int bestFeature, int mode)
+        {
             if (mode == 1)
             {
-                return WindingNumber(p) > 0.5 ? -Math.Sqrt(best) : Math.Sqrt(best);
+                return WindingNumber(p) > 0.5;
             }
             if (mode == 2)
             {
@@ -495,13 +523,19 @@ namespace pbrt
                 double winding = WindingNumber(p);
                 if (winding > 0.8)
                 {
-                    return -Math.Sqrt(best);
+                    return true;
                 }
                 if (winding < 0.2)
                 {
-                    return Math.Sqrt(best);
+                    return false;
                 }
             }
+            return IsBehind(p, bestPoint, bestTriangle, bestFeature);
+        }
+
+        // Whether p is on the inner side of the feature of a triangle that is closest to it, by the pseudonormal of the feature
+        private bool IsBehind(SdfVector p, SdfVector bestPoint, int bestTriangle, int bestFeature)
+        {
             SdfVector pseudonormal = faceNormals[bestTriangle];
             int i0 = indices[3 * bestTriangle], i1 = indices[3 * bestTriangle + 1], i2 = indices[3 * bestTriangle + 2];
             if (bestFeature == 1)
@@ -528,8 +562,91 @@ namespace pbrt
             {
                 pseudonormal = edgeNormals[EdgeKey(i2, i0)];
             }
-            double distance = Math.Sqrt(best);
-            return SdfVector.Dot(p - bestPoint, pseudonormal) < 0 ? -distance : distance;
+            return SdfVector.Dot(p - bestPoint, pseudonormal) < 0;
+        }
+
+        public SdfVector Corner(int triangle, int corner)
+        {
+            return vertices[indices[3 * triangle + corner]];
+        }
+
+        // The largest distance from a point to a triangle, which is at one of its corners
+        public double Farthest(SdfVector a, int triangle)
+        {
+            return Math.Sqrt(Math.Max((Corner(triangle, 0) - a).LengthSquared(),
+                                      Math.Max((Corner(triangle, 1) - a).LengthSquared(), (Corner(triangle, 2) - a).LengthSquared())));
+        }
+
+        // Whether a triangle whose closest point to the center is q can be the closest triangle to some point of the ball, when
+        // the point a of the mesh is the closest one to the center. Two tests, each of which rules a triangle out for certain:
+        //  - by radius (Pujol, "Efficient discretization of signed distance fields", 2022, section 5.1, for a ball instead of
+        //    the box of an octree node): the closest triangle of a point of the ball is no farther from the center than a
+        //    is plus twice the radius;
+        //  - by the plane halfway between a and a point b of the triangle: the ball is on the side of a if
+        //    (|c - b|^2 - |c - a|^2) / (2 |a - b|) > radius, and over the triangle |c - b| is at least |c - q| and |a - b| at
+        //    most the distance from a to its farthest corner. Then a is nearer than the triangle everywhere in the ball.
+        public bool CanBeClosest(SdfVector center, double radius, SdfVector a, SdfVector q, int triangle)
+        {
+            double nearest = (a - center).LengthSquared(), distance = (q - center).LengthSquared();
+            double reach = Math.Sqrt(nearest) + 2 * radius;
+            if (distance > reach * reach * (1 + 1e-9))
+            {
+                return false;
+            }
+            return distance - nearest <= 2 * radius * Farthest(a, triangle) * (1 + 1e-9);
+        }
+
+        // The field of a cell (SdfNode.Prune): only the triangles that can be the closest one to a point of the ball. The
+        // distance is then from the list; the sign is that of the center for a ball that the surface does not cross, and
+        // asked of the mesh (its pseudonormals or its winding number) for one that it does.
+        public override SdfNode Prune(SdfVector center, double radius, out double lower, out double upper)
+        {
+            double squared = Nearest(center, out int closestTriangle, out int closestFeature, out SdfVector a);
+            if (closestTriangle < 0)
+            {
+                lower = upper = double.MaxValue;
+                return this;
+            }
+            double value = IsInside(center, a, closestTriangle, closestFeature) ? -Math.Sqrt(squared) : Math.Sqrt(squared);
+            lower = value - radius;
+            upper = value + radius;
+            double reach = Math.Abs(value) + 2 * radius, reachSquared = reach * reach * (1 + 1e-9);
+            List<int> near = new List<int>();
+            Span<int> stack = stackalloc int[64];
+            int stackSize = 0;
+            stack[stackSize++] = 0;
+            while (stackSize > 0)
+            {
+                int nodeIndex = stack[--stackSize];
+                HierarchyNode node = nodes[nodeIndex];
+                if (BoxDistanceSquared(node, center) > reachSquared)
+                {
+                    continue;
+                }
+                if (node.triangleCount == 0)
+                {
+                    stack[stackSize++] = node.secondChild;
+                    stack[stackSize++] = nodeIndex + 1;
+                    continue;
+                }
+                for (int i = 0; i < node.triangleCount; ++i)
+                {
+                    int t = order[node.firstTriangle + i];
+                    SdfVector q = ClosestOnTriangle(center, vertices[indices[3 * t]], vertices[indices[3 * t + 1]], vertices[indices[3 * t + 2]],
+                                                    out int feature);
+                    if (t == closestTriangle || CanBeClosest(center, radius, a, q, t))
+                    {
+                        near.Add(t);
+                        if (near.Count > SdfMeshPart.MostTriangles)
+                        {
+                            // Too many for a list that is gone through one by one: the hierarchy is the faster way
+                            return this;
+                        }
+                    }
+                }
+            }
+            near.Sort();
+            return new SdfMeshPart(this, near.ToArray(), Math.Abs(value) <= radius ? 0 : (value < 0 ? -1 : 1));
         }
 
         private readonly SdfVector[] vertices;
@@ -541,6 +658,108 @@ namespace pbrt
         private int signMode;
         private List<HierarchyNode> nodes;
         private int[] order;
+    }
+
+    // SdfMeshPart Definition: the exact distance to a mesh from a short list of its triangles, for a region in which no other
+    // triangle can be the closest (SdfMeshDistance.Prune). side is the sign of the whole region (-1 inside, 1 outside), or 0
+    // for a region that the surface crosses, where the mesh tells the sign as it does for itself.
+    public sealed class SdfMeshPart : SdfNode
+    {
+        public const int MostTriangles = 48;
+
+        public SdfMeshPart(SdfMeshDistance mesh, int[] triangles, int side)
+        {
+            this.mesh = mesh;
+            this.triangles = triangles;
+            this.side = side;
+        }
+
+        public override double Evaluate(SdfVector p)
+        {
+            double best = double.MaxValue;
+            int bestTriangle = -1, bestFeature = 0;
+            SdfVector bestPoint = new SdfVector(0, 0, 0);
+            for (int i = 0; i < triangles.Length; ++i)
+            {
+                int t = triangles[i];
+                SdfVector q = SdfMeshDistance.ClosestOnTriangle(p, mesh.Corner(t, 0), mesh.Corner(t, 1), mesh.Corner(t, 2), out int feature);
+                double distanceSquared = (q - p).LengthSquared();
+                if (distanceSquared < best)
+                {
+                    best = distanceSquared;
+                    bestTriangle = t;
+                    bestFeature = feature;
+                    bestPoint = q;
+                }
+            }
+            if (bestTriangle < 0)
+            {
+                return double.MaxValue;
+            }
+            double distance = Math.Sqrt(best);
+            if (side != 0)
+            {
+                return side * distance;
+            }
+            return mesh.IsInside(p, bestPoint, bestTriangle, bestFeature) ? -distance : distance;
+        }
+
+        public override bool IsRigorous()
+        {
+            return mesh.IsRigorous();
+        }
+
+        public override bool Bounds(out SdfVector lower, out SdfVector upper, out bool grows)
+        {
+            return mesh.Bounds(out lower, out upper, out grows);
+        }
+
+        // A smaller region inside the one of this list: the same tests among the triangles of the list
+        public override SdfNode Prune(SdfVector center, double radius, out double lower, out double upper)
+        {
+            double value = Evaluate(center);
+            lower = value - radius;
+            upper = value + radius;
+            double best = double.MaxValue;
+            int closest = -1;
+            SdfVector a = new SdfVector(0, 0, 0);
+            SdfVector[] points = new SdfVector[triangles.Length];
+            for (int i = 0; i < triangles.Length; ++i)
+            {
+                int t = triangles[i];
+                points[i] = SdfMeshDistance.ClosestOnTriangle(center, mesh.Corner(t, 0), mesh.Corner(t, 1), mesh.Corner(t, 2), out int feature);
+                double distanceSquared = (points[i] - center).LengthSquared();
+                if (distanceSquared < best)
+                {
+                    best = distanceSquared;
+                    closest = i;
+                    a = points[i];
+                }
+            }
+            List<int> near = new List<int>();
+            for (int i = 0; i < triangles.Length; ++i)
+            {
+                if (i == closest || mesh.CanBeClosest(center, radius, a, points[i], triangles[i]))
+                {
+                    near.Add(triangles[i]);
+                }
+            }
+            int sign = side != 0 ? side : (Math.Abs(value) <= radius ? 0 : (value < 0 ? -1 : 1));
+            return near.Count == triangles.Length && sign == side ? this : new SdfMeshPart(mesh, near.ToArray(), sign);
+        }
+
+        public override void Signature(System.Text.StringBuilder key)
+        {
+            key.Append("MP").Append(SdfIdentity.Of(mesh)).Append('|').Append(side);
+            for (int i = 0; i < triangles.Length; ++i)
+            {
+                key.Append(',').Append(triangles[i]);
+            }
+        }
+
+        private readonly SdfMeshDistance mesh;
+        private readonly int[] triangles;
+        private readonly int side;
     }
 
     // SdfGrid Definition
@@ -640,7 +859,23 @@ namespace pbrt
                 double c11 = Sample(ix, iy + 1, iz + 1) * (1 - fx) + Sample(ix + 1, iy + 1, iz + 1) * fx;
                 value = (c00 * (1 - fy) + c10 * fy) * (1 - fz) + (c01 * (1 - fy) + c11 * fy) * fz;
             }
-            return value + outside;
+            // Outside the box the closest point of the box is at a right angle or more to everything inside it, so the distance
+            // is at least sqrt(outside^2 + value^2). (The sum of the two, which this used to return, is an upper bound of the
+            // distance, not a lower one: a tracer could step past a thin part, and a carving could cut into the object.)
+            if (outside == 0)
+            {
+                return value;
+            }
+            return value > 0 ? Math.Sqrt(outside * outside + value * value) : value + outside;
+        }
+
+        // The box of the grid, which holds the mesh and its padding
+        public override bool Bounds(out SdfVector lowerBound, out SdfVector upperBound, out bool grows)
+        {
+            lowerBound = lower;
+            upperBound = upper;
+            grows = false;
+            return true;
         }
 
         // The reconstruction can overshoot a little between the samples of a distance

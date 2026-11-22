@@ -47,7 +47,20 @@ namespace pbrt
             double outside = new SdfVector(p.x - cx, p.y - cy, p.z - cz).Length();
             nanovdb.Vec3<double> index = grid.worldToIndexF(new nanovdb.Vec3<double>(cx, cy, cz));
             double value = new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(grid.tree()).Apply(index);
-            return value + outside;
+            // At least sqrt(outside^2 + value^2) outside the box (see SdfGrid.Evaluate)
+            if (outside == 0)
+            {
+                return value;
+            }
+            return value > 0 ? Math.Sqrt(outside * outside + value * value) : value + outside;
+        }
+
+        public override bool Bounds(out SdfVector lowerBound, out SdfVector upperBound, out bool grows)
+        {
+            lowerBound = lower;
+            upperBound = upper;
+            grows = false;
+            return true;
         }
 
         // Trilinear interpolation of the distances of a level set can overshoot the distance a little

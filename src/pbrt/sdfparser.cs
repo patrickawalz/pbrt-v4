@@ -6,15 +6,29 @@
 //   sphere(r)  box(hx, hy, hz [, rounding])  torus(R, r)  cylinder(r, halfHeight)  capsule(ax,ay,az, bx,by,bz, r)
 //   cone(r, height)  plane(nx, ny, nz, offset)  ellipsoid(rx, ry, rz)  octahedron(s)  mandelbulb([power, iterations, bailout, safety])
 //   menger([iterations])  gyroid(period, thickness)  mesh("file.ply" [, resolution, padding])
-//   union(a, b)  intersect(a, b)  subtract(a, b)  smoothunion(a, b, k [, "poly"|"cubic"|"exp"])  smoothintersect(...)
+//   boxframe(hx, hy, hz, e)  cappedtorus(halfAngle, R, r)  link(halfLength, R, r)  hexprism(apothem, halfHeight)
+//   triprism(size, halfHeight)  roundedcylinder(r, rounding, halfHeight)  cappedcone(halfHeight, r1, r2)  roundcone(r1, r2, h)
+//   solidangle(halfAngle, r)  cutsphere(r, h)  cuthollowsphere(r, h, t)  deathstar(ra, rb, d)  rhombus(la, lb, halfHeight, rounding)
+//   pyramid(h)  triangle(ax,ay,az, bx,by,bz, cx,cy,cz, t)  quad(a, b, c, d as 12 numbers, t)  infinitecylinder(r)
+//   infinitecone(halfAngle)  torusnorm(R, r, ringPower, tubePower)  ballnorm(r, power)   (sdfprimitives.cs)
+//   outlines and the solids over them (sdfcontour.cs):  path("M x y L x y A x y bulge Q cx cy x y Z")  circle(r)
+//   rect(hx, hy [, rounding])  polygon(x0, y0, x1, y1, ...)  ngon(sides, apothem)  octagon(apothem)  cross(arm, halfWidth)
+//   pie(halfAngle, r)  arc(halfAngle, r, halfWidth)  horseshoe(halfAngle, r, length, halfWidth)  vesica(r, d)
+//   translate2(o, x, y)  rotate2(o, degrees)  offset2(o, d)  extrude(o, halfHeight)  revolve(o [, offset])  lathe(profile)
+//   multiphase fields, one distance for each material (sdfphases.cs):  phase(a, m)  under(A, B)  over(A, B)
+//   contact(a, b, ma, mb [, alpha])  contactsmooth(a, b, ma, mb, r [, alpha])  layer(A, m, t)  change(A, s, ma, mb)
+//   remove(A, m)  shrink(A, r)  checker(ma, mb [, size])  merge(A [, m, ...]); intersect and subtract cut all the phases of A
+//   proxy(a)   a behind its box: the distance to the box away from it, a only inside (not below an offset, a shell or a blend)
+//   union(a, b)  intersect(a, b)  subtract(a, b)  xor(a, b)  smoothunion(a, b, k [, "poly"|"cubic"|"exp"])  smoothintersect(...)
 //   smoothsubtract(...)  mix(a, b, t)  offset(a, d)  shell(a, thickness)
 //   translate(a, x, y, z)  rotate(a, rx, ry, rz)  rotateaxis(a, ax, ay, az, degrees)  scale(a, s | sx, sy, sz)
-//   twist(a, k)  bend(a, k)  repeat(a, px, py, pz [, count])  mirror(a, "x"|"y"|"z")  elongate(a, hx, hy, hz)
+//   twist(a, k)  bend(a, k)  repeat(a, px, py, pz [, count [, jitter [, seed]]])  mirror(a, "x"|"y"|"z")  elongate(a, hx, hy, hz)
 //   displace(a, amplitude, frequency [, octaves, roughness])
 //   inset  ink  clip  julia  metaballs   texdisplace  label  transfer  morph  translate_t  rotate_t  displace_t  mandelbulbt
 //   (see sdfops.cs)
 //
-// and the operators a | b (union), a & b (intersection) and a - b (subtraction), with & binding tighter than - and | .
+// and the operators a | b (union), a ^ b (exclusive or), a & b (intersection) and a - b (subtraction), with & binding tighter
+// than - , and - tighter than | and ^ .
 // The constant pi is known; angles are in degrees.
 
 using System;
@@ -33,6 +47,11 @@ namespace pbrt
         // Called to make a field from a mesh file (name, resolution, padding); set by the code that knows how to read meshes
         public Func<string, int, double, string, SdfNode> meshLoader;
         public Func<string, string, SdfNode> vdbLoader;
+        // No warnings: for a parse whose result is only asked for its extent
+        public bool quiet = false;
+        // The multiphase functions make the nodes of sdfphases.cs (one node for all the phases of an operator) instead of the
+        // bundles of ordinary fields of sdfphasetree.cs
+        public bool legacyPhases = false;
     }
 
     // SdfParser Definition
@@ -75,6 +94,19 @@ namespace pbrt
         private void Fail(string message)
         {
             pbrt.ErrorExit("sdf expression \"" + source + "\": " + message + ".");
+        }
+
+        // Warns that an operator reads the field on a side where it is only a bound of the distance
+        private void Inexact(string operation, string side)
+        {
+            if (context.quiet)
+            {
+                return;
+            }
+            pbrt.Warning("sdf expression \"" + source + "\": " + operation + " reads the distance " + side +
+                         ", where this field is a bound and not the exact distance (a union is not exact inside; an " +
+                         "intersection, a subtraction and a blend are not exact outside). The bound is smaller than the distance, so " +
+                         "where it is loose the wall of a shell is too thick and an inward offset or an inset takes too much.");
         }
 
         private void Tokenize()
@@ -139,7 +171,7 @@ namespace pbrt
                     tokens.Add(new Token { kind = TokenKind.String, text = source.Substring(i + 1, end - i - 1) });
                     i = end + 1;
                 }
-                else if ("(),|&-+".IndexOf(c) >= 0)
+                else if ("(),|&-+^".IndexOf(c) >= 0)
                 {
                     tokens.Add(new Token { kind = TokenKind.Symbol, text = c.ToString() });
                     ++i;
@@ -160,10 +192,11 @@ namespace pbrt
         private SdfNode ParseUnion()
         {
             SdfNode node = ParseSubtraction();
-            while (IsSymbol("|") || IsSymbol("+"))
+            while (IsSymbol("|") || IsSymbol("+") || IsSymbol("^"))
             {
+                bool exclusive = IsSymbol("^");
                 ++position;
-                node = new SdfUnion(node, ParseSubtraction());
+                node = Build(exclusive ? "xor" : "union", new List<object> { node, ParseSubtraction() });
             }
             return node;
         }
@@ -174,7 +207,7 @@ namespace pbrt
             while (IsSymbol("-"))
             {
                 ++position;
-                node = new SdfSubtraction(node, ParseIntersection());
+                node = Build("subtract", new List<object> { node, ParseIntersection() });
             }
             return node;
         }
@@ -185,7 +218,7 @@ namespace pbrt
             while (IsSymbol("&"))
             {
                 ++position;
-                node = new SdfIntersection(node, ParsePrimary());
+                node = Build("intersect", new List<object> { node, ParsePrimary() });
             }
             return node;
         }
@@ -284,6 +317,70 @@ namespace pbrt
             return (SdfNode)arguments[index];
         }
 
+        // A multiphase field (sdfphases.cs) cut by an ordinary one keeps its phases
+        private static SdfNode Intersect(SdfNode a, SdfNode b)
+        {
+            if (a is SdfPhaseNode && !(b is SdfPhaseNode))
+            {
+                return new SdfPhaseCut((SdfPhaseNode)a, b, false);
+            }
+            return new SdfIntersection(a, b);
+        }
+
+        private static SdfNode Subtract(SdfNode a, SdfNode b)
+        {
+            if (a is SdfPhaseNode && !(b is SdfPhaseNode))
+            {
+                return new SdfPhaseCut((SdfPhaseNode)a, b, true);
+            }
+            return new SdfSubtraction(a, b);
+        }
+
+        // A multiphase argument
+        private SdfPhaseNode Tree(List<object> arguments, int index, string function)
+        {
+            if (index >= arguments.Count || !(arguments[index] is SdfPhaseNode))
+            {
+                Fail(function + ": argument " + (index + 1) + " must be a multiphase field (phase, under, over, contact, layer, ...)");
+            }
+            return (SdfPhaseNode)arguments[index];
+        }
+
+        // The number of a phase
+        private int PhaseIndex(List<object> arguments, int index, string function)
+        {
+            double value = Number(arguments, index, function, this);
+            if (value != Math.Floor(value) || value < 0 || value >= SdfPhaseNode.MaxPhases)
+            {
+                Fail(function + ": a phase is a whole number from 0 to " + (SdfPhaseNode.MaxPhases - 1));
+            }
+            return (int)value;
+        }
+
+        // An outline argument (sdfcontour.cs), closed unless a profile is asked for
+        private SdfContour Outline(List<object> arguments, int index, string function, bool closed)
+        {
+            if (index >= arguments.Count || !(arguments[index] is SdfOutlineNode))
+            {
+                Fail(function + ": argument " + (index + 1) + " must be an outline (path, circle, rect, polygon, ...)");
+            }
+            SdfContour contour = ((SdfOutlineNode)arguments[index]).Contour();
+            if (closed && !contour.IsClosed())
+            {
+                Fail(function + ": the outline has a path that is not closed (end it with Z)");
+            }
+            return contour;
+        }
+
+        private SdfNode ClosedOutline(SdfContour contour, string function)
+        {
+            if (!contour.IsClosed())
+            {
+                Fail(function + ": the outline is not closed");
+            }
+            return new SdfOutlineNode(contour);
+        }
+
         private string Text(List<object> arguments, int index, string function)
         {
             if (index >= arguments.Count || !(arguments[index] is string))
@@ -364,8 +461,31 @@ namespace pbrt
             return Transpose(forward);
         }
 
+        // Build for SdfPhaseOps: an ordinary function applied to a part of a multiphase field, without warnings if asked
+        private SdfNode BuildPart(string name, List<object> a, bool quiet)
+        {
+            bool before = context.quiet;
+            context.quiet = before || quiet;
+            try
+            {
+                return Build(name, a);
+            }
+            finally
+            {
+                context.quiet = before;
+            }
+        }
+
         private SdfNode Build(string name, List<object> a)
         {
+            if (!context.legacyPhases)
+            {
+                SdfNode phased = SdfPhaseOps.Call(name, a, BuildPart, Fail);
+                if (phased != null)
+                {
+                    return phased;
+                }
+            }
             double[] identity = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
             switch (name)
             {
@@ -400,6 +520,65 @@ namespace pbrt
                 case "octahedron":
                     Count(a, name, 1, 1);
                     return new SdfOctahedron(Number(a, 0, name, this));
+                case "boxframe":
+                    Count(a, name, 4, 4);
+                    return new SdfBoxFrame(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this));
+                case "cappedtorus":
+                    Count(a, name, 3, 3);
+                    return new SdfCappedTorus(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "link":
+                    Count(a, name, 3, 3);
+                    return new SdfLink(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "hexprism":
+                    Count(a, name, 2, 2);
+                    return new SdfHexPrism(Number(a, 0, name, this), Number(a, 1, name, this));
+                case "triprism":
+                    Count(a, name, 2, 2);
+                    return new SdfTriPrism(Number(a, 0, name, this), Number(a, 1, name, this));
+                case "roundedcylinder":
+                    Count(a, name, 3, 3);
+                    return new SdfRoundedCylinder(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "cappedcone":
+                    Count(a, name, 3, 3);
+                    return new SdfCappedCone(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "roundcone":
+                    Count(a, name, 3, 3);
+                    return new SdfRoundCone(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "solidangle":
+                    Count(a, name, 2, 2);
+                    return new SdfSolidAngle(Number(a, 0, name, this), Number(a, 1, name, this));
+                case "cutsphere":
+                    Count(a, name, 2, 2);
+                    return new SdfCutSphere(Number(a, 0, name, this), Number(a, 1, name, this));
+                case "cuthollowsphere":
+                    Count(a, name, 3, 3);
+                    return new SdfCutHollowSphere(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "deathstar":
+                    Count(a, name, 3, 3);
+                    return new SdfDeathStar(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this));
+                case "rhombus":
+                    Count(a, name, 4, 4);
+                    return new SdfRhombus(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this));
+                case "pyramid":
+                    Count(a, name, 1, 1);
+                    return new SdfPyramid(Number(a, 0, name, this));
+                case "triangle":
+                    Count(a, name, 10, 10);
+                    return new SdfTriangle(new SdfVector(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this)),
+                                           new SdfVector(Number(a, 3, name, this), Number(a, 4, name, this), Number(a, 5, name, this)),
+                                           new SdfVector(Number(a, 6, name, this), Number(a, 7, name, this), Number(a, 8, name, this)), Number(a, 9, name, this));
+                case "quad":
+                    Count(a, name, 13, 13);
+                    return new SdfQuad(new SdfVector(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this)),
+                                       new SdfVector(Number(a, 3, name, this), Number(a, 4, name, this), Number(a, 5, name, this)),
+                                       new SdfVector(Number(a, 6, name, this), Number(a, 7, name, this), Number(a, 8, name, this)),
+                                       new SdfVector(Number(a, 9, name, this), Number(a, 10, name, this), Number(a, 11, name, this)), Number(a, 12, name, this));
+                case "infinitecylinder":
+                    Count(a, name, 1, 1);
+                    return new SdfInfiniteCylinder(Number(a, 0, name, this));
+                case "infinitecone":
+                    Count(a, name, 1, 1);
+                    return new SdfInfiniteCone(Number(a, 0, name, this));
                 case "mandelbulb":
                     Count(a, name, 0, 4);
                     return new SdfMandelbulb(Number(a, 0, 8, name), (int)Number(a, 1, 12, name), Number(a, 2, 4, name),
@@ -425,15 +604,198 @@ namespace pbrt
                         Fail("vdb: no grid loader available here");
                     }
                     return context.vdbLoader(Text(a, 0, name), a.Count > 1 ? Text(a, 1, name) : "");
+                case "path":
+                    {
+                        Count(a, name, 1, 1);
+                        SdfContour contour = SdfShapes2D.Path(Text(a, 0, name), out string error);
+                        if (contour == null)
+                        {
+                            Fail("path: " + error);
+                        }
+                        // A path may be left open: a profile for lathe
+                        return new SdfOutlineNode(contour);
+                    }
+                case "circle":
+                    Count(a, name, 1, 1);
+                    return new SdfOutlineNode(SdfShapes2D.Circle(Number(a, 0, name, this)));
+                case "rect":
+                    Count(a, name, 2, 3);
+                    return new SdfOutlineNode(SdfShapes2D.Rectangle(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, 0, name)));
+                case "polygon":
+                    {
+                        if (a.Count < 6 || a.Count % 2 != 0)
+                        {
+                            Fail("polygon takes the x and y of three or more points");
+                        }
+                        double[] coordinates = new double[a.Count];
+                        for (int i = 0; i < a.Count; ++i)
+                        {
+                            coordinates[i] = Number(a, i, name, this);
+                        }
+                        return ClosedOutline(SdfShapes2D.Polygon(coordinates), name);
+                    }
+                case "ngon":
+                    Count(a, name, 2, 2);
+                    if ((int)Number(a, 0, name, this) < 3)
+                    {
+                        Fail("ngon needs three or more sides");
+                    }
+                    return new SdfOutlineNode(SdfShapes2D.RegularPolygon((int)Number(a, 0, name, this), Number(a, 1, name, this)));
+                case "octagon":
+                    Count(a, name, 1, 1);
+                    return new SdfOutlineNode(SdfShapes2D.RegularPolygon(8, Number(a, 0, name, this)));
+                case "cross":
+                    Count(a, name, 2, 2);
+                    return new SdfOutlineNode(SdfShapes2D.Cross(Number(a, 0, name, this), Number(a, 1, name, this)));
+                case "pie":
+                    Count(a, name, 2, 2);
+                    return new SdfOutlineNode(SdfShapes2D.Pie(Number(a, 0, name, this) * Math.PI / 180, Number(a, 1, name, this)));
+                case "arc":
+                    Count(a, name, 3, 3);
+                    return new SdfOutlineNode(SdfShapes2D.Arc(Number(a, 0, name, this) * Math.PI / 180, Number(a, 1, name, this),
+                                                              Number(a, 2, name, this)));
+                case "horseshoe":
+                    Count(a, name, 4, 4);
+                    return new SdfOutlineNode(SdfShapes2D.Horseshoe(Number(a, 0, name, this) * Math.PI / 180, Number(a, 1, name, this),
+                                                                    Number(a, 2, name, this), Number(a, 3, name, this)));
+                case "vesica":
+                    Count(a, name, 2, 2);
+                    if (Number(a, 1, name, this) >= Number(a, 0, name, this))
+                    {
+                        Fail("vesica: the distance d has to be below the radius");
+                    }
+                    return new SdfOutlineNode(SdfShapes2D.Vesica(Number(a, 0, name, this), Number(a, 1, name, this)));
+                case "translate2":
+                    Count(a, name, 3, 3);
+                    return new SdfOutlineNode(Outline(a, 0, name, false).Transformed(0, Number(a, 1, name, this), Number(a, 2, name, this)));
+                case "rotate2":
+                    Count(a, name, 2, 2);
+                    return new SdfOutlineNode(Outline(a, 0, name, false).Transformed(Number(a, 1, name, this) * Math.PI / 180, 0, 0));
+                case "offset2":
+                    Count(a, name, 2, 2);
+                    return new SdfOutlineNode(Outline(a, 0, name, false).Grown(Number(a, 1, name, this)));
+                case "extrude":
+                    Count(a, name, 2, 2);
+                    return new SdfExtrude(Outline(a, 0, name, true), Number(a, 1, name, this));
+                case "revolve":
+                    Count(a, name, 1, 2);
+                    return new SdfRevolve(Outline(a, 0, name, true), Number(a, 1, 0, name), false);
+                case "lathe":
+                    {
+                        Count(a, name, 1, 1);
+                        SdfContour whole = Outline(a, 0, name, false).Mirrored();
+                        if (whole == null)
+                        {
+                            Fail("lathe takes a profile: one open path that starts and ends on the y axis (x = 0)");
+                        }
+                        return new SdfRevolve(whole, 0, true);
+                    }
+                case "torusnorm":
+                    Count(a, name, 4, 4);
+                    if (Number(a, 2, name, this) < 2 || Number(a, 3, name, this) < 2)
+                    {
+                        Fail("torusnorm: the powers have to be 2 or more");
+                    }
+                    return new SdfNormTorus(Number(a, 0, name, this), Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this));
+                case "ballnorm":
+                    Count(a, name, 2, 2);
+                    if (Number(a, 1, name, this) < 2)
+                    {
+                        Fail("ballnorm: the power has to be 2 or more");
+                    }
+                    return new SdfNormBall(Number(a, 0, name, this), Number(a, 1, name, this));
+                case "phase":
+                    Count(a, name, 2, 2);
+                    return new SdfPhaseSet(Node(a, 0, name), PhaseIndex(a, 1, name));
+                case "under":
+                    Count(a, name, 2, 2);
+                    return new SdfPhaseUnder(Tree(a, 0, name), Tree(a, 1, name));
+                case "over":
+                    Count(a, name, 2, 2);
+                    return new SdfPhaseUnder(Tree(a, 1, name), Tree(a, 0, name));
+                case "contact":
+                    {
+                        Count(a, name, 4, 5);
+                        double alpha = Number(a, 4, 0.5, name);
+                        if (alpha < 0 || alpha > 1 || PhaseIndex(a, 2, name) == PhaseIndex(a, 3, name))
+                        {
+                            Fail("contact: two different phases and an alpha from 0 to 1");
+                        }
+                        return new SdfPhaseContact(Node(a, 0, name), Node(a, 1, name), PhaseIndex(a, 2, name), PhaseIndex(a, 3, name), alpha, 0);
+                    }
+                case "contactsmooth":
+                    {
+                        Count(a, name, 5, 6);
+                        double alpha = Number(a, 5, 0.5, name);
+                        if (alpha < 0 || alpha > 1 || PhaseIndex(a, 2, name) == PhaseIndex(a, 3, name) || Number(a, 4, name, this) <= 0)
+                        {
+                            Fail("contactsmooth: two different phases, a radius above 0 and an alpha from 0 to 1");
+                        }
+                        return new SdfPhaseContact(Node(a, 0, name), Node(a, 1, name), PhaseIndex(a, 2, name), PhaseIndex(a, 3, name), alpha,
+                                                   Number(a, 4, name, this));
+                    }
+                case "layer":
+                    Count(a, name, 3, 3);
+                    return new SdfPhaseLayer(Tree(a, 0, name), PhaseIndex(a, 1, name), Number(a, 2, name, this));
+                case "change":
+                    Count(a, name, 4, 4);
+                    if (PhaseIndex(a, 2, name) == PhaseIndex(a, 3, name))
+                    {
+                        Fail("change: two different phases");
+                    }
+                    return new SdfPhaseChange(Tree(a, 0, name), Node(a, 1, name), PhaseIndex(a, 2, name), PhaseIndex(a, 3, name));
+                case "remove":
+                    Count(a, name, 2, 2);
+                    return new SdfPhaseAdjust(Tree(a, 0, name), PhaseIndex(a, 1, name), 0);
+                case "shrink":
+                    Count(a, name, 2, 2);
+                    return new SdfPhaseAdjust(Tree(a, 0, name), -1, Number(a, 1, name, this));
+                case "checker":
+                    Count(a, name, 2, 3);
+                    if (PhaseIndex(a, 0, name) == PhaseIndex(a, 1, name) || Number(a, 2, 1, name) <= 0)
+                    {
+                        Fail("checker: two different phases and a size above 0");
+                    }
+                    return new SdfPhaseChecker(PhaseIndex(a, 0, name), PhaseIndex(a, 1, name), Number(a, 2, 1, name));
+                case "merge":
+                    {
+                        if (a.Count < 1)
+                        {
+                            Fail("merge takes a multiphase field and the phases to keep");
+                        }
+                        bool[] chosen = new bool[SdfPhaseNode.MaxPhases];
+                        for (int i = 0; i < SdfPhaseNode.MaxPhases; ++i)
+                        {
+                            chosen[i] = a.Count == 1;
+                        }
+                        for (int i = 1; i < a.Count; ++i)
+                        {
+                            chosen[PhaseIndex(a, i, name)] = true;
+                        }
+                        return new SdfPhaseMerge(Tree(a, 0, name), chosen);
+                    }
+                case "proxy":
+                    {
+                        Count(a, name, 1, 1);
+                        SdfNode part = Node(a, 0, name);
+                        if (!part.Bounds(out SdfVector lower, out SdfVector upper, out bool grows))
+                        {
+                            Fail("proxy: the field has no box of its own (it has a part without end)");
+                        }
+                        return new SdfProxy(part, lower, upper, 0);
+                    }
+                case "xor":
+                    Count(a, name, 2, 2);
+                    return new SdfXor(Node(a, 0, name), Node(a, 1, name));
                 case "union":
                     Count(a, name, 2, 2);
                     return new SdfUnion(Node(a, 0, name), Node(a, 1, name));
                 case "intersect":
                     Count(a, name, 2, 2);
-                    return new SdfIntersection(Node(a, 0, name), Node(a, 1, name));
+                    return Intersect(Node(a, 0, name), Node(a, 1, name));
                 case "subtract":
                     Count(a, name, 2, 2);
-                    return new SdfSubtraction(Node(a, 0, name), Node(a, 1, name));
+                    return Subtract(Node(a, 0, name), Node(a, 1, name));
                 case "smoothunion":
                     Count(a, name, 3, 4);
                     return new SdfSmoothCombine(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this), BlendKind(a, 3, name), 0);
@@ -462,10 +824,25 @@ namespace pbrt
                     return new SdfNoiseWeight(Number(a, 0, name, this), (int)Number(a, 1, 3, name), Number(a, 2, 0.5, name));
                 case "offset":
                     Count(a, name, 2, 2);
-                    return new SdfOffset(Node(a, 0, name), Number(a, 1, name, this));
+                    {
+                        SdfNode child = Node(a, 0, name);
+                        double amount = Number(a, 1, name, this);
+                        if (amount < 0 && !child.IsExactInside())
+                        {
+                            Inexact("offset by a negative amount", "inside");
+                        }
+                        return new SdfOffset(child, amount);
+                    }
                 case "shell":
                     Count(a, name, 2, 2);
-                    return new SdfShell(Node(a, 0, name), Number(a, 1, name, this));
+                    {
+                        SdfNode child = Node(a, 0, name);
+                        if (!child.IsExactInside())
+                        {
+                            Inexact("shell", "inside");
+                        }
+                        return new SdfShell(child, Number(a, 1, name, this));
+                    }
                 case "translate":
                     Count(a, name, 4, 4);
                     // f(p - t) is f(p + (-t))
@@ -497,10 +874,10 @@ namespace pbrt
                     Count(a, name, 2, 2);
                     return new SdfBend(Node(a, 0, name), Number(a, 1, name, this), context.domainRadius);
                 case "repeat":
-                    Count(a, name, 4, 5);
+                    Count(a, name, 4, 7);
                     return new SdfRepeat(Node(a, 0, name),
                                          new SdfVector(Number(a, 1, name, this), Number(a, 2, name, this), Number(a, 3, name, this)),
-                                         (int)Number(a, 4, 0, name));
+                                         (int)Number(a, 4, 0, name), Number(a, 5, 0, name), (int)Number(a, 6, 0, name));
                 case "mirror":
                     Count(a, name, 2, 2);
                     string axis = Text(a, 1, name);
@@ -519,7 +896,14 @@ namespace pbrt
                                                     (int)Number(a, 3, 1, name), Number(a, 4, 0.5, name));
                 case "inset":
                     Count(a, name, 3, 4);
-                    return new SdfInset(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this), Number(a, 3, 0.05, name));
+                    {
+                        SdfNode region = Node(a, 1, name);
+                        if (!region.IsExactInside())
+                        {
+                            Inexact("inset", "inside its second argument");
+                        }
+                        return new SdfInset(Node(a, 0, name), region, Number(a, 2, name, this), Number(a, 3, 0.05, name));
+                    }
                 case "ink":
                     Count(a, name, 3, 3);
                     return new SdfInk(Node(a, 0, name), Node(a, 1, name), Number(a, 2, name, this));
