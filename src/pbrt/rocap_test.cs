@@ -358,6 +358,45 @@ namespace pbrt
             }
         }
 
+        // The Bezier form of a curve in another basis is the same curve: its points against the basis itself,
+        // P(u) = [u^3 u^2 u 1] M [g0 g1 g2 g3]
+        [TEST("Rocap", "BasesGiveTheSameCurve")]
+        public static void BasesGiveTheSameCurve()
+        {
+            string[] names = { "bezier", "b-spline", "catmull-rom", "hermite", "power" };
+            Random random = new Random(31);
+            foreach (string name in names)
+            {
+                CHECK(PatchBases.TryGet(name, out double[,] basis));
+                int step = PatchBases.DefaultStep(name), curves = 4;
+                double[] g = new double[4 + (curves - 1) * step];
+                for (int i = 0; i < g.Length; ++i)
+                {
+                    g[i] = random.NextDouble() * 2 - 1;
+                }
+                double[] values = Rocaps.ToBezierCurves(g, basis, step);
+                CHECK_EQ(values.Length, 4 * curves);
+                double worst = 0;
+                for (int s = 0; s < curves; ++s)
+                {
+                    for (int k = 0; k <= 20; ++k)
+                    {
+                        double u = k / 20.0, v = 1 - u;
+                        double expected = 0;
+                        for (int column = 0; column < 4; ++column)
+                        {
+                            double weight = u * u * u * basis[0, column] + u * u * basis[1, column] + u * basis[2, column] + basis[3, column];
+                            expected += weight * g[s * step + column];
+                        }
+                        double value = values[4 * s] * (v * v * v) + values[4 * s + 1] * (3 * u * v * v) + values[4 * s + 2] * (3 * u * u * v) + values[4 * s + 3] * (u * u * u);
+                        worst = Math.Max(worst, Math.Abs(value - expected));
+                    }
+                }
+                Console.WriteLine("rocap basis " + name + " (step " + step + "): the Bezier form differs from the basis by " + worst);
+                CHECK_LT(worst, 1e-12);
+            }
+        }
+
         [TEST("Rocap", "SolidAnglePdfMatchesTheSampler")]
         public static void SolidAnglePdfMatchesTheSampler()
         {

@@ -323,7 +323,7 @@ namespace pbrt
             return result;
         }
 
-        private static SdfVector OrthogonalTo(SdfVector direction)
+        public static SdfVector OrthogonalTo(SdfVector direction)
         {
             SdfVector axis = Math.Abs(direction.x) < Math.Abs(direction.y) && Math.Abs(direction.x) < Math.Abs(direction.z) ? new SdfVector(1, 0, 0) :
                              Math.Abs(direction.y) < Math.Abs(direction.z) ? new SdfVector(0, 1, 0) : new SdfVector(0, 0, 1);
@@ -336,7 +336,7 @@ namespace pbrt
         // a joint of the quadratic B-spline and so is g (up to its length), so the normals agree for every v when Y is the same on both sides: with
         // g(u0) = alpha_p b before and b after, the component of g' that is perpendicular to b of the next segment is that of the previous one divided by alpha_p.
         // That is two equations for alpha, beta and gamma; alpha is chosen to minimize beta^2 + gamma^2.
-        private static void Connect(RibbonSegment previous, RibbonSegment next)
+        public static void Connect(RibbonSegment previous, RibbonSegment next)
         {
             SdfVector b = next.bitangent0;
             SdfVector c1 = 2 * (previous.b1 - previous.b0), c2 = previous.b0 - 2 * previous.b1 + previous.b2;

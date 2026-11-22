@@ -3114,6 +3114,10 @@ namespace pbrt
             {
                 shapes = Ribbons.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
             }
+            else if (name == "ribbon2")
+            {
+                shapes = Ribbons2.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
+            }
             else if (name == "rocap")
             {
                 shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
