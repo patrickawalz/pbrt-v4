@@ -71,7 +71,28 @@ namespace pbrt
         // point of the disk that is not on the surface, which leaves the density of the points that are as it is.
         public override pstd.optional<ShapeSample> Sample(Point2f u)
         {
+            CheckSampled();
             return SampleSurface(u, false, new SdfVector(0, 0, 0));
+        }
+
+        // The samples are those of the swept spheres cut by the planes of the ends. The swept disks of a strand with one radius
+        // and flat or open ends are that surface; with a radius that changes, or with round ends or joints, they are not, and
+        // the samples would be of another surface than the rays find.
+        private void CheckSampled()
+        {
+            if (!segment.Disks)
+            {
+                return;
+            }
+            double[] radii = segment.Radii;
+            bool oneRadius = radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3];
+            bool squareEnds = segment.Start != RocylinderEnd.Round && segment.Start != RocylinderEnd.Join && segment.End != RocylinderEnd.Round &&
+                              segment.End != RocylinderEnd.Join;
+            if (!oneRadius || !squareEnds)
+            {
+                pbrt.LOG_FATAL("rocylinder: as a light it needs one radius along the strand and flat ends (no corners): its samples are not made for a radius that changes, " +
+                               "round ends or joints yet.");
+            }
         }
 
         // The density of Sample(u) at a point of the surface, by area
@@ -111,6 +132,7 @@ namespace pbrt
         // about the direction of D across the strand
         public override pstd.optional<ShapeSample> Sample(ShapeSampleContext ctx, Point2f u)
         {
+            CheckSampled();
             Point3f reference = settings.objectFromRender.Apply(ctx.p());
             return PatchSampling.ToSolidAngle(SampleSurface(u, true, new SdfVector(reference.x, reference.y, reference.z)), ctx);
         }
@@ -855,7 +877,8 @@ namespace pbrt
             SdfVector tangent = segment.Velocity(u);
             // The hit is the entry into a sphere near the envelope of the spheres, so its normal is tilted a little from the normal of the envelope (the angle to the tangent is
             // -r'/|q'|): the normal of the tube is corrected to that, which the hair material needs (its frame is perpendicular to the strand)
-            if (tangent.LengthSquared() > 0)
+            // (the normal of the swept disks is that of their surface already)
+            if (tangent.LengthSquared() > 0 && !segment.Disks)
             {
                 SdfVector axisUnit = tangent.Normalized();
                 double slope = -segment.RadiusDerivative(u) / tangent.Length();
@@ -961,11 +984,25 @@ namespace pbrt
         // "point3 P" (the control points of the chain of cubic Bezier curves: 3n + 1 points), "float radius" (one value, or one for each point),
         // "float width0" and "float width1" (diameters at the two ends when "radius" is absent, 0.02 and 0.02 of the diagonal), "rgb Cs" (the color of the strand, one for all or one for each point, read by a "strandcolor" texture with "local" true), "bool flatcaps" (disks at the ends instead of spheres), "epsilon" (a fraction of the
         // diagonal of the points that keeps rays that leave the surface from hitting it again)
+        // disks: the shape "rocylinder": swept disks in place of swept spheres (RocapSegment.Disks), with "string caps" "flat" (the default: the strand is cut off
+        // square) or "round" for the ends of the strand. Where two curves of the strand meet in one direction nothing is between them, and where they meet at an
+        // angle the sphere of the joint fills the corner.
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
-                                                FileLoc loc)
+                                                FileLoc loc, bool disks)
         {
             List<Point3f> pointList = parameters.GetPoint3fArray("P");
             List<float> radiusList = parameters.GetFloatArray("radius");
+            string caps = disks ? parameters.GetOneString("caps", "flat") : "flat";
+            // "intersector" "polynomial" (the default: all the roots of a polynomial of degree 10) or "search" (the roots between samples)
+            string intersector = parameters.GetOneString("intersector", "polynomial");
+            if (intersector != "search" && intersector != "polynomial")
+            {
+                pbrt.ErrorExit(loc, "rocap: \"intersector\" is \"search\" or \"polynomial\".");
+            }
+            if (caps != "flat" && caps != "round")
+            {
+                pbrt.ErrorExit(loc, "rocylinder: \"caps\" is \"flat\" or \"round\".");
+            }
             StrandBasis basis = StrandBasis.Read(parameters, "rocap", "bezier", 3, loc);
             string problem = basis.Check(pointList.Count);
             if (problem != null)
@@ -1093,7 +1130,30 @@ namespace pbrt
             {
                 SdfVector[] p = new SdfVector[] { points[stride * s], points[stride * s + 1], points[stride * s + 2], points[stride * s + 3] };
                 double[] r = new double[] { radii[stride * s], radii[stride * s + 1], radii[stride * s + 2], radii[stride * s + 3] };
-                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps, RootRefinement = refinement == "roots" }, strandColors) { SolidAngleSampling = solidAngle });
+                RocapSegment segment = new RocapSegment(p, r, s, count) { FlatCaps = flatCaps || disks, RootRefinement = refinement == "roots", Disks = disks, Polynomial = intersector == "polynomial" };
+                if (disks)
+                {
+                    RocylinderEnd end = caps == "round" ? RocylinderEnd.Round : RocylinderEnd.Flat;
+                    segment.Start = end;
+                    segment.End = end;
+                    if (s > 0)
+                    {
+                        // The curve before: on with it in one direction, at an angle, or apart
+                        SdfVector before = points[stride * (s - 1) + 3] - points[stride * (s - 1) + 2], after = p[1] - p[0];
+                        bool together = (points[stride * (s - 1) + 3] - p[0]).Length() <= 1e-9 * diagonal;
+                        bool straight = SdfVector.Cross(before, after).Length() <= 1e-6 * before.Length() * after.Length() && SdfVector.Dot(before, after) > 0;
+                        if (together)
+                        {
+                            segment.Start = straight ? RocylinderEnd.Open : RocylinderEnd.Join;
+                        }
+                    }
+                    if (s + 1 < count && (points[stride * (s + 1)] - p[3]).Length() <= 1e-9 * diagonal)
+                    {
+                        // (the curve after has the joint)
+                        segment.End = RocylinderEnd.Open;
+                    }
+                }
+                shapes.push_back(new RocapShape(settings, segment, strandColors) { SolidAngleSampling = solidAngle });
             }
             return shapes;
         }

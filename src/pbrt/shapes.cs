@@ -3120,7 +3120,11 @@ namespace pbrt
             }
             else if (name == "rocap")
             {
-                shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
+                shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, false);
+            }
+            else if (name == "rocylinder")
+            {
+                shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, true);
             }
             else if (name == "displacedmesh")
             {

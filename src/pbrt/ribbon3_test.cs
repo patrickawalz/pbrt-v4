@@ -31,7 +31,17 @@ namespace pbrt
             SdfVector[] points = { new SdfVector(0, 0, 0), new SdfVector(1, 1.2, 0.3), new SdfVector(2, -0.8, 0.6), new SdfVector(3, 0.4, -0.2) };
             double[] widths = { 0.15, 0.3, 0.1, 0.2 };
             double angle = twist * Math.PI / 180;
-            return new Ribbon3Curve(points, widths, new SdfVector(0, 0, 1), new SdfVector(0, Math.Sin(angle), Math.Cos(angle)), interpolation, null, null, 0, 1);
+            SdfVector[] values = null;
+            if (interpolation == Ribbon3Normals.Basis)
+            {
+                // (the Bezier values of a normal that goes round and leans on the way)
+                values = new SdfVector[]
+                {
+                    new SdfVector(0, 0, 1), new SdfVector(0.4, Math.Sin(angle / 3), Math.Cos(angle / 3)), new SdfVector(-0.3, Math.Sin(2 * angle / 3), Math.Cos(2 * angle / 3)),
+                    new SdfVector(0, Math.Sin(angle), Math.Cos(angle))
+                };
+            }
+            return new Ribbon3Curve(points, widths, new SdfVector(0, 0, 1), new SdfVector(0, Math.Sin(angle), Math.Cos(angle)), interpolation, values, null, 0, 1);
         }
 
         // The distance to the triangle along the ray (Moller and Trumbore), or -1
@@ -60,11 +70,22 @@ namespace pbrt
         [TEST("Ribbon3", "RaysHitTheSurface")]
         public static void RaysHitTheSurface()
         {
-            for (int roots = 0; roots < 2; ++roots)
-            foreach (double twist in new double[] { 0, 60, 170 })
+            // (roots 2: the polynomial, on the normals for which the crossing function is one: the same all along, in a line, and
+            // along the cubic curve of its values, which is the twist of 61 degrees)
+            for (int roots = 0; roots < 3; ++roots)
+            foreach (double twist in new double[] { 0, 60, 170, 61 })
             {
-                Ribbon3Curve curve = Twisted(twist, roots == 1 && twist == 60 ? Ribbon3Normals.Linear : Ribbon3Normals.Slerp);
-                List<Ribbon3Shape> shapes = Ribbons3.Shapes(Settings(), One(curve), 0, true, roots == 1, false, false, false, 0);
+                if (twist == 61 && roots < 2)
+                {
+                    continue;
+                }
+                Ribbon3Normals interpolation = twist == 61 ? Ribbon3Normals.Basis : (roots == 1 && twist == 60) || (roots == 2 && twist != 0) ? Ribbon3Normals.Linear : Ribbon3Normals.Slerp;
+                Ribbon3Curve curve = Twisted(twist, interpolation);
+                List<Ribbon3Shape> shapes = Ribbons3.Shapes(Settings(), One(curve), 0, true, roots >= 1, false, false, false, 0);
+                foreach (Ribbon3Shape shape in shapes)
+                {
+                    shape.Polynomial = roots == 2;
+                }
                 const int nu = 1200, nv = 24;
                 SdfVector[,] grid = new SdfVector[nu + 1, nv + 1];
                 for (int i = 0; i <= nu; ++i)
@@ -149,7 +170,7 @@ namespace pbrt
                         ++extra;
                     }
                 }
-                Console.WriteLine("ribbon3 (" + (roots == 1 ? "roots" : "newton") + ") twisted by " + twist + " degrees: " + shapes.Count + " shapes, " + rays + " rays, " + hits + " hit both, " + missed +
+                Console.WriteLine("ribbon3 (" + (roots == 2 ? "polynomial" : roots == 1 ? "roots" : "newton") + ", normals " + interpolation + ") twisted by " + twist + " degrees: " + shapes.Count + " shapes, " + rays + " rays, " + hits + " hit both, " + missed +
                                   " hit only the triangles, " + extra + " hit only the shape; the distances differ by up to " + worst + ", the hits are up to " + worstOff +
                                   " from the surface at their parameters");
                 CHECK_EQ(missed, 0);

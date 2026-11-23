@@ -80,7 +80,42 @@ namespace pbrt
             {
                 new SdfVector(-1, 0, 0), new SdfVector(-0.6, 2.2, 0.4), new SdfVector(0.8, -1.8, -0.5), new SdfVector(1.1, 0.3, 0.2)
             };
-            return new RocapSegment(p, new double[] { r0, r1, r2, r3 }, 0, 1);
+            return new RocapSegment(p, new double[] { r0, r1, r2, r3 }, 0, 1) { Polynomial = polynomial };
+        }
+
+        // (the hook with the polynomial intersector)
+        private static bool polynomial;
+
+        [TEST("Rocap", "PolynomialMatchesTheSpheres")]
+        public static void PolynomialMatchesTheSpheres()
+        {
+            polynomial = true;
+            for (int which = 0; which < 4; ++which)
+            {
+                RocapSegment segment = which == 0 ? Hook(0.12, 0.12, 0.12, 0.12) : which == 1 ? Hook(0.45, 0.3, 0.08, 0.0) : which == 2 ? Hook(0.01, 0.02, 0.01, 0.015) :
+                                       Hook(0.3, 0.2, 0.06, 0.02);
+                string name = which == 0 ? "constant" : which == 1 ? "tapered thick" : which == 2 ? "thin" : "tapered";
+                Compare(segment, which == 2 ? 20000 : 2500, out int total, out int missed, out int extra, out double worstT, out double worstSurface, out double worstNormal);
+                Console.WriteLine("rocap polynomial from all sides, " + name + ": hits " + total + " missed " + missed + " extra " + extra + " worst t " + worstT + " surface " +
+                                  worstSurface + " normal " + worstNormal);
+                CHECK_LT(missed, which == 1 ? 5 : 3);
+                CHECK_LT(extra, which == 1 ? 5 : 3);
+                CHECK_LT(worstT, which == 2 ? 1e-3 : 2e-4);
+                CHECK_LT(worstSurface, 1e-6);
+            }
+            // (the strands of GrazingRaysMatchTheSpheres)
+            for (int which = 0; which < 3; ++which)
+            {
+                RocapSegment segment = which == 0 ? Hook(0.12, 0.12, 0.12, 0.12) : which == 1 ? Hook(0.02, 0.03, 0.02, 0.025) : Hook(0.3, 0.2, 0.06, 0.02);
+                Graze(segment, 3000, out int total, out int missed, out int extra, out double worstT);
+                Console.WriteLine("rocap polynomial grazing rays, " + (which == 0 ? "constant" : which == 1 ? "thin" : "tapered") + ": hits " + total + " missed " + missed + " extra " + extra +
+                                  " worst t " + worstT);
+                CHECK_GT(total, 1500);
+                CHECK_EQ(missed, 0);
+                CHECK_EQ(extra, 0);
+                CHECK_LT(worstT, 1e-6);
+            }
+            polynomial = false;
         }
 
         // Rays at a low angle to the strand (1 to 10 degrees from its direction, at a point of its surface), over a strand

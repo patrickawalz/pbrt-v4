@@ -30,6 +30,12 @@ namespace pbrt
     {
         public bool pbrtEngine;
         public bool pbrtLook;
+        // The tube of the cylinder type: swept disks ("rocylinder") in place of swept spheres ("rocap")
+        public bool disks;
+        // (RocapSegment.Polynomial)
+        public bool polynomial;
+        // (Ribbon3Shape.Polynomial)
+        public bool ribbonPolynomial;
         public Ribbon3Normals normals;
         public bool solidAngleSampling;
         public BezierSurfaceSettings ribbonSettings;
@@ -60,6 +66,24 @@ namespace pbrt
             }
             options.pbrtEngine = engine == "pbrt";
             options.pbrtLook = look == "pbrt";
+            string tube = parameters.GetOneString("tube", "rocap");
+            if (tube != "rocap" && tube != "rocylinder")
+            {
+                pbrt.ErrorExit(loc, shape + ": \"tube\" is \"rocap\" or \"rocylinder\".");
+            }
+            options.disks = tube == "rocylinder";
+            string tubeIntersector = parameters.GetOneString("tubeintersector", "polynomial");
+            if (tubeIntersector != "search" && tubeIntersector != "polynomial")
+            {
+                pbrt.ErrorExit(loc, shape + ": \"tubeintersector\" is \"search\" or \"polynomial\".");
+            }
+            options.polynomial = tubeIntersector == "polynomial";
+            string ribbonIntersector = parameters.GetOneString("ribbonintersector", "polynomial");
+            if (ribbonIntersector != "roots" && ribbonIntersector != "polynomial")
+            {
+                pbrt.ErrorExit(loc, shape + ": \"ribbonintersector\" is \"roots\" or \"polynomial\".");
+            }
+            options.ribbonPolynomial = ribbonIntersector == "polynomial";
             options.normals = normals == "linear" ? Ribbon3Normals.Linear : Ribbon3Normals.Slerp;
             options.solidAngleSampling = parameters.GetOneBool("solidanglesampling", true);
             options.renderFromObject = renderFromObject;
@@ -118,7 +142,16 @@ namespace pbrt
                     double a = (double)i / pieces, b = (double)(i + 1) / pieces;
                     SdfVector[] part = { Blossom(points, a, a, a), Blossom(points, a, a, b), Blossom(points, a, b, b), Blossom(points, b, b, b) };
                     double[] radii = { Blossom(halves, a, a, a), Blossom(halves, a, a, b), Blossom(halves, a, b, b), Blossom(halves, b, b, b) };
-                    shapes.push_back(new RocapShape(options.rocapSettings, new RocapSegment(part, radii, 0, 1)) { SolidAngleSampling = options.solidAngleSampling });
+                    RocapSegment segment = new RocapSegment(part, radii, 0, 1) { Polynomial = options.polynomial };
+                    if (options.disks)
+                    {
+                        // (the ends of the segment are cut off square; nothing between its parts)
+                        segment.Disks = true;
+                        segment.FlatCaps = true;
+                        segment.Start = i == 0 ? RocylinderEnd.Flat : RocylinderEnd.Open;
+                        segment.End = i + 1 == pieces ? RocylinderEnd.Flat : RocylinderEnd.Open;
+                    }
+                    shapes.push_back(new RocapShape(options.rocapSettings, segment) { SolidAngleSampling = options.solidAngleSampling });
                 }
                 return;
             }
@@ -141,6 +174,7 @@ namespace pbrt
             foreach (Ribbon3Shape shape in Ribbons3.Shapes(options.ribbonSettings, curves, 0, options.solidAngleSampling, true, facing, type == CurveType.Ribbon && facing,
                                                            type == CurveType.Cylinder, pieces))
             {
+                shape.Polynomial = options.ribbonPolynomial;
                 shapes.push_back(shape);
             }
         }

@@ -6,7 +6,7 @@
 //   Shape "ribbon3" "point3 P" [...] ("string basis" "b-spline") ("integer degree" 2) ("integer step" ...) ("string wrap" "nonperiodic")
 //         ("float tension" 0.5) ("float knots" [...])
 //         ("normal N" [...]) ("float width" [...]) ("rgb Cs" [...]) ("bool solidanglesampling" true) ("bool flipturns" false)
-//         ("string intersector" "roots") ("string look" "surface") ("string normals" "slerp")
+//         ("string intersector" "polynomial") ("string look" "surface") ("string normals" "slerp")
 //
 //   normals: how "N" goes from one end of a curve to the other (Ribbon3Normals). "slerp": round at one rate, as the ribbons of
 //   pbrt-v4. "linear": in a line and then of unit length, a "varying" normal of RenderMan. "basis": the normals of the control
@@ -53,7 +53,11 @@
 //   flipstretch: "curve" or "bend", as for "ribbon2" (cubic bases with normals: the rule of flipturns over stretches that go
 //   round the bends of the strand, as the segments of "ribbon" do).
 //
-// The ray ("intersector" "roots", the default). The surface is the line across the ribbon, C(u) + s b(u), moved along u. A ray
+// The ray. "intersector" "polynomial" (the default): where the crossing function below is a polynomial in u (one normal all
+// along, "normals" "linear" or "basis", and every look that faces the ray), all its roots by polynomialroots.cs
+// (Ribbon3Curve.CrossingPolynomial); elsewhere (a normal that turns at one rate, "flipturns") it is "roots":
+//
+// "intersector" "roots". The surface is the line across the ribbon, C(u) + s b(u), moved along u. A ray
 // meets that line where the ray, b(u) and the step from the origin of the ray to C(u) are in one plane:
 //
 //   f(u) = (C(u) - o) . (d x b(u)) = 0
@@ -432,6 +436,89 @@ namespace pbrt
                 u = next;
             }
             return u;
+        }
+
+        // The crossing function as a polynomial (polynomialroots.cs). It has the sign of f(u) = (C - o) . (d x b) wherever the
+        // bitangent b is a polynomial in u before it is made of unit length (that length is positive, and does not move a
+        // root): b ~ C' x N with the normal N the same all along (degree 2), in a line from n0 to n1 ("normals" "linear",
+        // degree 3) or along the cubic curve of its values ("basis", degree 5), which with C - o of degree 3 gives a polynomial
+        // of degree 5, 6 or 8. The normal that turns at one rate ("slerp") and the bitangents of "flipturns" are not
+        // polynomials: -1. facing: of the strip that faces the ray, f(u) = (C - o) . (C' - d (d . C')), of degree 5 for any
+        // normals. The ray is taken from its point nearest the middle of the curve (the squares of a far origin would take the
+        // digits). coef: room for 9 values; the degree.
+        public unsafe int CrossingPolynomial(SdfVector o, SdfVector d, bool facing, double* coef)
+        {
+            if (!facing && (like != null || (interpolation == Ribbon3Normals.Slerp && angle != 0)))
+            {
+                return -1;
+            }
+            SdfVector c1 = (p1 - p0) * 3, c2 = (p0 - 2 * p1 + p2) * 3, c3 = p3 - 3 * p2 + 3 * p1 - p0;
+            SdfVector c0 = p0 - (o + d * SdfVector.Dot(Center(0.5) - o, d));
+            // The derivative of the centerline
+            SdfVector t0 = c1, t1 = c2 * 2, t2 = c3 * 3;
+            if (facing)
+            {
+                // (the centerline across the ray)
+                SdfVector e0 = c0 - d * SdfVector.Dot(c0, d), e1 = c1 - d * SdfVector.Dot(c1, d), e2 = c2 - d * SdfVector.Dot(c2, d), e3 = c3 - d * SdfVector.Dot(c3, d);
+                coef[0] = SdfVector.Dot(e0, t0);
+                coef[1] = SdfVector.Dot(e0, t1) + SdfVector.Dot(e1, t0);
+                coef[2] = SdfVector.Dot(e0, t2) + SdfVector.Dot(e1, t1) + SdfVector.Dot(e2, t0);
+                coef[3] = SdfVector.Dot(e1, t2) + SdfVector.Dot(e2, t1) + SdfVector.Dot(e3, t0);
+                coef[4] = SdfVector.Dot(e2, t2) + SdfVector.Dot(e3, t1);
+                coef[5] = SdfVector.Dot(e3, t2);
+                return 5;
+            }
+            // (C - o) x d
+            SdfVector q0 = SdfVector.Cross(c0, d), q1 = SdfVector.Cross(c1, d), q2 = SdfVector.Cross(c2, d), q3 = SdfVector.Cross(c3, d);
+            // The normal before it is made of unit length, in powers of u
+            SdfVector m0 = n0, m1 = default, m2 = default, m3 = default;
+            int normalDegree = 0;
+            if (interpolation == Ribbon3Normals.Linear)
+            {
+                m1 = n1 - n0;
+                normalDegree = 1;
+            }
+            else if (interpolation == Ribbon3Normals.Basis)
+            {
+                m0 = v0;
+                m1 = (v1 - v0) * 3;
+                m2 = (v0 - 2 * v1 + v2) * 3;
+                m3 = v3 - 3 * v2 + 3 * v1 - v0;
+                normalDegree = 3;
+            }
+            // b ~ C' x N
+            SdfVector b0 = SdfVector.Cross(t0, m0), b1 = SdfVector.Cross(t1, m0), b2 = SdfVector.Cross(t2, m0), b3 = default, b4 = default, b5 = default;
+            if (normalDegree >= 1)
+            {
+                b1 = b1 + SdfVector.Cross(t0, m1);
+                b2 = b2 + SdfVector.Cross(t1, m1);
+                b3 = SdfVector.Cross(t2, m1);
+            }
+            if (normalDegree == 3)
+            {
+                b2 = b2 + SdfVector.Cross(t0, m2);
+                b3 = b3 + SdfVector.Cross(t1, m2) + SdfVector.Cross(t0, m3);
+                b4 = SdfVector.Cross(t2, m2) + SdfVector.Cross(t1, m3);
+                b5 = SdfVector.Cross(t2, m3);
+            }
+            coef[0] = SdfVector.Dot(b0, q0);
+            coef[1] = SdfVector.Dot(b0, q1) + SdfVector.Dot(b1, q0);
+            coef[2] = SdfVector.Dot(b0, q2) + SdfVector.Dot(b1, q1) + SdfVector.Dot(b2, q0);
+            coef[3] = SdfVector.Dot(b0, q3) + SdfVector.Dot(b1, q2) + SdfVector.Dot(b2, q1) + SdfVector.Dot(b3, q0);
+            coef[4] = SdfVector.Dot(b1, q3) + SdfVector.Dot(b2, q2) + SdfVector.Dot(b3, q1) + SdfVector.Dot(b4, q0);
+            coef[5] = SdfVector.Dot(b2, q3) + SdfVector.Dot(b3, q2) + SdfVector.Dot(b4, q1) + SdfVector.Dot(b5, q0);
+            if (normalDegree == 0)
+            {
+                return 5;
+            }
+            coef[6] = SdfVector.Dot(b3, q3) + SdfVector.Dot(b4, q2) + SdfVector.Dot(b5, q1);
+            if (normalDegree == 1)
+            {
+                return 6;
+            }
+            coef[7] = SdfVector.Dot(b4, q3) + SdfVector.Dot(b5, q2);
+            coef[8] = SdfVector.Dot(b5, q3);
+            return 8;
         }
 
         // The hit of the ray with the line of the ribbon at u, where the ray crosses it: within the width, farther than tMin and
@@ -848,6 +935,10 @@ namespace pbrt
             SdfVector e2 = SdfVector.Cross(direction, e1);
             t = float.IsPositiveInfinity(tMax) ? 1e30 : tMax * length;
             bool found = false;
+            if (Polynomial && TracePolynomial(origin, direction, e1, e2, ref t, ref u, ref v, out found))
+            {
+                return found;
+            }
             for (int i = 0; i < leaves; ++i)
             {
                 // The chord of the leaf across the ray, and the point of it that is the nearest to the ray
@@ -904,6 +995,68 @@ namespace pbrt
                 found |= Search(origin, direction, e1, e2, a, fa, da, b, fb, db, steepest, 4, ref t, ref u, ref v);
             }
             return found;
+        }
+
+        // The crossings by the roots of the polynomial of the crossing function (Ribbon3Curve.CrossingPolynomial), over the leaves
+        // within whose reach the ray passes; each root is then brought to that of the crossing function itself by Newton's
+        // steps. False where the crossing function of the curve is no polynomial (the leaves are then searched as before).
+        private unsafe bool TracePolynomial(SdfVector origin, SdfVector direction, SdfVector e1, SdfVector e2, ref double t, ref double u, ref double v, out bool found)
+        {
+            found = false;
+            double* coef = stackalloc double[9];
+            // (the leaves in reach first: most rays that come to the bounds have none, and need no polynomial)
+            int first = -1, last = -1;
+            for (int i = 0; i < leaves; ++i)
+            {
+                SdfVector start = Node(i, 0) - origin, end = Node(i + 1, 0) - origin;
+                double ax = SdfVector.Dot(e1, start), ay = SdfVector.Dot(e2, start);
+                double cx = SdfVector.Dot(e1, end) - ax, cy = SdfVector.Dot(e2, end) - ay;
+                double square = cx * cx + cy * cy;
+                double along = square > 0 ? Math.Max(0, Math.Min(1, -(ax * cx + ay * cy) / square)) : 0.5;
+                double nx = ax + along * cx, ny = ay + along * cy;
+                if (nx * nx + ny * ny > Leaf(i, 0) * Leaf(i, 0))
+                {
+                    continue;
+                }
+                first = first < 0 ? i : first;
+                last = i;
+            }
+            int degree = curve.CrossingPolynomial(origin, direction, facing, coef);
+            if (degree < 0)
+            {
+                return false;
+            }
+            if (first < 0)
+            {
+                return true;
+            }
+            double low = from + (to - from) * first / leaves, high = from + (to - from) * (last + 1) / leaves;
+            double* crossings = stackalloc double[8];
+            int count = PolynomialRoots.Roots(coef, degree, low, high, 1e-9, crossings);
+            for (int i = 0; i < count; ++i)
+            {
+                double root = crossings[i];
+                for (int step = 0; step < 2; ++step)
+                {
+                    double f, derivative;
+                    if (facing)
+                    {
+                        curve.FacingCrossing(origin, direction, root, out f, out derivative);
+                    }
+                    else
+                    {
+                        curve.Crossing(origin, direction, root, out f, out derivative);
+                    }
+                    double next = derivative != 0 ? root - f / derivative : root;
+                    if (!(Math.Abs(next - crossings[i]) <= 1e-6) || next < from || next > to)
+                    {
+                        break;
+                    }
+                    root = next;
+                }
+                found |= HitAt(origin, direction, e1, e2, root, ref t, ref u, ref v);
+            }
+            return true;
         }
 
         // The vector `which` kept for the end `node` of a leaf (0: the centerline, 1: its derivative, 2: its second derivative or
@@ -1156,6 +1309,9 @@ namespace pbrt
         private readonly double[] data;
         private readonly int stride;
         private readonly bool roots;
+        // The crossings by the roots of a polynomial where the crossing function is one ("intersector" "polynomial"); the search
+        // of `roots` otherwise
+        public bool Polynomial;
         private readonly bool facing;
         private readonly bool narrowed;
         private readonly bool rounded;
@@ -1513,10 +1669,10 @@ namespace pbrt
                                                         givenNz, parts);
                 like = Ribbons2.Build(runs, true, out double[] starts, out double[] extents);
             }
-            string intersector = parameters.GetOneString("intersector", "roots");
-            if (intersector != "newton" && intersector != "roots")
+            string intersector = parameters.GetOneString("intersector", "polynomial");
+            if (intersector != "newton" && intersector != "roots" && intersector != "polynomial")
             {
-                pbrt.ErrorExit(loc, "ribbon3: \"intersector\" is \"newton\" or \"roots\".");
+                pbrt.ErrorExit(loc, "ribbon3: \"intersector\" is \"newton\", \"roots\" or \"polynomial\".");
             }
             string normalsName = parameters.GetOneString("normals", "slerp");
             if (normalsName != "slerp" && normalsName != "linear" && normalsName != "basis")
@@ -1529,9 +1685,10 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, "ribbon3: \"look\" is \"surface\", \"curves\", \"facing\" or \"cylinder\".");
             }
-            foreach (Ribbon3Shape shape in Shapes(settings, Curves(x, y, z, w, nx, ny, nz, interpolation, like, parts), strandColors, solidAngle, intersector == "roots", look != "surface",
+            foreach (Ribbon3Shape shape in Shapes(settings, Curves(x, y, z, w, nx, ny, nz, interpolation, like, parts), strandColors, solidAngle, intersector != "newton", look != "surface",
                                                   look == "curves", look == "cylinder", 0))
             {
+                shape.Polynomial = intersector == "polynomial";
                 shapes.push_back(shape);
             }
             return shapes;
