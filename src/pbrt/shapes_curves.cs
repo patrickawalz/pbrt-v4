@@ -99,6 +99,8 @@ namespace pbrt
                 return shapes;
             }
             int splitDepth = parameters.GetOneInt("splitdepth", 3);
+            // The segments as the strands "ribbon3" and "rocap", or as the Curve of pbrt-v4 (strandcurves.cs)
+            StrandCurveOptions options = StrandCurveOptions.Read(parameters, "curves", renderFromObject, objectFromRender, reverseOrientation, StrandCurves.Diagonal(points), loc);
             double[,] bezier;
             PatchBases.TryGet("bezier", out bezier);
             double[,] toBezier = linear ? null : PatchBases.Multiply(PatchBases.Inverse(bezier), basis);
@@ -186,17 +188,8 @@ namespace pbrt
                     }
                     int v0 = varyingBase + s, v1 = varyingBase + (s + 1) % varying;
                     Float w0 = widths.Count > 0 ? widths[v0] : constantWidth, w1 = widths.Count > 0 ? widths[v1] : constantWidth;
-                    pstd.span<Normal3f> normalSpan = default;
-                    if (normals.Count > 0)
-                    {
-                        normalSpan = new pstd.span<Normal3f>(new Normal3f[] { normals[v0], normals[v1] });
-                    }
-                    pstd.vector<Shape> made = Curve.CreateCurve(renderFromObject, objectFromRender, reverseOrientation, new pstd.span<Point3f>(bez), w0, w1, curveType,
-                                                                normalSpan, splitDepth, alloc);
-                    for (int i = 0; i < (int)made.size(); ++i)
-                    {
-                        shapes.push_back(made[i]);
-                    }
+                    Normal3f[] ends = normals.Count > 0 ? new Normal3f[] { normals[v0], normals[v1] } : null;
+                    StrandCurves.Add(shapes, options, bez, w0, w1, curveType, ends, splitDepth, alloc);
                 }
                 vertexBase += nv;
                 varyingBase += varying;

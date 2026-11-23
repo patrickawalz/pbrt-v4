@@ -2083,6 +2083,8 @@ namespace pbrt
             }
 
             pstd.vector<Shape> curves = new pstd.vector<Shape>();
+            // (not in pbrt-v4) The segments as the strands "ribbon3" and "rocap", or as the Curve itself (strandcurves.cs)
+            StrandCurveOptions strandOptions = StrandCurveOptions.Read(parameters, "curve", renderFromObject, objectFromRender, reverseOrientation, StrandCurves.Diagonal(cp), loc);
             Point3f[] cpArr = cp.ToArray();
             Normal3f[] nArr = n.ToArray();
             int cpOffset = 0;
@@ -2123,16 +2125,10 @@ namespace pbrt
                     ++cpOffset;
                 }
 
-                pstd.span<Normal3f> nspan = default;
-                if (n.Count != 0)
-                    nspan = new pstd.span<Normal3f>(nArr, seg, 2);
-                pstd.vector<Shape> c = CreateCurve(
-                    renderFromObject, objectFromRender, reverseOrientation,
-                    new pstd.span<Point3f>(new Point3f[] { segCpBezier[0], segCpBezier[1], segCpBezier[2], segCpBezier[3] }),
-                    pbrt.Lerp((Float)seg / (Float)nSegments, width0, width1),
-                    pbrt.Lerp((Float)(seg + 1) / (Float)nSegments, width0, width1), type, nspan, sd, alloc);
-                for (int i = 0; i < (int)c.size(); ++i)
-                    curves.push_back(c[i]);
+                Normal3f[] ends = n.Count != 0 ? new Normal3f[] { nArr[seg], nArr[seg + 1] } : null;
+                StrandCurves.Add(curves, strandOptions, new Point3f[] { segCpBezier[0], segCpBezier[1], segCpBezier[2], segCpBezier[3] },
+                                 pbrt.Lerp((Float)seg / (Float)nSegments, width0, width1), pbrt.Lerp((Float)(seg + 1) / (Float)nSegments, width0, width1), type, ends, sd,
+                                 alloc);
             }
             return curves;
         }
@@ -3113,6 +3109,10 @@ namespace pbrt
             else if (name == "ribbon")
             {
                 shapes = Ribbons.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
+            }
+            else if (name == "ribbon3")
+            {
+                shapes = Ribbons3.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
             }
             else if (name == "ribbon2")
             {

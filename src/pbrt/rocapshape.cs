@@ -952,8 +952,9 @@ namespace pbrt
             return chain;
         }
 
-        // "string basis" ("bezier"; "b-spline", "catmull-rom", "hermite", "power": the bases of RenderMan's curves) and "integer step" (the step of
-        // the basis: 3 for bezier and power, 1 for b-spline and catmull-rom, 2 for hermite): "P" has 4 + n step points for n cubic curves, and
+        // "string basis", "integer degree", "integer step", "string wrap", "float tension", "float knots": the basis of the centerline (strandbasis.cs:
+        // linear, bezier, b-spline, catmull-rom, cardinal, hermite, power; the quadratic bezier and b-spline with the degree 2, which are
+        // the centerlines of "ribbon2"; closed and pinned strands; a B-spline with knots). "P" has the points of the basis, and
         // the radii and the colors that are given one for each point follow the same basis as the points. Every curve is changed to its
         // Bezier form, which the change of basis does exactly. (The colors are kept as one chain along the strand: with hermite or power
         // values whose curves do not meet, the color at the end of a curve is that of the start of the next.)
@@ -965,18 +966,13 @@ namespace pbrt
         {
             List<Point3f> pointList = parameters.GetPoint3fArray("P");
             List<float> radiusList = parameters.GetFloatArray("radius");
-            string basisName = parameters.GetOneString("basis", "bezier");
-            if (!PatchBases.TryGet(basisName, out double[,] basis))
+            StrandBasis basis = StrandBasis.Read(parameters, "rocap", "bezier", 3, loc);
+            string problem = basis.Check(pointList.Count);
+            if (problem != null)
             {
-                pbrt.ErrorExit(loc, "rocap: unknown basis \"" + basisName + "\" (bezier, b-spline, catmull-rom, hermite, power).");
+                pbrt.ErrorExit(loc, "rocap: \"P\": " + problem + ".");
             }
-            int step = parameters.GetOneInt("step", PatchBases.DefaultStep(basisName));
-            if (step < 1 || pointList.Count < 4 || (pointList.Count - 4) % step != 0)
-            {
-                pbrt.ErrorExit(loc, "rocap: \"P\" needs 4 + n * step control points (n cubic curves of the basis \"" + basisName + "\" with the step " + step +
-                                    "), n >= 0.");
-            }
-            bool bezierChain = basisName == "bezier" && step == 3;
+            bool bezierChain = basis.IsCubicBezierChain;
             if (radiusList.Count > 1 && radiusList.Count != pointList.Count)
             {
                 pbrt.ErrorExit(loc, "rocap: \"radius\" needs one value or one for each point.");
@@ -1040,9 +1036,9 @@ namespace pbrt
                     y[i] = points[i].y;
                     z[i] = points[i].z;
                 }
-                x = ToBezierCurves(x, basis, step);
-                y = ToBezierCurves(y, basis, step);
-                z = ToBezierCurves(z, basis, step);
+                x = basis.Curves(x, 3);
+                y = basis.Curves(y, 3);
+                z = basis.Curves(z, 3);
                 points = new SdfVector[x.Length];
                 for (int i = 0; i < points.Length; ++i)
                 {
@@ -1050,7 +1046,7 @@ namespace pbrt
                 }
                 if (radiusList.Count > 1)
                 {
-                    radii = ToBezierCurves(radii, basis, step);
+                    radii = basis.Curves(radii, 3);
                     for (int i = 0; i < radii.Length; ++i)
                     {
                         radii[i] = Math.Max(0, radii[i]);
@@ -1068,9 +1064,9 @@ namespace pbrt
                 }
                 if (colors.Length > 1)
                 {
-                    red = Chain(ToBezierCurves(red, basis, step));
-                    green = Chain(ToBezierCurves(green, basis, step));
-                    blue = Chain(ToBezierCurves(blue, basis, step));
+                    red = Chain(basis.Curves(red, 3));
+                    green = Chain(basis.Curves(green, 3));
+                    blue = Chain(basis.Curves(blue, 3));
                     colors = new RGB[red.Length];
                     for (int i = 0; i < colors.Length; ++i)
                     {
@@ -1080,6 +1076,13 @@ namespace pbrt
             }
             int strandColors = colors.Length > 0 ? StrandColors.Register(colors, true) : 0;
             bool flatCaps = parameters.GetOneBool("flatcaps", false);
+            // "string refinement": how the nearest of the spheres of a capsule is found: "roots" (the root of the slope of the entry, RocapSegment.RootRefinement; the
+            // default) or "golden" (the golden section search of the entry, the first method)
+            string refinement = parameters.GetOneString("refinement", "roots");
+            if (refinement != "golden" && refinement != "roots")
+            {
+                pbrt.ErrorExit(loc, "rocap: \"refinement\" is \"golden\" or \"roots\".");
+            }
             // "bool solidanglesampling" (true): the samples of an emitting strand close to its solid angle from the lit point; false: by the area of the side that faces it
             bool solidAngle = parameters.GetOneBool("solidanglesampling", true);
             // The curves of a chain share their ends (3n + 1 values); those of another basis have four values each
@@ -1090,7 +1093,7 @@ namespace pbrt
             {
                 SdfVector[] p = new SdfVector[] { points[stride * s], points[stride * s + 1], points[stride * s + 2], points[stride * s + 3] };
                 double[] r = new double[] { radii[stride * s], radii[stride * s + 1], radii[stride * s + 2], radii[stride * s + 3] };
-                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps }, strandColors) { SolidAngleSampling = solidAngle });
+                shapes.push_back(new RocapShape(settings, new RocapSegment(p, r, s, count) { FlatCaps = flatCaps, RootRefinement = refinement == "roots" }, strandColors) { SolidAngleSampling = solidAngle });
             }
             return shapes;
         }

@@ -3,16 +3,31 @@
 // The "ribbon2" shape: the curved ribbons of Reshetov (ribbon.cs) with more ways to give the centerline and with better sampling
 // as a light. The segments and their ray intersection are those of "ribbon" (RibbonSegment); "ribbon" itself is as it was.
 //
-//   Shape "ribbon2" "point3 P" [...] ("string basis" "b-spline") ("integer degree" 2) ("integer step" ...) ("integer pieces" 4)
+//   Shape "ribbon2" "point3 P" [...] ("string basis" "b-spline") ("integer degree" 2) ("integer step" ...) ("string wrap" "nonperiodic")
+//         ("float tension" 0.5) ("float knots" [...]) ("integer pieces" 4)
 //         ("normal N" [...]) ("float width" [...]) ("rgb Cs" [...]) ("float epsilon" 1e-5) ("bool solidanglesampling" true)
+//         ("bool flipturns" false)
 //
-//   basis, degree:
-//     "b-spline" with the degree 2 (the default): the quadratic B-spline of "ribbon", the same segments.
-//     "bezier" with the degree 2: a chain of quadratic Bezier curves, 2n + 1 points (the ends and the middle point of each curve).
-//       Both of these are the centerline of the paper itself: nothing is approximated.
-//     "bezier", "b-spline" with the degree 3, and "catmull-rom", "hermite", "power" (the cubic bases of RenderMan, with "step" as for
-//       its curves: 4 + n step points): the centerline of the paper is quadratic, so that the ray intersection is a cubic equation,
-//       and a cubic curve is not a quadratic one. Each cubic curve is replaced by "pieces" quadratic curves: the curve is cut at
+//   flipturns: with normals, the behavior of "ribbon" where a curve turns by more than a right angle (Ribbons2.Build): the ribbon
+//   turns its sides there and shows its other face from there on, instead of lying across the normals as given. With the
+//   default basis the segments are those of "ribbon".
+//   flippieces (cubic bases, with flipturns; "pieces" by default): the pieces to a cubic curve that the rule of flipturns is
+//   applied to. "ribbon" turns its sides because its segments are long, and the pieces of a cubic curve seldom turn by a right
+//   angle; with fewer "flippieces" (1: the whole curve) the ribbon turns its sides as "ribbon" would over curves that long,
+//   while its centerline stays that of "pieces" (Ribbons2.TakeBitangents).
+//   flipstretch (cubic bases, with flipturns and normals): "curve" (the default: the rule over the pieces above) or "bend":
+//   the rule over stretches from the middle of one cubic curve to the middle of the next, which go round the bends of the
+//   strand as the segments of "ribbon" do, so that the ribbon turns its sides at the bends as "ribbon" does over its own
+//   basis (Ribbons2.BendStretches).
+//
+//   The basis of the centerline is one of strandbasis.cs.
+//     "b-spline" with the degree 2 (the default, the quadratic B-spline of "ribbon": the same segments), "bezier" with the degree 2
+//       (2n + 1 points: the ends and the middle point of each curve), "linear", and the "b-spline" with "knots" and the degree 2:
+//       these are quadratic curves, the centerline of the paper itself, and nothing is approximated. (Straight pieces and corners
+//       of repeated knots meet at an angle; the ribbon turns there without a smooth joint.)
+//     "bezier", "b-spline" with the degree 3 (with or without knots), "catmull-rom", "cardinal", "hermite", "power": the centerline
+//       of the paper is quadratic, so that the ray intersection is a cubic equation, and a cubic curve is not a quadratic one.
+//       Each cubic curve is replaced by "pieces" quadratic curves: the curve is cut at
 //       equal steps h of its parameter, and the quadratic B-spline is taken whose control point for a piece from t to t + h is the
 //       mean of C(t) + h C'(t) / 2 and C(t + h) - h C'(t + h) / 2 (the two are the same point for a quadratic, and h^3 C''' / 12
 //       apart for a cubic). Being a B-spline, the pieces meet with one tangent, and the ribbon is as smooth as that of "ribbon"; it
@@ -37,8 +52,11 @@ namespace pbrt
     public sealed unsafe class Ribbon2Shape : Shape
     {
         // Ribbon2Shape Public Methods
-        public Ribbon2Shape(BezierSurfaceSettings settings, RibbonSegment segment, int strandColors, bool solidAngleSampling)
+        // start, extent: the part of the parameter of the whole ribbon that the segment covers (the texture coordinate u)
+        public Ribbon2Shape(BezierSurfaceSettings settings, RibbonSegment segment, double start, double extent, int strandColors, bool solidAngleSampling)
         {
+            this.start = start;
+            this.extent = extent;
             this.strandColors = strandColors;
             this.settings = settings;
             this.segment = segment;
@@ -110,7 +128,7 @@ namespace pbrt
         // The density of Sample(u) at a point of the ribbon, by area: from the parameters of the point
         public override Float PDF(Interaction intr)
         {
-            double u = Math.Max(0, Math.Min(1, (double)intr.uv.x * segment.count - segment.index));
+            double u = Math.Max(0, Math.Min(1, ((double)intr.uv.x - start) / extent));
             double v = Math.Max(0, Math.Min(1, (double)intr.uv.y));
             double pdf = Sampler().AreaDensity(u, v);
             return double.IsNaN(pdf) || double.IsInfinity(pdf) ? 0 : (Float)pdf;
@@ -290,9 +308,9 @@ namespace pbrt
             Transform renderFromObject = settings.renderFromObject;
             p = renderFromObject.Apply(new Point3f((Float)position.x, (Float)position.y, (Float)position.z));
             // The texture coordinates run along the whole ribbon and across its width
-            dpdu = renderFromObject.Apply(new Vector3f((Float)(du.x * segment.Count), (Float)(du.y * segment.Count), (Float)(du.z * segment.Count)));
+            dpdu = renderFromObject.Apply(new Vector3f((Float)(du.x / extent), (Float)(du.y / extent), (Float)(du.z / extent)));
             dpdv = renderFromObject.Apply(new Vector3f((Float)(dv.x * 2), (Float)(dv.y * 2), (Float)(dv.z * 2)));
-            uv = new Point2f((Float)((segment.Index + u) / segment.Count), (Float)(0.5 * (v + 1)));
+            uv = new Point2f((Float)(start + u * extent), (Float)(0.5 * (v + 1)));
         }
 
         private SurfaceInteraction InteractionAt(double u, double v, Ray ray)
@@ -320,6 +338,8 @@ namespace pbrt
         // Ribbon2Shape Private Members
         private readonly BezierSurfaceSettings settings;
         private readonly RibbonSegment segment;
+        private readonly double start;
+        private readonly double extent;
         // The number of the registered colors of the strand (StrandColors), the face index of the hits; 0 without
         private readonly int strandColors;
         private readonly bool solidAngleSampling;
@@ -404,36 +424,212 @@ namespace pbrt
                         (cubic[4 * curve + 3] - cubic[4 * curve + 2]) * (t * t));
         }
 
-        // The segments of the runs of one ribbon, numbered along the whole ribbon. Within a run the bitangent is carried from
-        // one curve to the next, and where the two curves have the same derivative at their joint (as those of a B-spline
-        // have) the surface normals are made the same along the joint (RibbonBuilder.Connect, Section 4.1 of the paper).
-        public static List<RibbonSegment> Build(List<Run> runs)
+        // One quadratic curve of a ribbon: its three points and half widths, the normals at its ends, and the part of the
+        // parameter of the whole ribbon that it covers
+        private sealed class Piece
         {
-            List<RibbonSegment> segments = new List<RibbonSegment>();
+            public SdfVector p0, p1, p2;
+            public double w0, w1, w2;
+            public SdfVector n0, n1;
+            public double start, extent;
+        }
+
+        // The segments of the runs of one ribbon, numbered along the whole ribbon, with the part of the parameter of the ribbon
+        // (0 at its start, 1 at its end, the same step for every curve given) that each segment covers. Within a run the
+        // bitangent is carried from one curve to the next, and where two curves meet with one tangent the surface normals are
+        // made the same along the joint (Section 4.1 of the paper).
+        //
+        // With normals the ribbon is to lie across them: its bitangent at u is to be along T(u) x n(u), n going round from the
+        // normal of one end of a curve to that of the other. The bitangent of a segment goes in a line from that of its start
+        // to that of its end (with the terms of the joint added), which is not that turn when the two are far apart: the ribbon
+        // then leans, and over a large turn folds. So the segments are built, the angle of each from T x n is measured at three
+        // places, the curves that are off by more than Tolerance are cut in two at the middle of their parameter (the same
+        // centerline and widths), and the segments are built again, until none is off (at most 6 times). Only the curves that
+        // need it are cut, and as far as they need it.
+        //
+        // flip (the behavior of "ribbon" with normals): no curve is cut; where the bitangent at the end of a curve is more
+        // than a right angle from that at its start it is turned to its other side, so that the ribbon turns its sides there
+        // and shows its other face from there on. For the quadratic B-spline the segments are those of "ribbon".
+        public static List<RibbonSegment> Build(List<Run> runs, bool flip, out double[] starts, out double[] extents)
+        {
             int total = 0;
             foreach (Run run in runs)
             {
                 total += (run.points.Length - 1) / 2;
             }
+            List<List<Piece>> pieces = new List<List<Piece>>();
+            int curve = 0;
             foreach (Run run in runs)
             {
-                int curves = (run.points.Length - 1) / 2;
-                SdfVector[] normals = run.normals ?? PlaneNormals(run.points, curves);
-                int first = segments.Count;
-                for (int i = 0; i < curves; ++i)
+                int given = (run.points.Length - 1) / 2;
+                SdfVector[] normals = run.normals ?? PlaneNormals(run.points, given);
+                List<Piece> list = new List<Piece>();
+                for (int i = 0; i < given; ++i)
                 {
+                    Piece piece = new Piece();
+                    piece.p0 = run.points[2 * i];
+                    piece.p1 = run.points[2 * i + 1];
+                    piece.p2 = run.points[2 * i + 2];
+                    piece.w0 = run.widths[2 * i];
+                    piece.w1 = run.widths[2 * i + 1];
+                    piece.w2 = run.widths[2 * i + 2];
+                    piece.n0 = normals[i];
+                    piece.n1 = normals[i + 1];
+                    piece.start = (double)(curve + i) / total;
+                    piece.extent = 1.0 / total;
+                    list.Add(piece);
+                }
+                curve += given;
+                pieces.Add(list);
+            }
+            List<RibbonSegment> segments = null;
+            for (int pass = 0; pass <= 6; ++pass)
+            {
+                segments = Assemble(runs, pieces, flip);
+                if (pass == 6 || flip)
+                {
+                    break;
+                }
+                bool cut = false;
+                int at = 0;
+                for (int r = 0; r < runs.Count; ++r)
+                {
+                    List<Piece> list = pieces[r];
+                    if (runs[r].normals == null)
+                    {
+                        at += list.Count;
+                        continue;
+                    }
+                    List<Piece> next = new List<Piece>();
+                    foreach (Piece piece in list)
+                    {
+                        if (Lean(segments[at++], piece) < 1)
+                        {
+                            Halve(piece, next);
+                            cut = true;
+                        }
+                        else
+                        {
+                            next.Add(piece);
+                        }
+                    }
+                    pieces[r] = next;
+                }
+                if (!cut)
+                {
+                    break;
+                }
+            }
+            starts = new double[segments.Count];
+            extents = new double[segments.Count];
+            int index = 0;
+            foreach (List<Piece> list in pieces)
+            {
+                foreach (Piece piece in list)
+                {
+                    starts[index] = piece.start;
+                    extents[index++] = piece.extent;
+                }
+            }
+            return segments;
+        }
+
+        // The cosines of the angles that the bitangent of a segment of a ribbon with normals may be off by: 2 degrees round
+        // the centerline (the ribbon is turned out of its plane by as much), and 15 degrees along it (the ribbon stays in
+        // its plane, and is narrower by the cosine: 3 percent)
+        private const double Tolerance = 0.9993908270190958;
+        private const double ToleranceAlong = 0.9659258262890683;
+
+        // How far the bitangent of the segment is from T x n of its curve at a quarter, a half and three quarters of the
+        // parameter, against the tolerances: the least of the cosine of its angle round the centerline over Tolerance and the
+        // cosine of its angle along the centerline over ToleranceAlong (less than 1: the curve is to be cut)
+        private static double Lean(RibbonSegment segment, Piece piece)
+        {
+            SdfVector n0 = piece.n0.Normalized(), n1 = piece.n1.Normalized();
+            double cosine = Math.Max(-1, Math.Min(1, SdfVector.Dot(n0, n1))), angle = Math.Acos(cosine), sine = Math.Sin(angle);
+            double least = double.MaxValue;
+            for (int i = 1; i <= 3; ++i)
+            {
+                double u = 0.25 * i;
+                // (the normal round from one end to the other; in a line where the two are the same or opposite)
+                SdfVector normal = sine > 1e-6 ? n0 * (Math.Sin((1 - u) * angle) / sine) + n1 * (Math.Sin(u * angle) / sine) : n0 * (1 - u) + n1 * u;
+                SdfVector tangent = segment.Velocity(u);
+                SdfVector across = SdfVector.Cross(tangent, normal);
+                SdfVector bitangent = segment.Position(u, 1) - segment.Position(u, -1);
+                double tangentSquared = tangent.LengthSquared(), length = bitangent.Length();
+                if (!(tangentSquared > 0) || !(length > 0) || !(across.LengthSquared() > 0))
+                {
+                    continue;
+                }
+                // The bitangent without its part along the centerline
+                SdfVector upright = bitangent - tangent * (SdfVector.Dot(bitangent, tangent) / tangentSquared);
+                double uprightLength = upright.Length();
+                double round = uprightLength > 0 ? SdfVector.Dot(upright, across) / (uprightLength * across.Length()) : -1;
+                least = Math.Min(least, Math.Min(round / Tolerance, uprightLength / length / ToleranceAlong));
+            }
+            return least;
+        }
+
+        // The two halves of the curve, added to the list: the same centerline and widths; the normal at the cut is the one half
+        // way round from one end to the other
+        private static void Halve(Piece piece, List<Piece> list)
+        {
+            SdfVector middle = piece.n0.Normalized() + piece.n1.Normalized();
+            if (!(middle.LengthSquared() > 0))
+            {
+                middle = piece.n0;
+            }
+            SdfVector a = (piece.p0 + piece.p1) * 0.5, b = (piece.p1 + piece.p2) * 0.5, m = (a + b) * 0.5;
+            double wa = 0.5 * (piece.w0 + piece.w1), wb = 0.5 * (piece.w1 + piece.w2), wm = 0.5 * (wa + wb);
+            Piece first = new Piece(), second = new Piece();
+            first.p0 = piece.p0;
+            first.p1 = a;
+            first.p2 = m;
+            first.w0 = piece.w0;
+            first.w1 = wa;
+            first.w2 = wm;
+            first.n0 = piece.n0;
+            first.n1 = middle;
+            first.start = piece.start;
+            first.extent = 0.5 * piece.extent;
+            second.p0 = m;
+            second.p1 = b;
+            second.p2 = piece.p2;
+            second.w0 = wm;
+            second.w1 = wb;
+            second.w2 = piece.w2;
+            second.n0 = middle;
+            second.n1 = piece.n1;
+            second.start = piece.start + 0.5 * piece.extent;
+            second.extent = 0.5 * piece.extent;
+            list.Add(first);
+            list.Add(second);
+        }
+
+        // The segments of the curves of the runs
+        private static List<RibbonSegment> Assemble(List<Run> runs, List<List<Piece>> pieces, bool flip)
+        {
+            List<RibbonSegment> segments = new List<RibbonSegment>();
+            for (int r = 0; r < runs.Count; ++r)
+            {
+                List<Piece> list = pieces[r];
+                int first = segments.Count;
+                for (int i = 0; i < list.Count; ++i)
+                {
+                    Piece piece = list[i];
                     RibbonSegment segment = new RibbonSegment();
                     segment.index = first + i;
-                    segment.count = total;
-                    segment.b0 = run.points[2 * i];
-                    segment.b1 = run.points[2 * i + 1];
-                    segment.b2 = run.points[2 * i + 2];
-                    segment.width0 = run.widths[2 * i];
-                    segment.width1 = run.widths[2 * i + 1];
-                    segment.width2 = run.widths[2 * i + 2];
+                    segment.count = 0;
+                    segment.b0 = piece.p0;
+                    segment.b1 = piece.p1;
+                    segment.b2 = piece.p2;
+                    segment.width0 = piece.w0;
+                    segment.width1 = piece.w1;
+                    segment.width2 = piece.w2;
                     SdfVector leaving = segment.b1 - segment.b0, arriving = segment.b2 - segment.b1;
-                    SdfVector start = Bitangent(leaving, normals[i]), end = Bitangent(arriving, normals[i + 1]);
+                    SdfVector start = Bitangent(leaving, piece.n0), end = Bitangent(arriving, piece.n1);
                     bool smooth = false;
+                    double ratio = 1;
                     if (i > 0)
                     {
                         // The bitangent of the end of the curve before, unless the centerline turns at the joint
@@ -443,10 +639,15 @@ namespace pbrt
                         if (turn <= 1e-3 * scale && SdfVector.Dot(before, leaving) > 0)
                         {
                             start = previous.bitangent1.Normalized();
-                            smooth = (before - leaving).Length() <= 1e-6 * Math.Sqrt(scale);
+                            smooth = true;
+                            // (1 where the derivatives are the same, as those of a uniform B-spline)
+                            ratio = (before - leaving).Length() <= 1e-6 * Math.Sqrt(scale) ? 1 : leaving.Length() / before.Length();
                         }
                     }
-                    if (SdfVector.Dot(start, end) < 0)
+                    // Without normals the bitangent of the end is turned to the side of that of the start (as "ribbon" does).
+                    // With normals it is left as the normals give it ("ribbon" turns it there too, which swaps the sides of
+                    // the ribbon from there on).
+                    if ((flip || runs[r].normals == null) && SdfVector.Dot(start, end) < 0)
                     {
                         end = -end;
                     }
@@ -456,12 +657,69 @@ namespace pbrt
                     segment.gamma = 0;
                     if (smooth)
                     {
-                        RibbonBuilder.Connect(segments[first + i - 1], segment);
+                        Connect(segments[first + i - 1], segment, ratio);
                     }
                     segments.Add(segment);
                 }
             }
+            foreach (RibbonSegment segment in segments)
+            {
+                segment.count = segments.Count;
+            }
             return segments;
+        }
+
+        // RibbonBuilder.Connect (Section 4.1 of the paper) for two segments whose derivatives at the joint have one direction but
+        // not one length (the halves of a cut curve beside a whole one, a B-spline with knots): the terms beta, gamma of the
+        // segment next that make the surface normals of both segments the same along the joint. ratio: the length of the
+        // derivative of next at the joint over that of previous; the derivative of the generator of previous, taken in the
+        // parameter of next, is that many times as long.
+        private static void Connect(RibbonSegment previous, RibbonSegment next, double ratio)
+        {
+            SdfVector b = next.bitangent0;
+            SdfVector c1 = 2 * (previous.b1 - previous.b0), c2 = previous.b0 - 2 * previous.b1 + previous.b2;
+            double previousAlpha = previous.bitangent1.Length();
+            // g'(1) of the previous segment
+            SdfVector previousGenerator = previous.bitangent1 - previous.bitangent0 - (previous.beta * c2 + previous.gamma * (c1 + c2));
+            SdfVector nc1 = 2 * (next.b1 - next.b0), nc2 = next.b0 - 2 * next.b1 + next.b2;
+            SdfVector unitEnd = next.bitangent1.Normalized();
+            // A basis of the plane perpendicular to b
+            SdfVector e1 = RibbonBuilder.OrthogonalTo(b);
+            SdfVector e2 = SdfVector.Cross(b, e1).Normalized();
+            double m11 = SdfVector.Dot(e1, nc2), m12 = SdfVector.Dot(e1, nc1);
+            double m21 = SdfVector.Dot(e2, nc2), m22 = SdfVector.Dot(e2, nc1);
+            double determinant = m11 * m22 - m12 * m21;
+            if (!(previousAlpha > 0) || Math.Abs(determinant) < 1e-12 * Math.Max(1e-300, Math.Abs(m11 * m22) + Math.Abs(m12 * m21)))
+            {
+                next.bitangent1 = unitEnd;
+                return;
+            }
+            SdfVector target = previousGenerator / previousAlpha;
+            if (ratio != 1)
+            {
+                target = target * ratio;
+            }
+            double r1 = SdfVector.Dot(e1, target), r2 = SdfVector.Dot(e2, target);
+            double s1 = SdfVector.Dot(e1, unitEnd), s2 = SdfVector.Dot(e2, unitEnd);
+            // [beta, gamma] = M^-1 (r - alpha s) = p + alpha q
+            double p0 = (m22 * r1 - m12 * r2) / determinant, p1 = (-m21 * r1 + m11 * r2) / determinant;
+            double q0 = -(m22 * s1 - m12 * s2) / determinant, q1 = -(-m21 * s1 + m11 * s2) / determinant;
+            double denominator = q0 * q0 + q1 * q1;
+            double alpha = denominator > 0 ? -(p0 * q0 + p1 * q1) / denominator : 1;
+            if (!(alpha > 1e-3) || double.IsNaN(alpha) || double.IsInfinity(alpha))
+            {
+                // the bitangent must keep its direction: take the smallest positive length that is allowed
+                alpha = 1;
+            }
+            next.beta = p0 + alpha * q0;
+            next.gamma = p1 + alpha * q1;
+            next.bitangent1 = unitEnd * alpha;
+            if (double.IsNaN(next.beta) || double.IsNaN(next.gamma) || double.IsInfinity(next.beta) || double.IsInfinity(next.gamma))
+            {
+                next.beta = 0;
+                next.gamma = 0;
+                next.bitangent1 = unitEnd;
+            }
         }
 
         private static SdfVector Bitangent(SdfVector tangent, SdfVector normal)
@@ -482,6 +740,33 @@ namespace pbrt
                 SdfVector normal = SdfVector.Cross(a, b);
                 valid[i] = normal.LengthSquared() > 1e-24 * a.LengthSquared() * b.LengthSquared();
                 planes[i] = valid[i] ? normal.Normalized() : new SdfVector(0, 0, 0);
+            }
+            // A straight curve (all those of the basis "linear"): the plane of the turn to the curve after it, or before it
+            for (int i = 0; i < curves; ++i)
+            {
+                if (valid[i])
+                {
+                    continue;
+                }
+                SdfVector along = points[2 * i + 2] - points[2 * i];
+                for (int side = 1; side >= -1 && planes[i].LengthSquared() == 0; side -= 2)
+                {
+                    int other = i + side;
+                    if (other < 0 || other >= curves)
+                    {
+                        continue;
+                    }
+                    SdfVector next = points[2 * other + 2] - points[2 * other];
+                    SdfVector normal = side > 0 ? SdfVector.Cross(along, next) : SdfVector.Cross(next, along);
+                    if (normal.LengthSquared() > 1e-24 * along.LengthSquared() * next.LengthSquared())
+                    {
+                        planes[i] = normal.Normalized();
+                    }
+                }
+            }
+            for (int i = 0; i < curves; ++i)
+            {
+                valid[i] = valid[i] || planes[i].LengthSquared() > 0;
             }
             for (int i = 1; i < curves; ++i)
             {
@@ -528,44 +813,51 @@ namespace pbrt
             return result;
         }
 
-        // The runs of a ribbon given in a cubic basis: every cubic curve as `pieces` quadratic ones. values: the points, the
-        // widths and the normals (or null) at the control points of the basis; the colors (or null) are changed alike, into
-        // the control values of a quadratic B-spline along the whole ribbon.
-        public static List<Run> FromCubics(SdfVector[] points, double[] widths, SdfVector[] normals, double[,] basis, int step, int pieces, ref RGB[] colors)
+        // The runs of a ribbon of quadratic Bezier curves, three values for each curve (the coordinates of the points, the half
+        // widths, and the coordinates of the normals or null): the curves that follow each other without a gap are one run
+        public static List<Run> FromQuadratics(double[] x, double[] y, double[] z, double[] w, double[] nx, double[] ny, double[] nz)
         {
-            double[] x = new double[points.Length], y = new double[points.Length], z = new double[points.Length];
-            for (int i = 0; i < points.Length; ++i)
+            int curves = x.Length / 3;
+            double size = Size(x, y, z);
+            List<Run> runs = new List<Run>();
+            int from = 0;
+            for (int s = 1; s <= curves; ++s)
             {
-                x[i] = points[i].x;
-                y[i] = points[i].y;
-                z[i] = points[i].z;
-            }
-            x = Rocaps.ToBezierCurves(x, basis, step);
-            y = Rocaps.ToBezierCurves(y, basis, step);
-            z = Rocaps.ToBezierCurves(z, basis, step);
-            double[] w = Rocaps.ToBezierCurves(widths, basis, step);
-            double[] nx = null, ny = null, nz = null;
-            if (normals != null)
-            {
-                nx = new double[normals.Length];
-                ny = new double[normals.Length];
-                nz = new double[normals.Length];
-                for (int i = 0; i < normals.Length; ++i)
+                if (s < curves && Apart(x, y, z, 3 * s - 1, 3 * s) <= 1e-9 * size)
                 {
-                    nx[i] = normals[i].x;
-                    ny[i] = normals[i].y;
-                    nz[i] = normals[i].z;
+                    continue;
                 }
-                nx = Rocaps.ToBezierCurves(nx, basis, step);
-                ny = Rocaps.ToBezierCurves(ny, basis, step);
-                nz = Rocaps.ToBezierCurves(nz, basis, step);
+                int count = s - from;
+                Run run = new Run();
+                run.points = new SdfVector[2 * count + 1];
+                run.widths = new double[2 * count + 1];
+                run.normals = nx == null ? null : new SdfVector[count + 1];
+                for (int i = 0; i < count; ++i)
+                {
+                    int at = 3 * (from + i);
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        run.points[2 * i + k] = new SdfVector(x[at + k], y[at + k], z[at + k]);
+                        run.widths[2 * i + k] = Math.Max(0, w[at + k]);
+                    }
+                    if (nx != null)
+                    {
+                        run.normals[i] = new SdfVector(nx[at], ny[at], nz[at]);
+                        run.normals[i + 1] = new SdfVector(nx[at + 2], ny[at + 2], nz[at + 2]);
+                    }
+                }
+                runs.Add(run);
+                from = s;
             }
+            return runs;
+        }
+
+        // The runs of a ribbon of cubic Bezier curves, four values for each curve: every cubic curve as `pieces` quadratic ones.
+        // The ribbon is cut where two curves do not meet, or meet at an angle.
+        public static List<Run> FromCubics(double[] x, double[] y, double[] z, double[] w, double[] nx, double[] ny, double[] nz, int pieces)
+        {
             int curves = x.Length / 4;
-            double size = 0;
-            for (int i = 0; i < x.Length; ++i)
-            {
-                size = Math.Max(size, Math.Max(Math.Abs(x[i] - x[0]), Math.Max(Math.Abs(y[i] - y[0]), Math.Abs(z[i] - z[0]))));
-            }
+            double size = Size(x, y, z);
             List<Run> runs = new List<Run>();
             int from = 0;
             for (int s = 1; s <= curves; ++s)
@@ -594,7 +886,7 @@ namespace pbrt
                     sw[i] = Math.Max(0, sw[i]);
                 }
                 SdfVector[] splineNormals = null;
-                if (normals != null)
+                if (nx != null)
                 {
                     double[] ax = SplineOfCubics(Slice(nx, from, count), pieces, true), ay = SplineOfCubics(Slice(ny, from, count), pieces, true);
                     double[] az = SplineOfCubics(Slice(nz, from, count), pieces, true);
@@ -607,24 +899,6 @@ namespace pbrt
                 runs.Add(FromSpline(splinePoints, sw, splineNormals));
                 from = s;
             }
-            if (colors != null && colors.Length > 1)
-            {
-                double[] red = new double[colors.Length], green = new double[colors.Length], blue = new double[colors.Length];
-                for (int i = 0; i < colors.Length; ++i)
-                {
-                    red[i] = colors[i].r;
-                    green[i] = colors[i].g;
-                    blue[i] = colors[i].b;
-                }
-                red = SplineOfCubics(Rocaps.ToBezierCurves(red, basis, step), pieces, true);
-                green = SplineOfCubics(Rocaps.ToBezierCurves(green, basis, step), pieces, true);
-                blue = SplineOfCubics(Rocaps.ToBezierCurves(blue, basis, step), pieces, true);
-                colors = new RGB[red.Length];
-                for (int i = 0; i < colors.Length; ++i)
-                {
-                    colors[i] = new RGB((Float)Math.Max(0, red[i]), (Float)Math.Max(0, green[i]), (Float)Math.Max(0, blue[i]));
-                }
-            }
             return runs;
         }
 
@@ -636,36 +910,175 @@ namespace pbrt
             return part;
         }
 
+        private static double Size(double[] x, double[] y, double[] z)
+        {
+            double size = 0;
+            for (int i = 0; i < x.Length; ++i)
+            {
+                size = Math.Max(size, Math.Max(Math.Abs(x[i] - x[0]), Math.Max(Math.Abs(y[i] - y[0]), Math.Abs(z[i] - z[0]))));
+            }
+            return size;
+        }
+
+        private static double Apart(double[] x, double[] y, double[] z, int a, int b)
+        {
+            return new SdfVector(x[a] - x[b], y[a] - y[b], z[a] - z[b]).Length();
+        }
+
+        // The control values of the quadratic B-spline of the colors along a ribbon of quadratic curves (three values each):
+        // the first value, the middle one of each curve, the last
+        private static double[] SplineOfQuadratics(double[] values)
+        {
+            int curves = values.Length / 3;
+            double[] spline = new double[curves + 2];
+            spline[0] = values[0];
+            spline[curves + 1] = values[values.Length - 1];
+            for (int s = 0; s < curves; ++s)
+            {
+                spline[s + 1] = values[3 * s + 1];
+            }
+            return spline;
+        }
+
+        // The bitangents of the segments of a strand of cubic curves (`pieces` to a curve) taken from the segments `coarse` of the
+        // same strand (`coarsePieces` to a curve): the bitangent of a segment goes in a line between those of `coarse` at its
+        // two ends, without the terms of the joints. The centerline is that of the many pieces, and the ribbon turns its sides
+        // where the few do ("flippieces").
+        public static void TakeBitangents(List<RibbonSegment> segments, int pieces, List<RibbonSegment> coarse, int coarsePieces)
+        {
+            for (int i = 0; i < segments.Count; ++i)
+            {
+                int curve = i / pieces;
+                // The part of the parameter of the curve of the segment, and the coarse segment over its middle
+                double from = (double)(i % pieces) / pieces, to = (double)(i % pieces + 1) / pieces;
+                int part = Math.Min(coarsePieces - 1, (int)(0.5 * (from + to) * coarsePieces));
+                RibbonSegment source = coarse[curve * coarsePieces + part];
+                segments[i].bitangent0 = source.Generator(from * coarsePieces - part);
+                segments[i].bitangent1 = source.Generator(to * coarsePieces - part);
+                segments[i].beta = 0;
+                segments[i].gamma = 0;
+            }
+        }
+
+        // The bitangents of a strand of cubic Bezier curves with normals (four values for each curve) by the rule of "ribbon"
+        // over stretches that go round the bends: "ribbon" turns the sides of the ribbon where the bitangent at the end of a
+        // segment is more than a right angle from that at its start, and its segments run from the middle of one side of the
+        // control polygon to the middle of the next, round a bend of the strand. The curves of the cubic bases run from one bend
+        // to the next, and their ends have nearly one direction. So here the stretches run from the middle of one curve to the
+        // middle of the next (and over the first half of the first curve and the last half of the last one of a run of curves
+        // that follow each other): at the ends of each the bitangent is T x n, turned to the side of the one before when it is
+        // more than a right angle from it, and in between it goes in a line. Returned as two segments for each curve (its two
+        // halves) of which only the bitangents are set, for TakeBitangents and for "ribbon3".
+        public static List<RibbonSegment> BendStretches(double[] x, double[] y, double[] z, double[] nx, double[] ny, double[] nz)
+        {
+            int curves = x.Length / 4;
+            double size = Size(x, y, z);
+            List<RibbonSegment> halves = new List<RibbonSegment>();
+            SdfVector before = new SdfVector(0, 0, 0);
+            SdfVector middleBefore = new SdfVector(0, 0, 0);
+            for (int s = 0; s < curves; ++s)
+            {
+                bool first = s == 0 || Apart(x, y, z, 4 * s - 1, 4 * s) > 1e-9 * size;
+                bool last = s == curves - 1 || Apart(x, y, z, 4 * s + 3, 4 * s + 4) > 1e-9 * size;
+                // The bitangent at the middle of the curve, on the side of the end of the stretch before
+                SdfVector middle = Across(x, y, z, nx, ny, nz, s, 0.5);
+                if (first)
+                {
+                    before = Across(x, y, z, nx, ny, nz, s, 0);
+                }
+                else
+                {
+                    before = middleBefore;
+                }
+                if (SdfVector.Dot(before, middle) < 0)
+                {
+                    middle = -middle;
+                }
+                // The first half: the end of the stretch from the middle of the curve before (its second half), or the whole
+                // stretch from the start of the run
+                RibbonSegment firstHalf = new RibbonSegment();
+                firstHalf.bitangent0 = first ? before : (before + middle) * 0.5;
+                firstHalf.bitangent1 = middle;
+                halves.Add(firstHalf);
+                // The second half: the start of the stretch to the middle of the curve after, or the whole stretch to the end
+                // of the run
+                SdfVector after;
+                if (last)
+                {
+                    after = Across(x, y, z, nx, ny, nz, s, 1);
+                }
+                else
+                {
+                    after = Across(x, y, z, nx, ny, nz, s + 1, 0.5);
+                }
+                if (SdfVector.Dot(middle, after) < 0)
+                {
+                    after = -after;
+                }
+                RibbonSegment secondHalf = new RibbonSegment();
+                secondHalf.bitangent0 = middle;
+                secondHalf.bitangent1 = last ? after : (middle + after) * 0.5;
+                halves.Add(secondHalf);
+                middleBefore = middle;
+            }
+            return halves;
+        }
+
+        // T x n of unit length at u of the cubic curve
+        private static SdfVector Across(double[] x, double[] y, double[] z, double[] nx, double[] ny, double[] nz, int curve, double u)
+        {
+            SdfVector tangent = new SdfVector(CubicDerivative(x, curve, u), CubicDerivative(y, curve, u), CubicDerivative(z, curve, u));
+            SdfVector normal = new SdfVector(Cubic(nx, curve, u), Cubic(ny, curve, u), Cubic(nz, curve, u));
+            return Bitangent(tangent, normal);
+        }
+
+        // The runs of a strand in a basis: the values at the control points (the coordinates of the points; the half widths, or
+        // null and one `width` for all; the coordinates of the normals, or null). The quadratic curves of the ribbon itself for
+        // the bases of the degrees 1 and 2; the cubic curves in `pieces` quadratic ones otherwise.
+        public static List<Run> Runs(StrandBasis basis, double[] x, double[] y, double[] z, double[] widths, double width, double[] nx, double[] ny, double[] nz, int pieces)
+        {
+            int degree = basis.Degree == 3 ? 3 : 2;
+            x = basis.Curves(x, degree);
+            y = basis.Curves(y, degree);
+            z = basis.Curves(z, degree);
+            double[] w = new double[x.Length];
+            if (widths != null)
+            {
+                w = basis.Curves(widths, degree);
+            }
+            else
+            {
+                // One width for all: not through the basis (the values of hermite and power are not all points)
+                for (int i = 0; i < w.Length; ++i)
+                {
+                    w[i] = width;
+                }
+            }
+            if (nx != null)
+            {
+                nx = basis.Curves(nx, degree);
+                ny = basis.Curves(ny, degree);
+                nz = basis.Curves(nz, degree);
+            }
+            return degree == 3 ? FromCubics(x, y, z, w, nx, ny, nz, pieces) : FromQuadratics(x, y, z, w, nx, ny, nz);
+        }
+
         public static pstd.vector<Shape> Create(Transform renderFromObject, Transform objectFromRender, bool reverseOrientation, ParameterDictionary parameters,
                                                 FileLoc loc)
         {
             List<Point3f> pointList = parameters.GetPoint3fArray("P");
             List<Normal3f> normalList = parameters.GetNormal3fArray("N");
             List<float> widthList = parameters.GetFloatArray("width");
-            string basisName = parameters.GetOneString("basis", "b-spline");
-            if (basisName == "bspline")
+            StrandBasis basis = StrandBasis.Read(parameters, "ribbon2", "b-spline", 2, loc);
+            string problem = basis.Check(pointList.Count);
+            if (problem != null)
             {
-                basisName = "b-spline";
+                pbrt.ErrorExit(loc, "ribbon2: \"P\": " + problem + ".");
             }
-            if (!PatchBases.TryGet(basisName, out double[,] basis))
-            {
-                pbrt.ErrorExit(loc, "ribbon2: unknown basis \"" + basisName + "\" (b-spline, bezier, catmull-rom, hermite, power).");
-            }
-            bool cubicOnly = basisName != "b-spline" && basisName != "bezier";
-            int degree = parameters.GetOneInt("degree", cubicOnly ? 3 : 2);
-            if (degree != 2 && degree != 3 || (cubicOnly && degree != 3))
-            {
-                pbrt.ErrorExit(loc, "ribbon2: \"degree\" is 2 or 3, and 3 for the basis \"" + basisName + "\".");
-            }
-            int step = parameters.GetOneInt("step", PatchBases.DefaultStep(basisName));
             int pieces = parameters.GetOneInt("pieces", 4);
-            if (degree == 3 && (step < 1 || pieces < 1 || pointList.Count < 4 || (pointList.Count - 4) % step != 0))
+            if (pieces < 1)
             {
-                pbrt.ErrorExit(loc, "ribbon2: a cubic \"" + basisName + "\" needs 4 + n * step points \"P\" (step " + step + "), and \"pieces\" of at least 1.");
-            }
-            if (degree == 2 && (pointList.Count < 3 || (basisName == "bezier" && pointList.Count % 2 == 0)))
-            {
-                pbrt.ErrorExit(loc, basisName == "bezier" ? "ribbon2: a quadratic \"bezier\" needs 2n + 1 points \"P\"." : "ribbon2: at least three points \"P\" are needed.");
+                pbrt.ErrorExit(loc, "ribbon2: \"pieces\" is at least 1.");
             }
             if (normalList.Count != 0 && normalList.Count != pointList.Count)
             {
@@ -675,94 +1088,67 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, "ribbon2: \"width\" needs one value or one for each point.");
             }
-            SdfVector[] points = new SdfVector[pointList.Count];
-            SdfVector minimum = new SdfVector(double.MaxValue, double.MaxValue, double.MaxValue);
-            SdfVector maximum = new SdfVector(-double.MaxValue, -double.MaxValue, -double.MaxValue);
-            for (int i = 0; i < points.Length; ++i)
-            {
-                points[i] = new SdfVector(pointList[i].x, pointList[i].y, pointList[i].z);
-                minimum = new SdfVector(Math.Min(minimum.x, points[i].x), Math.Min(minimum.y, points[i].y), Math.Min(minimum.z, points[i].z));
-                maximum = new SdfVector(Math.Max(maximum.x, points[i].x), Math.Max(maximum.y, points[i].y), Math.Max(maximum.z, points[i].z));
-            }
-            double diagonal = (maximum - minimum).Length();
-            SdfVector[] normals = null;
-            if (normalList.Count != 0)
-            {
-                normals = new SdfVector[normalList.Count];
-                for (int i = 0; i < normals.Length; ++i)
-                {
-                    normals[i] = new SdfVector(normalList[i].x, normalList[i].y, normalList[i].z);
-                }
-            }
-            double[] widths = new double[points.Length];
-            for (int i = 0; i < widths.Length; ++i)
-            {
-                widths[i] = widthList.Count == 0 ? 0.05 * diagonal : widthList.Count == 1 ? widthList[0] : widthList[i];
-            }
             List<RGB> colorList = parameters.GetRGBArray("Cs");
-            if (colorList.Count > 1 && colorList.Count != points.Length)
+            if (colorList.Count > 1 && colorList.Count != pointList.Count)
             {
                 pbrt.ErrorExit(loc, "ribbon2: \"Cs\" needs one color or one for each point.");
             }
+            int count = pointList.Count;
+            double[] x = new double[count], y = new double[count], z = new double[count];
+            SdfVector minimum = new SdfVector(double.MaxValue, double.MaxValue, double.MaxValue);
+            SdfVector maximum = new SdfVector(-double.MaxValue, -double.MaxValue, -double.MaxValue);
+            for (int i = 0; i < count; ++i)
+            {
+                x[i] = pointList[i].x;
+                y[i] = pointList[i].y;
+                z[i] = pointList[i].z;
+                minimum = new SdfVector(Math.Min(minimum.x, x[i]), Math.Min(minimum.y, y[i]), Math.Min(minimum.z, z[i]));
+                maximum = new SdfVector(Math.Max(maximum.x, x[i]), Math.Max(maximum.y, y[i]), Math.Max(maximum.z, z[i]));
+            }
+            double diagonal = (maximum - minimum).Length();
+            int degree = basis.Degree == 3 ? 3 : 2;
+            double[] givenWidths = null;
+            if (widthList.Count > 1)
+            {
+                givenWidths = new double[count];
+                for (int i = 0; i < count; ++i)
+                {
+                    givenWidths[i] = widthList[i];
+                }
+            }
+            double[] nx = null, ny = null, nz = null;
+            if (normalList.Count != 0)
+            {
+                nx = new double[count];
+                ny = new double[count];
+                nz = new double[count];
+                for (int i = 0; i < count; ++i)
+                {
+                    nx[i] = normalList[i].x;
+                    ny[i] = normalList[i].y;
+                    nz[i] = normalList[i].z;
+                }
+            }
+            List<Run> runs = Runs(basis, x, y, z, givenWidths, widthList.Count == 1 ? widthList[0] : 0.05 * diagonal, nx, ny, nz, pieces);
             RGB[] colors = colorList.Count > 0 ? colorList.ToArray() : null;
-
-            List<Run> runs = new List<Run>();
-            if (degree == 3)
+            if (colors != null && colors.Length > 1)
             {
-                if (widthList.Count <= 1)
+                // The colors along the whole ribbon, as the control values of a quadratic B-spline with a curve for each segment
+                double[] red = new double[count], green = new double[count], blue = new double[count];
+                for (int i = 0; i < count; ++i)
                 {
-                    // One width for all: not through the basis (the values of hermite and power are not all points)
-                    double[] same = new double[points.Length];
-                    for (int i = 0; i < same.Length; ++i)
-                    {
-                        same[i] = widths[0];
-                    }
-                    runs = FromCubics(points, same, normals, basis, step, pieces, ref colors);
-                    foreach (Run run in runs)
-                    {
-                        for (int i = 0; i < run.widths.Length; ++i)
-                        {
-                            run.widths[i] = widths[0];
-                        }
-                    }
+                    red[i] = colors[i].r;
+                    green[i] = colors[i].g;
+                    blue[i] = colors[i].b;
                 }
-                else
+                red = degree == 3 ? SplineOfCubics(basis.Curves(red, 3), pieces, true) : SplineOfQuadratics(basis.Curves(red, 2));
+                green = degree == 3 ? SplineOfCubics(basis.Curves(green, 3), pieces, true) : SplineOfQuadratics(basis.Curves(green, 2));
+                blue = degree == 3 ? SplineOfCubics(basis.Curves(blue, 3), pieces, true) : SplineOfQuadratics(basis.Curves(blue, 2));
+                colors = new RGB[red.Length];
+                for (int i = 0; i < colors.Length; ++i)
                 {
-                    runs = FromCubics(points, widths, normals, basis, step, pieces, ref colors);
+                    colors[i] = new RGB((Float)Math.Max(0, red[i]), (Float)Math.Max(0, green[i]), (Float)Math.Max(0, blue[i]));
                 }
-            }
-            else if (basisName == "bezier")
-            {
-                Run run = new Run();
-                run.points = points;
-                run.widths = widths;
-                if (normals != null)
-                {
-                    run.normals = new SdfVector[(points.Length + 1) / 2];
-                    for (int j = 0; j < run.normals.Length; ++j)
-                    {
-                        run.normals[j] = normals[2 * j];
-                    }
-                }
-                runs.Add(run);
-                if (colors != null && colors.Length > 1)
-                {
-                    // The colors as the control values of a quadratic B-spline along the ribbon: the first, the middle one of
-                    // each curve, the last (the colors given at the ends of the curves between are not kept)
-                    int curves = (points.Length - 1) / 2;
-                    RGB[] spline = new RGB[curves + 2];
-                    spline[0] = colors[0];
-                    spline[curves + 1] = colors[colors.Length - 1];
-                    for (int i = 0; i < curves; ++i)
-                    {
-                        spline[i + 1] = colors[2 * i + 1];
-                    }
-                    colors = spline;
-                }
-            }
-            else
-            {
-                runs.Add(FromSpline(points, widths, normals));
             }
 
             BezierSurfaceSettings settings = new BezierSurfaceSettings();
@@ -774,9 +1160,36 @@ namespace pbrt
             bool solidAngle = parameters.GetOneBool("solidanglesampling", true);
             int strandColors = colors != null ? StrandColors.Register(colors, false) : 0;
             pstd.vector<Shape> shapes = new pstd.vector<Shape>();
-            foreach (RibbonSegment segment in Build(runs))
+            bool flip = parameters.GetOneBool("flipturns", false);
+            int flipPieces = parameters.GetOneInt("flippieces", pieces);
+            if (flipPieces < 1)
             {
-                shapes.push_back(new Ribbon2Shape(settings, segment, strandColors, solidAngle));
+                pbrt.ErrorExit(loc, "ribbon2: \"flippieces\" is at least 1.");
+            }
+            List<RibbonSegment> segments = Build(runs, flip, out double[] starts, out double[] extents);
+            string flipStretch = parameters.GetOneString("flipstretch", "curve");
+            if (flipStretch != "curve" && flipStretch != "bend")
+            {
+                pbrt.ErrorExit(loc, "ribbon2: \"flipstretch\" is \"curve\" or \"bend\".");
+            }
+            if (flip && flipStretch == "bend")
+            {
+                if (degree != 3 || nx == null || pieces % 2 != 0)
+                {
+                    pbrt.ErrorExit(loc, "ribbon2: \"flipstretch\" \"bend\" is for the cubic bases, with \"N\" and an even number of \"pieces\".");
+                }
+                TakeBitangents(segments, pieces, BendStretches(basis.Curves(x, 3), basis.Curves(y, 3), basis.Curves(z, 3), basis.Curves(nx, 3), basis.Curves(ny, 3),
+                                                                basis.Curves(nz, 3)), 2);
+            }
+            else if (flip && degree == 3 && flipPieces != pieces)
+            {
+                List<RibbonSegment> coarse = Build(Runs(basis, x, y, z, givenWidths, widthList.Count == 1 ? widthList[0] : 0.05 * diagonal, nx, ny, nz, flipPieces), true,
+                                                   out double[] coarseStarts, out double[] coarseExtents);
+                TakeBitangents(segments, pieces, coarse, flipPieces);
+            }
+            for (int i = 0; i < segments.Count; ++i)
+            {
+                shapes.push_back(new Ribbon2Shape(settings, segments[i], starts[i], extents[i], strandColors, solidAngle));
             }
             return shapes;
         }

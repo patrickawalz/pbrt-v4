@@ -83,6 +83,84 @@ namespace pbrt
             return new RocapSegment(p, new double[] { r0, r1, r2, r3 }, 0, 1);
         }
 
+        // Rays at a low angle to the strand (1 to 10 degrees from its direction, at a point of its surface), over a strand
+        // that curves tightly: a ray can run along the strand, meet it more than once, and enter spheres over a long range of
+        // the parameter. Against the spheres one by one.
+        private static void Graze(RocapSegment segment, int rays, out int total, out int missed, out int extra, out double worstT)
+        {
+            Random random = new Random(23);
+            segment.Bounds(out SdfVector low, out SdfVector high);
+            double size = (high - low).Length();
+            total = missed = extra = 0;
+            worstT = 0;
+            for (int k = 0; k < rays; ++k)
+            {
+                double u = 0.02 + 0.96 * random.NextDouble();
+                SdfVector along = segment.Velocity(u).Normalized();
+                SdfVector side = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5);
+                side = (side - along * SdfVector.Dot(side, along)).Normalized();
+                // A point of the sphere of u, a little inside or outside its surface, and a direction near that of the strand
+                SdfVector target = segment.Position(u) + side * (segment.Radius(u) * (0.7 + 0.4 * random.NextDouble()));
+                double tilt = (1 + 9 * random.NextDouble()) * Math.PI / 180 * (random.Next(2) == 0 ? 1 : -1);
+                SdfVector turn = new SdfVector(random.NextDouble() - 0.5, random.NextDouble() - 0.5, random.NextDouble() - 0.5);
+                turn = (turn - along * SdfVector.Dot(turn, along)).Normalized();
+                SdfVector dir = (along * Math.Cos(tilt) + turn * Math.Sin(tilt)).Normalized();
+                if (random.Next(2) == 0)
+                {
+                    dir = -dir;
+                }
+                SdfVector origin = target - dir * (2 * size);
+                double expected = BruteForce(segment, origin, dir, 200000);
+                bool hit = segment.Intersect(origin, dir, 0, 1e30, out double t, out double hitU, out SdfVector normal);
+                if (expected < double.MaxValue)
+                {
+                    ++total;
+                    if (!hit)
+                    {
+                        ++missed;
+                        continue;
+                    }
+                    worstT = Math.Max(worstT, Math.Abs(t - expected) / size);
+                }
+                else if (hit)
+                {
+                    ++extra;
+                }
+            }
+        }
+
+        [TEST("Rocap", "GrazingRaysMatchTheSpheres")]
+        public static void GrazingRaysMatchTheSpheres()
+        {
+            for (int roots = 0; roots < 2; ++roots)
+            {
+                for (int which = 0; which < 3; ++which)
+                {
+                    RocapSegment segment = which == 0 ? Hook(0.12, 0.12, 0.12, 0.12) : which == 1 ? Hook(0.02, 0.03, 0.02, 0.025) : Hook(0.3, 0.2, 0.06, 0.02);
+                    segment.RootRefinement = roots == 1;
+                    Graze(segment, 3000, out int total, out int missed, out int extra, out double worstT);
+                    Console.WriteLine("rocap grazing rays (" + (roots == 1 ? "root of the slope" : "golden section") + "), " + (which == 0 ? "constant" : which == 1 ? "thin" : "tapered") +
+                                      ": hits " + total + " missed " + missed + " extra " + extra + " worst t " + worstT);
+                    CHECK_GT(total, 1500);
+                    CHECK_EQ(missed, 0);
+                    CHECK_EQ(extra, 0);
+                    CHECK_LT(worstT, 1e-6);
+                }
+            }
+            // The rays from all sides too, and the straight strand
+            for (int which = 0; which < 3; ++which)
+            {
+                RocapSegment segment = which == 0 ? Hook(0.12, 0.12, 0.12, 0.12) : which == 1 ? Hook(0.45, 0.3, 0.08, 0.0) : Hook(0.01, 0.02, 0.01, 0.015);
+                segment.RootRefinement = true;
+                Compare(segment, which == 2 ? 20000 : 2500, out int total, out int missed, out int extra, out double worstT, out double worstSurface, out double worstNormal);
+                Console.WriteLine("rocap from all sides (root of the slope), " + (which == 0 ? "constant" : which == 1 ? "tapered thick" : "thin") + ": hits " + total + " missed " +
+                                  missed + " extra " + extra + " worst t " + worstT + " surface " + worstSurface);
+                CHECK_LT(missed, which == 1 ? 5 : 3);
+                CHECK_LT(extra, which == 1 ? 5 : 3);
+                CHECK_LT(worstT, which == 2 ? 1e-3 : 2e-4);
+            }
+        }
+
         [TEST("Rocap", "ConstantRadiusMatchesTheSpheres")]
         public static void ConstantRadiusMatchesTheSpheres()
         {
@@ -182,6 +260,44 @@ namespace pbrt
                 }
             }
             return best;
+        }
+
+        // A straight strand (the basis "linear") is a cylinder: rays at every distance from the axis up to the silhouette, at
+        // right and at slanted angles to it, hit where they hit the cylinder
+        [TEST("Rocap", "StraightStrandIsACylinder")]
+        public static void StraightStrandIsACylinder()
+        {
+            const double r = 0.1;
+            SdfVector[] p = { new SdfVector(0, 0, 0), new SdfVector(4.0 / 3, 0, 0), new SdfVector(8.0 / 3, 0, 0), new SdfVector(4, 0, 0) };
+            RocapSegment segment = new RocapSegment(p, new double[] { r, r, r, r }, 0, 1);
+            Random random = new Random(5);
+            int rays = 0, missed = 0;
+            double worst = 0;
+            foreach (double slant in new double[] { 0, 1, 4 })
+            {
+                SdfVector d = new SdfVector(slant, 0, 1).Normalized();
+                for (int i = 0; i < 20000; ++i)
+                {
+                    // The distance from the axis: most of the rays near the silhouette, up to 1e-9 of the radius from it (a ray
+                    // nearer than 1e-13 is on the silhouette to the rounding of the numbers, and may miss)
+                    double fraction = 1 - (1e-9 + Math.Pow(random.NextDouble(), 3) * 0.999);
+                    double y = (random.Next(2) == 0 ? -1 : 1) * r * fraction, x = 0.5 + 3 * random.NextDouble();
+                    double depth = Math.Sqrt(r * r - y * y);
+                    // The point of the cylinder that is hit, and the ray to it from 3 away
+                    SdfVector hit = new SdfVector(x, y, -depth);
+                    SdfVector o = hit - d * 3;
+                    ++rays;
+                    if (!segment.Intersect(o, d, 0, 1e30, out double t, out double u, out SdfVector normal))
+                    {
+                        ++missed;
+                        continue;
+                    }
+                    worst = Math.Max(worst, Math.Abs(t - 3));
+                }
+            }
+            Console.WriteLine("rocap straight strand: " + missed + " of " + rays + " rays that hit the cylinder are missed; the hits are off by up to " + worst);
+            CHECK_EQ(missed, 0);
+            CHECK_LT(worst, 1e-6);
         }
 
         [TEST("Rocap", "FlatCapsMatchTheCutSpheres")]

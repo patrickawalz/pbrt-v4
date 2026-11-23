@@ -11,6 +11,11 @@ namespace pbrt
 {
     public static unsafe class CurvesTests
     {
+        // The engine of the curves under test; with either a segment is 8 shapes (2^splitdepth, 3 by default)
+        private static string Engine = "strands";
+
+        private const int Pieces = 8;
+
         private static ParsedParameter Param(string type, string name)
         {
             ParsedParameter p = new ParsedParameter(null);
@@ -51,6 +56,10 @@ namespace pbrt
                 s.ints.push_back(step);
                 list.Add(s);
             }
+            // The Curve of pbrt-v4 or the strands "ribbon3" and "rocap" (strandcurves.cs)
+            ParsedParameter e = Param("string", "engine");
+            e.strings.push_back(Engine);
+            list.Add(e);
             if (widths != null)
             {
                 ParsedParameter wd = Param("float", "width");
@@ -151,6 +160,16 @@ namespace pbrt
         [TEST("Curves", "CubicBases")]
         public static void CubicBases()
         {
+            foreach (string engine in new string[] { "pbrt", "strands" })
+            {
+                Engine = engine;
+                CubicBasesBody();
+            }
+            Engine = "strands";
+        }
+
+        private static void CubicBasesBody()
+        {
             string[] bases = { "bezier", "b-spline", "catmull-rom", "hermite" };
             int[] counts = { 7, 6, 6, 6 };
             int[] steps = { 3, 1, 1, 2 };
@@ -172,7 +191,7 @@ namespace pbrt
                 EXPECT_EQ(segments, (int)shapes.size(), bases[bi] + " number of segments");
                 list.RemoveAt(list.Count - 1);
                 shapes = Make(list);
-                EXPECT_EQ(segments * 8, (int)shapes.size(), bases[bi] + " number of pieces");
+                EXPECT_EQ(segments * Pieces, (int)shapes.size(), bases[bi] + " number of pieces");
                 for (int s = 0; s < segments; ++s)
                 {
                     int first = s * steps[bi];
@@ -186,6 +205,16 @@ namespace pbrt
         [TEST("Curves", "PeriodicAndSeveralCurves")]
         public static void PeriodicAndSeveralCurves()
         {
+            foreach (string engine in new string[] { "pbrt", "strands" })
+            {
+                Engine = engine;
+                PeriodicAndSeveralCurvesBody();
+            }
+            Engine = "strands";
+        }
+
+        private static void PeriodicAndSeveralCurvesBody()
+        {
             // a closed b-spline loop of 6 vertices (6 segments, the last ones wrap)
             double[][] loop = new double[6][];
             for (int i = 0; i < 6; ++i)
@@ -194,7 +223,7 @@ namespace pbrt
             }
             List<ParsedParameter> single = Parameters(new int[] { 6 }, loop, "cubic", "periodic", "b-spline", 1, new float[] { 0.1f, 0.12f, 0.14f, 0.16f, 0.18f, 0.2f });
             pstd.vector<Shape> shapes = Make(single);
-            EXPECT_EQ(6 * 8, (int)shapes.size(), "periodic segments");
+            EXPECT_EQ(6 * Pieces, (int)shapes.size(), "periodic segments");
             for (int s = 0; s < 6; ++s)
             {
                 double[][] g = { loop[s], loop[(s + 1) % 6], loop[(s + 2) % 6], loop[(s + 3) % 6] };
@@ -206,17 +235,27 @@ namespace pbrt
             both.AddRange(second);
             List<ParsedParameter> list = Parameters(new int[] { 4, 7 }, both.ToArray(), "cubic", "nonperiodic", "bezier", 3, new float[] { 0.2f, 0.2f, 0.1f, 0.2f, 0.3f });
             shapes = Make(list);
-            EXPECT_EQ((1 + 2) * 8, (int)shapes.size(), "two curves");
+            EXPECT_EQ((1 + 2) * Pieces, (int)shapes.size(), "two curves");
             CheckSegment("second curve, segment 1", shapes, t => Evaluate("bezier", new double[][] { second[3], second[4], second[5], second[6] }, t), 0.2, 0.3);
         }
 
         [TEST("Curves", "LinearCurves")]
         public static void LinearCurves()
         {
+            foreach (string engine in new string[] { "pbrt", "strands" })
+            {
+                Engine = engine;
+                LinearCurvesBody();
+            }
+            Engine = "strands";
+        }
+
+        private static void LinearCurvesBody()
+        {
             double[][] points = { new double[] { 0, 0, 0 }, new double[] { 2, 1, 0 }, new double[] { 3, -1, 0 }, new double[] { 5, 0.5, 0 } };
             float[] widths = { 0.1f, 0.3f, 0.2f, 0.4f };
             pstd.vector<Shape> shapes = Make(Parameters(new int[] { 4 }, points, "linear", "nonperiodic", "bezier", 0, widths));
-            EXPECT_EQ(3 * 8, (int)shapes.size());
+            EXPECT_EQ(3 * Pieces, (int)shapes.size());
             for (int s = 0; s < 3; ++s)
             {
                 double[] a = points[s], b = points[s + 1];
@@ -226,13 +265,23 @@ namespace pbrt
             double[][] square = { new double[] { 0, 0, 0 }, new double[] { 4, 0, 0 }, new double[] { 4, 3, 0 }, new double[] { 0, 3, 0 } };
             float[] squareWidths = { 0.2f, 0.1f, 0.2f, 0.3f };
             shapes = Make(Parameters(new int[] { 4 }, square, "linear", "periodic", "bezier", 0, squareWidths));
-            EXPECT_EQ(4 * 8, (int)shapes.size());
+            EXPECT_EQ(4 * Pieces, (int)shapes.size());
             double[] la = square[3], lb = square[0];
             CheckSegment("closing segment", shapes, t => new double[] { la[0] + (lb[0] - la[0]) * t, la[1] + (lb[1] - la[1]) * t, 0 }, squareWidths[3], squareWidths[0]);
         }
 
         [TEST("Curves", "RibbonWithNormals")]
         public static void RibbonWithNormals()
+        {
+            foreach (string engine in new string[] { "pbrt", "strands" })
+            {
+                Engine = engine;
+                RibbonWithNormalsBody();
+            }
+            Engine = "strands";
+        }
+
+        private static void RibbonWithNormalsBody()
         {
             double[][] points = Wave(4, 0, 0, 1.5, 0.6, 0);
             List<ParsedParameter> list = Parameters(new int[] { 4 }, points, "cubic", "nonperiodic", "bezier", 3, new float[] { 0.3f, 0.3f });
@@ -243,7 +292,7 @@ namespace pbrt
             }
             list.Add(n);
             pstd.vector<Shape> shapes = Make(list);
-            EXPECT_EQ(8, (int)shapes.size());
+            EXPECT_EQ(Pieces, (int)shapes.size());
             double[] c = Evaluate("bezier", points, 0.5);
             Ray above = new Ray(new Point3f((Float)c[0], (Float)c[1], 3), new Vector3f(0, 0, -1));
             bool hit = false;

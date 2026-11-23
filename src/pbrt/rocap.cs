@@ -38,6 +38,10 @@ namespace pbrt
 
         // Flat caps: the strand ends in disks perpendicular to the curve instead of spheres (the solid is cut by the planes of the ends)
         public bool FlatCaps;
+        // The nearest entry into the spheres of a capsule is found from where the entry stops changing along the strand (the
+        // root of its derivative, EntrySlope: the default) and not by the golden section search (the first method, as exact
+        // and a little slower)
+        public bool RootRefinement = true;
 
         public readonly int index, count;
 
@@ -392,13 +396,152 @@ namespace pbrt
             return start;
         }
 
-        // The nearest entry into the spheres of the parameters in [lo, hi] (cut by the slab of flat caps): a scan, then the golden section search around the best
-        // sample. The entry of the sphere that is the nearest is on the swept surface (or on the plane of an end).
+        // The derivative along u of the distance at which the ray enters the sphere of u, b - sqrt(h) with b = (C - o) . d and
+        // h = b^2 - |C - o|^2 + r^2: b' - h' / (2 sqrt(h)). At an end of the spheres that the ray hits h is 0, and the entry
+        // falls (at the first of them) or rises (at the last) without bound: -infinity or +infinity by the sign of h', and
+        // `outside` (the value for an end of the range) where the ray misses the sphere.
+        private double EntrySlope(SdfVector o, SdfVector d, double u, double outside)
+        {
+            SdfVector c = Position(u) - o, velocity = Velocity(u);
+            double r = Radius(u), along = SdfVector.Dot(c, d);
+            double h = along * along - SdfVector.Dot(c, c) + r * r;
+            if (h < 0)
+            {
+                return outside;
+            }
+            double alongSlope = SdfVector.Dot(velocity, d);
+            double hSlope = 2 * along * alongSlope - 2 * SdfVector.Dot(c, velocity) + 2 * r * RadiusDerivative(u);
+            if (h == 0)
+            {
+                return hSlope > 0 ? double.NegativeInfinity : hSlope < 0 ? double.PositiveInfinity : alongSlope;
+            }
+            return alongSlope - hSlope / (2 * Math.Sqrt(h));
+        }
+
+        // The parameter in [a, b] of the sphere that the ray enters first, [a, b] being around the nearest of the samples: where
+        // the slope of the entry changes from falling to rising. An end when the entry rises from a or falls to b. In between
+        // the root of the slope by the secant of the two ends of the part that holds it, with a step to the middle whenever
+        // the secant did not halve the part (the slope is without bound at the ends of the spheres that are hit, where the
+        // secant alone would creep).
+        private double SlopeRoot(SdfVector o, SdfVector d, double a, double b)
+        {
+            double sa = EntrySlope(o, d, a, double.NegativeInfinity), sb = EntrySlope(o, d, b, double.PositiveInfinity);
+            if (!(sa < 0))
+            {
+                return a;
+            }
+            if (!(sb > 0))
+            {
+                return b;
+            }
+            double width = b - a;
+            bool halve = false;
+            for (int i = 0; i < 60 && b - a > 1e-9 * width; ++i)
+            {
+                double before = b - a;
+                double next = 0.5 * (a + b);
+                if (!halve && !double.IsInfinity(sa) && !double.IsInfinity(sb))
+                {
+                    double secant = a - sa * (b - a) / (sb - sa);
+                    if (secant > a && secant < b)
+                    {
+                        next = secant;
+                    }
+                }
+                double slope = EntrySlope(o, d, next, 0);
+                if (slope == 0)
+                {
+                    return next;
+                }
+                if (slope < 0)
+                {
+                    a = next;
+                    sa = slope;
+                }
+                else
+                {
+                    b = next;
+                    sb = slope;
+                }
+                halve = b - a > 0.5 * before;
+            }
+            return 0.5 * (a + b);
+        }
+
+        // How far the ray goes into the sphere of the parameter u: the square of half the chord (negative: the ray misses it)
+        private double Depth(SdfVector o, SdfVector d, double u)
+        {
+            SdfVector c = Position(u) - o;
+            double r = Radius(u), along = SdfVector.Dot(c, d);
+            return along * along - SdfVector.Dot(c, c) + r * r;
+        }
+
+        // The end of the parameters whose spheres the ray hits, between `outside` (missed) and `inside` (hit)
+        private double EndOfHits(SdfVector o, SdfVector d, double outside, double inside)
+        {
+            for (int i = 0; i < 24; ++i)
+            {
+                double middle = 0.5 * (outside + inside);
+                if (Depth(o, d, middle) >= 0)
+                {
+                    inside = middle;
+                }
+                else
+                {
+                    outside = middle;
+                }
+            }
+            return inside;
+        }
+
+        // The nearest entry into the spheres of the parameters in [lo, hi] (cut by the slab of flat caps). The entry of the sphere that is the nearest is on the
+        // swept surface (or on the plane of an end). Near the silhouette the ray hits the spheres of a short range of the parameters only, which samples of
+        // the entry over [lo, hi] step over (the strand then shows as a string of beads, the more the longer the capsule: a straight strand most of all).
+        // So first the sphere that the ray goes into the deepest is found (the depth is defined for every sphere, hit or not: a scan and the golden section
+        // search), then the range of the spheres that are hit around it, and then the nearest entry within that range (a scan and the golden section search).
         private bool Scan(SdfVector o, SdfVector d, double lo, double hi, double tMin, double slabLow, double slabHigh, SdfVector slabNormal, ref double u, ref double t,
                           out SdfVector normal)
         {
             normal = default;
             const int samples = 12;
+            const double phi = 0.6180339887498949;
+            double deepest = double.MinValue, deepestU = lo;
+            for (int i = 0; i <= samples; ++i)
+            {
+                double w = lo + (hi - lo) * i / samples;
+                double depth = Depth(o, d, w);
+                if (depth > deepest)
+                {
+                    deepest = depth;
+                    deepestU = w;
+                }
+            }
+            double from = Math.Max(lo, deepestU - (hi - lo) / samples), to = Math.Min(hi, deepestU + (hi - lo) / samples);
+            // (the search is only needed when no sample is in a sphere that the ray hits)
+            for (int i = 0; i < 28 && deepest < 0; ++i)
+            {
+                double c1 = to - phi * (to - from), c2 = from + phi * (to - from);
+                if (Depth(o, d, c1) > Depth(o, d, c2))
+                {
+                    to = c2;
+                }
+                else
+                {
+                    from = c1;
+                }
+            }
+            double middleU = 0.5 * (from + to);
+            if (deepest < 0 && Depth(o, d, middleU) > deepest)
+            {
+                deepestU = middleU;
+                deepest = Depth(o, d, middleU);
+            }
+            if (deepest < 0)
+            {
+                return false;
+            }
+            lo = Depth(o, d, lo) >= 0 ? lo : EndOfHits(o, d, lo, deepestU);
+            hi = Depth(o, d, hi) >= 0 ? hi : EndOfHits(o, d, hi, deepestU);
             double bestT = double.MaxValue, bestU = 0;
             for (int i = 0; i <= samples; ++i)
             {
@@ -415,22 +558,29 @@ namespace pbrt
                 return false;
             }
             double a = Math.Max(lo, bestU - (hi - lo) / samples), b = Math.Min(hi, bestU + (hi - lo) / samples);
-            const double phi = 0.6180339887498949;
-            for (int i = 0; i < 34; ++i)
+            double best;
+            if (RootRefinement)
             {
-                double c1 = b - phi * (b - a), c2 = a + phi * (b - a);
-                double f1 = ClampedEntry(o, d, c1, tMin, slabLow, slabHigh, out bool p1, out SdfVector v1);
-                double f2 = ClampedEntry(o, d, c2, tMin, slabLow, slabHigh, out bool p2, out SdfVector v2);
-                if (f1 < f2)
-                {
-                    b = c2;
-                }
-                else
-                {
-                    a = c1;
-                }
+                best = SlopeRoot(o, d, a, b);
             }
-            double best = 0.5 * (a + b);
+            else
+            {
+                for (int i = 0; i < 34; ++i)
+                {
+                    double c1 = b - phi * (b - a), c2 = a + phi * (b - a);
+                    double f1 = ClampedEntry(o, d, c1, tMin, slabLow, slabHigh, out bool p1, out SdfVector v1);
+                    double f2 = ClampedEntry(o, d, c2, tMin, slabLow, slabHigh, out bool p2, out SdfVector v2);
+                    if (f1 < f2)
+                    {
+                        b = c2;
+                    }
+                    else
+                    {
+                        a = c1;
+                    }
+                }
+                best = 0.5 * (a + b);
+            }
             double tb = ClampedEntry(o, d, best, tMin, slabLow, slabHigh, out bool onPlane, out SdfVector vb);
             if (!(tb <= bestT))
             {

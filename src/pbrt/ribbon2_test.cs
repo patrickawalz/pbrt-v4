@@ -15,7 +15,7 @@ namespace pbrt
             SdfVector[] points = new SdfVector[count];
             for (int i = 0; i < count; ++i)
             {
-                double angle = i * 0.7;
+                double angle = i * 0.4;
                 points[i] = new SdfVector(radius * Math.Cos(angle), radius * Math.Sin(angle), rise * i);
             }
             return points;
@@ -35,7 +35,7 @@ namespace pbrt
         {
             List<Ribbons2.Run> runs = new List<Ribbons2.Run>();
             runs.Add(run);
-            return Ribbons2.Build(runs);
+            return Ribbons2.Build(runs, false, out double[] starts, out double[] extents);
         }
 
         // The largest distance between the surfaces of two lists of segments at the same parameters
@@ -75,6 +75,69 @@ namespace pbrt
                 double worst = Difference(old, now);
                 Console.WriteLine("ribbon2 b-spline " + (which == 0 ? "without" : "with") + " normals: " + now.Count + " segments, differs from ribbon by " + worst);
                 CHECK_LT(worst, 1e-12);
+            }
+        }
+
+        // With normals the surface follows them: the largest angle between the normal of the surface on the centerline and
+        // the given normal, for a strand that turns by more than a right angle within its curves ("ribbon" swaps the sides
+        // of the ribbon there; the bitangent of one segment over such a turn folds the ribbon), and the least length of the
+        // generator against its ends (a generator that shrinks is a ribbon that folds)
+        [TEST("Ribbon2", "FollowsTheNormals")]
+        public static void FollowsTheNormals()
+        {
+            SdfVector[] points = new SdfVector[10];
+            SdfVector[] normals = new SdfVector[10];
+            double[] widths = new double[10];
+            for (int i = 0; i < 10; ++i)
+            {
+                points[i] = new SdfVector(-1.6 + 0.36 * i, 0.55 + (i % 2 == 1 ? 0.28 : -0.28), 0.9 + 0.1 * Math.Sin(i));
+                normals[i] = new SdfVector(0, 0, 1);
+                widths[i] = 0.09;
+            }
+            // With "flipturns" the segments are those of "ribbon"
+            List<Ribbons2.Run> flipRuns = new List<Ribbons2.Run>();
+            flipRuns.Add(Ribbons2.FromSpline(points, widths, normals));
+            List<RibbonSegment> flipped = Ribbons2.Build(flipRuns, true, out double[] flipStarts, out double[] flipExtents);
+            List<RibbonSegment> existing = RibbonBuilder.Build(points, normals, widths);
+            CHECK_EQ(flipped.Count, existing.Count);
+            double flipDifference = Difference(existing, flipped);
+            Console.WriteLine("ribbon2 with flipturns over the zigzag: " + flipped.Count + " segments, differs from ribbon by " + flipDifference);
+            CHECK_LT(flipDifference, 1e-12);
+            for (int which = 0; which < 2; ++which)
+            {
+                List<RibbonSegment> segments = which == 0 ? RibbonBuilder.Build(points, normals, widths) : Segments(Ribbons2.FromSpline(points, widths, normals));
+                double worst = 0, least = double.MaxValue;
+                foreach (RibbonSegment segment in segments)
+                {
+                    for (int j = 0; j <= 32; ++j)
+                    {
+                        double u = j / 32.0;
+                        segment.Derivatives(u, 0, out SdfVector du, out SdfVector dv);
+                        SdfVector normal = SdfVector.Cross(du, dv).Normalized();
+                        // (the given normal is across the tangent only as far as the strand lies in its plane)
+                        SdfVector tangent = du.Normalized();
+                        SdfVector across = (new SdfVector(0, 0, 1) - tangent * tangent.z).Normalized();
+                        worst = Math.Max(worst, Math.Acos(Math.Min(1, Math.Abs(SdfVector.Dot(normal, across)))) * 180 / Math.PI);
+                        // (the width across the centerline: a bitangent that leans along it makes the ribbon narrower)
+                        SdfVector bitangent = segment.Position(u, 1) - segment.Position(u, -1);
+                        least = Math.Min(least, (bitangent - tangent * SdfVector.Dot(bitangent, tangent)).Length() / (2 * 0.09));
+                    }
+                }
+                int up = 0;
+                for (int i = 0; i < segments.Count; ++i)
+                {
+                    segments[i].Derivatives(0.5, 0, out SdfVector du, out SdfVector dv);
+                    up += SdfVector.Cross(du, dv).z > 0 ? 1 : 0;
+                }
+                bool flips = up != 0 && up != segments.Count;
+                Console.WriteLine((which == 0 ? "ribbon" : "ribbon2") + " over a zigzag with the normals 0 0 1: " + segments.Count + " segments, the surface is up to " +
+                                  worst.ToString("0.0") + " degrees from the normals, " + (flips ? "its sides swap" : "one side along the whole strand") + ", width at least " + least.ToString("0.000") +
+                                  " of the given");
+                if (which == 1)
+                {
+                    CHECK_LT(worst, 15);
+                    CHECK(!flips);
+                }
             }
         }
 
@@ -152,10 +215,11 @@ namespace pbrt
                 double before = 0;
                 for (int pieces = 1; pieces <= 8; pieces *= 2)
                 {
-                    RGB[] colors = null;
-                    List<Ribbons2.Run> runs = Ribbons2.FromCubics(points, widths, null, basis, step, pieces, ref colors);
+                    double[] w = new double[x.Length];
+                    Array.Fill(w, 0.1);
+                    List<Ribbons2.Run> runs = Ribbons2.FromCubics(x, y, z, w, null, null, null, pieces);
                     CHECK_EQ(runs.Count, 1);
-                    List<RibbonSegment> segments = Ribbons2.Build(runs);
+                    List<RibbonSegment> segments = Ribbons2.Build(runs, false, out double[] starts, out double[] extents);
                     CHECK_EQ(segments.Count, curves * pieces);
                     double worst = 0, worstJoint = 0;
                     for (int i = 0; i < segments.Count; ++i)
@@ -195,11 +259,21 @@ namespace pbrt
             PatchBases.TryGet("bezier", out double[,] basis);
             SdfVector[] points = { new SdfVector(0, 0, 0), new SdfVector(1, 0, 0), new SdfVector(2, 1, 0), new SdfVector(3, 1, 0), new SdfVector(3, 2, 0),
                                    new SdfVector(3, 3, 1), new SdfVector(4, 3, 1) };
-            double[] widths = { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1 };
-            RGB[] colors = null;
-            List<Ribbons2.Run> runs = Ribbons2.FromCubics(points, widths, null, basis, 3, 4, ref colors);
+            double[] x = new double[points.Length], y = new double[points.Length], z = new double[points.Length];
+            for (int i = 0; i < points.Length; ++i)
+            {
+                x[i] = points[i].x;
+                y[i] = points[i].y;
+                z[i] = points[i].z;
+            }
+            x = Rocaps.ToBezierCurves(x, basis, 3);
+            y = Rocaps.ToBezierCurves(y, basis, 3);
+            z = Rocaps.ToBezierCurves(z, basis, 3);
+            double[] w = new double[x.Length];
+            Array.Fill(w, 0.1);
+            List<Ribbons2.Run> runs = Ribbons2.FromCubics(x, y, z, w, null, null, null, 4);
             CHECK_EQ(runs.Count, 2);
-            List<RibbonSegment> segments = Ribbons2.Build(runs);
+            List<RibbonSegment> segments = Ribbons2.Build(runs, false, out double[] starts, out double[] extents);
             CHECK_EQ(segments.Count, 8);
             CHECK_EQ(segments[7].Index, 7);
             CHECK_EQ(segments[7].Count, 8);
@@ -230,7 +304,7 @@ namespace pbrt
                 run.widths = new double[] { 0.15, 0.3, 0.2 };
                 run.normals = new SdfVector[] { new SdfVector(0, 0, 1), new SdfVector(0, 0.6, 0.8) };
             }
-            return new Ribbon2Shape(settings, Segments(run)[0], 0, solidAngle);
+            return new Ribbon2Shape(settings, Segments(run)[0], 0, 1, 0, solidAngle);
         }
 
         // The samples by area: the density of a sample is the density that the shape gives for its point, and the mean of
