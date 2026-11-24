@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AssemblyName>materialx_lib</AssemblyName>
+    <RootNamespace>MaterialX</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ErrorEndLocation>true</ErrorEndLocation>
+    <NoWarn>$(NoWarn);CS0660;CS0661;CS0659;CS0108;CS0168;CS0219;CS0414</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="MaterialXCore/**/*.cs" />
+    <Compile Include="MaterialXFormat/**/*.cs" />
+    <Compile Include="MaterialXGenShader/**/*.cs" />
+    <Compile Include="MaterialXGenOsl/**/*.cs" />
+  </ItemGroup>
+
+</Project>
