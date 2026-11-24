@@ -161,7 +161,7 @@ namespace MaterialX
                 // Upgrade elements in place.
                 foreach (Element elem in traverseTree())
                 {
-                    List<Element> origChildren = elem.getChildren();
+                    List<Element> origChildren = new List<Element>(elem.getChildren());
                     foreach (Element child in origChildren)
                     {
                         if (child.getCategory() == "opgraph")
@@ -350,7 +350,7 @@ namespace MaterialX
                         elem.setAttribute(ValueElement.VALUE_ATTRIBUTE, replaceSubstrings(elem.getAttribute(ValueElement.VALUE_ATTRIBUTE), stringMap));
                     }
 
-                    List<Element> origChildren = elem.getChildren();
+                    List<Element> origChildren = new List<Element>(elem.getChildren());
                     foreach (Element child in origChildren)
                     {
                         if (elem.getCategory() == "material" && child.getCategory() == "override")
