@@ -91,9 +91,9 @@ namespace pbrt
                         z[i] = set.points[3 * (first + i) + 2];
                         width[i] = scale * (set.thickness != null ? set.thickness[first + i] : set.defaultThickness);
                     }
-                    x = basis.Curves(x, 3);
-                    y = basis.Curves(y, 3);
-                    z = basis.Curves(z, 3);
+                    x = basis.Vectors(x, 3);
+                    y = basis.Vectors(y, 3);
+                    z = basis.Vectors(z, 3);
                     width = basis.Curves(width, 3);
                     for (int curve = 0; curve < x.Length / 4; ++curve)
                     {
@@ -197,9 +197,9 @@ namespace pbrt
                     z[i] = set.points[3 * (first + i) + 2];
                     radius[i] = 0.5 * scale * (set.thickness != null ? set.thickness[first + i] : set.defaultThickness);
                 }
-                x = basis.Curves(x, 3);
-                y = basis.Curves(y, 3);
-                z = basis.Curves(z, 3);
+                x = basis.Vectors(x, 3);
+                y = basis.Vectors(y, 3);
+                z = basis.Vectors(z, 3);
                 radius = basis.Curves(radius, 3);
                 int curves = x.Length / 4;
                 List<SdfVector> centers = new List<SdfVector>(), tangents = new List<SdfVector>();

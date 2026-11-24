@@ -13,6 +13,12 @@
 //     "catmull-rom"  cubic, through the points.
 //     "cardinal"     cubic, through the points, with "float tension" (0.5): the tangent at a point is the tension times the
 //                    difference of its two neighbors; 0.5 is catmull-rom, 0 gives straight pieces.
+//     "monotone"     cubic, through all the points (n points give n - 1 curves, n when closed; no "step" and no pinning):
+//                    catmull-rom with its ends pinned for the points and the normals (Vectors), and for every other value
+//                    (a radius, a width, a color: Curves) the same tangents held to twice the smaller of the two differences
+//                    at a point, and none where the values turn (Steffen 1990): the value between two points never leaves
+//                    theirs. A radius that falls to zero stays above it, and a step in a color makes no fringe. Where
+//                    nothing is held it is catmull-rom. (Held by coordinate, the points would follow the axes: they are not.)
 //     "hermite", "power"  cubic, as in RenderMan.
 //   "integer step"   of the cubic bases, as in RenderMan (bezier, power 3; hermite 2; the others 1).
 //   "string wrap"    "nonperiodic" (the default);
@@ -43,6 +49,10 @@ namespace pbrt
                 double t = tension;
                 matrix = new double[,] { { -t, 2 - t, t - 2, t }, { 2 * t, t - 3, 3 - 2 * t, -t }, { -t, 0, t, 0 }, { 0, 1, 0, 0 } };
             }
+            else if (name == "monotone")
+            {
+                PatchBases.TryGet("catmull-rom", out matrix);
+            }
             else if (this.degree == 3 && knots == null)
             {
                 PatchBases.TryGet(name, out matrix);
@@ -69,10 +79,11 @@ namespace pbrt
             {
                 name = "catmull-rom";
             }
-            bool known = name == "linear" || name == "bezier" || name == "b-spline" || name == "catmull-rom" || name == "cardinal" || name == "hermite" || name == "power";
+            bool known = name == "linear" || name == "bezier" || name == "b-spline" || name == "catmull-rom" || name == "cardinal" || name == "monotone" ||
+                         name == "hermite" || name == "power";
             if (!known)
             {
-                pbrt.ErrorExit(loc, shape + ": unknown basis \"" + name + "\" (linear, bezier, b-spline, catmull-rom, cardinal, hermite, power).");
+                pbrt.ErrorExit(loc, shape + ": unknown basis \"" + name + "\" (linear, bezier, b-spline, catmull-rom, cardinal, monotone, hermite, power).");
             }
             bool eitherDegree = name == "bezier" || name == "b-spline";
             int degree = name == "linear" ? 1 : (eitherDegree ? parameters.GetOneInt("degree", defaultDegree) : 3);
@@ -80,7 +91,7 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, shape + ": \"degree\" is 2 or 3.");
             }
-            int step = parameters.GetOneInt("step", name == "cardinal" ? 1 : PatchBases.DefaultStep(name));
+            int step = name == "monotone" ? 1 : parameters.GetOneInt("step", name == "cardinal" ? 1 : PatchBases.DefaultStep(name));
             string wrap = parameters.GetOneString("wrap", "nonperiodic");
             if (wrap != "nonperiodic" && wrap != "periodic" && wrap != "pinned")
             {
@@ -177,7 +188,19 @@ namespace pbrt
         // higher one (degree elevation).
         public double[] Curves(double[] g, int to)
         {
-            double[] values = Native(g);
+            return Raised(name == "monotone" ? Monotone(g) : Native(g), to);
+        }
+
+        // The same for a coordinate of the points or of the normals of the strand: the curve must not depend on the axes, and
+        // "monotone" holds nothing there
+        public double[] Vectors(double[] g, int to)
+        {
+            return Raised(Native(g), to);
+        }
+
+        // StrandBasis Private Methods
+        private double[] Raised(double[] values, int to)
+        {
             int from = degree;
             if (from == 1 && to >= 2)
             {
@@ -208,10 +231,57 @@ namespace pbrt
             return values;
         }
 
-        // StrandBasis Private Methods
         private bool Pinned()
         {
+            if (name == "monotone")
+            {
+                return wrap != "periodic";
+            }
             return wrap == "pinned" && degree == 3 && knots == null && step == 1 && (name == "b-spline" || name == "catmull-rom" || name == "cardinal");
+        }
+
+        // The Bezier values of the curves of "monotone" for a value that is not a coordinate: from point to point with the
+        // tangents of catmull-rom (half the difference of the neighbors; at an end that is not closed the difference to the
+        // one neighbor, as pinned), held to twice the smaller of the differences to the two neighbors and zero where those
+        // differ in sign. The two inner Bezier values of a curve are then between its ends, and so is the curve.
+        private double[] Monotone(double[] g)
+        {
+            int n = g.Length;
+            bool periodic = wrap == "periodic";
+            double[] tangent = new double[n];
+            for (int i = 0; i < n; ++i)
+            {
+                if (!periodic && i == 0)
+                {
+                    tangent[i] = g[1] - g[0];
+                    continue;
+                }
+                if (!periodic && i == n - 1)
+                {
+                    tangent[i] = g[n - 1] - g[n - 2];
+                    continue;
+                }
+                double before = g[i] - g[(i + n - 1) % n], after = g[(i + 1) % n] - g[i];
+                if (!(before * after > 0))
+                {
+                    tangent[i] = 0;
+                    continue;
+                }
+                double held = Math.Min(0.5 * Math.Abs(before + after), 2 * Math.Min(Math.Abs(before), Math.Abs(after)));
+                tangent[i] = before > 0 ? held : -held;
+            }
+            int curves = periodic ? n : n - 1;
+            double[] values = new double[4 * curves];
+            for (int s = 0; s < curves; ++s)
+            {
+                // (closed, the first curve is from the second point, as that of catmull-rom)
+                int from = periodic ? (s + 1) % n : s, next = (from + 1) % n;
+                values[4 * s] = g[from];
+                values[4 * s + 1] = g[from] + tangent[from] / 3;
+                values[4 * s + 2] = g[next] - tangent[next] / 3;
+                values[4 * s + 3] = g[next];
+            }
+            return values;
         }
 
         // The Bezier values of the curves in the degree of the basis: degree + 1 values for each

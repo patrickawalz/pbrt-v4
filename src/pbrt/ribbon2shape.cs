@@ -1038,9 +1038,9 @@ namespace pbrt
         public static List<Run> Runs(StrandBasis basis, double[] x, double[] y, double[] z, double[] widths, double width, double[] nx, double[] ny, double[] nz, int pieces)
         {
             int degree = basis.Degree == 3 ? 3 : 2;
-            x = basis.Curves(x, degree);
-            y = basis.Curves(y, degree);
-            z = basis.Curves(z, degree);
+            x = basis.Vectors(x, degree);
+            y = basis.Vectors(y, degree);
+            z = basis.Vectors(z, degree);
             double[] w = new double[x.Length];
             if (widths != null)
             {
@@ -1056,9 +1056,9 @@ namespace pbrt
             }
             if (nx != null)
             {
-                nx = basis.Curves(nx, degree);
-                ny = basis.Curves(ny, degree);
-                nz = basis.Curves(nz, degree);
+                nx = basis.Vectors(nx, degree);
+                ny = basis.Vectors(ny, degree);
+                nz = basis.Vectors(nz, degree);
             }
             return degree == 3 ? FromCubics(x, y, z, w, nx, ny, nz, pieces) : FromQuadratics(x, y, z, w, nx, ny, nz);
         }
@@ -1178,8 +1178,8 @@ namespace pbrt
                 {
                     pbrt.ErrorExit(loc, "ribbon2: \"flipstretch\" \"bend\" is for the cubic bases, with \"N\" and an even number of \"pieces\".");
                 }
-                TakeBitangents(segments, pieces, BendStretches(basis.Curves(x, 3), basis.Curves(y, 3), basis.Curves(z, 3), basis.Curves(nx, 3), basis.Curves(ny, 3),
-                                                                basis.Curves(nz, 3)), 2);
+                TakeBitangents(segments, pieces, BendStretches(basis.Vectors(x, 3), basis.Vectors(y, 3), basis.Vectors(z, 3), basis.Vectors(nx, 3), basis.Vectors(ny, 3),
+                                                                basis.Vectors(nz, 3)), 2);
             }
             else if (flip && degree == 3 && flipPieces != pieces)
             {

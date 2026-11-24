@@ -1076,9 +1076,9 @@ namespace pbrt
                     y[i] = points[i].y;
                     z[i] = points[i].z;
                 }
-                x = basis.Curves(x, 3);
-                y = basis.Curves(y, 3);
-                z = basis.Curves(z, 3);
+                x = basis.Vectors(x, 3);
+                y = basis.Vectors(y, 3);
+                z = basis.Vectors(z, 3);
                 points = new SdfVector[x.Length];
                 for (int i = 0; i < points.Length; ++i)
                 {

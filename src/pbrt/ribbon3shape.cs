@@ -1561,9 +1561,9 @@ namespace pbrt
             }
             double diagonal = (maximum - minimum).Length();
             double[] givenX = x, givenY = y, givenZ = z;
-            x = basis.Curves(x, 3);
-            y = basis.Curves(y, 3);
-            z = basis.Curves(z, 3);
+            x = basis.Vectors(x, 3);
+            y = basis.Vectors(y, 3);
+            z = basis.Vectors(z, 3);
             double[] w = new double[x.Length];
             if (widthList.Count > 1)
             {
@@ -1594,9 +1594,9 @@ namespace pbrt
                     ny[i] = normalList[i].y;
                     nz[i] = normalList[i].z;
                 }
-                nx = basis.Curves(nx, 3);
-                ny = basis.Curves(ny, 3);
-                nz = basis.Curves(nz, 3);
+                nx = basis.Vectors(nx, 3);
+                ny = basis.Vectors(ny, 3);
+                nz = basis.Vectors(nz, 3);
             }
             RGB[] colors = colorList.Count > 0 ? colorList.ToArray() : null;
             if (colors != null && colors.Length > 1)

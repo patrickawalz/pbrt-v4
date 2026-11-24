@@ -316,6 +316,78 @@ namespace pbrt
             Same(new StrandBasis("bezier", 3, 3, "nonperiodic", 0.5, null).BezierMatrix, identity);
         }
 
+        // "monotone": through the points; a value between two points stays between theirs (where catmull-rom leaves them);
+        // where nothing is held it is catmull-rom pinned; the points and the normals are catmull-rom pinned always
+        [TEST("StrandBasis", "MonotoneStaysBetweenThePoints")]
+        public static void MonotoneStaysBetweenThePoints()
+        {
+            foreach (bool closed in new bool[] { false, true })
+            {
+                string wrap = closed ? "periodic" : "nonperiodic";
+                StrandBasis monotone = new StrandBasis("monotone", 3, 1, wrap, 0.5, null);
+                StrandBasis catmull = new StrandBasis("catmull-rom", 3, 1, closed ? "periodic" : "pinned", 0.5, null);
+                // (a radius that falls to nothing, a step, and values at random)
+                double[][] cases = { new double[] { 1, 1, 1, 0.05, 0, 0 }, new double[] { 0, 0, 0, 1, 1, 1, 0.2, 0.2 }, Values(9, 5), Values(12, 8) };
+                foreach (double[] g in cases)
+                {
+                    int n = g.Length, curves = closed ? n : n - 1;
+                    double[] held = monotone.Curves(g, 3), free = catmull.Curves(g, 3);
+                    CHECK_EQ(held.Length, 4 * curves);
+                    CHECK_EQ(monotone.Check(n) == null, true);
+                    double misses = 0, outside = 0, outsideFree = 0, jump = 0;
+                    for (int s = 0; s < curves; ++s)
+                    {
+                        // (closed, the first curve is from the second point, as that of catmull-rom)
+                        int from = closed ? (s + 1) % n : s;
+                        double a = g[from], b = g[(from + 1) % n], low = Math.Min(a, b), high = Math.Max(a, b);
+                        misses = Math.Max(misses, Math.Max(Math.Abs(held[4 * s] - a), Math.Abs(held[4 * s + 3] - b)));
+                        for (int k = 0; k <= 50; ++k)
+                        {
+                            double value = Bezier(held, 3, s, k / 50.0), other = Bezier(free, 3, s, k / 50.0);
+                            outside = Math.Max(outside, Math.Max(low - value, value - high));
+                            outsideFree = Math.Max(outsideFree, Math.Max(low - other, other - high));
+                        }
+                        // (the tangent goes on from one curve to the next)
+                        if (closed || s + 1 < curves)
+                        {
+                            int next = (s + 1) % curves;
+                            jump = Math.Max(jump, Math.Abs(held[4 * s + 3] - held[4 * s + 2] - (held[4 * next + 1] - held[4 * next])));
+                        }
+                    }
+                    Console.WriteLine("monotone (" + wrap + ", " + n + " values): misses the points by " + misses + ", leaves them by " + outside + " (catmull-rom by " +
+                                      outsideFree + "), the tangent jumps by " + jump);
+                    CHECK_LT(misses, 1e-15);
+                    CHECK_LT(outside, 1e-15);
+                    CHECK_LT(jump, 1e-14);
+                }
+                // Values that rise evenly enough that nothing is held: catmull-rom
+                double[] gentle = new double[8];
+                for (int i = 0; i < 8; ++i)
+                {
+                    gentle[i] = 0.4 * i + 0.05 * i * i;
+                }
+                double[] one = monotone.Curves(gentle, 3), two = catmull.Curves(gentle, 3), vectors = monotone.Vectors(Values(8, 2), 3), plain = catmull.Curves(Values(8, 2), 3);
+                double worst = 0, worstVectors = 0;
+                for (int i = 0; i < one.Length; ++i)
+                {
+                    worst = Math.Max(worst, Math.Abs(one[i] - two[i]));
+                    worstVectors = Math.Max(worstVectors, Math.Abs(vectors[i] - plain[i]));
+                }
+                Console.WriteLine("monotone (" + wrap + "): differs from catmull-rom where nothing is held by " + worst + ", its points by " + worstVectors);
+                // (closed, the values fall back from the last to the first, and are held there: the curves away from that)
+                if (closed)
+                {
+                    worst = 0;
+                    for (int i = 4; i < one.Length - 12; ++i)
+                    {
+                        worst = Math.Max(worst, Math.Abs(one[i] - two[i]));
+                    }
+                }
+                CHECK_LT(worst, 1e-14);
+                CHECK_LT(worstVectors, 1e-14);
+            }
+        }
+
         private static void Same(double[,] matrix, double[,] expected)
         {
             for (int i = 0; i < 4; ++i)
