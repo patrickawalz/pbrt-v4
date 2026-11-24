@@ -662,14 +662,18 @@ namespace MaterialX
             return false;
         }
 
-        internal static void findRenderableMaterialNodes(Document doc, List<TypedElement> elements, bool arg2, HashSet<Element> arg3)
+        // These are deprecated wrappers for older versions of the function interfaces in this module.
+        public static void findRenderableMaterialNodes(Document doc, List<TypedElement> elements, bool includeReferencedGraphs,
+                                                       HashSet<Element> processedSources)
         {
-            elements = findRenderableMaterialNodes(doc);
+            elements.Clear();
+            elements.AddRange(findRenderableMaterialNodes(doc));
         }
 
-        internal static void findRenderableElements(Document doc, List<TypedElement> elements, bool arg2)
+        public static void findRenderableElements(Document doc, List<TypedElement> elements, bool includeReferencedGraphs = false)
         {
-            elements = findRenderableElements(doc);
+            elements.Clear();
+            elements.AddRange(findRenderableElements(doc));
         }
     }
 }
