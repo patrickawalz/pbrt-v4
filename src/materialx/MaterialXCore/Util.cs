@@ -56,12 +56,12 @@ namespace MaterialX
             return (MATERIALX_MAJOR_VERSION, MATERIALX_MINOR_VERSION, MATERIALX_BUILD_VERSION);
         }
 
-        private static bool isalnum(char c)
+        internal static bool isalnum(char c)
         {
             return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
         }
 
-        private static bool isdigit(char c)
+        internal static bool isdigit(char c)
         {
             return c >= '0' && c <= '9';
         }

@@ -1062,7 +1062,7 @@ namespace MaterialX
         // Element Private Members
         private static readonly Dictionary<string, Func<Element, string, Element>> _creatorMap =
             new Dictionary<string, Func<Element, string, Element>>(StringComparer.Ordinal);
-        private static readonly Dictionary<Type, string> _categoryMap = new Dictionary<Type, string>();
+        private static readonly Dictionary<System.Type, string> _categoryMap = new Dictionary<System.Type, string>();
     }
 
     // TypedElement Definition

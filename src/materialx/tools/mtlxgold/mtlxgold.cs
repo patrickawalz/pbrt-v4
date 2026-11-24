@@ -76,6 +76,10 @@ public static class MtlxGold
             catch (System.Exception e)
             {
                 log.Append("error " + e.Message + "\n");
+                if (Environment.GetEnvironmentVariable("MTLXGOLD_TRACE") != null)
+                {
+                    Console.Error.WriteLine(rel + ": " + e.ToString());
+                }
             }
 
             string goldXml = File.Exists(goldBase + ".xml") ? File.ReadAllText(goldBase + ".xml") : null;
@@ -174,5 +178,42 @@ public static class Generate
 {
     public static void run(Document doc, Document lib, FileSearchPath searchPath, StringBuilder log, Dictionary<string, string> sources)
     {
+        GenContext context = new GenContext(OslShaderGenerator.create());
+        context.registerSourceCodeSearchPath(searchPath);
+        ShaderGenerator gen = context.getShaderGenerator();
+        DefaultColorManagementSystem cms = DefaultColorManagementSystem.create(gen.getTarget());
+        cms.loadLibrary(lib);
+        gen.setColorManagementSystem(cms);
+        UnitSystem units = UnitSystem.create(gen.getTarget());
+        units.loadLibrary(lib);
+        units.setUnitConverterRegistry(UnitConverterRegistry.create());
+        UnitTypeDef distance = lib.getUnitTypeDef("distance");
+        units.getUnitConverterRegistry().addUnitConverter(distance, LinearUnitConverter.create(distance));
+        UnitTypeDef angle = lib.getUnitTypeDef("angle");
+        units.getUnitConverterRegistry().addUnitConverter(angle, LinearUnitConverter.create(angle));
+        gen.setUnitSystem(units);
+        context.getOptions().targetDistanceUnit = "meter";
+        context.getOptions().targetColorSpaceOverride = "lin_rec709";
+        gen.registerTypeDefs(doc);
+        List<TypedElement> elements = Mx.findRenderableElements(doc);
+        foreach (TypedElement element in elements)
+        {
+            string name = Mx.createValidName(element.getNamePath());
+            log.Append("renderable " + element.getNamePath() + " " + name + "\n");
+            try
+            {
+                Shader shader = gen.generate(name, element, context);
+                sources[name] = shader.getSourceCode();
+                log.Append("generated " + name + "\n");
+            }
+            catch (System.Exception e)
+            {
+                log.Append("failed " + name + " " + e.Message + "\n");
+                if (Environment.GetEnvironmentVariable("MTLXGOLD_TRACE") != null)
+                {
+                    Console.Error.WriteLine(name + ": " + e.ToString());
+                }
+            }
+        }
     }
 }
