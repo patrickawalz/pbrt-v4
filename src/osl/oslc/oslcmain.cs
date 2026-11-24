@@ -148,6 +148,25 @@ namespace OSL
                 return 1;
             }
 
+            // (not in OpenShadingLanguage) A MaterialX document: its first material is written as <name>.osl beside it, and that is compiled
+            if (shader_path.EndsWith(".mtlx", StringComparison.OrdinalIgnoreCase))
+            {
+                string written, name, problem;
+                if (!MaterialXTranslator.Translate(shader_path, "", MaterialXTranslator.DefaultLibraryDirectory(), out written, out name, out problem))
+                {
+                    Console.Out.Write("ERROR: " + problem + "\n");
+                    return 1;
+                }
+                shader_path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(shader_path)), name + ".osl");
+                System.IO.File.WriteAllText(shader_path, written);
+                // the stdosl.h that ships beside the compiler
+                string shaders = System.IO.Path.Combine(AppContext.BaseDirectory, "shaders");
+                if (System.IO.File.Exists(System.IO.Path.Combine(shaders, "stdosl.h")))
+                {
+                    args.Add("-I" + shaders);
+                }
+            }
+
             OSLC_ErrorHandler handler = new OSLC_ErrorHandler();
             handler.quiet = quiet;
             handler.verbose = args.Contains("-v");

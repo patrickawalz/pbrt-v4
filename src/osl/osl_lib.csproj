@@ -17,6 +17,13 @@
     <NoWarn>CS0162;CS0164;CS0168;CS0219;CS0649;CS0169;CS0414;CS8981;CS0660;CS0661</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- stdosl.h, beside the program in the directory "shaders": the shaders written from MaterialX documents need it -->
+    <Content Include="shaders/**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The MaterialX data libraries and example documents, beside the program in the directory "materialx" -->
+    <Content Include="../materialx/libraries/**" Link="materialx/libraries/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../materialx/resources/Materials/Examples/**" Link="materialx/resources/Materials/Examples/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../materialx/LICENSE" Link="materialx/LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../materialx/materialx_lib.csproj" />
     <Compile Remove="**/*_test.cs;bin/**;obj/**;oslc/**;testshade/**;testrender/**;oslinfo/**;osl_test/**" />
   </ItemGroup>
 </Project>

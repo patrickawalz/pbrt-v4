@@ -48,6 +48,26 @@ Parameters of an `osl` material or texture:
 * A named OSL texture (`Texture ... "osl"`) is merged into the group: its layers are put in front of the material layers (names made unique) and its output is connected to the parameter. The shaders see each other, so noise, coordinate transformations and so on are evaluated once per shading point.
 * Any other pbrt texture (image, checkerboard, ...) is bound as an interpolated parameter: pbrt evaluates it at the shading point and the shader reads it through `get_userdata`. A spectrum texture becomes a `color` (a noisy estimate, see below), a float texture a `float` or a gray `color`.
 
+### MaterialX documents
+
+`"string shader" "look.mtlx"` takes the first material of a MaterialX
+document, and `"look.mtlx#name"` the material of that name. The shader is
+written by the OSL shader generator of MaterialX (`src/materialx`, a port of
+the library, see `docs/materialx-port.md`) and compiled like any other
+source. It is named `mtlx_<material>`.
+
+The values of the nodes are the parameters of the shader. The generator names
+them `<node>_<input>`; an input of the surface shader node is known by its
+own name as well:
+
+    Material "osl" "string shader" "open_pbr_carpaint.mtlx" "rgb base_color" [0.8 0.05 0.05]
+
+A texture can be connected to such a parameter in the same way. File names in
+the document are resolved against the document. The data libraries of
+MaterialX and `stdosl.h` ship beside the program, in `materialx` and
+`shaders`. `oslc look.mtlx` writes the shader beside the document and
+compiles it. `scenes/osl/open_pbr_carpaint.pbrt` is an example.
+
 ### Spaces
 
 OSL's `"common"` space is pbrt's world space. pbrt renders in render space (camera-world by default); the glue converts positions and directions with `OSLScene.WorldFromRender`. Matrices follow the OSL (row vector) convention, so they are the transpose of pbrt's.

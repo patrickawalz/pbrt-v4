@@ -618,6 +618,29 @@ namespace pbrt
             EXPECT_TRUE(OSLSystem.PrepareShader("constcolor", OslTestShaders.Directory(), out resolved, out error));
         }
 
+        [TEST("OslPbrt", "MaterialXDocumentIsAShader")]
+        public static void MaterialXDocumentIsAShader()
+        {
+            ResetScene();
+            string document = Path.Combine(OSL.MaterialXTranslator.DefaultLibraryDirectory(), "resources", "Materials", "Examples", "OpenPbr",
+                                           "open_pbr_carpaint.mtlx");
+            ASSERT_TRUE(File.Exists(document));
+            string resolved, error;
+            ASSERT_TRUE(OSLSystem.PrepareShader(document, null, out resolved, out error));
+            EXPECT_EQ(resolved, "mtlx_Car_Paint");
+            // the material by its name is the same shader
+            string named;
+            EXPECT_TRUE(OSLSystem.PrepareShader(document + "#Car_Paint", null, out named, out error));
+            EXPECT_EQ(named, resolved);
+            // a material the document does not have
+            string missing;
+            EXPECT_FALSE(OSLSystem.PrepareShader(document + "#No_Such_Material", null, out missing, out error));
+            // an input of the surface shader node keeps its own name; every other name is itself
+            EXPECT_EQ(OSLSystem.DocumentParameter(resolved, "base_color"), "open_pbr_surface_surfaceshader_base_color");
+            EXPECT_EQ(OSLSystem.DocumentParameter(resolved, "no_such_input"), "no_such_input");
+            EXPECT_EQ(OSLSystem.DocumentParameter("constcolor", "base_color"), "base_color");
+        }
+
         [TEST("OslPbrt", "SpectralModes")]
         public static void SpectralModes()
         {

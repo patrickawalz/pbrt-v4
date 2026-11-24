@@ -79,6 +79,28 @@ namespace pbrt
             return query.open(shaderName, string.Join(":", SearchPaths())) ? query : null;
         }
         private static HashSet<string> loaded = new HashSet<string>();
+        /// The shader that was written from each MaterialX document
+        private static Dictionary<string, string> documentShaders = new Dictionary<string, string>();
+        /// The document each of those shaders was written from
+        private static Dictionary<string, string> shaderDocuments = new Dictionary<string, string>();
+        /// For a shader that was written from a MaterialX document: its parameters that have a short name (the inputs of the surface shader node)
+        private static Dictionary<string, Dictionary<string, string>> documentParameters = new Dictionary<string, Dictionary<string, string>>();
+
+        /// The parameter of a shader by the name a scene gives: an input of the surface shader node of a MaterialX document ("base_color")
+        /// is the parameter the shader generator of MaterialX wrote for it ("<node>_base_color"); every other name is itself
+        public static string DocumentParameter(string shaderName, string parameter)
+        {
+            lock (mutex)
+            {
+                Dictionary<string, string> parameters;
+                string full;
+                if (documentParameters.TryGetValue(shaderName, out parameters) && parameters.TryGetValue(parameter, out full))
+                {
+                    return full;
+                }
+                return parameter;
+            }
+        }
         private static string stdoslPath = null;
         private static HashSet<string> emitters = new HashSet<string>();
 
@@ -257,6 +279,75 @@ namespace pbrt
             lock (mutex)
             {
                 string key = name;
+                // "look.mtlx" is the first material of the document, "look.mtlx#name" the one of that name
+                int hash = name.LastIndexOf('#');
+                string materialOfDocument = "";
+                if (hash > 0 && name.Substring(0, hash).EndsWith(".mtlx"))
+                {
+                    materialOfDocument = name.Substring(hash + 1);
+                    name = name.Substring(0, hash);
+                }
+                if (name.EndsWith(".mtlx"))
+                {
+                    // A MaterialX document: its material is written as an OSL shader by the port of the MaterialX library (src/materialx,
+                    // through src/osl/materialx/materialx.cs) and compiled
+                    if (loaded.Contains(key))
+                    {
+                        shaderName = documentShaders[key];
+                        return true;
+                    }
+                    string document = File.Exists(name) || sceneDirectory == null ? name : Path.Combine(sceneDirectory, name);
+                    string written, translationError;
+                    Dictionary<string, string> shortNames;
+                    if (!MaterialXTranslator.Translate(document, materialOfDocument, MaterialXTranslator.DefaultLibraryDirectory(), out written, out shaderName,
+                                                       out shortNames, out translationError))
+                    {
+                        error = "Could not translate \"" + document + "\": " + translationError;
+                        return false;
+                    }
+                    string fullDocument = Path.GetFullPath(document);
+                    string documentOfShader;
+                    if (shaderDocuments.TryGetValue(shaderName, out documentOfShader))
+                    {
+                        if (documentOfShader != fullDocument)
+                        {
+                            error = "Two MaterialX documents have a material that is called \"" + shaderName.Substring(5) + "\"";
+                            return false;
+                        }
+                        // The same material of the same document, asked for by its name and as the first of the document
+                        documentShaders[key] = shaderName;
+                        loaded.Add(key);
+                        return true;
+                    }
+                    string documentStdOsl = FindStdOsl();
+                    List<string> documentOptions = new List<string>();
+                    if (documentStdOsl.Length > 0)
+                    {
+                        documentOptions.Add("-I" + Path.GetDirectoryName(documentStdOsl));
+                    }
+                    OSLCompiler documentCompiler = new OSLCompiler(errorHandler);
+                    string documentObject;
+                    if (!documentCompiler.compile_buffer(written, out documentObject, documentOptions, documentStdOsl, shaderName + ".osl"))
+                    {
+                        error = "Could not compile the shader written from \"" + document + "\"";
+                        return false;
+                    }
+                    if (!ss.LoadMemoryCompiledShader(shaderName, documentObject))
+                    {
+                        error = "Could not load the shader written from \"" + document + "\"";
+                        return false;
+                    }
+                    lock (bytecodeCache)
+                    {
+                        bytecodeCache[shaderName] = documentObject;
+                    }
+                    NoteEmitter(shaderName, documentObject);
+                    documentShaders[key] = shaderName;
+                    shaderDocuments[shaderName] = fullDocument;
+                    documentParameters[shaderName] = shortNames;
+                    loaded.Add(key);
+                    return true;
+                }
                 if (name.EndsWith(".oso") || name.EndsWith(".osl"))
                 {
                     string dir = Path.GetDirectoryName(Path.GetFullPath(name));

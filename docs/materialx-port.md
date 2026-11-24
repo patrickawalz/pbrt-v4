@@ -87,3 +87,14 @@ does not apply.
 
 All 862 generated material shaders and all 810 node shaders also compile
 with the OSL compiler of this repository (`src/osl/oslc`).
+
+## Where it is used
+
+`src/osl/materialx/materialx.cs` asks the port for the shader of a material
+and adds what a renderer needs: the shader is declared a `surface`, its
+closure is assigned to `Ci`, and `mx_funcs.h` is included by its full path.
+`oslc look.mtlx` and Magi's `Material "osl" "string shader" "look.mtlx"` go
+through it. See `docs/osl-pbrt.md`.
+
+The 50 example documents of MaterialX are written and compiled this way by
+the test `MaterialX.DocumentsBecomeShaders`.

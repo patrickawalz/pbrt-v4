@@ -322,6 +322,8 @@ namespace pbrt
                     paramName = p.name.Substring(dot + 1);
                 }
                 OSLLayerSpec layer = spec.FindLayer(layerName);
+                // An input of the surface shader node of a MaterialX document, by its own name
+                paramName = OSLSystem.DocumentParameter(layer.shader, paramName);
                 if (p.type == "texture")
                 {
                     p.lookedUp = true;
