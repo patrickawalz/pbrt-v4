@@ -2420,6 +2420,8 @@ namespace pbrt
                 material = ThinDielectricMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "hair")
                 material = HairMaterial.Create(parameters, loc, alloc);
+            else if (name == "fur")
+                material = FurMaterial.Create(parameters, loc, alloc);
             else if (name == "conductor")
                 material = ConductorMaterial.Create(parameters, normalMap, loc, alloc);
             else if (name == "measured")

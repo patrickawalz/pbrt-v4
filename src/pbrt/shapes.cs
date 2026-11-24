@@ -3122,6 +3122,13 @@ namespace pbrt
             {
                 shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, false);
             }
+            else if (name == "hairfile")
+            {
+                // ("shape" "mesh": the strands as the triangles of one mesh)
+                shapes = parameters.GetOneString("shape", "rocap") == "mesh"
+                             ? CreateExact("trianglemesh", renderFromObject, objectFromRender, reverseOrientation, HairFile.Mesh(parameters, loc), floatTextures, loc, alloc)
+                             : HairFile.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, alloc);
+            }
             else if (name == "rocylinder")
             {
                 shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, true);

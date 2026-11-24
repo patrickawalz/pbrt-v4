@@ -1225,8 +1225,11 @@ namespace pbrt
             Point2f uv = new Point2f((Float)((curve.Index + u) / curve.Count), (Float)(0.5 * (v + 1)));
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Float reach = (Float)(2 * seen);
-            return new SurfaceInteraction(new Point3fi(p, new Vector3f(reach, reach, reach)), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time,
-                                          flipNormal, strandColors);
+            SurfaceInteraction interaction = new SurfaceInteraction(new Point3fi(p, new Vector3f(reach, reach, reach)), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0),
+                                                                    new Normal3f(0, 0, 0), ray.time, flipNormal, strandColors);
+            // (dpdv is across the width of the ribbon)
+            interaction.strandWidth = pbrt.Length(dpdv);
+            return interaction;
         }
 
         // The point of the shape at (u, v) in [0, 1]^2 in render space, in double precision (the densities are from differences
@@ -1283,8 +1286,10 @@ namespace pbrt
             Geometry(u, v, out Point3f p, out Vector3f dpdu, out Vector3f dpdv, out Point2f uv);
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
-            return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,
-                                          strandColors);
+            SurfaceInteraction interaction = new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time,
+                                                                    flipNormal, strandColors);
+            interaction.strandWidth = pbrt.Length(dpdv);
+            return interaction;
         }
 
         // The sample of the point at (u of the curve, v), with the normal of the surface (the density is set by the caller)

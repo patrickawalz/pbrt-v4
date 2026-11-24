@@ -921,8 +921,11 @@ namespace pbrt
             Point2f uv = new Point2f((Float)((segment.index + u) / segment.count), (Float)(0.5 * (1 + h)));
             bool flipNormal = settings.reverseOrientation ^ settings.transformSwapsHandedness;
             Vector3f pError = pbrt.gamma(8) * pbrt.Abs(new Vector3f(p.x, p.y, p.z));
-            return new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time, flipNormal,
-                                          strandColors);
+            SurfaceInteraction interaction = new SurfaceInteraction(new Point3fi(p, pError), uv, -ray.d, dpdu, dpdv, new Normal3f(0, 0, 0), new Normal3f(0, 0, 0), ray.time,
+                                                                    flipNormal, strandColors);
+            // (dpdv is once around the strand)
+            interaction.strandWidth = pbrt.Length(dpdv) / (Float)Math.PI;
+            return interaction;
         }
 
         private readonly BezierSurfaceSettings settings;
@@ -1131,9 +1134,10 @@ namespace pbrt
                 SdfVector[] p = new SdfVector[] { points[stride * s], points[stride * s + 1], points[stride * s + 2], points[stride * s + 3] };
                 double[] r = new double[] { radii[stride * s], radii[stride * s + 1], radii[stride * s + 2], radii[stride * s + 3] };
                 RocapSegment segment = new RocapSegment(p, r, s, count) { FlatCaps = flatCaps || disks, RootRefinement = refinement == "roots", Disks = disks, Polynomial = intersector == "polynomial" };
-                if (disks)
+                // The ends of the segment: of the strand, or where it goes on with the curve before or after (of the swept spheres
+                // too: the sphere between two curves that go on in one direction is inside the strand)
                 {
-                    RocylinderEnd end = caps == "round" ? RocylinderEnd.Round : RocylinderEnd.Flat;
+                    RocylinderEnd end = caps == "round" || !disks ? RocylinderEnd.Round : RocylinderEnd.Flat;
                     segment.Start = end;
                     segment.End = end;
                     if (s > 0)

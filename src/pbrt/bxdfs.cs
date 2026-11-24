@@ -4352,7 +4352,7 @@ namespace pbrt
         public override BxDFFlags Flags() { return BxDFFlags.GlossyReflection; }
 
         // HairBxDF Private Methods
-        private static Float Mp(Float cosTheta_i, Float cosTheta_o, Float sinTheta_i, Float sinTheta_o, Float v)
+        internal static Float Mp(Float cosTheta_i, Float cosTheta_o, Float sinTheta_i, Float sinTheta_o, Float v)
         {
             Float a = cosTheta_i * cosTheta_o / v, b = sinTheta_i * sinTheta_o / v;
             Float mp = (v <= .1f) ? (FastExp(LogI0(a) - b - 1 / v + 0.6931f + std.log(1 / (2 * v))))

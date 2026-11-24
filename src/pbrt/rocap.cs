@@ -90,6 +90,7 @@ namespace pbrt
         // the ray, D(u) = d . q'(u), and k = 0 for the disks, 1 for the spheres: of degree 10. Every root that crosses zero is
         // found. (Not with FlatCaps on the spheres.)
         public bool Polynomial;
+        // (of the swept spheres with Polynomial too: Flat and Round are the sphere of an end of the strand)
         public RocylinderEnd Start = RocylinderEnd.Flat, End = RocylinderEnd.Flat;
 
         public readonly int index, count;
@@ -292,11 +293,28 @@ namespace pbrt
             bool found = false;
             if (!Disks)
             {
-                found |= Sphere(o, d, 0, default, tMin, ref t, ref u, ref normal);
-                found |= Sphere(o, d, 1, default, tMin, ref t, ref u, ref normal);
+                // The sphere of an end of the strand: the part of it beyond the circle where the envelope leaves it (the rest is
+                // inside the strand). Where the strand goes on with another segment in one direction all of the sphere is inside
+                // the two, and nothing of it is surface: a ray inside the strand would meet it as if from outside (Open).
+                for (int end = 0; end <= 1; ++end)
+                {
+                    RocylinderEnd kind = end == 0 ? Start : End;
+                    if (kind == RocylinderEnd.Open)
+                    {
+                        continue;
+                    }
+                    SdfVector along = Velocity(end);
+                    if (kind == RocylinderEnd.Join || !(along.LengthSquared() > 0))
+                    {
+                        found |= Sphere(o, d, end, default, 0, tMin, ref t, ref u, ref normal);
+                        continue;
+                    }
+                    double lean = Radius(end) * RadiusDerivative(end) / along.Length();
+                    found |= Sphere(o, d, end, end == 0 ? -1 * along.Normalized() : along.Normalized(), end == 0 ? lean : -lean, tMin, ref t, ref u, ref normal);
+                }
                 for (int i = 0; i < envelopeEnds.Length; ++i)
                 {
-                    found |= Sphere(o, d, envelopeEnds[i], default, tMin, ref t, ref u, ref normal);
+                    found |= Sphere(o, d, envelopeEnds[i], default, 0, tMin, ref t, ref u, ref normal);
                 }
                 return found;
             }
@@ -309,7 +327,7 @@ namespace pbrt
                 }
                 if (kind == RocylinderEnd.Join)
                 {
-                    found |= Sphere(o, d, end, default, tMin, ref t, ref u, ref normal);
+                    found |= Sphere(o, d, end, default, 0, tMin, ref t, ref u, ref normal);
                     continue;
                 }
                 SdfVector axis = Velocity(end);
@@ -322,12 +340,13 @@ namespace pbrt
                 SdfVector outward = end == 0 ? -1 * axis.Normalized() : axis.Normalized();
                 if (kind == RocylinderEnd.Round)
                 {
-                    found |= Sphere(o, d, end, outward, tMin, ref t, ref u, ref normal);
+                    found |= Sphere(o, d, end, outward, 0, tMin, ref t, ref u, ref normal);
                     continue;
                 }
                 SdfVector c = Position(end) - o;
                 double slope = SdfVector.Dot(d, outward);
-                if (slope == 0)
+                // (into the strand only)
+                if (!(slope < 0))
                 {
                     continue;
                 }
@@ -344,8 +363,9 @@ namespace pbrt
             return found;
         }
 
-        // The sphere of the parameter `at`, or the half of it on the side of `outward` (the zero vector: all of it), nearer than t
-        private bool Sphere(SdfVector o, SdfVector d, double at, SdfVector outward, double tMin, ref double t, ref double u, ref SdfVector normal)
+        // The sphere of the parameter `at`, or the part of it farther than `beyond` along `outward` from its center (the zero
+        // vector: all of it), where the ray goes into it, nearer than t
+        private bool Sphere(SdfVector o, SdfVector d, double at, SdfVector outward, double beyond, double tMin, ref double t, ref double u, ref SdfVector normal)
         {
             SdfVector c = Position(at) - o;
             double r = Radius(at);
@@ -359,25 +379,21 @@ namespace pbrt
             {
                 return false;
             }
-            double root = Math.Sqrt(h);
-            for (int side = -1; side <= 1; side += 2)
+            // (where the ray goes into the sphere)
+            double hit = along - Math.Sqrt(h);
+            if (!(hit > tMin) || !(hit < t))
             {
-                double hit = along + side * root;
-                if (!(hit > tMin) || !(hit < t))
-                {
-                    continue;
-                }
-                SdfVector radial = d * hit - c;
-                if (SdfVector.Dot(radial, outward) < 0)
-                {
-                    continue;
-                }
-                t = hit;
-                u = at;
-                normal = radial / r;
-                return true;
+                return false;
             }
-            return false;
+            SdfVector radial = d * hit - c;
+            if (outward.LengthSquared() > 0 && SdfVector.Dot(radial, outward) < beyond)
+            {
+                return false;
+            }
+            t = hit;
+            u = at;
+            normal = radial / r;
+            return true;
         }
 
         // The interval of the ray inside the slab between the planes of the ends (flat caps), and the plane (0: start, 1: end) that bounds it from below
@@ -742,7 +758,7 @@ namespace pbrt
                             kept = -1;
                         }
                     }
-                    if (DiskCondition(o, d, rootU, side, out double fr, out double rootT) && rootT > tMin && rootT < bestT)
+                    if (DiskCondition(o, d, rootU, side, out double fr, out double rootT) && rootT > tMin && rootT < bestT && Enters(o, d, rootT, rootU))
                     {
                         bestT = rootT;
                         bestU = rootU;
@@ -794,6 +810,16 @@ namespace pbrt
             u = rootU;
             t = distance;
             return true;
+        }
+
+        // Whether the ray goes into the strand at its point of the distance t on the circle of u (and not out of it). A strand
+        // is met from outside only, as it always was by the search of the swept spheres: a ray that starts in it (the light
+        // that a fiber sends on through itself starts just under its surface) does not meet its far side, where a fiber
+        // would scatter it a second time.
+        private bool Enters(SdfVector o, SdfVector d, double t, double u)
+        {
+            SdfVector p = o + d * t;
+            return SdfVector.Dot(d, Disks ? DiskNormal(p, u) : p - Position(u)) < 0;
         }
 
         // The normal of the surface of the circles at the point p of the circle of u: (p - q) (|q'|^2 - (p - q) . q'') - r r' q'
@@ -915,7 +941,7 @@ namespace pbrt
                 int side = Math.Abs(entryCondition) <= Math.Abs(leaveCondition) ? -1 : 1;
                 double rootU = found[i], rootT = side < 0 ? entryT : leaveT;
                 Refine(o, d, side, ref rootU, ref rootT);
-                if (rootT > tMin && rootT < bestT)
+                if (rootT > tMin && rootT < bestT && Enters(o, d, rootT, rootU))
                 {
                     bestT = rootT;
                     bestU = rootU;
@@ -936,7 +962,7 @@ namespace pbrt
                 for (int side = -1; side <= 1; side += 2)
                 {
                     double rootU = across[i], rootT = 0;
-                    if (Refine(o, d, side, ref rootU, ref rootT) && rootT > tMin && rootT < bestT)
+                    if (Refine(o, d, side, ref rootU, ref rootT) && rootT > tMin && rootT < bestT && Enters(o, d, rootT, rootU))
                     {
                         bestT = rootT;
                         bestU = rootU;

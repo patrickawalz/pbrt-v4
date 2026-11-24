@@ -143,13 +143,14 @@ namespace pbrt
                     SdfVector[] part = { Blossom(points, a, a, a), Blossom(points, a, a, b), Blossom(points, a, b, b), Blossom(points, b, b, b) };
                     double[] radii = { Blossom(halves, a, a, a), Blossom(halves, a, a, b), Blossom(halves, a, b, b), Blossom(halves, b, b, b) };
                     RocapSegment segment = new RocapSegment(part, radii, 0, 1) { Polynomial = options.polynomial };
+                    // (nothing between the parts of the curve, nor at its ends: as the cylinder of pbrt, the tube is open, and a
+                    // ray inside it meets no surface but its side)
+                    segment.Start = RocylinderEnd.Open;
+                    segment.End = RocylinderEnd.Open;
                     if (options.disks)
                     {
-                        // (the ends of the segment are cut off square; nothing between its parts)
                         segment.Disks = true;
                         segment.FlatCaps = true;
-                        segment.Start = i == 0 ? RocylinderEnd.Flat : RocylinderEnd.Open;
-                        segment.End = i + 1 == pieces ? RocylinderEnd.Flat : RocylinderEnd.Open;
                     }
                     shapes.push_back(new RocapShape(options.rocapSettings, segment) { SolidAngleSampling = options.solidAngleSampling });
                 }

@@ -229,6 +229,10 @@ namespace pbrt
         // independent); zero if there is none
         public Vector3f coatN;
 
+        // (not in pbrt-v4) The width of the strand at the point, for the shapes that are strands (rocap, rocylinder, ribbon3);
+        // zero if it is not known. A material of fibers compares it with the footprint of the pixel (FurMaterial, "field").
+        public Float strandWidth;
+
         public void SetShadingGeometry(Normal3f ns, Vector3f dpdus, Vector3f dpdvs, Normal3f dndus, Normal3f dndvs,
                                        bool orientationIsAuthoritative)
         {

@@ -293,5 +293,38 @@ namespace pbrt
                 }
             }
         }
+
+        // The matrices to Bezier values are the known ones: catmull-rom and cardinal (the inner values a third of the tangent
+        // from the points), the uniform cubic b-spline, and bezier itself
+        [TEST("StrandBasis", "BezierMatricesAreTheKnownOnes")]
+        public static void BezierMatricesAreTheKnownOnes()
+        {
+            foreach (double tension in new double[] { 0.5, 0.2, 0.9 })
+            {
+                double third = tension / 3;
+                double[,] cardinal = { { 0, 1, 0, 0 }, { -third, 1, third, 0 }, { 0, third, 1, -third }, { 0, 0, 1, 0 } };
+                Same(new StrandBasis("cardinal", 3, 1, "nonperiodic", tension, null).BezierMatrix, cardinal);
+                if (tension == 0.5)
+                {
+                    Same(new StrandBasis("catmull-rom", 3, 1, "nonperiodic", 0.5, null).BezierMatrix, cardinal);
+                }
+            }
+            double sixth = 1.0 / 6;
+            double[,] spline = { { sixth, 4 * sixth, sixth, 0 }, { 0, 4 * sixth, 2 * sixth, 0 }, { 0, 2 * sixth, 4 * sixth, 0 }, { 0, sixth, 4 * sixth, sixth } };
+            Same(new StrandBasis("b-spline", 3, 1, "nonperiodic", 0.5, null).BezierMatrix, spline);
+            double[,] identity = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 } };
+            Same(new StrandBasis("bezier", 3, 3, "nonperiodic", 0.5, null).BezierMatrix, identity);
+        }
+
+        private static void Same(double[,] matrix, double[,] expected)
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                for (int j = 0; j < 4; ++j)
+                {
+                    CHECK_LT(Math.Abs(matrix[i, j] - expected[i, j]), 1e-12);
+                }
+            }
+        }
     }
 }

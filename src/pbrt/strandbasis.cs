@@ -110,6 +110,13 @@ namespace pbrt
         }
 
         // The chain of cubic Bezier curves that share their ends (3n + 1 points), which needs no change
+        // The matrix that takes the four control values of a curve of the basis to its four Bezier values (row i: the Bezier value
+        // i), for the cubic bases without knots; null for the others
+        public double[,] BezierMatrix
+        {
+            get { return toBezier; }
+        }
+
         public bool IsCubicBezierChain
         {
             get { return name == "bezier" && degree == 3 && step == 3 && wrap != "periodic" && knots == null; }
