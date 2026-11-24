@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>materialx_test</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Optimize>true</Optimize>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseAppHost>false</UseAppHost>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ErrorEndLocation>true</ErrorEndLocation>
+    <StartupObject>MaterialXTestProgram</StartupObject>
+    <NoWarn>$(NoWarn);CS0168;CS0219;CS0162</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../ext/gtest/gtest.cs" />
+    <Compile Include="*.cs" />
+    <Compile Include="../tools/mtlxgold/mtlxgold.cs" />
+    <Compile Include="../MaterialXGenOsl/LibsToOso.cs" />
+    <Compile Include="MaterialXCore/**/*.cs" />
+    <Compile Include="MaterialXFormat/**/*.cs" />
+    <Compile Include="MaterialXGenShader/**/*.cs" />
+    <Compile Include="MaterialXGenOsl/**/*.cs" />
+    <ProjectReference Include="../materialx_lib.csproj" />
+  </ItemGroup>
+
+</Project>

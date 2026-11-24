@@ -1,0 +1,26 @@
+--- MaterialXCore/Node.cpp	2026-11-24 13:25:44.334607303 -0600
++++ MaterialXCore/Node.cpp	2026-11-24 14:58:21.301537119 -0600
+@@ -287,6 +287,7 @@
+         {
+             NodeGraphPtr sourceSubGraph = graphImplMap[processNode];
+             std::unordered_map<NodePtr, NodePtr> subNodeMap;
++            std::vector<std::pair<NodePtr, NodePtr>> subNodeOrder;
+ 
+             // Create a new instance of each original subnode.
+             for (NodePtr sourceSubNode : sourceSubGraph->getNodes())
+@@ -300,13 +301,14 @@
+ 
+                 // Store the mapping between subgraphs.
+                 subNodeMap[sourceSubNode] = destSubNode;
++                subNodeOrder.push_back({ sourceSubNode, destSubNode });
+ 
+                 // Add the subnode to the queue, allowing processing of nested subgraphs.
+                 nodeQueue.push_back(destSubNode);
+             }
+ 
+             // Update properties of generated subnodes.
+-            for (const auto& subNodePair : subNodeMap)
++            for (const auto& subNodePair : subNodeOrder)
+             {
+                 NodePtr sourceSubNode = subNodePair.first;
+                 NodePtr destSubNode = subNodePair.second;

@@ -75,6 +75,12 @@ namespace MaterialX
 
         public GenOptions(GenOptions other)
         {
+            assign(other);
+        }
+
+        // operator=
+        public void assign(GenOptions other)
+        {
             shaderInterfaceType = other.shaderInterfaceType;
             fileTextureVerticalFlip = other.fileTextureVerticalFlip;
             targetColorSpaceOverride = other.targetColorSpaceOverride;

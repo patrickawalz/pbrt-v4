@@ -42,6 +42,14 @@ namespace MaterialX
         public const int MATERIALX_MINOR_VERSION = 39;
         public const int MATERIALX_BUILD_VERSION = 6;
 
+        // MATERIALX_GENERATE_INDEX
+        public static int MATERIALX_GENERATE_INDEX(int major, int minor, int build)
+        {
+            return (major << 22) | (minor << 12) | build;
+        }
+
+        public const int MATERIALX_VERSION_INDEX = (MATERIALX_MAJOR_VERSION << 22) | (MATERIALX_MINOR_VERSION << 12) | MATERIALX_BUILD_VERSION;
+
         public const string EMPTY_STRING = "";
 
         public static string getVersionString()

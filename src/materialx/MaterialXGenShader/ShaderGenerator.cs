@@ -25,7 +25,7 @@ namespace MaterialX
 
         // Generate a shader starting from the given element, translating
         // the element and all dependencies upstream into shader code.
-        public virtual Shader generate(string arg0, Element arg1, GenContext arg2)
+        public virtual Shader generate(string name, Element element, GenContext context)
         {
             return null;
         }

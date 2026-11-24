@@ -93,6 +93,29 @@ namespace MaterialX
             _holdCount = 0;
         }
 
+        // operator==
+        public bool isEqual(TreeIterator rhs)
+        {
+            if (!ReferenceEquals(_elem, rhs._elem) || _stack.Count != rhs._stack.Count || _prune != rhs._prune)
+            {
+                return false;
+            }
+            for (int i = 0; i < _stack.Count; i++)
+            {
+                if (!ReferenceEquals(_stack[i].first, rhs._stack[i].first) || _stack[i].second != rhs._stack[i].second)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Return the end iterator.
+        public static TreeIterator end()
+        {
+            return Mx.getNullTreeIterator();
+        }
+
         public bool isEnd()
         {
             return _elem == null && _stack.Count == 0 && !_prune;
@@ -207,6 +230,29 @@ namespace MaterialX
             _prune = false;
             _holdCount = 0;
             _pathElems.Add(elem);
+        }
+
+        // operator==
+        public bool isEqual(GraphIterator rhs)
+        {
+            if (!ReferenceEquals(_upstreamElem, rhs._upstreamElem) || _stack.Count != rhs._stack.Count || _prune != rhs._prune)
+            {
+                return false;
+            }
+            for (int i = 0; i < _stack.Count; i++)
+            {
+                if (!ReferenceEquals(_stack[i].first, rhs._stack[i].first) || _stack[i].second != rhs._stack[i].second)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Return the end iterator.
+        public static GraphIterator end()
+        {
+            return Mx.getNullGraphIterator();
         }
 
         public bool isEnd()
@@ -416,6 +462,18 @@ namespace MaterialX
             _pathElems.Add(elem);
         }
 
+        // operator==
+        public bool isEqual(InheritanceIterator rhs)
+        {
+            return ReferenceEquals(_elem, rhs._elem);
+        }
+
+        // Return the end iterator.
+        public static InheritanceIterator end()
+        {
+            return Mx.getNullInheritanceIterator();
+        }
+
         public bool isEnd()
         {
             return _elem == null;
@@ -494,6 +552,23 @@ namespace MaterialX
         public static Edge getNullEdge()
         {
             return new Edge(null, null, null);
+        }
+
+        // The iterators are reference types here, so each call returns its own
+        // null iterator where the C++ returns a constant that is copied.
+        public static TreeIterator getNullTreeIterator()
+        {
+            return new TreeIterator(null);
+        }
+
+        public static GraphIterator getNullGraphIterator()
+        {
+            return new GraphIterator(null);
+        }
+
+        public static InheritanceIterator getNullInheritanceIterator()
+        {
+            return new InheritanceIterator(null);
         }
     }
 }

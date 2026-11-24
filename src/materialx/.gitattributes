@@ -1,0 +1,3 @@
+libraries/** -text
+resources/** -text
+MaterialXTest/reference/** -text

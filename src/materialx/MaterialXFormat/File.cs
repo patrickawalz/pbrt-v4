@@ -279,7 +279,7 @@ namespace MaterialX
             DirectoryInfo dir = openDirectory();
             if (dir != null)
             {
-                foreach (FileSystemInfo entry in dir.EnumerateFileSystemInfos())
+                foreach (FileSystemInfo entry in sortedEntries(dir))
                 {
                     if (!isDirectoryEntry(entry) && (extension.Length == 0 || new FilePath(entry.Name).getExtension() == extension))
                     {
@@ -304,7 +304,7 @@ namespace MaterialX
             DirectoryInfo dir = openDirectory();
             if (dir != null)
             {
-                foreach (FileSystemInfo entry in dir.EnumerateFileSystemInfos())
+                foreach (FileSystemInfo entry in sortedEntries(dir))
                 {
                     string path = entry.Name;
                     if (path == "." || path == "..")
@@ -366,7 +366,7 @@ namespace MaterialX
                 DirectoryInfo dir = openDirectory();
                 if (dir != null)
                 {
-                    foreach (FileSystemInfo entry in dir.EnumerateFileSystemInfos())
+                    foreach (FileSystemInfo entry in sortedEntries(dir))
                     {
                         string entryName = entry.Name;
                         if (entryName == CURRENT_PATH_STRING || entryName == PARENT_PATH_STRING)
@@ -432,12 +432,14 @@ namespace MaterialX
 
         public static FilePath getModulePath()
         {
-            string path = Environment.ProcessPath;
-            if (path == null)
+            // The directory of the application: the process path would be that of
+            // the dotnet host when the application is started through it.
+            string path = AppContext.BaseDirectory;
+            if (string.IsNullOrEmpty(path))
             {
-                throw new Exception("Error in getModulePath: the path of the process is not known");
+                throw new Exception("Error in getModulePath: the path of the application is not known");
             }
-            return new FilePath(path).getParentPath();
+            return new FilePath(path);
         }
 
         public static FilePath createTemporaryDirectory()
@@ -454,17 +456,17 @@ namespace MaterialX
                 throw new Exception("Error in createTemporaryDirectory: parent path is not a directory: " + tempParent.asString());
             }
 
-            const string letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            for (int attempt = 0; attempt < TEMPORARY_DIRECTORY_MAX_ATTEMPTS; attempt++)
+            if (OperatingSystem.IsWindows())
             {
-                char[] suffix = new char[6];
-                for (int i = 0; i < suffix.Length; i++)
+                // Windows provides no atomic equivalent of mkdtemp, so generate candidate names
+                // until the directory can be created.
+                for (int attempt = 0; attempt < TEMPORARY_DIRECTORY_MAX_ATTEMPTS; attempt++)
                 {
-                    suffix[i] = letters[Random.Shared.Next(letters.Length)];
-                }
-                FilePath tempDir = tempParent / (TEMPORARY_DIRECTORY_PREFIX + new string(suffix));
-                if (!tempDir.exists())
-                {
+                    FilePath tempDir = tempParent / (TEMPORARY_DIRECTORY_PREFIX + Mx.to_string(Random.Shared.Next(100000, 1000000)));
+                    if (tempDir.exists())
+                    {
+                        continue;
+                    }
                     try
                     {
                         Directory.CreateDirectory(tempDir.asString());
@@ -475,8 +477,39 @@ namespace MaterialX
                     }
                     return tempDir;
                 }
+
+                throw new Exception("Error in createTemporaryDirectory: no unique name found in " + tempParent.asString());
             }
-            throw new Exception("Error in createTemporaryDirectory: no unique name found in " + tempParent.asString());
+            else
+            {
+                // Create the directory as mkdtemp does: a unique name of six letters and
+                // digits, with access restricted to the current user.
+                const string letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                for (int attempt = 0; attempt < TEMPORARY_DIRECTORY_MAX_ATTEMPTS; attempt++)
+                {
+                    char[] suffix = new char[6];
+                    for (int i = 0; i < suffix.Length; i++)
+                    {
+                        suffix[i] = letters[Random.Shared.Next(letters.Length)];
+                    }
+                    FilePath tempDir = tempParent / (TEMPORARY_DIRECTORY_PREFIX + new string(suffix));
+                    if (tempDir.exists())
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        Directory.CreateDirectory(tempDir.asString(), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    }
+                    catch (System.Exception e)
+                    {
+                        throw new Exception("Error in createTemporaryDirectory: " + e.Message);
+                    }
+                    return tempDir;
+                }
+
+                throw new Exception("Error in createTemporaryDirectory: no unique name found in " + tempParent.asString());
+            }
         }
 
         public static FilePath getSystemTemporaryDirectory()
@@ -500,6 +533,18 @@ namespace MaterialX
         private static bool hasWindowsDriveSpecifier(string val)
         {
             return val.Length > 1 && ((val[0] >= 'a' && val[0] <= 'z') || (val[0] >= 'A' && val[0] <= 'Z')) && (val[1] == ':');
+        }
+
+        // (not in MaterialX) The entries of a directory in the order of their names.
+        // The C++ library returns them in the order the operating system lists
+        // them, which differs between file systems, and the order in which the
+        // data libraries are loaded decides the order of node definitions and
+        // with it some generated output. Sorting makes that the same everywhere.
+        private static List<FileSystemInfo> sortedEntries(DirectoryInfo dir)
+        {
+            List<FileSystemInfo> entries = new List<FileSystemInfo>(dir.EnumerateFileSystemInfos());
+            entries.Sort((FileSystemInfo lhs, FileSystemInfo rhs) => string.CompareOrdinal(lhs.Name, rhs.Name));
+            return entries;
         }
 
         private DirectoryInfo openDirectory()

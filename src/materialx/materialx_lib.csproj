@@ -17,7 +17,7 @@
     <Compile Include="MaterialXCore/**/*.cs" />
     <Compile Include="MaterialXFormat/**/*.cs" />
     <Compile Include="MaterialXGenShader/**/*.cs" />
-    <Compile Include="MaterialXGenOsl/**/*.cs" />
+    <Compile Include="MaterialXGenOsl/**/*.cs" Exclude="MaterialXGenOsl/LibsToOso.cs" />
   </ItemGroup>
 
 </Project>

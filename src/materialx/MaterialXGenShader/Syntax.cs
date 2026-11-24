@@ -229,7 +229,7 @@ namespace MaterialX
         public abstract string getSourceFileExtension();
 
         // Return the array suffix to use for declaring an array type.
-        public virtual string getArrayTypeSuffix(TypeDesc arg0, Value arg1)
+        public virtual string getArrayTypeSuffix(TypeDesc type, Value value)
         {
             return EMPTY_STRING;
         }

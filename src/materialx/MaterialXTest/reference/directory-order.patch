@@ -1,0 +1,51 @@
+--- MaterialXFormat/File.cpp	2026-11-24 13:25:44.336099074 -0600
++++ MaterialXFormat/File.cpp	2026-11-24 16:24:28.212240539 -0600
+@@ -4,6 +4,7 @@
+ //
+ 
+ #include <MaterialXFormat/File.h>
++#include <algorithm>
+ 
+ #include <MaterialXFormat/Environ.h>
+ 
+@@ -227,6 +228,7 @@
+     }
+ #endif
+ 
++    std::sort(files.begin(), files.end(), [](const FilePath& lhs, const FilePath& rhs) { return lhs.asString() < rhs.asString(); });
+     return files;
+ }
+ 
+@@ -261,25 +263,21 @@
+     DIR* dir = opendir(asString().c_str());
+     if (dir)
+     {
++        StringVec entryNames;
+         while (struct dirent* entry = readdir(dir))
+         {
+-            string path = entry->d_name;
++            entryNames.push_back(entry->d_name);
++        }
++        std::sort(entryNames.begin(), entryNames.end());
++        for (const string& path : entryNames)
++        {
+             if (path == "." || path == "..")
+             {
+                 continue;
+             }
+ 
+-            auto d_type = entry->d_type;
+             FilePath newDir = *this / path;
+-
+-            if (d_type == DT_UNKNOWN)
+-            {
+-                if (newDir.isDirectory())
+-                {
+-                    d_type = DT_DIR;
+-                }
+-            }
+-            if (d_type == DT_DIR)
++            if (newDir.isDirectory())
+             {
+                 FilePathVec newDirs = newDir.getSubDirectories();
+                 dirs.insert(dirs.end(), newDirs.begin(), newDirs.end());
