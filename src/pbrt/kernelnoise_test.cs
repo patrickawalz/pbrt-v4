@@ -28,7 +28,7 @@ namespace pbrt
         {
             foreach (Float coverage in new Float[] { 1f, 0.4f })
             {
-                KernelNoise noise = new KernelNoise(3f, 3, 2f, 0.5f, coverage, 0);
+                KernelNoise noise = new KernelNoise(3f, 3, 2f, 0.5f, coverage, 0, null);
                 RNG rng = new RNG(7);
                 for (int i = 0; i < 40; ++i)
                 {
@@ -61,7 +61,7 @@ namespace pbrt
         [TEST("KernelNoise", "InverseOfTheIntegral")]
         public static void InverseOfTheIntegral()
         {
-            KernelNoise noise = new KernelNoise(4f, 3, 2f, 0.5f, 0.6f, 3);
+            KernelNoise noise = new KernelNoise(4f, 3, 2f, 0.5f, 0.6f, 3, null);
             RNG rng = new RNG(17);
             for (int i = 0; i < 200; ++i)
             {
@@ -91,7 +91,7 @@ namespace pbrt
             // never negative, and it stays under its bound. Part of space is empty.
             foreach (Float coverage in new Float[] { 1f, 0.5f, 0.15f })
             {
-                KernelNoise noise = new KernelNoise(2f, 3, 2f, 0.5f, coverage, 1);
+                KernelNoise noise = new KernelNoise(2f, 3, 2f, 0.5f, coverage, 1, null);
                 RNG rng = new RNG(31);
                 double sum = 0, largest = 0;
                 int count = 400000, empty = 0;
@@ -114,7 +114,7 @@ namespace pbrt
             }
 
             // Over a box
-            KernelNoise boxed = new KernelNoise(2f, 3, 2f, 0.5f, 0.7f, 5);
+            KernelNoise boxed = new KernelNoise(2f, 3, 2f, 0.5f, 0.7f, 5, null);
             RNG rg = new RNG(11);
             double width = 0, reached = 0;
             for (int i = 0; i < 60; ++i)
@@ -147,9 +147,46 @@ namespace pbrt
                               width / 20, reached / 20, boxed.MaxDensity() * boxed.Mean());
         }
 
+        [TEST("KernelNoise", "CloudEnvelope")]
+        public static void CloudEnvelope()
+        {
+            // The kernels take the density of pbrt-v4's cloud as their heights: the integral along a ray is still the closed
+            // form, part of the box is empty, and the mean over the box is close to that of the envelope (as in pbrt-v4, it is the
+            // box of the medium that ends the cloud at the altitude 1: the formula does not)
+            KernelNoiseCloudEnvelope envelope = new KernelNoiseCloudEnvelope(5f, 1f, 1f);
+            KernelNoise noise = new KernelNoise(24f, 2, 2f, 0.5f, 1f, 0, envelope);
+            RNG rng = new RNG(7);
+            for (int i = 0; i < 30; ++i)
+            {
+                double ox = rng.Uniform<Float>(), oy = rng.Uniform<Float>(), oz = rng.Uniform<Float>();
+                double dx = 2 * rng.Uniform<Float>() - 1, dy = 2 * rng.Uniform<Float>() - 1, dz = 2 * rng.Uniform<Float>() - 1;
+                double t0 = 0, t1 = 0.1 + 0.5 * rng.Uniform<Float>();
+                double exact = noise.FieldIntegral(ox, oy, oz, dx, dy, dz, t0, t1);
+                double numeric = Quadrature((double t) => noise.Field(ox + t * dx, oy + t * dy, oz + t * dz), t0, t1, 200000);
+                EXPECT_NEAR(exact, numeric, 1e-7 * Math.Max(1.0, Math.Abs(numeric)));
+            }
+            double sum = 0, envelopeSum = 0;
+            int count = 200000, empty = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                Point3f p = new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>());
+                double d = noise.Density(p);
+                sum += d;
+                envelopeSum += envelope.Evaluate(p.x, p.y, p.z);
+                if (d == 0)
+                {
+                    ++empty;
+                }
+            }
+            EXPECT_NEAR(sum / count, envelopeSum / count, 0.1 * envelopeSum / count);
+            EXPECT_GT(empty, count / 20);
+            Console.WriteLine("MEASURE kernel noise with the cloud envelope: mean density {0:F4}, mean of the envelope {1:F4}, {2:F1}% of the box is empty",
+                              sum / count, envelopeSum / count, 100.0 * empty / count);
+        }
+
         private static KernelNoiseMedium Medium(Float coverage, bool bounded, Transform renderFromMedium, bool closedFormSampling)
         {
-            KernelNoise noise = new KernelNoise(4f, 3, 2f, 0.5f, coverage, 2);
+            KernelNoise noise = new KernelNoise(4f, 3, 2f, 0.5f, coverage, 2, null);
             KernelNoiseMedium medium = new KernelNoiseMedium(bounded, bounded ? new Bounds3f(new Point3f(-1, -1, -1), new Point3f(1, 1, 1)) : new Bounds3f(),
                                                              renderFromMedium, new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(0.2f, 0.4f, 1f)),
                                                              new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(1f, 2f, 3f)), 0, 0.5f, noise,
@@ -292,7 +329,7 @@ namespace pbrt
         [TEST("KernelNoise", "TextureAndItsBounds")]
         public static void TextureAndItsBounds()
         {
-            KernelNoise noise = new KernelNoise(3f, 3, 2f, 0.5f, 0.8f, 0);
+            KernelNoise noise = new KernelNoise(3f, 3, 2f, 0.5f, 0.8f, 0, null);
             KernelNoiseTexture texture = new KernelNoiseTexture(new PointTransformMapping(Scale(2f, 2f, 2f)), noise, 0.8f);
             EXPECT_EQ(texture.MinValue(), 0f);
             EXPECT_NEAR(texture.MaxValue(), 0.8 * noise.MaxDensity(), 1e-4);

@@ -32,6 +32,10 @@
 // The density of the texture and of the medium is the noise over its mean, so that "density" is the mean density of a medium
 // with every cell filled, and "coverage" times it otherwise.
 //
+// The shape. A sum of bumps is shaped by where the bumps are and how tall they are, and stays a sum of bumps: "string envelope"
+// "cloud" gives each kernel the height that pbrt-v4's cloud medium has as its density at the kernel's centre, and the noise is
+// that cloud, with the same exact integral (KernelNoiseCloudEnvelope).
+//
 //     KernelNoise              the function, its integral along a ray, the inverse of the integral, and its bounds over a box
 //     KernelNoiseTexture       Texture "name" "float" "kernelnoise"
 //     KernelNoiseMedium        MakeNamedMedium "name" "string type" "kernelnoise"
@@ -46,8 +50,9 @@ namespace pbrt
     public sealed unsafe class KernelNoise
     {
         // KernelNoise Public Methods
-        public KernelNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed)
+        public KernelNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, KernelNoiseCloudEnvelope envelope)
         {
+            this.envelope = envelope;
             this.octaves = octaves;
             this.coverage = coverage;
             this.seed = (ulong)(uint)seed;
@@ -101,6 +106,40 @@ namespace pbrt
             bound = cellBound * weights;
         }
 
+        // Keeps the heights that the envelope gives the kernels of the cells about a box, each from the first time it is asked
+        // for: the envelope is a good deal of Perlin noise, and a ray asks for the kernels of the same cells over and over. What
+        // is kept is the value itself, so nothing changes but the time. (An octave of more than 2^24 cells there keeps nothing.)
+        public void KeepHeights(Bounds3f box)
+        {
+            if (envelope == null)
+            {
+                return;
+            }
+            keptHeights = new float[octaves][];
+            keptX = new long[octaves];
+            keptY = new long[octaves];
+            keptZ = new long[octaves];
+            keptNx = new long[octaves];
+            keptNy = new long[octaves];
+            keptNz = new long[octaves];
+            for (int o = 0; o < octaves; ++o)
+            {
+                keptX[o] = (long)Math.Floor(box.pMin.x * scale[o]) - 2;
+                keptY[o] = (long)Math.Floor(box.pMin.y * scale[o]) - 2;
+                keptZ[o] = (long)Math.Floor(box.pMin.z * scale[o]) - 2;
+                keptNx[o] = (long)Math.Floor(box.pMax.x * scale[o]) + 3 - keptX[o];
+                keptNy[o] = (long)Math.Floor(box.pMax.y * scale[o]) + 3 - keptY[o];
+                keptNz[o] = (long)Math.Floor(box.pMax.z * scale[o]) + 3 - keptZ[o];
+                double cells = (double)keptNx[o] * keptNy[o] * keptNz[o];
+                if (cells > 1 << 24)
+                {
+                    continue;
+                }
+                keptHeights[o] = new float[(int)cells];
+                Array.Fill(keptHeights[o], Single.NaN);
+            }
+        }
+
         // What the noise is divided by to give the density: its mean with every cell filled
         public double Mean()
         {
@@ -135,13 +174,13 @@ namespace pbrt
                             {
                                 continue;
                             }
-                            double cx, cy, cz, radius;
-                            if (!Kernel(o, ix + dx, iy + dy, iz + dz, out cx, out cy, out cz, out radius))
+                            double cx, cy, cz, radius, height;
+                            if (!Kernel(o, ix + dx, iy + dy, iz + dz, out cx, out cy, out cz, out radius, out height))
                             {
                                 continue;
                             }
                             double x = qx - cx, y = qy - cy, z = qz - cz;
-                            octave += Bump(1.0 - (x * x + y * y + z * z) / (radius * radius));
+                            octave += height * Bump(1.0 - (x * x + y * y + z * z) / (radius * radius));
                         }
                     }
                 }
@@ -243,16 +282,16 @@ namespace pbrt
                     {
                         for (long ix = ix0; ix <= ix1; ++ix)
                         {
-                            double cx, cy, cz, radius;
-                            if (!Kernel(o, ix, iy, iz, out cx, out cy, out cz, out radius))
+                            double cx, cy, cz, radius, height;
+                            if (!Kernel(o, ix, iy, iz, out cx, out cy, out cz, out radius, out height))
                             {
                                 continue;
                             }
                             double nx = Math.Max(0.0, Math.Max(x0 - cx, cx - x1)), ny = Math.Max(0.0, Math.Max(y0 - cy, cy - y1));
                             double nz = Math.Max(0.0, Math.Max(z0 - cz, cz - z1));
                             double fx = Math.Max(cx - x0, x1 - cx), fy = Math.Max(cy - y0, y1 - cy), fz = Math.Max(cz - z0, z1 - cz);
-                            octaveHi += Bump(1.0 - (nx * nx + ny * ny + nz * nz) / (radius * radius));
-                            octaveLo += Bump(1.0 - (fx * fx + fy * fy + fz * fz) / (radius * radius));
+                            octaveHi += height * Bump(1.0 - (nx * nx + ny * ny + nz * nz) / (radius * radius));
+                            octaveLo += height * Bump(1.0 - (fx * fx + fy * fy + fz * fz) / (radius * radius));
                         }
                     }
                 }
@@ -274,15 +313,37 @@ namespace pbrt
             return d < 0 ? lo : d > 0 ? 1.0 - hi : 0;
         }
 
-        // The kernel of a cell of an octave, if it has one: its centre, in cells, and its radius
-        private bool Kernel(int octave, long ix, long iy, long iz, out double cx, out double cy, out double cz, out double radius)
+        // The kernel of a cell of an octave, if it has one: its centre, in cells, its radius and its height
+        private bool Kernel(int octave, long ix, long iy, long iz, out double cx, out double cy, out double cz, out double radius, out double height)
         {
+            // The height that was kept for the cell, if it is one of those of KeepHeights: nothing more to do for a kernel of no
+            // height, and no envelope to ask for the others
+            long slot = -1;
+            float kept = Single.NaN;
+            if (keptHeights != null && keptHeights[octave] != null)
+            {
+                long kx = ix - keptX[octave], ky = iy - keptY[octave], kz = iz - keptZ[octave];
+                if (kx >= 0 && kx < keptNx[octave] && ky >= 0 && ky < keptNy[octave] && kz >= 0 && kz < keptNz[octave])
+                {
+                    slot = (kz * keptNy[octave] + ky) * keptNx[octave] + kx;
+                    kept = keptHeights[octave][slot];
+                    if (kept == 0)
+                    {
+                        cx = cy = cz = radius = height = 0;
+                        return false;
+                    }
+                }
+            }
             ulong h = MixBits((ulong)ix * 0x9E3779B97F4A7C15UL + seed);
             h = MixBits(h ^ ((ulong)iy * 0xC2B2AE3D27D4EB4FUL));
             h = MixBits(h ^ ((ulong)iz * 0x165667B19E3779F9UL) ^ ((ulong)octave << 56));
             if ((h >> 11) * TwoToMinus53 >= coverage)
             {
-                cx = cy = cz = radius = 0;
+                cx = cy = cz = radius = height = 0;
+                if (slot >= 0)
+                {
+                    keptHeights[octave][slot] = 0;
+                }
                 return false;
             }
             h = MixBits(h + 0x9E3779B97F4A7C15UL);
@@ -293,6 +354,22 @@ namespace pbrt
             cz = iz + (h >> 11) * TwoToMinus53;
             h = MixBits(h + 0x9E3779B97F4A7C15UL);
             radius = 0.5 + 0.5 * ((h >> 11) * TwoToMinus53);
+            // The height of the bump: one, or what the envelope is at its centre
+            height = 1;
+            if (!Single.IsNaN(kept))
+            {
+                height = kept;
+                return true;
+            }
+            if (envelope != null)
+            {
+                height = envelope.Evaluate(cx / scale[octave], cy / scale[octave], cz / scale[octave]);
+                if (slot >= 0)
+                {
+                    keptHeights[octave][slot] = (float)height;
+                }
+                return height > 0;
+            }
             return true;
         }
 
@@ -356,8 +433,8 @@ namespace pbrt
         private void AddKernel(int octave, long ix, long iy, long iz, double qx, double qy, double qz, double dx, double dy, double dz,
                                double speed, double t0, double t1, ref int count)
         {
-            double cx, cy, cz, radius;
-            if (!Kernel(octave, ix, iy, iz, out cx, out cy, out cz, out radius))
+            double cx, cy, cz, radius, height;
+            if (!Kernel(octave, ix, iy, iz, out cx, out cy, out cz, out radius, out height))
             {
                 return;
             }
@@ -382,7 +459,7 @@ namespace pbrt
             gathered[4 * count] = tc;
             gathered[4 * count + 1] = h;
             gathered[4 * count + 2] = speed;
-            gathered[4 * count + 3] = weight[octave] / (r2 * r2 * r2);
+            gathered[4 * count + 3] = weight[octave] * height / (r2 * r2 * r2);
             ++count;
         }
 
@@ -467,6 +544,61 @@ namespace pbrt
         private readonly ulong seed;
         private readonly double[] scale, weight;
         private readonly double mean, octaveBound, bound;
+        private readonly KernelNoiseCloudEnvelope envelope;
+        // (the heights of the kernels about the box of KeepHeights, octave by octave; not a number where not yet asked for)
+        private float[][] keptHeights;
+        private long[] keptX, keptY, keptZ, keptNx, keptNy, keptNz;
+    }
+
+    // KernelNoiseCloudEnvelope Definition
+    //
+    // The shape of a cloud for the kernel noise: the density of pbrt-v4's "cloud" medium (CloudMedium::Density), taken as the
+    // height of the bump at each kernel's centre. That density is five octaves of Perlin noise about a warped point, scaled down
+    // with altitude and clamped, which is what gives the cloud its outline and what no integral along a ray can be written for.
+    // Here it is asked only at the centres of the kernels: the noise is then a sum of bumps of those heights, the cloud is where
+    // the bumps are, and the integral along a ray is as exact as before. The point is in the space of the noise, with the cloud
+    // between the altitudes 0 and 1.
+    public sealed class KernelNoiseCloudEnvelope
+    {
+        public KernelNoiseCloudEnvelope(Float frequency, Float wispiness, Float density)
+        {
+            this.frequency = frequency;
+            this.wispiness = wispiness;
+            this.density = density;
+        }
+
+        public double Evaluate(double x, double y, double z)
+        {
+            Point3f p = new Point3f((Float)x, (Float)y, (Float)z);
+            Point3f pp = frequency * p;
+            if (wispiness > 0)
+            {
+                // Perturb cloud lookup point _pp_ using noise
+                Float vomega = 0.05f * wispiness, vlambda = 10f;
+                for (int i = 0; i < 2; ++i)
+                {
+                    pp += vomega * DNoise(vlambda * pp);
+                    vomega *= 0.5f;
+                    vlambda *= 1.99f;
+                }
+            }
+            // Sum scales of noise to approximate cloud density
+            Float d = 0;
+            Float omega = 0.5f, lambda = 1f;
+            for (int i = 0; i < 5; ++i)
+            {
+                d += omega * Noise(lambda * pp);
+                omega *= 0.5f;
+                lambda *= 1.99f;
+            }
+
+            // Model decrease in density with altitude and return final cloud density
+            d = Clamp((1 - p.y) * 4.5f * density * d, 0, 1);
+            d += 2 * Math.Max(0f, 0.5f - p.y);
+            return Clamp(d, 0, 1);
+        }
+
+        private readonly Float frequency, wispiness, density;
     }
 
     // KernelNoiseTexture Definition
@@ -519,8 +651,15 @@ namespace pbrt
             hi = (Float)Math.Min(density * noise.MaxDensity(), density * fieldHi / noise.Mean() * (1 + 1e-5) + 1e-6);
         }
 
-        public static KernelNoise CreateNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, FileLoc loc)
+        // "string envelope" is "none", or "cloud" for the shape of pbrt-v4's cloud medium, with that medium's "cloudfrequency" (5),
+        // "wispiness" (1) and "clouddensity" (1)
+        public static KernelNoise CreateNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, string envelopeName,
+                                              Float cloudFrequency, Float wispiness, Float cloudDensity, FileLoc loc)
         {
+            if (envelopeName != "none" && envelopeName != "cloud")
+            {
+                ErrorExit(loc, "\"kernelnoise\": \"envelope\" is \"none\" or \"cloud\".");
+            }
             if (octaves < 1 || octaves > 16)
             {
                 ErrorExit(loc, "\"kernelnoise\": \"octaves\" is 1 to 16.");
@@ -533,14 +672,17 @@ namespace pbrt
             {
                 ErrorExit(loc, "\"kernelnoise\": \"frequency\", \"lacunarity\" and \"gain\" are positive.");
             }
-            return new KernelNoise(frequency, octaves, lacunarity, gain, coverage, seed);
+            return new KernelNoise(frequency, octaves, lacunarity, gain, coverage, seed,
+                                   envelopeName == "cloud" ? new KernelNoiseCloudEnvelope(cloudFrequency, wispiness, cloudDensity) : null);
         }
 
         public static KernelNoiseTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             TextureMapping3D map = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
             KernelNoise noise = CreateNoise(parameters.GetOneFloat("frequency", 1), parameters.GetOneInt("octaves", 3), parameters.GetOneFloat("lacunarity", 2),
-                                            parameters.GetOneFloat("gain", 0.5f), parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0), loc);
+                                            parameters.GetOneFloat("gain", 0.5f), parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0),
+                                            parameters.GetOneString("envelope", "none"), parameters.GetOneFloat("cloudfrequency", 5),
+                                            parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1), loc);
             return new KernelNoiseTexture(map, noise, parameters.GetOneFloat("density", 1));
         }
 
@@ -584,6 +726,7 @@ namespace pbrt
             this.noise = noise;
             if (bounded)
             {
+                noise.KeepHeights(bounds);
                 // The largest density of each cell
                 Point3i res = new Point3i(majorantResolution, majorantResolution, majorantResolution);
                 densityGrid = new MajorantGrid(bounds, res, alloc);
@@ -785,7 +928,9 @@ namespace pbrt
             }
             KernelNoise noise = KernelNoiseTexture.CreateNoise(parameters.GetOneFloat("frequency", 1), parameters.GetOneInt("octaves", 3),
                                                                parameters.GetOneFloat("lacunarity", 2), parameters.GetOneFloat("gain", 0.5f),
-                                                               parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0), loc);
+                                                               parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0),
+                                                               parameters.GetOneString("envelope", "none"), parameters.GetOneFloat("cloudfrequency", 5),
+                                                               parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1), loc);
             // A box of the medium's own space, where one is given
             Point3f far = new Point3f(Infinity, Infinity, Infinity);
             Point3f p0 = parameters.GetOnePoint3f("p0", far);
