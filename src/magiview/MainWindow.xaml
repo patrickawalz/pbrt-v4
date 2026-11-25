@@ -31,6 +31,13 @@
             <Button DockPanel.Dock="Left" Content="+" Width="26" Margin="2,0,0,0" ToolTip="Zoom in (Ctrl +)" Click="OnZoomIn"/>
             <Button DockPanel.Dock="Left" Content="Fit" Padding="8,1" Margin="6,0,0,0" ToolTip="Fit on screen (Ctrl 0)" Click="OnZoomFit"/>
             <Button DockPanel.Dock="Left" Content="100%" Padding="8,1" Margin="2,0,0,0" ToolTip="Actual pixels (Ctrl 1)" Click="OnZoomActual"/>
+            <!-- What the left button does on the film -->
+            <RadioButton x:Name="moveModeButton" DockPanel.Dock="Left" GroupName="zoomMode" Content="Hand" IsChecked="True" Foreground="#d0d0d0" Margin="12,0,0,0"
+                         VerticalAlignment="Center" ToolTip="Drag to pan, double click to fit (H)" Checked="OnZoomMode"/>
+            <RadioButton x:Name="zoomModeButton" DockPanel.Dock="Left" GroupName="zoomMode" Content="Zoom" Foreground="#d0d0d0" Margin="8,0,0,0"
+                         VerticalAlignment="Center" ToolTip="Click to zoom in, Alt click to zoom out (Z)" Checked="OnZoomMode"/>
+            <RadioButton x:Name="marqueeModeButton" DockPanel.Dock="Left" GroupName="zoomMode" Content="Marquee" Foreground="#d0d0d0" Margin="8,0,0,0"
+                         VerticalAlignment="Center" ToolTip="Drag a rectangle to zoom to it (M)" Checked="OnZoomMode"/>
             <TextBlock x:Name="statusText" Foreground="#d0d0d0" Margin="12,0,0,0" VerticalAlignment="Center" Text="No scene."/>
         </DockPanel>
         <!-- The light layers: one row each, made when the scene's layers are known -->

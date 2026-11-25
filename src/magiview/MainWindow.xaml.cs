@@ -411,28 +411,77 @@ namespace magiview
             zoomPanel.Zoom100Percent();
         }
 
-        // The keys of Photoshop: Ctrl 0 fits, Ctrl 1 is 100%, Ctrl + and Ctrl - go a zoom level in and out
+        // What the left button does on the film (the first button is checked while the window is still being made)
+        private void OnZoomMode(object sender, RoutedEventArgs e)
+        {
+            if (zoomPanel != null)
+            {
+                zoomPanel.ZoomMode = sender == zoomModeButton ? ZoomPanelMode.Zoom : sender == marqueeModeButton ? ZoomPanelMode.Rectangle : ZoomPanelMode.Move;
+            }
+        }
+
+        // The keys of Photoshop: Ctrl 0 fits, Ctrl 1 is 100%, Ctrl + and Ctrl - go a zoom level in and out; H, Z and M choose
+        // what the left button does and the arrows move the image (not while a number is being typed)
         private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
-            if (System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control)
+            System.Windows.Input.Key key = e.Key;
+            if (System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control)
             {
-                return;
+                if (key == System.Windows.Input.Key.D0 || key == System.Windows.Input.Key.NumPad0)
+                {
+                    zoomPanel.ZoomToFit();
+                }
+                else if (key == System.Windows.Input.Key.D1 || key == System.Windows.Input.Key.NumPad1)
+                {
+                    zoomPanel.Zoom100Percent();
+                }
+                else if (key == System.Windows.Input.Key.OemPlus || key == System.Windows.Input.Key.Add)
+                {
+                    zoomPanel.ZoomIn();
+                }
+                else if (key == System.Windows.Input.Key.OemMinus || key == System.Windows.Input.Key.Subtract)
+                {
+                    zoomPanel.ZoomOut();
+                }
+                else
+                {
+                    return;
+                }
             }
-            if (e.Key == System.Windows.Input.Key.D0 || e.Key == System.Windows.Input.Key.NumPad0)
+            else if (System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.None && !(e.OriginalSource is TextBox))
             {
-                zoomPanel.ZoomToFit();
-            }
-            else if (e.Key == System.Windows.Input.Key.D1 || e.Key == System.Windows.Input.Key.NumPad1)
-            {
-                zoomPanel.Zoom100Percent();
-            }
-            else if (e.Key == System.Windows.Input.Key.OemPlus || e.Key == System.Windows.Input.Key.Add)
-            {
-                zoomPanel.ZoomIn();
-            }
-            else if (e.Key == System.Windows.Input.Key.OemMinus || e.Key == System.Windows.Input.Key.Subtract)
-            {
-                zoomPanel.ZoomOut();
+                if (key == System.Windows.Input.Key.H)
+                {
+                    moveModeButton.IsChecked = true;
+                }
+                else if (key == System.Windows.Input.Key.Z)
+                {
+                    zoomModeButton.IsChecked = true;
+                }
+                else if (key == System.Windows.Input.Key.M)
+                {
+                    marqueeModeButton.IsChecked = true;
+                }
+                else if (key == System.Windows.Input.Key.Left)
+                {
+                    zoomPanel.MoveBy(120, 0);
+                }
+                else if (key == System.Windows.Input.Key.Right)
+                {
+                    zoomPanel.MoveBy(-120, 0);
+                }
+                else if (key == System.Windows.Input.Key.Up)
+                {
+                    zoomPanel.MoveBy(0, 120);
+                }
+                else if (key == System.Windows.Input.Key.Down)
+                {
+                    zoomPanel.MoveBy(0, -120);
+                }
+                else
+                {
+                    return;
+                }
             }
             else
             {
