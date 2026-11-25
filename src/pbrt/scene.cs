@@ -359,7 +359,7 @@ namespace pbrt
                         members[i] = GetMedium(names[i], medium.loc);
                     Medium aggregate = type == "aggregate" ? AggregateMedium.Create(members, medium.parameters, medium.loc)
                                                            : AggregateMedium2.Create(members, medium.parameters, medium.loc);
-                    aggregate.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc);
+                    aggregate.volumeIntegrator = VolumeIntegrator.Create(medium.parameters, medium.loc, "ratio");
                     aggregate.CreateEmissionSampling(medium.parameters, medium.loc);
                     medium.parameters.ReportUnused();
                     return aggregate;

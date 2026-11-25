@@ -1982,6 +1982,8 @@ namespace pbrt
                 tex = FBmTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "cloud")
                 tex = CloudMediumTexture.Create(renderFromTexture, parameters, loc, alloc);
+            else if (name == "cosinenoise")
+                tex = CosineNoiseTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "wrinkled")
                 tex = WrinkledTexture.Create(renderFromTexture, parameters, loc, alloc);
             else if (name == "windy")

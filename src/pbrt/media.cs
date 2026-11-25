@@ -209,6 +209,14 @@ namespace pbrt
                 return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is CosineNoiseMedium)
+            {
+                // (the distances of a cosine noise that is never negative are sampled from its closed form, without a majorant)
+                CosineNoiseMedium cosineNoise = (CosineNoiseMedium)m;
+                if (cosineNoise.ClosedFormSampling())
+                    return cosineNoise.SampleT_maj(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<CosineNoiseMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            }
             else if (m is TextureMedium)
                 return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
@@ -1831,6 +1839,15 @@ namespace pbrt
             return new SampledSpectrum(0f);
         }
 
+        // (not in pbrt-v4) For the "closedform" transmittance estimator: the transmittance of the segment of the ray up to tMax (in
+        // units of the length of ray.d) from an integral that the medium has in closed form, exact or unbiased. False for a medium
+        // that has none, and for a segment it cannot do; the segment is then ratio tracked.
+        public virtual bool ClosedFormTransmittance(Ray ray, Float tMax, ref RNG rng, SampledWavelengths lambda, out SampledSpectrum T)
+        {
+            T = new SampledSpectrum(1f);
+            return false;
+        }
+
         // (not in pbrt-v4) The emission of the medium as a light (media_emission_light.cs). The region that may emit, a box in
         // the space of the medium; false for a medium that has no extent of its own.
         public virtual bool EmissionRegion(out Bounds3f mediumBounds, out Transform renderFromMedium)
@@ -2035,6 +2052,10 @@ namespace pbrt
             {
                 m = CloudMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
+            else if (name == "cosinenoise")
+            {
+                m = CosineNoiseMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
             else if (name == "atmosphere")
             {
                 m = AtmosphereMedium.Create(parameters, loc, alloc);
@@ -2058,7 +2079,8 @@ namespace pbrt
             if (m == null)
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
-            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc);
+            // (the cosine noise medium has its transmittance in closed form, and takes it unless told otherwise)
+            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" ? "closedform" : "ratio");
             m.CreateEmissionSampling(parameters, loc);
 
             parameters.ReportUnused();

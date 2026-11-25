@@ -268,6 +268,25 @@ namespace pbrt
         }
     }
 
+    // The integral that the medium has in closed form (Medium.ClosedFormTransmittance: the cosine noise medium); every other
+    // medium, and a segment the medium cannot do, falls back to ratio tracking
+    public sealed unsafe class ClosedFormEstimator : RatioTrackingEstimator
+    {
+        public override string Name() { return "closedform"; }
+
+        public override bool TryEstimate(Ray ray, Medium medium, Float tMax, ref RNG rng, SampledWavelengths lambda,
+                                         ref SampledSpectrum T_ray, ref SampledSpectrum r_l, ref SampledSpectrum r_u)
+        {
+            SampledSpectrum T;
+            if (!medium.ClosedFormTransmittance(ray, tMax, ref rng, lambda, out T))
+            {
+                return false;
+            }
+            T_ray *= T;
+            return true;
+        }
+    }
+
     // Track-length estimation (delta tracking): the estimate is 1 if no real collision happens along the segment and 0
     // otherwise. At a collision the hero wavelength continues through a null collision with probability sigma_n / sigma_maj.
     // Cheap per sample and binary, so it suits thin or bright-to-dark media better than dense ones.
@@ -1170,6 +1189,7 @@ namespace pbrt
         public static VolumeTracker Decomposition() { return decompositionTracker; }
         private static readonly RatioTrackingEstimator ratioEstimator = new RatioTrackingEstimator();
         private static readonly AnalyticTransmittanceEstimator analyticEstimator = new AnalyticTransmittanceEstimator();
+        private static readonly ClosedFormEstimator closedFormEstimator = new ClosedFormEstimator();
         private static readonly TrackLengthEstimator trackLengthEstimator = new TrackLengthEstimator();
         private static readonly ResidualRatioEstimator residualEstimator = new ResidualRatioEstimator();
         private static readonly RayMarchingEstimator rayMarchingEstimator = new RayMarchingEstimator();
@@ -1182,7 +1202,7 @@ namespace pbrt
         private static readonly PowerSeriesEstimator powerSeriesCumulativeEstimator = new PowerSeriesEstimator(false);
         private static readonly PowerSeriesEstimator powerSeriesCmfEstimator = new PowerSeriesEstimator(true);
 
-        // The estimators that a medium made in code may name: "ratio", "analytic", "tracklength", "residual", "raymarching",
+        // The estimators that a medium made in code may name: "ratio", "analytic", "closedform", "tracklength", "residual", "raymarching",
         // "nextflight", "nextflightratio", "unidirectional", "bidirectional", "residuallocal", "residualtracking",
         // "pseriescumulative", "pseriescmf"; null for any other name
         public static TransmittanceEstimator Transmittance(string name)
@@ -1193,6 +1213,8 @@ namespace pbrt
                 return ratioEstimator;
             case "analytic":
                 return analyticEstimator;
+            case "closedform":
+                return closedFormEstimator;
             case "tracklength":
                 return trackLengthEstimator;
             case "residual":
@@ -1238,10 +1260,10 @@ namespace pbrt
         // "string distancesampling" ("density" | "equiangular" | "mis"), "string lightsampling" ("light" | "mis"),
         // "integer lightsamples", "float contrast", "string doublescattering" ("none" | "plain" | "joint" | "mis"),
         // "string oncemore" ("none" | "omnee" | "omnee2")
-        public static VolumeIntegrator Create(ParameterDictionary parameters, FileLoc loc)
+        public static VolumeIntegrator Create(ParameterDictionary parameters, FileLoc loc, string defaultTransmittance)
         {
             string trackerName = parameters.GetOneString("tracker", "majorant");
-            string transmittanceName = parameters.GetOneString("transmittance", "ratio");
+            string transmittanceName = parameters.GetOneString("transmittance", defaultTransmittance);
             VolumeTracker tracker = majorantTracker;
             if (trackerName == "global")
                 tracker = globalTracker;
