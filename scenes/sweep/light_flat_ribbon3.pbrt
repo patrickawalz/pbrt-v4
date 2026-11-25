@@ -1,0 +1,32 @@
+LookAt 0 2.2 -5.2  0 0.7 0.3  0 1 0
+Camera "perspective" "float fov" 36
+Sampler "independent" "integer pixelsamples" 16 "integer seed" 7
+Integrator "path" "integer maxdepth" 5
+Film "rgb" "integer xresolution" 360 "integer yresolution" 240 "string filename" "light_flat_ribbon3.exr"
+WorldBegin
+AttributeBegin
+Material "diffuse" "rgb reflectance" [0.7 0.7 0.7]
+Shape "trianglemesh" "point3 P" [-8 0 -8  8 0 -8  8 0 8  -8 0 8] "integer indices" [0 2 1 0 3 2]
+Shape "trianglemesh" "point3 P" [-8 0 2.6  8 0 2.6  8 6 2.6  -8 6 2.6] "integer indices" [0 2 1 0 3 2]
+AttributeEnd
+AttributeBegin
+Material "coateddiffuse" "rgb reflectance" [0.6 0.25 0.2] "float roughness" 0.15
+Translate 0.2 0.5 0.6
+Shape "sphere" "float radius" 0.5
+AttributeEnd
+AttributeBegin
+AreaLightSource "diffuse" "rgb L" [4 2.2 1.2] "float scale" 4 "bool twosided" true
+Shape "ribbon3" "string basis" "bezier" "integer degree" 3 "point3 P" [-2.2 0.25 0.4  -1.7 0.666667 0.7  -1.2 1.08333 1  -0.7 1.5 1.3] "normal N" [0 1 0.2  0 1 0.2  0 1 0.2  0 1 0.2] "float width" [0.09]
+AttributeEnd
+AttributeBegin
+AreaLightSource "diffuse" "rgb L" [1.2 2.4 4] "float scale" 4 "bool twosided" true
+Shape "ribbon3" "string basis" "bezier" "integer degree" 3 "point3 P" [0.9 0.12 -0.6  1.4 0.38 -0.2  1.9 0.64 0.2  2.4 0.9 0.6] "normal N" [0 1 0.2  0 1 0.2  0 1 0.2  0 1 0.2] "float width" [0.09]
+AttributeEnd
+AttributeBegin
+AreaLightSource "diffuse" "rgb L" [3.5 3.2 2.6] "float scale" 4 "bool twosided" true
+Shape "ribbon3" "string basis" "bezier" "integer degree" 3 "point3 P" [-0.9 2 1.6  -0.166667 1.93333 1.56667  0.566667 1.86667 1.53333  1.3 1.8 1.5] "normal N" [0 1 0.2  0 1 0.2  0 1 0.2  0 1 0.2] "float width" [0.09]
+AttributeEnd
+AttributeBegin
+AreaLightSource "diffuse" "rgb L" [1.4 3.6 1.6] "float scale" 4 "bool twosided" true
+Shape "ribbon3" "string basis" "bezier" "integer degree" 3 "point3 P" [-0.8 0.06 -1.3  -0.366667 0.0666667 -1.16667  0.0666667 0.0733333 -1.03333  0.5 0.08 -0.9] "normal N" [0 1 0.2  0 1 0.2  0 1 0.2  0 1 0.2] "float width" [0.09]
+AttributeEnd
