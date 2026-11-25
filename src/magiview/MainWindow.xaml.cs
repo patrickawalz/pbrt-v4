@@ -175,7 +175,7 @@ namespace magiview
             if (dialog.ShowDialog(this) == true)
             {
                 // The image as the layers are set now, with the layers
-                shown.LatestImage.Write(dialog.FileName, new ImageMetadata());
+                shown.LatestImage.Write(dialog.FileName, new pbrt.ImageMetadata());
             }
         }
 
@@ -338,7 +338,7 @@ namespace magiview
             {
                 // (the film thread of a render that has ended is gone: the film is still, and the image is made here)
                 double spp = ended.LatestImageSpp;
-                ShowImage(ended.Film.GetImage(new ImageMetadata(), spp > 0 ? (float)(ended.SplatUnit / spp) : 0, LightLayers.Scene));
+                ShowImage(ended.Film.GetImage(new pbrt.ImageMetadata(), spp > 0 ? (float)(ended.SplatUnit / spp) : 0, LightLayers.Scene));
             }
         }
 

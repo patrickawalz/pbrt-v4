@@ -48,6 +48,9 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "osl_lib", "src\osl\osl_lib.csproj", "{E7410F68-251E-4E2B-A058-56A412E51849}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pbrt_rgbspec", "src\pbrt\rgbspec\source\pbrt_rgbspec.csproj", "{6963E0CC-B954-401A-B8F0-75515B3B5EB7}"
+	ProjectSection(ProjectDependencies) = postProject
+		{08EB8F5E-F64E-4322-9D72-7349971380D4} = {08EB8F5E-F64E-4322-9D72-7349971380D4}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

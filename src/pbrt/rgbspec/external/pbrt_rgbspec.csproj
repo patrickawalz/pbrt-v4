@@ -26,9 +26,12 @@
     <RgbSpecTool>$(MSBuildThisFileDirectory)../../cmd/bin/$(Configuration)/net10.0/rgb2spec_opt.dll</RgbSpecTool>
   </PropertyGroup>
 
-  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="AssignTargetPaths;BeforeCompile;CoreCompile"
+  <!-- (not in a design-time build: Visual Studio runs the compile targets when it loads a project, before anything is built, and
+       the tables are not made then) -->
+  <Target Name="GenerateRgbSpectrumTables" BeforeTargets="AssignTargetPaths;BeforeCompile;CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'"
           Inputs="$(MSBuildThisFileDirectory)../../cmd/rgb2spec_opt.cs;$(RgbSpecTool)"
           Outputs="$(RgbSpecDir)rgbspectrum_srgb.bin;$(RgbSpecDir)rgbspectrum_srgb.cs;$(RgbSpecDir)rgbspectrum_dci_p3.cs;$(RgbSpecDir)rgbspectrum_rec2020.cs;$(RgbSpecDir)rgbspectrum_aces.cs">
+    <Error Condition="!Exists('$(RgbSpecTool)')" Text="rgb2spec_opt has not been built: $(RgbSpecTool) is missing. Build src/pbrt/cmd/rgb2spec_opt.csproj in the $(Configuration) configuration first." />
     <MakeDir Directories="$(RgbSpecDir)" />
     <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_srgb.cs&quot; sRGB bin" />
     <Exec Command="dotnet &quot;$(RgbSpecTool)&quot; 64 &quot;$(RgbSpecDir)rgbspectrum_dci_p3.cs&quot; DCI_P3 bin" />
