@@ -3695,6 +3695,7 @@ namespace pbrt
             Film film = camera.GetFilm();
             MLTImportanceMap importance = new MLTImportanceMap(film.PixelBounds(), importanceRange);
             Point2i boundsMin = film.PixelBounds().pMin;
+            int passes = mutationsPerPixel;
             int stageCount = noiseImportance ? Math.Max(1, Math.Min(schedule != null ? schedule.Length : stages, mutationsPerPixel)) : 1;
             for (int stage = 0; stage < stageCount; ++stage)
             {
@@ -3759,6 +3760,13 @@ namespace pbrt
                 AliasTable bootstrapTable = new AliasTable(new pstd.span<Float>(bootstrapWeights));
                 Float b = (Float)nDepths / bootstrapWeights.Length * (Float)bootstrapSum;
                 MLTNoiseEstimate noise = stage < stageCount - 1 ? new MLTNoiseEstimate(importance, noiseGroups) : null;
+
+                // (not in pbrt-v4) A render of one stage is rendered in passes
+                if (stageCount == 1)
+                {
+                    passes = RenderPasses(film, bootstrapTable, b, importanceOf, stageLargeStepProbability, threadScratchBuffers);
+                    break;
+                }
 
                 // Follow _nChains_ Markov chains to render image
                 int64_t nTotalMutations = (int64_t)film.SampleBounds().Area() * (int64_t)stageMutationsPerPixel;
@@ -3846,7 +3854,126 @@ namespace pbrt
             ImageMetadata metadata = new ImageMetadata();
             metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
             camera.InitMetadata(metadata);
-            camera.GetFilm().WriteImage(metadata, (Float)1 / mutationsPerPixel);
+            metadata.samplesPerPixel = passes;
+            if (passes > 0)
+                camera.GetFilm().WriteImage(metadata, (Float)1 / passes);
+        }
+
+        // (not in pbrt-v4) The Markov chains of mlt, in passes, for progressive rendering (progressive.cs). A pass is one
+        // mutation a pixel, shared among the chains as pbrt-v4 shares the whole render among them; the chains are kept from
+        // pass to pass, each with its sampler, its state and its random numbers, so a chain goes through the states it would
+        // have gone through in one run. The render goes on for as long as the session says: its sample count, where the render
+        // made the session itself, is mutationsPerPixel, and the image is that of pbrt-v4. The splats of a pass have the integral
+        // b of the importance in them, and the image is their sum over the passes. A state carries the light layer of its path.
+        // Returns the number of passes.
+        int RenderPasses(Film film, AliasTable bootstrapTable, Float b, Func<Float, Point2f, Float> importanceOf,
+                         Float stageLargeStepProbability, ThreadLocal<ScratchBuffer> threadScratchBuffers)
+        {
+            MLTSampler[] samplers = new MLTSampler[nChains];
+            RNG[] rngs = new RNG[nChains];
+            Point2f[] pCurrents = new Point2f[nChains];
+            SampledSpectrum[] LCurrents = new SampledSpectrum[nChains];
+            SampledWavelengths[] lambdaCurrents = new SampledWavelengths[nChains];
+            int[] depths = new int[nChains];
+            int[] layerCurrents = new int[nChains];
+            int64_t passMutations = (int64_t)film.SampleBounds().Area();
+            int64_t pixelArea = (int64_t)film.PixelBounds().Area();
+
+            RenderSession session = RenderSession.Begin(film, mutationsPerPixel);
+            ProgressReporter progressRender = new ProgressReporter(Options.haltSpp > 0 ? Options.haltSpp : mutationsPerPixel, "Rendering",
+                                                                   Options.quiet || (Options.haltSpp == 0 && Options.haltTime > 0));
+            int pass = 0;
+            while (session.NextPass(pass))
+            {
+                // Run _nChains_ Markov chains in parallel
+                bool first = pass == 0;
+                int64_t passCopy = pass;
+                ParallelFor(0, nChains, (int i) =>
+                {
+                    ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
+                    // Compute number of mutations to apply in current Markov chain, in this pass: what brings the chain to
+                    // its share of the mutations of the passes so far, which after mutationsPerPixel passes is pbrt-v4's
+                    int64_t soFar = passCopy * passMutations, withThis = soFar + passMutations;
+                    int64_t nChainMutations = ((i + 1) * withThis / nChains - i * withThis / nChains) -
+                                              ((i + 1) * soFar / nChains - i * soFar / nChains);
+
+                    if (first)
+                    {
+                        // Select initial state from the set of bootstrap samples
+                        rngs[i] = new RNG((uint64_t)i);
+                        int bootstrapIndex = bootstrapTable.Sample(rngs[i].Uniform<Float>());
+                        depths[i] = bootstrapIndex % nDepths;
+
+                        // Initialize the state of the chain
+                        samplers[i] = new MLTSampler(mutationsPerPixel, bootstrapIndex, sigma, stageLargeStepProbability,
+                                                     MLTPathEvaluator.nSampleStreams);
+                        LCurrents[i] = L(scratchBuffer, samplers[i], depths[i], out pCurrents[i], out lambdaCurrents[i]);
+                        layerCurrents[i] = LightLayers.SampledLayer();
+                    }
+                    MLTSampler sampler = samplers[i];
+                    int depth = depths[i];
+                    Point2f pCurrent = pCurrents[i];
+                    SampledSpectrum LCurrent = LCurrents[i];
+                    SampledWavelengths lambdaCurrent = lambdaCurrents[i];
+                    int layerCurrent = layerCurrents[i];
+                    ref RNG rng = ref rngs[i];
+
+                    // Run the Markov chain for _nChainMutations_ steps
+                    for (int64_t j = 0; j < nChainMutations; ++j)
+                    {
+                        StatsReportPixelStart(PI2(pCurrent));
+                        sampler.StartIteration();
+                        // Generate proposed sample and compute its radiance
+                        Point2f pProposed;
+                        SampledWavelengths lambdaProposed;
+                        SampledSpectrum LProposed = L(scratchBuffer, sampler, depth, out pProposed, out lambdaProposed);
+                        int layerProposed = LightLayers.SampledLayer();
+
+                        // Compute acceptance probability for proposed sample from the importance
+                        Float cProposed = c(LProposed, lambdaProposed);
+                        Float cCurrent = c(LCurrent, lambdaCurrent);
+                        Float iProposed = importanceOf(cProposed, pProposed);
+                        Float iCurrent = importanceOf(cCurrent, pCurrent);
+                        Float accept = std.min<Float>(1, iProposed / iCurrent);
+
+                        // Splat both current and proposed samples to _film_ (f / I, times b)
+                        if (accept > 0)
+                            film.AddSplat(pProposed, LProposed * (accept * b / iProposed), lambdaProposed, layerProposed);
+                        film.AddSplat(pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent, layerCurrent);
+
+                        // Accept or reject the proposal
+                        if (rng.Uniform<Float>() < accept)
+                        {
+                            StatsReportPixelEnd(PI2(pCurrent));
+                            StatsReportPixelStart(PI2(pProposed));
+                            pCurrent = pProposed;
+                            LCurrent = LProposed;
+                            lambdaCurrent = lambdaProposed;
+                            layerCurrent = layerProposed;
+                            sampler.Accept();
+                            ++acceptedMutations;
+                        }
+                        else
+                            sampler.Reject();
+
+                        ++totalMutations;
+                        scratchBuffer.Reset();
+                        StatsReportPixelEnd(PI2(pCurrent));
+                    }
+                    pCurrents[i] = pCurrent;
+                    LCurrents[i] = LCurrent;
+                    lambdaCurrents[i] = lambdaCurrent;
+                    layerCurrents[i] = layerCurrent;
+                    // (the share of the chain in the samples of the pass, for the images made while the render runs)
+                    film.CountSamples(std.min((i + 1) * pixelArea / nChains, pixelArea) - i * pixelArea / nChains);
+                });
+                ++pass;
+                session.PassDone(pass);
+                progressRender.Update(1);
+            }
+            progressRender.Done();
+            session.End();
+            return pass;
         }
 
         // (not in pbrt-v4) Energy redistribution path tracing in primary sample space (Cline, Talbot and Egbert, "Energy Redistribution

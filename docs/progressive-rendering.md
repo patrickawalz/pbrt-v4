@@ -205,10 +205,17 @@ Polarisation, the spectral film and the G-buffer film take the same layering; `R
 | `RenderSession`: passes, `HaltSpp`, `HaltTime`, `Pause`, `Resume`, `Stop`, `Threads`, `LatestImage` | `progressive.cs` | done, tested |
 | Tile buffers and the film thread | `film.cs` (`RGBFilm`), `progressive.cs` | done, tested |
 | Light layers: `"string layer"`, the film's sums per layer, `Film::GetImage(metadata, splatScale, layers)` | `lightlayers.cs`, `film.cs` | done, tested |
-| Layers in the integrators | `path`, `volpath`, `bdpt`, `lightpath` | done |
+| Layers in the integrators | `path`, `volpath`, `bdpt`, `lightpath`, `mlt` | done |
+| `mlt` in passes: one mutation a pixel a pass, the chains kept from pass to pass | `MLTIntegrator::RenderPasses` | done, tested |
+| Ctrl+C on the command line stops at the end of the pass and writes the image | `cmd/pbrt.cs` | done |
 | `--halt-spp`, `--halt-time`, `Option "integer haltspp"`, `Option "float halttime"` | | done |
 | SPPM | | removed |
 | The viewer | `cmd/magiview` (WPF) | written; see below |
+
+When a render stops. A session that a front end made (the viewer's) with neither a sample count nor a time renders until it
+is stopped. A render from the command line makes its own session, and its sample count is the sampler's (the mutations a
+pixel, for `mlt`) unless `--halt-spp` or `--halt-time` say otherwise, so a scene file renders as it does in pbrt-v4; Ctrl+C
+stops it early, at the end of the pass, with the image written.
 
 Decisions taken since the draft: a render always ends on a whole pass (a stop or a time limit lets the pass under way finish);
 a removed thread is parked for good, on a `PauseTokenSource` of its own (parking costs nothing while it lasts, and ending the
@@ -216,7 +223,7 @@ thread would not make the others faster); the lights of the sky models and emiss
 
 Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 3, a scene of two area lights and a sky):
 
-- `path`, `volpath` and `bdpt` write the same image as before the change, bit for bit.
+- `path`, `volpath`, `bdpt` and `mlt` (24 mutations a pixel) write the same image as before the change, bit for bit.
 - With the two area lights in layers of their own, the layers sum to the image without layers (to the last digit of the half
   floats of the file), and the mean of each layer is that of a render with only its lights: sky 0.1974 against 0.1974, the
   warm light 0.0154 against 0.0153, the cool light 0.1440 against 0.1440 (`path`; `volpath` and `bdpt` alike).
@@ -224,8 +231,10 @@ Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 
 
 ### Not done, and limits
 
-- **MLT and its relatives** (`mlt`, `erpt`, `pmcer`, `jrlt`, `smmc`, `jrsmmc`) still run their own loops to their own budget:
-  no passes, no stop conditions, pause only between chains, and all their light in the layer `default`. They render as before.
+- **The relatives of MLT** (`erpt`, `pmcer`, `jrlt`, `smmc`, `jrsmmc`), and `mlt` with the noise importance (which renders in
+  stages of set sizes), still run their own loops to their own budget: no passes, no stop conditions, pause only between
+  chains, and all their light in the layer `default`. They render as before. The time of `--halt-time` for `mlt` is that of
+  the passes: the bootstrap comes before it.
 - **Layers** are in `RGBFilm` only. The G-buffer and the spectral film are films of one layer. The polarised paths of
   `volpath` and the volume emission seen through a refractive cap put their light in `default`. In `bdpt`, a camera path that
   leaves the scene is given the layer of the light at infinity only when the scene has exactly one such light.
@@ -267,5 +276,6 @@ In rough order of value, each on top of the above without changing it:
 
 ## 9. Open questions
 
-1. MLT: a pass of one mutation a pixel over chains that are kept, as in section 4, or leave the MCMC integrators as they are?
-2. Should `GBufferFilm` and `SpectralFilm` take layers next, or the polarised paths first?
+1. Should the command line also render without end when the scene gives no halt (it would then always need Ctrl+C)?
+2. The relatives of MLT and the staged `mlt` in passes?
+3. Should `GBufferFilm` and `SpectralFilm` take layers next, or the polarised paths first?

@@ -4,7 +4,10 @@
 //
 // An integrator renders in passes of one sample a pixel and asks the session, before each, whether there is to be another:
 // the session says no when its sample count or its time has been reached, or when it has been told to stop. A render always
-// ends on a whole pass. With neither a count nor a time set, the count is the sampler's, and the render is pbrt-v4's.
+// ends on a whole pass. A session that a front end made and gave neither a count nor a time renders until it is stopped. A
+// render from the command line makes its own session, whose count is the sampler's unless --halt-spp or --halt-time say
+// otherwise: that render is pbrt-v4's. Ctrl+C on the command line stops the session, and the image of the passes done is
+// written.
 //
 // The session pauses and resumes the render by the thread pool's PauseTokenSource, and adds and removes its threads.
 //
@@ -32,6 +35,8 @@ namespace pbrt
     {
         // The session of the next render, if a front end has made one; a render that finds none makes its own
         public static RenderSession Next;
+        // The session of the render that is running, if one is
+        public static RenderSession Active;
 
         // RenderSession Public Members
         // Stop after this many samples a pixel (0: no such limit)
@@ -56,12 +61,16 @@ namespace pbrt
         // (called by the integrator) The render starts: the film, and the sample count of the sampler
         public static RenderSession Begin(Film film, int samplerSpp)
         {
+            // A session that a front end made renders until its sample count or its time, and with neither until it is
+            // stopped. A render that makes its own session, the command line's, has the sampler's count for one, as in pbrt-v4.
             RenderSession session = Interlocked.Exchange(ref Next, null);
-            if (session == null)
+            bool own = session == null;
+            if (own)
             {
                 session = new RenderSession();
             }
-            session.Start(film, samplerSpp);
+            session.Start(film, own ? samplerSpp : 0);
+            Volatile.Write(ref Active, session);
             return session;
         }
 
@@ -114,6 +123,7 @@ namespace pbrt
             filmThread = null;
             clock.Stop();
             Volatile.Write(ref rendering, false);
+            Interlocked.CompareExchange(ref Active, null, this);
         }
 
         public void Pause()
@@ -237,7 +247,7 @@ namespace pbrt
         private void Start(Film renderFilm, int samplerSpp)
         {
             film = renderFilm;
-            // With no limit asked for, the sampler's count, as in pbrt-v4
+            // With no limit asked for, the count given: the sampler's, or none
             haltSpp = HaltSpp > 0 ? HaltSpp : (HaltTime > 0 ? 0 : samplerSpp);
             film.SetLayerCount(LightLayers.Scene.Count);
             Volatile.Write(ref rendering, true);
@@ -252,22 +262,21 @@ namespace pbrt
         private void FilmThread()
         {
             Stopwatch sinceImage = Stopwatch.StartNew();
-            bool merged = false;
+            long developedSamples = 0;
             while (true)
             {
                 bool last = Volatile.Read(ref ending);
                 long flush = Interlocked.Read(ref flushRequested);
-                if (film.MergeTiles() > 0)
-                {
-                    merged = true;
-                }
+                film.MergeTiles();
                 Interlocked.Exchange(ref flushDone, flush);
                 bool requested = Volatile.Read(ref developRequested);
-                if (DevelopInterval > 0 && (last || requested || (merged && sinceImage.Elapsed.TotalSeconds >= DevelopInterval)))
+                // (an image when there are samples that the last one did not have: tiles that were merged, or splats)
+                long samples = film.SamplesCounted();
+                if (DevelopInterval > 0 && (last || requested || (samples != developedSamples && sinceImage.Elapsed.TotalSeconds >= DevelopInterval)))
                 {
                     Volatile.Write(ref developRequested, false);
                     Develop();
-                    merged = false;
+                    developedSamples = samples;
                     sinceImage.Restart();
                 }
                 if (last)

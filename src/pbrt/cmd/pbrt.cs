@@ -84,6 +84,8 @@ Reformatting options:
     }
 
     // main program
+    static bool stopAsked;
+
     public static int Main(string[] argv)
     {
         // Convert command-line arguments to vector of strings
@@ -254,6 +256,20 @@ Reformatting options:
 
         // Initialize pbrt
         InitPBRT(options);
+
+        // (not in pbrt-v4) Ctrl+C stops the render at the end of the pass it is in, and the image is written; once more ends
+        // the process
+        Console.CancelKeyPress += (object sender, ConsoleCancelEventArgs e) =>
+        {
+            RenderSession active = RenderSession.Active;
+            if (active != null && !stopAsked)
+            {
+                stopAsked = true;
+                e.Cancel = true;
+                Console.Error.WriteLine("Stopping at the end of the pass (Ctrl+C again to end now).");
+                active.Stop();
+            }
+        };
 
         if (format || toPly || options.upgrade)
         {
