@@ -3133,6 +3133,11 @@ namespace pbrt
             {
                 shapes = Rocaps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc, true);
             }
+            else if (name == "sweep")
+            {
+                // (not in pbrt-v4) A cross section that is a Bezier curve, carried along a cubic Bezier curve (sweep.cs)
+                shapes = Sweeps.Create(renderFromObject, objectFromRender, reverseOrientation, parameters, loc);
+            }
             else if (name == "displacedmesh")
             {
                 shapes = DisplacedTriangle.Create(renderFromObject, reverseOrientation, parameters, floatTextures, loc);
