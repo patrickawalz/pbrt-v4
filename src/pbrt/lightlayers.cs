@@ -143,6 +143,16 @@ namespace pbrt
             sampledLayer = light.layer;
         }
 
+        public static void Sampled(int layer)
+        {
+            sampledLayer = layer;
+        }
+
+        public static int SampledLayer()
+        {
+            return sampledLayer;
+        }
+
         public static void AddSampled(SampledSpectrum L)
         {
             if (sampledLayer != 0)

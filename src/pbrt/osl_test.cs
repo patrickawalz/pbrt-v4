@@ -1729,7 +1729,6 @@ namespace pbrt
                 "Integrator \"randomwalk\" \"integer maxdepth\" 4",
                 "Integrator \"bdpt\" \"integer maxdepth\" 4",
                 "Integrator \"mlt\" \"integer maxdepth\" 4 \"integer mutationsperpixel\" 32",
-                "Integrator \"sppm\" \"integer maxdepth\" 4 \"integer photonsperiteration\" 20000",
                 "Integrator \"lightpath\" \"integer maxdepth\" 4"
             };
             string[] materialNames = new string[] { "matte", "conductor", "glass", "emitter" };
