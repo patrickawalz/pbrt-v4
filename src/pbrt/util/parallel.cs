@@ -472,29 +472,163 @@ namespace pbrt
     }
 
     // ThreadPool Definition
+    //
+    // (not in pbrt-v4) The pool of pbrt-v4, with three things of its own, for progressive rendering:
+    //
+    //     stealing     A loop does not hand its chunks out one at a time under the pool's mutex. Each thread has a range of the
+    //                  chunks of the loop, takes them from the front of it, and when it has none takes the back half of the
+    //                  range of another (ParallelRangeLoop). The mutex is for the list of jobs and for sleeping.
+    //     threads      AddThread() and RemoveThread() while jobs run. A thread that is added has no range, so the first thing
+    //                  it does is steal one: nothing has to be told that it came. A thread that is removed is parked at the
+    //                  end of the chunk it is in, on a PauseTokenSource of its own, and what is left of its range is stolen by
+    //                  the others; AddThread() wakes a parked thread before it starts a new one.
+    //     pause        PauseSource pauses every thread at the end of its chunk, the thread of the caller of a loop too, until
+    //                  it is resumed. Loops need no code for it.
     public class ThreadPool
     {
+        // ThreadPool::WorkerThread Definition
+        private sealed class WorkerThread
+        {
+            public Thread thread;
+            public int slot;
+            // (paused while the thread is removed from the pool)
+            public PauseTokenSource removed = new PauseTokenSource();
+            public bool parked;
+        }
 
-        public long size() { return threads.Count; }
+        // (the number of threads at work beside the calling thread: those that are not parked)
+        public long size() { return Volatile.Read(ref activeThreads); }
         // ThreadPool Method Definitions
         public ThreadPool(int nThreads)
         {
             for (int i = 0; i < nThreads - 1; ++i)
-            {
-                Thread t = new Thread(Worker);
-                t.IsBackground = true;
-                t.Start();
-                threads.Add(t);
-            }
+                StartThread();
         }
 
-        private void Worker()
+        private void StartThread()
+        {
+            WorkerThread worker = new WorkerThread();
+            worker.slot = Interlocked.Increment(ref slots);
+            worker.thread = new Thread(() => Worker(worker));
+            worker.thread.IsBackground = true;
+            workers.Add(worker);
+            Interlocked.Increment(ref activeThreads);
+            worker.thread.Start();
+        }
+
+        // Adds a thread to the pool, a parked one if there is one; returns the number of threads at work, the caller's among them
+        public int AddThread()
+        {
+            std.lock_guard lg = new std.lock_guard(mutex);
+            WorkerThread parked = null;
+            foreach (WorkerThread worker in workers)
+            {
+                if (worker.parked)
+                {
+                    parked = worker;
+                    break;
+                }
+            }
+            if (parked != null)
+            {
+                parked.parked = false;
+                Interlocked.Increment(ref activeThreads);
+                parked.removed.Resume();
+            }
+            else
+            {
+                StartThread();
+            }
+            jobListCondition.notify_all();
+            int count = 1 + activeThreads;
+            lg.Dispose();
+            return count;
+        }
+
+        // Removes a thread from the pool: it finishes the chunk it is in and is parked. The calling thread of a loop is not one
+        // of the pool's and stays. Returns the number of threads at work.
+        public int RemoveThread()
+        {
+            std.lock_guard lg = new std.lock_guard(mutex);
+            for (int i = workers.Count - 1; i >= 0; --i)
+            {
+                if (!workers[i].parked)
+                {
+                    workers[i].parked = true;
+                    Interlocked.Decrement(ref activeThreads);
+                    workers[i].removed.Pause();
+                    break;
+                }
+            }
+            int count = 1 + activeThreads;
+            lg.Dispose();
+            return count;
+        }
+
+        // What pauses the pool
+        public PauseTokenSource PauseSource
+        {
+            get { return pause; }
+        }
+
+        // Whether the calling thread is to leave the loop it is taking chunks from: the pool is paused, or the thread has been
+        // removed (and is not inside a chunk, whose loops it still has to see through)
+        internal bool ShouldYield()
+        {
+            if (pause.IsPaused)
+                return true;
+            WorkerThread worker = currentWorker;
+            return worker != null && chunkDepth == 0 && worker.removed.IsPaused;
+        }
+
+        // The slot of the calling thread in the ranges of the loops: one for every thread that has ever taken a chunk
+        internal int Slot()
+        {
+            if (threadSlot == 0)
+                threadSlot = currentWorker != null ? currentWorker.slot : Interlocked.Increment(ref slots);
+            return threadSlot;
+        }
+
+        // The slots of the threads that a loop made now can expect: the caller's and those of the threads at work
+        internal int[] ExpectedSlots()
+        {
+            std.lock_guard lg = new std.lock_guard(mutex);
+            List<int> expected = new List<int>();
+            expected.Add(Slot());
+            foreach (WorkerThread worker in workers)
+            {
+                if (!worker.parked && worker.slot != threadSlot)
+                    expected.Add(worker.slot);
+            }
+            lg.Dispose();
+            return expected.ToArray();
+        }
+
+        internal int SlotCapacity()
+        {
+            return Volatile.Read(ref slots) + 1;
+        }
+
+        private void Worker(WorkerThread worker)
         {
             pbrt.LOG_VERBOSE("Started execution in worker thread");
+            currentWorker = worker;
 
             std.unique_lock lk = new std.unique_lock(mutex);
             while (!shutdownThreads)
+            {
+                if (worker.removed.IsPaused)
+                {
+                    // Parked, until AddThread() or the end of the pool. What the thread has counted is handed in first:
+                    // ForEachThread() does not come to a parked thread.
+                    lk.unlock();
+                    pbrt.ReportThreadStats();
+                    worker.removed.Token.WaitWhilePaused();
+                    lk.@lock();
+                    continue;
+                }
                 WorkOrWait(lk, false);
+            }
 
             lk.Dispose();
             pbrt.LOG_VERBOSE("Exiting worker thread");
@@ -516,6 +650,14 @@ namespace pbrt
         public void WorkOrWait(std.unique_lock lk, bool isEnqueuingThread)
         {
             pbrt.DCHECK(lk.owns_lock());
+            // (not in pbrt-v4) Wait out a pause of the pool
+            if (pause.IsPaused)
+            {
+                lk.unlock();
+                pause.Token.WaitWhilePaused();
+                lk.@lock();
+                return;
+            }
             // Return if this is a worker thread and the thread pool is disabled
             if (!isEnqueuingThread && disabled)
             {
@@ -562,6 +704,8 @@ namespace pbrt
 
         public bool WorkOrReturn()
         {
+            if (pause.IsPaused)
+                return false;
             std.unique_lock lk = new std.unique_lock(mutex);
 
             ParallelJob job = jobList;
@@ -588,14 +732,21 @@ namespace pbrt
 
         public void ForEachThread(Action func)
         {
-            Barrier barrier = new Barrier((int)(threads.Count + 1));
+            // (not in pbrt-v4: the threads at work. A thread that is parked has handed in what it had when it was parked.)
+            int count = (int)size() + 1;
+            Barrier barrier = new Barrier(count);
 
-            pbrt.ParallelFor(0, threads.Count + 1, (long i) =>
+            // (a chunk for each thread, and no thread finishes its chunk before every thread has one)
+            ParallelForLoop1D loop = new ParallelForLoop1D(0, count, 1, (long start, long end) =>
             {
                 func();
                 if (barrier.Block())
                     barrier = null;  // delete barrier;
             });
+            std.unique_lock lk = AddToJobList(loop);
+            while (!loop.Finished())
+                WorkOrWait(lk, true);
+            lk.Dispose();
         }
 
         public void Disable()
@@ -614,24 +765,28 @@ namespace pbrt
         // ~ThreadPool()
         public void Dispose()
         {
-            if (threads.Count == 0)
+            if (workers.Count == 0)
                 return;
 
             {
                 std.lock_guard lg = new std.lock_guard(mutex);
                 shutdownThreads = true;
+                // (the parked threads and a paused pool are let go)
+                foreach (WorkerThread worker in workers)
+                    worker.removed.Resume();
+                pause.Resume();
                 jobListCondition.notify_all();
                 lg.Dispose();
             }
 
-            foreach (Thread thread in threads)
-                thread.Join();
+            foreach (WorkerThread worker in workers)
+                worker.thread.Join();
         }
 
         public override string ToString()
         {
             string s = pbrt.StringPrintf("[ ThreadPool threads.size(): %d shutdownThreads: %s ",
-                                         threads.Count, shutdownThreads);
+                                         workers.Count, shutdownThreads);
             if (mutex.try_lock())
             {
                 s += "jobList: [ ";
@@ -650,7 +805,14 @@ namespace pbrt
         }
 
         // ThreadPool Private Members
-        private List<Thread> threads = new List<Thread>();
+        private List<WorkerThread> workers = new List<WorkerThread>();
+        private int activeThreads = 0;
+        private int slots = 0;
+        private PauseTokenSource pause = new PauseTokenSource();
+        [ThreadStatic] private static WorkerThread currentWorker;
+        [ThreadStatic] private static int threadSlot;
+        // (how many chunks of loops the calling thread is inside)
+        [ThreadStatic] internal static int chunkDepth;
         private std.mutex mutex = new std.mutex();
         private bool shutdownThreads = false;
         private bool disabled = false;
@@ -658,81 +820,178 @@ namespace pbrt
         private std.condition_variable jobListCondition = new std.condition_variable();
     }
 
+    // ParallelRangeLoop Definition
+    //
+    // (not in pbrt-v4) A loop over chunks numbered from zero, shared out by stealing. Each thread has a range [begin, end) of
+    // chunks, the two numbers in one 64-bit word. A thread takes the first chunk of its own range; one that has none takes the
+    // back half of the largest range there is, runs the first chunk of that and keeps the rest; both are one compare-and-swap.
+    // A range only ever names chunks that have not been run, so a word that a thread read and finds unchanged is still good.
+    public abstract class ParallelRangeLoop : ParallelJob
+    {
+        protected ParallelRangeLoop(long chunks)
+        {
+            pbrt.CHECK_LT(chunks, 1L << 32);
+            unstarted = chunks;
+            // The chunks are divided among the threads that are at work now; a thread that comes later steals
+            int[] expected = threadPool.ExpectedSlots();
+            ranges = new ulong[Math.Max(threadPool.SlotCapacity() + 16, 64)];
+            long each = chunks / expected.Length, extra = chunks % expected.Length, begin = 0;
+            for (int i = 0; i < expected.Length; ++i)
+            {
+                long count = each + (i < extra ? 1 : 0);
+                if (expected[i] < ranges.Length)
+                    ranges[expected[i]] = Pack((uint)begin, (uint)(begin + count));
+                else
+                    // (cannot be: the capacity is beyond every slot there is)
+                    pbrt.CHECK(false);
+                begin += count;
+            }
+        }
+
+        public override bool HaveWork() { return Volatile.Read(ref unstarted) > 0; }
+
+        public override void RunStep(std.unique_lock lk)
+        {
+            // Release lock and run chunks until there are none to take, or the thread is to stop for now
+            lk.unlock();
+            int slot = threadPool.Slot();
+            while (!threadPool.ShouldYield())
+            {
+                long chunk = Take(slot);
+                if (chunk < 0)
+                    break;
+                Interlocked.Decrement(ref unstarted);
+                ++ThreadPool.chunkDepth;
+                try
+                {
+                    RunChunk(chunk);
+                }
+                finally
+                {
+                    --ThreadPool.chunkDepth;
+                }
+            }
+
+            // Remove job from list if all work has been started
+            lk.@lock();
+            if (!HaveWork() && !removed)
+                threadPool.RemoveFromJobList(this);
+            lk.unlock();
+        }
+
+        protected abstract void RunChunk(long chunk);
+
+        private static ulong Pack(uint begin, uint end)
+        {
+            return ((ulong)begin << 32) | end;
+        }
+
+        // A chunk for the thread of the slot, or -1 if no range has one
+        private long Take(int slot)
+        {
+            bool owner = slot < ranges.Length;
+            if (owner)
+            {
+                // The first chunk of its own range
+                while (true)
+                {
+                    ulong range = Volatile.Read(ref ranges[slot]);
+                    uint begin = (uint)(range >> 32), end = (uint)range;
+                    if (begin >= end)
+                        break;
+                    if (Interlocked.CompareExchange(ref ranges[slot], Pack(begin + 1, end), range) == range)
+                        return begin;
+                }
+            }
+            while (true)
+            {
+                // The largest range of another
+                int victim = -1;
+                uint most = 0;
+                for (int i = 0; i < ranges.Length; ++i)
+                {
+                    ulong r = Volatile.Read(ref ranges[i]);
+                    uint b = (uint)(r >> 32), e = (uint)r;
+                    if (e > b && e - b > most)
+                    {
+                        most = e - b;
+                        victim = i;
+                    }
+                }
+                if (victim < 0)
+                    return -1;
+                ulong range = Volatile.Read(ref ranges[victim]);
+                uint begin = (uint)(range >> 32), end = (uint)range;
+                if (begin >= end)
+                    continue;
+                // Its back half (one chunk, for a thread that has no slot to keep the rest in)
+                uint take = owner ? (end - begin + 1) / 2 : 1;
+                if (Interlocked.CompareExchange(ref ranges[victim], Pack(begin, end - take), range) != range)
+                    continue;
+                if (take > 1)
+                    Volatile.Write(ref ranges[slot], Pack(end - take + 1, end));
+                return end - take;
+            }
+        }
+
+        // ParallelRangeLoop Private Members
+        private readonly ulong[] ranges;
+        private long unstarted;
+    }
+
     // ParallelForLoop1D Definition
-    public class ParallelForLoop1D : ParallelJob
+    public class ParallelForLoop1D : ParallelRangeLoop
     {
         // ParallelForLoop1D Public Methods
         public ParallelForLoop1D(long startIndex, long endIndex, int chunkSize, Action<long, long> func)
+            : base((endIndex - startIndex + chunkSize - 1) / chunkSize)
         {
             this.func = func;
-            this.nextIndex = startIndex;
+            this.startIndex = startIndex;
             this.endIndex = endIndex;
             this.chunkSize = chunkSize;
         }
 
-        public override bool HaveWork() { return nextIndex < endIndex; }
-
-        public override void RunStep(std.unique_lock lk)
+        protected override void RunChunk(long chunk)
         {
             // Determine the range of loop iterations to run in this step
-            long indexStart = nextIndex;
+            long indexStart = startIndex + chunk * chunkSize;
             long indexEnd = std.min(indexStart + chunkSize, endIndex);
-            nextIndex = indexEnd;
-
-            // Remove job from list if all work has been started
-            if (!HaveWork())
-                threadPool.RemoveFromJobList(this);
-
-            // Release lock and execute loop iterations in _[indexStart, indexEnd)_
-            lk.unlock();
             func(indexStart, indexEnd);
         }
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ ParallelForLoop1D nextIndex: %d endIndex: %d " +
+            return pbrt.StringPrintf("[ ParallelForLoop1D startIndex: %d endIndex: %d " +
                                      "chunkSize: %d ]",
-                                     nextIndex, endIndex, chunkSize);
+                                     startIndex, endIndex, chunkSize);
         }
 
         // ParallelForLoop1D Private Members
         private Action<long, long> func;
-        private long nextIndex, endIndex;
+        private long startIndex, endIndex;
         private int chunkSize;
     }
 
     // ParallelForLoop2D Definition
-    public class ParallelForLoop2D : ParallelJob
+    public class ParallelForLoop2D : ParallelRangeLoop
     {
         public ParallelForLoop2D(Bounds2i extent, int chunkSize, Action<Bounds2i> func)
+            : base((long)((extent.Diagonal().x + chunkSize - 1) / chunkSize) * ((extent.Diagonal().y + chunkSize - 1) / chunkSize))
         {
             this.func = func;
             this.extent = extent;
-            this.nextStart = extent.pMin;
             this.chunkSize = chunkSize;
+            this.across = (extent.Diagonal().x + chunkSize - 1) / chunkSize;
         }
 
-        public override bool HaveWork() { return nextStart.y < extent.pMax.y; }
-
-        public override void RunStep(std.unique_lock lk)
+        protected override void RunChunk(long chunk)
         {
             // Compute extent for this step
-            Point2i end = nextStart + new Vector2i(chunkSize, chunkSize);
-            Bounds2i b = pbrt.Intersect(new Bounds2i(nextStart, end), extent);
+            Point2i start = extent.pMin + new Vector2i((int)(chunk % across) * chunkSize, (int)(chunk / across) * chunkSize);
+            Point2i end = start + new Vector2i(chunkSize, chunkSize);
+            Bounds2i b = pbrt.Intersect(new Bounds2i(start, end), extent);
             pbrt.CHECK(!b.IsEmpty());
-
-            // Advance to be ready for the next extent.
-            nextStart.x += chunkSize;
-            if (nextStart.x >= extent.pMax.x)
-            {
-                nextStart.x = extent.pMin.x;
-                nextStart.y += chunkSize;
-            }
-
-            if (!HaveWork())
-                threadPool.RemoveFromJobList(this);
-
-            lk.unlock();
 
             // Run the loop iteration
             func(b);
@@ -740,15 +999,13 @@ namespace pbrt
 
         public override string ToString()
         {
-            return pbrt.StringPrintf("[ ParallelForLoop2D extent: %s nextStart: %s " +
-                                     "chunkSize: %d ]",
-                                     extent, nextStart, chunkSize);
+            return pbrt.StringPrintf("[ ParallelForLoop2D extent: %s chunkSize: %d ]", extent, chunkSize);
         }
 
         private Action<Bounds2i> func;
         private readonly Bounds2i extent;
-        private Point2i nextStart;
         private int chunkSize;
+        private int across;
     }
 
     // AsyncJob Definition
