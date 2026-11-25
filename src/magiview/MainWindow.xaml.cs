@@ -86,14 +86,23 @@ namespace magiview
             string file = sceneFile;
             renderThread = new Thread(() =>
             {
-                // The scene is read and rendered here; the session is this render's
-                Directory.SetCurrentDirectory(Path.GetDirectoryName(file));
-                BasicScene scene = new BasicScene();
-                BasicSceneBuilder builder = new BasicSceneBuilder(scene);
-                pbrt.pbrt.ParseFiles(builder, new string[] { file });
-                RenderSession.Next = started;
-                pbrt.pbrt.RenderCPU(scene);
-                Dispatcher.BeginInvoke(new Action(OnRenderEnded));
+                // The scene is read and rendered here; the session is this render's. A scene that the renderer gives up on
+                // (a file that is missing, a parameter it does not take: pbrt's ErrorExit) is reported, and the window stays.
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetDirectoryName(file));
+                    BasicScene scene = new BasicScene();
+                    BasicSceneBuilder builder = new BasicSceneBuilder(scene);
+                    pbrt.pbrt.ParseFiles(builder, new string[] { file });
+                    RenderSession.Next = started;
+                    pbrt.pbrt.RenderCPU(scene);
+                    Dispatcher.BeginInvoke(new Action(OnRenderEnded));
+                }
+                catch (Exception failure)
+                {
+                    RenderSession.Next = null;
+                    Dispatcher.BeginInvoke(new Action(() => OnRenderFailed(failure)));
+                }
             });
             renderThread.IsBackground = true;
             renderThread.Name = "render";
@@ -108,8 +117,28 @@ namespace magiview
             saveButton.IsEnabled = true;
         }
 
+        // The render gave up: what the renderer wrote of it (its errors name the file and the line of the scene), and the
+        // exception itself where it is not one of the renderer's own
+        private void OnRenderFailed(Exception failure)
+        {
+            session = null;
+            startButton.IsEnabled = sceneFile != null;
+            openButton.IsEnabled = true;
+            pauseButton.IsEnabled = false;
+            stopButton.IsEnabled = false;
+            statusText.Text = "The scene could not be rendered: " + sceneFile;
+            string text = App.NewMessages();
+            if (!(failure is FatalException) || text.Length == 0)
+            {
+                text += failure.ToString();
+            }
+            MessageBox.Show(this, App.Shorten(text), "Magi", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
         private void OnRenderEnded()
         {
+            // (the warnings of a render that went through are not kept for the next)
+            App.NewMessages();
             // The session is kept: its film still makes images when a layer changes
             ended = session;
             session = null;
