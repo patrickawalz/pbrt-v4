@@ -184,6 +184,41 @@ namespace pbrt
                               sum / count, envelopeSum / count, 100.0 * empty / count);
         }
 
+        [TEST("KernelNoise", "BlobEnvelope")]
+        public static void BlobEnvelope()
+        {
+            // A ball displaced by fBm: the integral along a ray is still the closed form, the middle is full, and there is
+            // nothing beyond the reach of the displacement and of a kernel
+            KernelNoiseBlobEnvelope envelope = new KernelNoiseBlobEnvelope(new Point3f(0.5f, 0.5f, 0.5f), 0.3f, 0.6f, 2f, 0.25f);
+            KernelNoise noise = new KernelNoise(24f, 2, 2f, 0.5f, 1f, 0, envelope);
+            noise.KeepHeights(new Bounds3f(new Point3f(-1, -1, -1), new Point3f(2, 2, 2)));
+            RNG rng = new RNG(7);
+            for (int i = 0; i < 30; ++i)
+            {
+                double ox = rng.Uniform<Float>(), oy = rng.Uniform<Float>(), oz = rng.Uniform<Float>();
+                double dx = 0.5 - ox, dy = 0.5 - oy, dz = 0.5 - oz;
+                double exact = noise.FieldIntegral(ox, oy, oz, dx, dy, dz, 0, 1.5);
+                double numeric = Quadrature((double t) => noise.Field(ox + t * dx, oy + t * dy, oz + t * dz), 0, 1.5, 200000);
+                EXPECT_NEAR(exact, numeric, 1e-7 * Math.Max(1.0, Math.Abs(numeric)));
+            }
+            EXPECT_EQ(envelope.Evaluate(0.5, 0.5, 0.5), 1.0);
+            double middle = 0;
+            for (int i = 0; i < 20000; ++i)
+            {
+                Vector3f w = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                middle += noise.Density(new Point3f(0.5f, 0.5f, 0.5f) + 0.1f * rng.Uniform<Float>() * w) / 20000;
+            }
+            // (the mean density of the noise with every bump at its full height is 1)
+            EXPECT_NEAR(middle, 1.0, 0.15);
+            double reach = 0.3 * (1 + 0.6 * FBmBound(0.5f, 6)) + 1.0 / 24;
+            for (int i = 0; i < 20000; ++i)
+            {
+                Vector3f w = SampleUniformSphere(new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                Float r = (Float)(reach * (1.001 + rng.Uniform<Float>()));
+                EXPECT_EQ(noise.Density(new Point3f(0.5f, 0.5f, 0.5f) + r * w), 0f);
+            }
+        }
+
         private static KernelNoiseMedium Medium(Float coverage, bool bounded, Transform renderFromMedium, bool closedFormSampling)
         {
             KernelNoise noise = new KernelNoise(4f, 3, 2f, 0.5f, coverage, 2, null);

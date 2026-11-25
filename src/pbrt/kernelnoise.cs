@@ -34,7 +34,8 @@
 //
 // The shape. A sum of bumps is shaped by where the bumps are and how tall they are, and stays a sum of bumps: "string envelope"
 // "cloud" gives each kernel the height that pbrt-v4's cloud medium has as its density at the kernel's centre, and the noise is
-// that cloud, with the same exact integral (KernelNoiseCloudEnvelope).
+// that cloud, with the same exact integral (KernelNoiseCloudEnvelope). "blob" is a cloud of its own outline: a ball displaced by
+// fBm (KernelNoiseBlobEnvelope).
 //
 //     KernelNoise              the function, its integral along a ray, the inverse of the integral, and its bounds over a box
 //     KernelNoiseTexture       Texture "name" "float" "kernelnoise"
@@ -50,7 +51,7 @@ namespace pbrt
     public sealed unsafe class KernelNoise
     {
         // KernelNoise Public Methods
-        public KernelNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, KernelNoiseCloudEnvelope envelope)
+        public KernelNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, KernelNoiseEnvelope envelope)
         {
             this.envelope = envelope;
             this.octaves = octaves;
@@ -544,10 +545,52 @@ namespace pbrt
         private readonly ulong seed;
         private readonly double[] scale, weight;
         private readonly double mean, octaveBound, bound;
-        private readonly KernelNoiseCloudEnvelope envelope;
+        private readonly KernelNoiseEnvelope envelope;
         // (the heights of the kernels about the box of KeepHeights, octave by octave; not a number where not yet asked for)
         private float[][] keptHeights;
         private long[] keptX, keptY, keptZ, keptNx, keptNy, keptNz;
+    }
+
+    // KernelNoiseEnvelope Definition: the height of the bump of a kernel, 0 to 1, from where its centre is (in the space of the
+    // noise). The noise is shaped by it and stays a sum of bumps.
+    public abstract class KernelNoiseEnvelope
+    {
+        public abstract double Evaluate(double x, double y, double z);
+    }
+
+    // KernelNoiseBlobEnvelope Definition
+    //
+    // A cloud of its own shape: a ball whose radius is displaced by fBm, R (1 + displacement fBm(frequency (p - centre) / R)),
+    // full inside and falling to nothing across "edge" times R at its surface. The surface billows with the noise and the
+    // medium ends there, well inside its box.
+    public sealed class KernelNoiseBlobEnvelope : KernelNoiseEnvelope
+    {
+        public KernelNoiseBlobEnvelope(Point3f center, Float radius, Float displacement, Float frequency, Float edge)
+        {
+            this.center = center;
+            this.radius = radius;
+            this.displacement = displacement;
+            this.frequency = frequency;
+            this.edge = edge;
+        }
+
+        public override double Evaluate(double x, double y, double z)
+        {
+            Vector3f v = new Vector3f((Float)x - center.x, (Float)y - center.y, (Float)z - center.z);
+            Float r = Length(v);
+            // (beyond the reach of any displacement: no noise to ask for)
+            Float reach = displacement * FBmBound(0.5f, 6);
+            if (r >= radius * (1 + reach))
+            {
+                return 0;
+            }
+            Point3f q = new Point3f(frequency * v.x / radius, frequency * v.y / radius, frequency * v.z / radius);
+            Float displaced = radius * (1 + displacement * FBm(q, new Vector3f(0, 0, 0), new Vector3f(0, 0, 0), 0.5f, 6));
+            return Clamp((displaced - r) / (edge * radius), 0, 1);
+        }
+
+        private readonly Point3f center;
+        private readonly Float radius, displacement, frequency, edge;
     }
 
     // KernelNoiseCloudEnvelope Definition
@@ -558,7 +601,7 @@ namespace pbrt
     // Here it is asked only at the centres of the kernels: the noise is then a sum of bumps of those heights, the cloud is where
     // the bumps are, and the integral along a ray is as exact as before. The point is in the space of the noise, with the cloud
     // between the altitudes 0 and 1.
-    public sealed class KernelNoiseCloudEnvelope
+    public sealed class KernelNoiseCloudEnvelope : KernelNoiseEnvelope
     {
         public KernelNoiseCloudEnvelope(Float frequency, Float wispiness, Float density)
         {
@@ -567,7 +610,7 @@ namespace pbrt
             this.density = density;
         }
 
-        public double Evaluate(double x, double y, double z)
+        public override double Evaluate(double x, double y, double z)
         {
             Point3f p = new Point3f((Float)x, (Float)y, (Float)z);
             Point3f pp = frequency * p;
@@ -651,14 +694,21 @@ namespace pbrt
             hi = (Float)Math.Min(density * noise.MaxDensity(), density * fieldHi / noise.Mean() * (1 + 1e-5) + 1e-6);
         }
 
-        // "string envelope" is "none", or "cloud" for the shape of pbrt-v4's cloud medium, with that medium's "cloudfrequency" (5),
-        // "wispiness" (1) and "clouddensity" (1)
+        // "string envelope" is "none"; "cloud" for the shape of pbrt-v4's cloud medium, with that medium's "cloudfrequency" (5),
+        // "wispiness" (1) and "clouddensity" (1); or "blob" for a ball displaced by fBm, about "blobcenter" (0.5 0.5 0.5) with
+        // "blobradius" (0.3), "displacement" (0.6, as a share of the radius), "blobfrequency" (2, the fBm's across a radius) and
+        // "edge" (0.25, the share of the radius across which the density falls to nothing)
         public static KernelNoise CreateNoise(Float frequency, int octaves, Float lacunarity, Float gain, Float coverage, int seed, string envelopeName,
-                                              Float cloudFrequency, Float wispiness, Float cloudDensity, FileLoc loc)
+                                              Float cloudFrequency, Float wispiness, Float cloudDensity, Point3f blobCenter, Float blobRadius,
+                                              Float displacement, Float blobFrequency, Float edge, FileLoc loc)
         {
-            if (envelopeName != "none" && envelopeName != "cloud")
+            if (envelopeName != "none" && envelopeName != "cloud" && envelopeName != "blob")
             {
-                ErrorExit(loc, "\"kernelnoise\": \"envelope\" is \"none\" or \"cloud\".");
+                ErrorExit(loc, "\"kernelnoise\": \"envelope\" is \"none\", \"cloud\" or \"blob\".");
+            }
+            if (!(blobRadius > 0) || !(edge > 0) || displacement < 0)
+            {
+                ErrorExit(loc, "\"kernelnoise\": \"blobradius\" and \"edge\" are positive, and \"displacement\" is not negative.");
             }
             if (octaves < 1 || octaves > 16)
             {
@@ -672,8 +722,16 @@ namespace pbrt
             {
                 ErrorExit(loc, "\"kernelnoise\": \"frequency\", \"lacunarity\" and \"gain\" are positive.");
             }
-            return new KernelNoise(frequency, octaves, lacunarity, gain, coverage, seed,
-                                   envelopeName == "cloud" ? new KernelNoiseCloudEnvelope(cloudFrequency, wispiness, cloudDensity) : null);
+            KernelNoiseEnvelope envelope = null;
+            if (envelopeName == "cloud")
+            {
+                envelope = new KernelNoiseCloudEnvelope(cloudFrequency, wispiness, cloudDensity);
+            }
+            else if (envelopeName == "blob")
+            {
+                envelope = new KernelNoiseBlobEnvelope(blobCenter, blobRadius, displacement, blobFrequency, edge);
+            }
+            return new KernelNoise(frequency, octaves, lacunarity, gain, coverage, seed, envelope);
         }
 
         public static KernelNoiseTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
@@ -682,7 +740,10 @@ namespace pbrt
             KernelNoise noise = CreateNoise(parameters.GetOneFloat("frequency", 1), parameters.GetOneInt("octaves", 3), parameters.GetOneFloat("lacunarity", 2),
                                             parameters.GetOneFloat("gain", 0.5f), parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0),
                                             parameters.GetOneString("envelope", "none"), parameters.GetOneFloat("cloudfrequency", 5),
-                                            parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1), loc);
+                                            parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1),
+                                            parameters.GetOnePoint3f("blobcenter", new Point3f(0.5f, 0.5f, 0.5f)), parameters.GetOneFloat("blobradius", 0.3f),
+                                            parameters.GetOneFloat("displacement", 0.6f), parameters.GetOneFloat("blobfrequency", 2),
+                                            parameters.GetOneFloat("edge", 0.25f), loc);
             return new KernelNoiseTexture(map, noise, parameters.GetOneFloat("density", 1));
         }
 
@@ -930,7 +991,10 @@ namespace pbrt
                                                                parameters.GetOneFloat("lacunarity", 2), parameters.GetOneFloat("gain", 0.5f),
                                                                parameters.GetOneFloat("coverage", 1), parameters.GetOneInt("seed", 0),
                                                                parameters.GetOneString("envelope", "none"), parameters.GetOneFloat("cloudfrequency", 5),
-                                                               parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1), loc);
+                                                               parameters.GetOneFloat("wispiness", 1), parameters.GetOneFloat("clouddensity", 1),
+                                            parameters.GetOnePoint3f("blobcenter", new Point3f(0.5f, 0.5f, 0.5f)), parameters.GetOneFloat("blobradius", 0.3f),
+                                            parameters.GetOneFloat("displacement", 0.6f), parameters.GetOneFloat("blobfrequency", 2),
+                                            parameters.GetOneFloat("edge", 0.25f), loc);
             // A box of the medium's own space, where one is given
             Point3f far = new Point3f(Infinity, Infinity, Infinity);
             Point3f p0 = parameters.GetOnePoint3f("p0", far);
