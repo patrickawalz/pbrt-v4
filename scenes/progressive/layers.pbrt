@@ -1,0 +1,33 @@
+# Progressive rendering and light layers (docs/progressive-rendering.md): a sky and two lamps, each in a layer of its own.
+#
+#   pbrt layers.pbrt                      the sampler's 64 samples a pixel
+#   pbrt --halt-time 30 layers.pbrt       as many whole passes as 30 seconds hold
+#   pbrt --halt-spp 500 layers.pbrt
+#
+# The file has R, G, B and, for each layer, name.R, name.G, name.B.
+LookAt 0 1 -4.2  0 0.6 0  0 1 0
+Camera "perspective" "float fov" 36
+Sampler "independent" "integer pixelsamples" 64
+Integrator "path" "integer maxdepth" 6
+Film "rgb" "integer xresolution" 400 "integer yresolution" 300 "string filename" "layers.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.2 0.25 0.4] "string layer" "sky"
+AttributeBegin
+  # (every light that follows in this attribute block)
+  Attribute "light" "string layer" "warm"
+  AreaLightSource "diffuse" "rgb L" [14 12 9]
+  Translate -1.2 2.4 0
+  Shape "sphere" "float radius" 0.25
+AttributeEnd
+AttributeBegin
+  AreaLightSource "diffuse" "rgb L" [3 6 14] "string layer" "cool"
+  Translate 1.4 1.2 -0.6
+  Shape "sphere" "float radius" 0.2
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.6 0.6 0.6]
+Shape "trianglemesh" "point3 P" [-6 0 -6 6 0 -6 6 0 6 -6 0 6] "integer indices" [0 1 2 0 2 3]
+AttributeBegin
+  Material "coateddiffuse" "rgb reflectance" [0.7 0.3 0.2] "float roughness" 0.1
+  Translate 0 0.6 0
+  Shape "sphere" "float radius" 0.6
+AttributeEnd

@@ -1,6 +1,7 @@
 # Progressive rendering and light layers (design draft, not in pbrt-v4)
 
-Branch `pbr-progressive`, cut from `pbr-materials` at `35574a7`. Nothing here is implemented yet.
+Branch `pbr-progressive`, cut from `pbr-materials` at `35574a7`. Sections 1 to 6 are the design; section 7 says what of it is
+built and how it was checked.
 
 The aim is the smallest change that makes every integrator render progressively, without the film or the integrators losing
 the feel of pbrt-v4:
@@ -77,7 +78,8 @@ thread is a parked thread; `AddThread()` resumes a parked one before it starts a
 token, for every integrator that renders through `ParallelFor`, with no code in the integrators. The cost while running is one
 volatile read per chunk.
 
-A chunk is a tile of one pass, so pause, stop and thread removal all take effect within one tile's worth of work.
+A chunk is a tile of one pass, so a pause and the removal of a thread take effect within one tile's worth of work. A stop
+takes effect at the end of the pass.
 
 ## 4. The render loop
 
@@ -107,21 +109,22 @@ public sealed class RenderSession : IDisposable
     public int HaltSpp { get; set; }                     // 0: none
     public double HaltTime { get; set; }                 // seconds of rendering, pauses not counted; 0: none
     public int Passes { get; }  public double Elapsed { get; }  public double SamplesPerSecond { get; }
-    public Image Develop();                              // the latest finished image, see section 5
-    public LightLayers Layers { get; }
+    public double DevelopInterval { get; set; }          // make an image this often; RequestDevelop() for one now
+    public Image LatestImage { get; }                    // the latest image, see section 5
+    public event Action<RenderSession> Developed;
 }
 ```
 
-Stop conditions are checked by the film thread, which cancels the stop token; whichever comes first ends the render. Scene and
-command line: `Option "integer haltspp"`, `Option "float halttime"`, `--halt-spp`, `--halt-time`. `pbrt_exe` gets a few keys
-(pause, resume, more threads, fewer, write now, stop) and the existing `--display-server` shows the film as it fills.
+Stop conditions are checked between passes; whichever comes first ends the render, on a whole pass. Scene and
+command line: `Option "integer haltspp"`, `Option "float halttime"`, `--halt-spp`, `--halt-time`. `pbrt_exe` has no keys for
+pausing: the front end for that is the viewer (section 7).
 
 The other integrators:
 
 - **Light tracer, BDPT**: already tile loops; the same change.
 - **MLT and its relatives**: the bootstrap runs once and the chains are kept. A pass is one mutation per pixel shared among the
   chains, so the chain loop becomes the same `for pass` loop and the image is `b / passes` times the splats.
-- **SPPM**: left as it is, or removed, as decided earlier.
+- **SPPM**: removed.
 
 Samplers: a render without an end needs a sampler that has sample `n` for any `n`. `independent` does (and is the only one
 used here); `halton` and `sobol` do; the ones built for a fixed count (`stratified`, `pmj02bn`, `zsobol`) stop at their count.
@@ -142,9 +145,10 @@ the sample in the calling thread's tile buffer. When the tile is done the buffer
 takes an empty one from a pool. It never waits.
 
 **The film thread is the only writer of the pixel sums.** It takes buffers off the queue and adds them into the film. Because
-it is alone, the pixel sums are always whole, and it can develop them into an image without stopping anyone. It also checks
-the stop conditions, and on a timer develops the display image and writes the partial file. A finished image is published by
-swapping a reference, so a viewer reads it without a lock too.
+it is alone, the pixel sums are always whole, and it can develop them into an image without stopping anyone, which it does
+at the interval the session was given and when asked. A finished image is published by swapping a reference, so a viewer
+reads it without a lock too. (The stop conditions are the integrator's question to the session between passes, and the
+partial files of `--write-partial-images` are written by the integrator as before.)
 
 **Splats stay as they are.** They go straight into the film's atomic sums. Sending every splat through one thread would make
 that thread the limit of an MLT or light-tracing render, where each sample is a splat over a filter's footprint; the atomics
@@ -192,18 +196,51 @@ at unit scale sum to the image pbrt would have written.
 
 Polarisation, the spectral film and the G-buffer film take the same layering; `RGBFilm` is first.
 
-## 7. Order of work
+## 7. What is built
 
-1. `PauseToken` / `PauseTokenSource`, with tests.
-2. The pool: range stealing, `AddThread` / `RemoveThread`, pause. Test: every index visited once while threads are added,
-   removed and paused at random.
-3. `RenderSession`, the pass loop, the stop conditions, for `ImageTileIntegrator`. Test: bit-identical to today at a fixed spp.
-4. Tile buffers and the film thread; display and partial writes from it.
-5. Light layers: film, `"layer"`, path and volpath. Test: layers sum to the unlayered image; each layer equals a render with
-   only its lights.
-6. BDPT, light tracer, MLT.
+| | where | state |
+|---|---|---|
+| `PauseToken`, `PauseTokenSource` (linked sources, asynchronous wait) | `util/pausetoken.cs` | done, tested |
+| Thread pool: range stealing, `AddThread()`, `RemoveThread()`, `PauseSource` | `util/parallel.cs` | done, tested |
+| `RenderSession`: passes, `HaltSpp`, `HaltTime`, `Pause`, `Resume`, `Stop`, `Threads`, `LatestImage` | `progressive.cs` | done, tested |
+| Tile buffers and the film thread | `film.cs` (`RGBFilm`), `progressive.cs` | done, tested |
+| Light layers: `"string layer"`, the film's sums per layer, `Film::GetImage(metadata, splatScale, layers)` | `lightlayers.cs`, `film.cs` | done, tested |
+| Layers in the integrators | `path`, `volpath`, `bdpt`, `lightpath` | done |
+| `--halt-spp`, `--halt-time`, `Option "integer haltspp"`, `Option "float halttime"` | | done |
+| SPPM | | removed |
+| The viewer | `cmd/magiview` (WPF) | written; see below |
 
-Steps 1 to 3 are a usable progressive renderer; 4 makes looking at it safe; 5 is the layers.
+Decisions taken since the draft: a render always ends on a whole pass (a stop or a time limit lets the pass under way finish);
+a removed thread is parked for good, on a `PauseTokenSource` of its own (parking costs nothing while it lasts, and ending the
+thread would not make the others faster); the lights of the sky models and emissive media take a layer like any light.
+
+Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 3, a scene of two area lights and a sky):
+
+- `path`, `volpath` and `bdpt` write the same image as before the change, bit for bit.
+- With the two area lights in layers of their own, the layers sum to the image without layers (to the last digit of the half
+  floats of the file), and the mean of each layer is that of a render with only its lights: sky 0.1974 against 0.1974, the
+  warm light 0.0154 against 0.0153, the cool light 0.1440 against 0.1440 (`path`; `volpath` and `bdpt` alike).
+- `--halt-time 6` ended after 6.04 s, at 87 whole passes.
+
+### Not done, and limits
+
+- **MLT and its relatives** (`mlt`, `erpt`, `pmcer`, `jrlt`, `smmc`, `jrsmmc`) still run their own loops to their own budget:
+  no passes, no stop conditions, pause only between chains, and all their light in the layer `default`. They render as before.
+- **Layers** are in `RGBFilm` only. The G-buffer and the spectral film are films of one layer. The polarised paths of
+  `volpath` and the volume emission seen through a refractive cap put their light in `default`. In `bdpt`, a camera path that
+  leaves the scene is given the layer of the light at infinity only when the scene has exactly one such light.
+- **Samplers** made for a fixed count are not stopped at their count when a time limit asks for more passes.
+- **The viewer could not be compiled here**: this machine is Linux and cannot fetch the Windows desktop reference assemblies.
+  Its code-behind was compiled against stand-ins for the WPF types it uses, which checks its use of the renderer and its C#,
+  and not its XAML or the WPF calls themselves. It has never been run. Build it on Windows with
+  `dotnet build src/pbrt/cmd/magiview/magiview.csproj -c Release`.
+
+### The viewer
+
+`magiview` opens a scene, starts it with a halt count, a halt time and an update interval, and shows the film as the session's
+thread develops it. Pause and resume, stop, one thread fewer and one more, an exposure slider, and a row for each light layer
+(enabled, scale, colour temperature, red, green and blue): a change to a row asks the session for a new image, whether the
+render is running, paused or over. Save writes the image as the layers are set, with the layers as channels.
 
 ## 8. Towards a polished production renderer
 
@@ -230,8 +267,5 @@ In rough order of value, each on top of the above without changing it:
 
 ## 9. Open questions
 
-1. A removed thread is parked, not ended. Is that what is wanted, or should it exit and free its scratch memory?
-2. When a time limit ends a render mid-pass, the unfinished pass is kept (the weights make it valid). Or should a render
-   always end on a whole pass?
-3. Layers for emissive media and for the sky models: one layer each by default, or `default`?
-4. SPPM: leave it non-progressive, or remove it on this branch?
+1. MLT: a pass of one mutation a pixel over chains that are kept, as in section 4, or leave the MCMC integrators as they are?
+2. Should `GBufferFilm` and `SpectralFilm` take layers next, or the polarised paths first?
