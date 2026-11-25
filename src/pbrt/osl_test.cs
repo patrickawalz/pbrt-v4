@@ -168,7 +168,7 @@ namespace pbrt
             string path = Path.Combine(AppContext.BaseDirectory, "pbrt.dll");
             if (!File.Exists(path))
             {
-                path = "/home/claude/pbrt-v4/src/pbrt/cmd/bin/Release/net10.0/pbrt.dll";
+                path = "/home/claude/pbrt-v4/src/pbrt/cmd/bin/Release/net11.0/pbrt.dll";
             }
             return path;
         }

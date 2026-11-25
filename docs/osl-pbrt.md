@@ -208,7 +208,7 @@ Each thread has its own shading context (thread-static); a point query allocates
 
 ### Tests and renders
 
-`dotnet src/pbrt/cmd/bin/Release/net10.0/pbrt_test.dll --gtest_filter='OslPbrt*'` (`RenderAllIntegrators` takes about 20 minutes; `OSL_TEST_INTEGRATORS=path,bdpt` restricts it)
+`dotnet src/pbrt/cmd/bin/Release/net11.0/pbrt_test.dll --gtest_filter='OslPbrt*'` (`RenderAllIntegrators` takes about 20 minutes; `OSL_TEST_INTEGRATORS=path,bdpt` restricts it)
 
 * Parameter conversion, scene parsing, spectral modes.
 * `ShaderGlobals` against hand-computed values with a probe shader (render space translation/rotation, object/shader/named/camera spaces, attributes, ray types, back faces, handedness, `trace`).
@@ -221,7 +221,7 @@ Each thread has its own shading context (thread-static); a point query allocates
 
 ### Volume tests (`OslVolume*`, 35 tests, `osl_volume_test.cs`)
 
-`dotnet src/pbrt/cmd/bin/Release/net10.0/pbrt_test.dll --gtest_filter='OslVolume*'` (about 12 minutes on two cores, mostly the renders)
+`dotnet src/pbrt/cmd/bin/Release/net11.0/pbrt_test.dll --gtest_filter='OslVolume*'` (about 12 minutes on two cores, mostly the renders)
 
 * Coefficients of every closure, globals of a volume point (`P`, `I`, `time`, `N`, shader space), detection of homogeneous shaders (including a read of `P` that the optimizer removes).
 * A constant shader against pbrt's `homogeneous`: spectra, majorant segments, phase function, closed-form transmittance, ratio tracking against `exp(-sigma_t d)` with z-scores; the same for emission.

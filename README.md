@@ -1,6 +1,6 @@
 # pbrt-v4 (C# port)
 
-A C# (.NET 10) port of [pbrt-v4](https://github.com/mmp/pbrt-v4), CPU only. The directory layout and file names
+A C# (.NET 11) port of [pbrt-v4](https://github.com/mmp/pbrt-v4), CPU only. The directory layout and file names
 follow the C++ sources: `src/pbrt` holds the renderer (a `.h`/`.cpp` pair becomes one `.cs`; `*_test.cpp` becomes
 `*_test.cs` in the same directory) and `src/ext` holds the external libraries.
 

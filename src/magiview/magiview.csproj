@@ -4,7 +4,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>magiview</AssemblyName>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net11.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

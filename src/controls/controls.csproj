@@ -2,7 +2,7 @@
   <!-- (not in pbrt-v4) The WPF controls of the Magi programs (ZoomPanel). Windows only, as src/magiview, which refers to it. -->
   <PropertyGroup>
     <AssemblyName>controls</AssemblyName>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net11.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>disable</Nullable>

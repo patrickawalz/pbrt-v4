@@ -4,7 +4,7 @@
 export LD_LIBRARY_PATH=/tmp/osl-ref/lib:/tmp/osl-ref/oiio-install/lib:/tmp/osl-ref/ocio-install/lib
 SUITE=/home/claude/OpenShadingLanguage/testsuite
 TOOLS=$(cd "$(dirname "$0")" && pwd)
-TS=${TS_DLL:-$TOOLS/../bin/Release/net10.0/testshade.dll}
+TS=${TS_DLL:-$TOOLS/../bin/Release/net11.0/testshade.dll}
 export OSL_TESTSUITE_ROOT=$SUITE
 export OSL_SOURCE_DIR=/home/claude/OpenShadingLanguage
 mkdir -p /tmp/tsuite/bin
@@ -35,8 +35,8 @@ chmod +x /tmp/tsuite/bin/oiiotool
 # The stock harness finds oslc, oslinfo, testrender ... as $BUILD/bin/<app>; oslc is the reference compiler, the others are the C# ports
 BUILD=/tmp/tsuite/osl-build
 mkdir -p $BUILD/bin
-OSLINFO_DLL=${OSLINFO_DLL:-$TOOLS/../../oslinfo/bin/Release/net10.0/oslinfo.dll}
-TESTRENDER_DLL=${TESTRENDER_DLL:-$TOOLS/../../testrender/bin/Release/net10.0/testrender.dll}
+OSLINFO_DLL=${OSLINFO_DLL:-$TOOLS/../../oslinfo/bin/Release/net11.0/oslinfo.dll}
+TESTRENDER_DLL=${TESTRENDER_DLL:-$TOOLS/../../testrender/bin/Release/net11.0/testrender.dll}
 printf '#!/bin/bash\nexec /tmp/osl-ref/bin/oslc "$@"\n' > $BUILD/bin/oslc
 printf '#!/bin/bash\nexec dotnet %s "$@"\n' "$OSLINFO_DLL" > $BUILD/bin/oslinfo
 printf '#!/bin/bash\nexec dotnet %s "$@"\n' "$TESTRENDER_DLL" > $BUILD/bin/testrender
