@@ -187,7 +187,7 @@ namespace pbrt
         }
 
         // What the sample has of the layers, for the film: null if all of it is the default's
-        internal static SampledSpectrum[] Scratch()
+        public static SampledSpectrum[] Scratch()
         {
             return scratchUsed ? scratch : null;
         }

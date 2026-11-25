@@ -1740,6 +1740,8 @@ namespace pbrt
             // Create _ParameterDictionary_ for medium and call _AddMedium()_
             ParameterDictionary dict = new ParameterDictionary(parms, graphicsState.mediumAttributes,
                                                                graphicsState.colorSpace);
+            // (not in pbrt-v4) The light layers are numbered in the order of the scene file
+            LightLayers.Scene.Index(dict.GetOneString("layer", "default"));
             scene.AddMedium(new TransformedSceneEntity(name, dict, loc, RenderFromObject()));
         }
 
@@ -1748,6 +1750,8 @@ namespace pbrt
             if (!VERIFY_WORLD("LightSource", loc)) return;
             ParameterDictionary dict = new ParameterDictionary(parms, graphicsState.lightAttributes,
                                                                graphicsState.colorSpace);
+            // (not in pbrt-v4) The light layers are numbered in the order of the scene file
+            LightLayers.Scene.Index(dict.GetOneString("layer", "default"));
             scene.AddLight(new LightSceneEntity(name, dict, loc, RenderFromObject(),
                                                 graphicsState.currentOutsideMedium));
         }
@@ -2313,6 +2317,8 @@ namespace pbrt
             graphicsState.areaLightName = name;
             graphicsState.areaLightParams = new ParameterDictionary(parms, graphicsState.lightAttributes,
                                                                     graphicsState.colorSpace);
+            // (not in pbrt-v4) The light layers are numbered in the order of the scene file
+            LightLayers.Scene.Index(graphicsState.areaLightParams.GetOneString("layer", "default"));
             graphicsState.areaLightLoc = loc;
         }
 
