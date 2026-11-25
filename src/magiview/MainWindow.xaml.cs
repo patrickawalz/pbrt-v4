@@ -27,6 +27,13 @@ namespace magiview
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
             InitializeComponent();
+            zoomBox.Items.Add("Fit");
+            for (int i = 0; i < ZoomPanel.LevelCount; ++i)
+            {
+                zoomBox.Items.Add(ZoomText(ZoomPanel.Level(i)));
+            }
+            ShowZoom();
+            zoomPanel.ZoomFactorChanged += OnZoomFactorChanged;
             // The renderer is started once for the life of the window
             PBRTOptions options = new PBRTOptions();
             options.quiet = true;
@@ -345,6 +352,95 @@ namespace magiview
             }
         }
 
+        // The zoom of the film
+
+        private static string ZoomText(double factor)
+        {
+            return (100 * factor).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+        }
+
+        // The zoom as the text of the box (a text that is one of the levels selects it: that is not a level being chosen)
+        private void ShowZoom()
+        {
+            showingZoom = true;
+            zoomBox.Text = ZoomText(zoomPanel.ZoomFactor);
+            showingZoom = false;
+        }
+
+        private void OnZoomFactorChanged(object sender, EventArgs e)
+        {
+            ShowZoom();
+        }
+
+        // A zoom level chosen from the list
+        private void OnZoomChosen(object sender, SelectionChangedEventArgs e)
+        {
+            if (showingZoom || e.AddedItems.Count == 0)
+            {
+                return;
+            }
+            string chosen = (string)e.AddedItems[0];
+            if (chosen == "Fit")
+            {
+                zoomPanel.ZoomToFit();
+            }
+            else
+            {
+                zoomPanel.ZoomTo(double.Parse(chosen.TrimEnd('%'), CultureInfo.InvariantCulture) / 100);
+            }
+            ShowZoom();
+        }
+
+        private void OnZoomOut(object sender, RoutedEventArgs e)
+        {
+            zoomPanel.ZoomOut();
+        }
+
+        private void OnZoomIn(object sender, RoutedEventArgs e)
+        {
+            zoomPanel.ZoomIn();
+        }
+
+        private void OnZoomFit(object sender, RoutedEventArgs e)
+        {
+            zoomPanel.ZoomToFit();
+        }
+
+        private void OnZoomActual(object sender, RoutedEventArgs e)
+        {
+            zoomPanel.Zoom100Percent();
+        }
+
+        // The keys of Photoshop: Ctrl 0 fits, Ctrl 1 is 100%, Ctrl + and Ctrl - go a zoom level in and out
+        private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control)
+            {
+                return;
+            }
+            if (e.Key == System.Windows.Input.Key.D0 || e.Key == System.Windows.Input.Key.NumPad0)
+            {
+                zoomPanel.ZoomToFit();
+            }
+            else if (e.Key == System.Windows.Input.Key.D1 || e.Key == System.Windows.Input.Key.NumPad1)
+            {
+                zoomPanel.Zoom100Percent();
+            }
+            else if (e.Key == System.Windows.Input.Key.OemPlus || e.Key == System.Windows.Input.Key.Add)
+            {
+                zoomPanel.ZoomIn();
+            }
+            else if (e.Key == System.Windows.Input.Key.OemMinus || e.Key == System.Windows.Input.Key.Subtract)
+            {
+                zoomPanel.ZoomOut();
+            }
+            else
+            {
+                return;
+            }
+            e.Handled = true;
+        }
+
         private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             statusTimer.Stop();
@@ -360,6 +456,7 @@ namespace magiview
         private RenderSession session, ended;
         private Thread renderThread;
         private WriteableBitmap bitmap;
+        private bool showingZoom;
         private byte[] pixels;
         private int showing;
         private int layersShown;
