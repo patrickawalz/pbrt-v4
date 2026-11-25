@@ -12,7 +12,10 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Optimize>true</Optimize>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- (not InvariantGlobalization, which the programs of cmd have: a WPF text box asks for the culture of the keyboard when it
+         takes the focus, and there is none but the invariant one in that mode. The window sets the invariant culture for the
+         threads instead, for the numbers that the renderer reads and writes.) -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <RootNamespace>magiview</RootNamespace>
   </PropertyGroup>
   <ItemGroup>

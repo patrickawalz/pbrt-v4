@@ -23,6 +23,9 @@ namespace magiview
     {
         public MainWindow()
         {
+            // The numbers of scene files and images are read and written the same on every machine
+            CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
             InitializeComponent();
             // The renderer is started once for the life of the window
             PBRTOptions options = new PBRTOptions();
