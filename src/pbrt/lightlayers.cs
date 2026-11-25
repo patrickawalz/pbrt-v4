@@ -36,6 +36,15 @@ namespace pbrt
         public Float temperature = 0;
     }
 
+    // LightLayerSplit Definition: the layers of a path that ends at more than one light at once, a ray that leaves a scene of
+    // several lights at infinity, and the share of the light of the path that each has, wavelength by wavelength. The path has
+    // one weight for the sum of what those lights give, so the shares of the sum are the shares of the path.
+    public sealed class LightLayerSplit
+    {
+        public int[] layers;
+        public SampledSpectrum[] shares;
+    }
+
     // LightLayers Definition
     public sealed class LightLayers
     {
@@ -141,11 +150,25 @@ namespace pbrt
         public static void Sampled(Light light)
         {
             sampledLayer = light.layer;
+            sampledSplit = null;
+        }
+
+        // (the light of a path that ends at more than one light, of more than one layer)
+        public static void Sampled(LightLayerSplit split)
+        {
+            sampledLayer = 0;
+            sampledSplit = split;
+        }
+
+        public static LightLayerSplit SampledSplit()
+        {
+            return sampledSplit;
         }
 
         public static void Sampled(int layer)
         {
             sampledLayer = layer;
+            sampledSplit = null;
         }
 
         public static int SampledLayer()
@@ -155,7 +178,14 @@ namespace pbrt
 
         public static void AddSampled(SampledSpectrum L)
         {
-            if (sampledLayer != 0)
+            if (sampledSplit != null)
+            {
+                for (int i = 0; i < sampledSplit.layers.Length; ++i)
+                {
+                    Add(sampledSplit.layers[i], L * sampledSplit.shares[i]);
+                }
+            }
+            else if (sampledLayer != 0)
             {
                 Add(sampledLayer, L);
             }
@@ -198,5 +228,6 @@ namespace pbrt
         [ThreadStatic] private static SampledSpectrum[] scratch;
         [ThreadStatic] private static bool scratchUsed;
         [ThreadStatic] private static int sampledLayer;
+        [ThreadStatic] private static LightLayerSplit sampledSplit;
     }
 }

@@ -228,6 +228,11 @@ Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 
   floats of the file), and the mean of each layer is that of a render with only its lights: sky 0.1974 against 0.1974, the
   warm light 0.0154 against 0.0153, the cool light 0.1440 against 0.1440 (`path`; `volpath` and `bdpt` alike).
 - `--halt-time 6` ended after 6.04 s, at 87 whole passes.
+- Lights at infinity are lights like the others. With two of them in layers of their own and a lamp in a third, nothing is
+  left in `default` in `path`, `volpath`, `bdpt` or `mlt` (24 samples or mutations a pixel), and the means of the layers are
+  those of each light alone (path, 96 spp: 0.1974, 0.1173, 0.0153): `bdpt` 0.1975, 0.1174, 0.0155; `mlt` 0.1958, 0.1176,
+  0.0161. In `bdpt` and `mlt` a camera path that leaves the scene has one weight for the sum of the lights at infinity, and
+  its light is shared among their layers in the proportion of what each gives in that direction.
 
 ### Not done, and limits
 
@@ -236,8 +241,7 @@ Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 
   chains, and all their light in the layer `default`. They render as before. The time of `--halt-time` for `mlt` is that of
   the passes: the bootstrap comes before it.
 - **Layers** are in `RGBFilm` only. The G-buffer and the spectral film are films of one layer. The polarised paths of
-  `volpath` and the volume emission seen through a refractive cap put their light in `default`. In `bdpt`, a camera path that
-  leaves the scene is given the layer of the light at infinity only when the scene has exactly one such light.
+  `volpath` and the volume emission seen through a refractive cap put their light in `default`.
 - **Samplers** made for a fixed count are not stopped at their count when a time limit asks for more passes.
 - **The viewer could not be compiled here**: this machine is Linux and cannot fetch the Windows desktop reference assemblies.
   Its code-behind was compiled against stand-ins for the WPF types it uses, which checks its use of the renderer and its C#,

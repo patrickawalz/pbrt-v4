@@ -3015,11 +3015,56 @@ namespace pbrt
             {
                 if (v.ei != null && v.ei.light != null)
                     return v.ei.light.layer;
-                return integrator.infiniteLights.Count == 1 ? integrator.infiniteLights[0].layer : 0;
+                // (of the lights at infinity, if they are all of one layer; see EscapedSplit for when they are not)
+                int layer = integrator.infiniteLights.Count > 0 ? integrator.infiniteLights[0].layer : 0;
+                foreach (Light light in integrator.infiniteLights)
+                    if (light.layer != layer)
+                        return 0;
+                return layer;
             }
             if (v.type == VertexType.Surface && v.si != null && v.si.areaLight != null)
                 return v.si.areaLight.layer;
             return 0;
+        }
+
+        // (not in pbrt-v4) The light layers of a camera path that leaves the scene, where the lights at infinity are of more
+        // than one layer: the share that the lights of each layer have of the radiance the path ends at (Vertex::Le() is their
+        // sum, and the path has one weight for it). Null where the lights at infinity are all of one layer.
+        private static LightLayerSplit EscapedSplit(Vertex pt, Vertex previous, Integrator integrator, SampledWavelengths lambda)
+        {
+            if (!pt.IsInfiniteLight() || integrator.infiniteLights.Count < 2)
+                return null;
+            bool several = false;
+            foreach (Light light in integrator.infiniteLights)
+                several |= light.layer != integrator.infiniteLights[0].layer;
+            if (!several)
+                return null;
+            Vector3f w = previous.p() - pt.p();
+            if (LengthSquared(w) == 0)
+                return null;
+            w = Normalize(w);
+            List<int> layers = new List<int>();
+            List<SampledSpectrum> radiance = new List<SampledSpectrum>();
+            SampledSpectrum total = new SampledSpectrum(0.0f);
+            foreach (Light light in integrator.infiniteLights)
+            {
+                SampledSpectrum Le = light.Le(new Ray(pt.p(), -w), lambda);
+                total += Le;
+                int at = layers.IndexOf(light.layer);
+                if (at < 0)
+                {
+                    layers.Add(light.layer);
+                    radiance.Add(Le);
+                }
+                else
+                    radiance[at] += Le;
+            }
+            LightLayerSplit split = new LightLayerSplit();
+            split.layers = layers.ToArray();
+            split.shares = new SampledSpectrum[layers.Count];
+            for (int i = 0; i < layers.Count; ++i)
+                split.shares[i] = SafeDiv(radiance[i], total);
+            return split;
         }
 
         public static SampledSpectrum ConnectBDPT(Integrator integrator, ref SampledWavelengths lambdaRef,
@@ -3041,6 +3086,7 @@ namespace pbrt
 
             // (not in pbrt-v4) The light layer of the path: that of the light it starts at (LightLayers.Sampled)
             int pathLayer = s == 0 ? LayerOf(cameraVertices[t - 1], integrator) : (s > 1 ? LayerOf(lightVertices[0], integrator) : 0);
+            LightLayerSplit pathSplit = s == 0 && t > 1 ? EscapedSplit(cameraVertices[t - 1], cameraVertices[t - 2], integrator, lambda) : null;
 
             // Perform connection and write contribution to _L_
             Vertex sampled = new Vertex();
@@ -3167,7 +3213,10 @@ namespace pbrt
             DCHECK(!IsNaN(misWeight));
             L *= misWeight;
             misWeightOut = misWeight;
-            LightLayers.Sampled(pathLayer);
+            if (pathSplit != null)
+                LightLayers.Sampled(pathSplit);
+            else
+                LightLayers.Sampled(pathLayer);
 
             // (not in pbrt-v4) What the sensor measures of the polarised light of the path. The scalar contribution has all the
             // factors of the strategy, so the polarisation is taken relative to the scalar throughputs of the two subpaths: the
@@ -3859,6 +3908,18 @@ namespace pbrt
                 camera.GetFilm().WriteImage(metadata, (Float)1 / passes);
         }
 
+        // (not in pbrt-v4) A splat of the light of a path, to the light layer of the path, or to its layers by their shares
+        static void AddLayeredSplat(Film film, Point2f p, SampledSpectrum L, SampledWavelengths lambda, int layer, LightLayerSplit split)
+        {
+            if (split == null)
+            {
+                film.AddSplat(p, L, lambda, layer);
+                return;
+            }
+            for (int i = 0; i < split.layers.Length; ++i)
+                film.AddSplat(p, L * split.shares[i], lambda, split.layers[i]);
+        }
+
         // (not in pbrt-v4) The Markov chains of mlt, in passes, for progressive rendering (progressive.cs). A pass is one
         // mutation a pixel, shared among the chains as pbrt-v4 shares the whole render among them; the chains are kept from
         // pass to pass, each with its sampler, its state and its random numbers, so a chain goes through the states it would
@@ -3876,6 +3937,7 @@ namespace pbrt
             SampledWavelengths[] lambdaCurrents = new SampledWavelengths[nChains];
             int[] depths = new int[nChains];
             int[] layerCurrents = new int[nChains];
+            LightLayerSplit[] splitCurrents = new LightLayerSplit[nChains];
             int64_t passMutations = (int64_t)film.SampleBounds().Area();
             int64_t pixelArea = (int64_t)film.PixelBounds().Area();
 
@@ -3909,6 +3971,7 @@ namespace pbrt
                                                      MLTPathEvaluator.nSampleStreams);
                         LCurrents[i] = L(scratchBuffer, samplers[i], depths[i], out pCurrents[i], out lambdaCurrents[i]);
                         layerCurrents[i] = LightLayers.SampledLayer();
+                        splitCurrents[i] = LightLayers.SampledSplit();
                     }
                     MLTSampler sampler = samplers[i];
                     int depth = depths[i];
@@ -3916,6 +3979,7 @@ namespace pbrt
                     SampledSpectrum LCurrent = LCurrents[i];
                     SampledWavelengths lambdaCurrent = lambdaCurrents[i];
                     int layerCurrent = layerCurrents[i];
+                    LightLayerSplit splitCurrent = splitCurrents[i];
                     ref RNG rng = ref rngs[i];
 
                     // Run the Markov chain for _nChainMutations_ steps
@@ -3928,6 +3992,7 @@ namespace pbrt
                         SampledWavelengths lambdaProposed;
                         SampledSpectrum LProposed = L(scratchBuffer, sampler, depth, out pProposed, out lambdaProposed);
                         int layerProposed = LightLayers.SampledLayer();
+                        LightLayerSplit splitProposed = LightLayers.SampledSplit();
 
                         // Compute acceptance probability for proposed sample from the importance
                         Float cProposed = c(LProposed, lambdaProposed);
@@ -3938,8 +4003,8 @@ namespace pbrt
 
                         // Splat both current and proposed samples to _film_ (f / I, times b)
                         if (accept > 0)
-                            film.AddSplat(pProposed, LProposed * (accept * b / iProposed), lambdaProposed, layerProposed);
-                        film.AddSplat(pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent, layerCurrent);
+                            AddLayeredSplat(film, pProposed, LProposed * (accept * b / iProposed), lambdaProposed, layerProposed, splitProposed);
+                        AddLayeredSplat(film, pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent, layerCurrent, splitCurrent);
 
                         // Accept or reject the proposal
                         if (rng.Uniform<Float>() < accept)
@@ -3950,6 +4015,7 @@ namespace pbrt
                             LCurrent = LProposed;
                             lambdaCurrent = lambdaProposed;
                             layerCurrent = layerProposed;
+                            splitCurrent = splitProposed;
                             sampler.Accept();
                             ++acceptedMutations;
                         }
@@ -3964,6 +4030,7 @@ namespace pbrt
                     LCurrents[i] = LCurrent;
                     lambdaCurrents[i] = lambdaCurrent;
                     layerCurrents[i] = layerCurrent;
+                    splitCurrents[i] = splitCurrent;
                     // (the share of the chain in the samples of the pass, for the images made while the render runs)
                     film.CountSamples(std.min((i + 1) * pixelArea / nChains, pixelArea) - i * pixelArea / nChains);
                 });
