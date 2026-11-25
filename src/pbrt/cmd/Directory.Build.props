@@ -1,0 +1,8 @@
+<Project>
+  <!-- The programs of this directory are one project each in one directory: each keeps its intermediate files (and the restore's
+       project.assets.json, which lists what a project refers to) in a directory of its own. Sharing obj/ let the restore of one project
+       overwrite that of another, so that a solution build (Visual Studio) had rgb2spec_opt refer to the libraries that need it built first. -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>
