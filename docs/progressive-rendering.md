@@ -210,7 +210,7 @@ Polarisation, the spectral film and the G-buffer film take the same layering; `R
 | Ctrl+C on the command line stops at the end of the pass and writes the image | `cmd/pbrt.cs` | done |
 | `--halt-spp`, `--halt-time`, `Option "integer haltspp"`, `Option "float halttime"` | | done |
 | SPPM | | removed |
-| The viewer | `cmd/magiview` (WPF) | written; see below |
+| The viewer | `src/magiview` (WPF) | written; see below |
 
 When a render stops. A session that a front end made (the viewer's) with neither a sample count nor a time renders until it
 is stopped. A render from the command line makes its own session, and its sample count is the sampler's (the mutations a
@@ -246,7 +246,7 @@ Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 
 - **The viewer could not be compiled here**: this machine is Linux and cannot fetch the Windows desktop reference assemblies.
   Its code-behind was compiled against stand-ins for the WPF types it uses, which checks its use of the renderer and its C#,
   and not its XAML or the WPF calls themselves. It has never been run. Build it on Windows with
-  `dotnet build src/pbrt/cmd/magiview/magiview.csproj -c Release`.
+  `dotnet build src/magiview/magiview.csproj -c Release`.
 
 ### The viewer
 

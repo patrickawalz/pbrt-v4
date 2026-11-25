@@ -86,6 +86,12 @@ namespace pbrt
             if (!(a != b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} != {b}");
         }
 
+        public static void CHECK_NE(Point2i a, Point2i b, [CallerFilePath] string file = "",
+                                    [CallerLineNumber] int line = 0)
+        {
+            if (!(a != b)) LogFatal(LogLevel.Fatal, file, line, $"Check failed: {a} != {b}");
+        }
+
         public static void CHECK_NE<T>(T a, T b, [CallerFilePath] string file = "",
                                     [CallerLineNumber] int line = 0)
             where T : IEquatable<T>

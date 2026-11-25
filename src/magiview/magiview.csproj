@@ -16,6 +16,6 @@
     <RootNamespace>magiview</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../pbrt_lib.csproj" />
+    <ProjectReference Include="../pbrt/pbrt_lib.csproj" />
   </ItemGroup>
 </Project>
