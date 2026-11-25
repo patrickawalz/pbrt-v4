@@ -41,7 +41,7 @@
 //     "bool squared"      the density is the square of the sum, (offset + waves / s)^2 over its mean. A square of a sum of cosines
 //                         is a sum of cosines (of the sums and the differences of the waves), so it has the same closed form,
 //                         and it is never negative at any offset: nothing is clamped and nothing is estimated. It costs a
-//                         term for every pair of waves, so it takes fewer of them ("waves" 6 and "octaves" 2 unless given,
+//                         product for every pair of waves, so it takes fewer of them ("waves" 6 and "octaves" 2 unless given,
 //                         and "offset" 0, where the density is zero on the surfaces where the sum changes sign).
 //     below that          the field goes below zero and the density has empty regions (the look of the paper's clouds). The
 //                         paper clamps the samples and the integrals there and accepts the artefacts, which is biased. Here the closed form is kept as a
@@ -115,63 +115,8 @@ namespace pbrt
             norm = Math.Sqrt(0.5 * squares);
             this.offset = offset * norm;
             this.squared = squared;
-            if (!squared)
-            {
-                // The field is the sum itself
-                integralCount = count;
-                integralOffset = this.offset;
-                ix = sx;
-                iy = sy;
-                iz = sz;
-                integralPhase = phase;
-                integralWeight = weight;
-                return;
-            }
-
-            // The square of the sum, as a sum of cosines again. With g = c + sum_k w_k cos(a_k),
-            //
-            //     g^2 = c^2 + sum_k w_k^2 / 2 + sum_k 2 c w_k cos(a_k) + sum_k w_k^2 / 2 cos(2 a_k)
-            //           + sum_(j < k) w_j w_k (cos(a_j + a_k) + cos(a_j - a_k)),
-            //
-            // and the waves of the sums and of the differences are plane waves like the others.
-            double c = this.offset;
-            integralOffset = c * c + 0.5 * squares;
-            integralCount = (c != 0 ? count : 0) + count + count * (count - 1);
-            ix = new double[integralCount];
-            iy = new double[integralCount];
-            iz = new double[integralCount];
-            integralPhase = new double[integralCount];
-            integralWeight = new double[integralCount];
-            int n = 0;
-            for (int k = 0; k < count; ++k)
-            {
-                if (c != 0)
-                {
-                    ix[n] = sx[k];
-                    iy[n] = sy[k];
-                    iz[n] = sz[k];
-                    integralPhase[n] = phase[k];
-                    integralWeight[n++] = 2.0 * c * weight[k];
-                }
-                ix[n] = 2.0 * sx[k];
-                iy[n] = 2.0 * sy[k];
-                iz[n] = 2.0 * sz[k];
-                integralPhase[n] = 2.0 * phase[k];
-                integralWeight[n++] = 0.5 * weight[k] * weight[k];
-                for (int j = 0; j < k; ++j)
-                {
-                    ix[n] = sx[j] + sx[k];
-                    iy[n] = sy[j] + sy[k];
-                    iz[n] = sz[j] + sz[k];
-                    integralPhase[n] = phase[j] + phase[k];
-                    integralWeight[n++] = weight[j] * weight[k];
-                    ix[n] = sx[j] - sx[k];
-                    iy[n] = sy[j] - sy[k];
-                    iz[n] = sz[j] - sz[k];
-                    integralPhase[n] = phase[j] - phase[k];
-                    integralWeight[n++] = weight[j] * weight[k];
-                }
-            }
+            // The mean of the field: of the sum, its offset; of its square, the square of the offset and the variance of the waves
+            mean = squared ? this.offset * this.offset + 0.5 * squares : this.offset;
         }
 
         // The sum of the weights of the waves: the field lies within this of its offset
@@ -184,7 +129,7 @@ namespace pbrt
         // square of the sum where the field is that
         public double Norm()
         {
-            return squared ? integralOffset : norm;
+            return squared ? mean : norm;
         }
 
         // Whether the field is never negative, so that the density is the field and nothing is clamped
@@ -198,7 +143,7 @@ namespace pbrt
         {
             if (squared)
             {
-                return (Math.Abs(offset) + amplitude) * (Math.Abs(offset) + amplitude) / integralOffset;
+                return (Math.Abs(offset) + amplitude) * (Math.Abs(offset) + amplitude) / mean;
             }
             return Math.Max(0.0, offset + amplitude) / norm;
         }
@@ -232,15 +177,21 @@ namespace pbrt
         // runs along the crests of a wave (b = 0).
         public double FieldIntegral(double ox, double oy, double oz, double dx, double dy, double dz, double t0, double t1)
         {
-            double dt = t1 - t0, tMid = 0.5 * (t0 + t1);
-            double sum = integralOffset * dt;
-            for (int k = 0; k < integralCount; ++k)
+            if (squared)
             {
-                double a = ix[k] * ox + iy[k] * oy + iz[k] * oz + integralPhase[k];
-                double b = ix[k] * dx + iy[k] * dy + iz[k] * dz;
+                PrepareRay(ox, oy, oz, dx, dy, dz);
+                PrepareStart(t0);
+                return PreparedIntegral(t0, t1);
+            }
+            double dt = t1 - t0, tMid = 0.5 * (t0 + t1);
+            double sum = offset * dt;
+            for (int k = 0; k < count; ++k)
+            {
+                double a = sx[k] * ox + sy[k] * oy + sz[k] * oz + phase[k];
+                double b = sx[k] * dx + sy[k] * dy + sz[k] * dz;
                 double half = 0.5 * b * dt;
                 double sinc = Math.Abs(half) < 1e-4 ? 1.0 - half * half / 6.0 : Math.Sin(half) / half;
-                sum += integralWeight[k] * dt * Math.Cos(a + b * tMid) * sinc;
+                sum += weight[k] * dt * Math.Cos(a + b * tMid) * sinc;
             }
             return sum;
         }
@@ -252,9 +203,14 @@ namespace pbrt
         public bool InvertFieldIntegral(double ox, double oy, double oz, double dx, double dy, double dz, double tStart, double tEnd, double target,
                                         out double t, out double toEnd)
         {
+            if (squared)
+            {
+                PrepareRay(ox, oy, oz, dx, dy, dz);
+                PrepareStart(tStart);
+            }
             // Bracket the distance, starting from where a field at its mean would reach the target
-            double lo = tStart, hi = Math.Min(tEnd, tStart + target / integralOffset);
-            double valueHi = FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, hi);
+            double lo = tStart, hi = Math.Min(tEnd, tStart + target / mean);
+            double valueHi = squared ? PreparedIntegral(tStart, hi) : FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, hi);
             while (valueHi < target)
             {
                 if (hi == tEnd)
@@ -265,13 +221,13 @@ namespace pbrt
                 }
                 lo = hi;
                 hi = Math.Min(tEnd, tStart + 2.0 * (hi - tStart));
-                valueHi = FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, hi);
+                valueHi = squared ? PreparedIntegral(tStart, hi) : FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, hi);
             }
             toEnd = 0;
             t = 0.5 * (lo + hi);
             for (int iteration = 0; iteration < 64; ++iteration)
             {
-                double value = FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, t) - target;
+                double value = (squared ? PreparedIntegral(tStart, t) : FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, t)) - target;
                 if (Math.Abs(value) <= 1e-9 * target || hi - lo <= 1e-13 * Math.Max(1.0, Math.Abs(hi)))
                 {
                     break;
@@ -284,7 +240,8 @@ namespace pbrt
                 {
                     hi = t;
                 }
-                double slope = Field(ox + t * dx, oy + t * dy, oz + t * dz);
+                // (the field at t: of the square, from the cosines that the integral has just taken there)
+                double slope = squared ? preparedField : Field(ox + t * dx, oy + t * dy, oz + t * dz);
                 double next = slope > 0 ? t - value / slope : lo;
                 t = next > lo && next < hi ? next : 0.5 * (lo + hi);
             }
@@ -319,6 +276,87 @@ namespace pbrt
         }
 
         // CosineNoise Private Methods
+        // The integral of the square of the sum, without writing the square out. With g = c + sum_k w_k cos(x_k) and
+        // x_k = a_k + b_k t along the ray,
+        //
+        //     g^2 = c^2 + sum_k w_k^2 / 2 + sum_k 2 c w_k cos(x_k) + sum_k w_k^2 / 2 cos(2 x_k)
+        //           + sum_(j < k) w_j w_k (cos(x_j + x_k) + cos(x_j - x_k)),
+        //
+        // a sum of cosines of the distance again, and the integral of each is a sine over its rate. The sines of the sums and
+        // of the differences come from the sines and the cosines of the waves themselves, so an end of the integral costs one
+        // sine and one cosine a wave, and a product for every pair of them.
+        //
+        // PrepareRay: the phase a_k and the rate b_k of every wave along the ray o + t d
+        private void PrepareRay(double ox, double oy, double oz, double dx, double dy, double dz)
+        {
+            if (rayPhase == null || rayPhase.Length < count)
+            {
+                rayPhase = new double[count];
+                rayRate = new double[count];
+                startSin = new double[count];
+                startCos = new double[count];
+                endSin = new double[count];
+                endCos = new double[count];
+            }
+            for (int k = 0; k < count; ++k)
+            {
+                rayPhase[k] = sx[k] * ox + sy[k] * oy + sz[k] * oz + phase[k];
+                rayRate[k] = sx[k] * dx + sy[k] * dy + sz[k] * dz;
+            }
+        }
+
+        // The sines and the cosines of the waves at the start of the integrals that follow
+        private void PrepareStart(double t0)
+        {
+            for (int k = 0; k < count; ++k)
+            {
+                (startSin[k], startCos[k]) = Math.SinCos(rayPhase[k] + rayRate[k] * t0);
+            }
+        }
+
+        // The integral of the square from the prepared start t0 to t1 along the prepared ray; leaves the square at t1 in
+        // preparedField
+        private double PreparedIntegral(double t0, double t1)
+        {
+            double[] a = rayPhase, b = rayRate, s0 = startSin, c0 = startCos, s1 = endSin, c1 = endCos;
+            double dt = t1 - t0, tMid = 0.5 * (t0 + t1);
+            double g = offset;
+            for (int k = 0; k < count; ++k)
+            {
+                (s1[k], c1[k]) = Math.SinCos(a[k] + b[k] * t1);
+                g += weight[k] * c1[k];
+            }
+            preparedField = g * g;
+            double sum = mean * dt;
+            for (int k = 0; k < count; ++k)
+            {
+                double w = weight[k];
+                // 2 c w cos(x) and w^2 / 2 cos(2 x)
+                sum += 2.0 * offset * w * CosineIntegral(a[k], b[k], s1[k] - s0[k], dt, tMid);
+                sum += 0.5 * w * w * CosineIntegral(2.0 * a[k], 2.0 * b[k], 2.0 * (s1[k] * c1[k] - s0[k] * c0[k]), dt, tMid);
+                for (int j = 0; j < k; ++j)
+                {
+                    // w_j w_k (cos(x_j + x_k) + cos(x_j - x_k))
+                    double plus = (s1[j] * c1[k] + c1[j] * s1[k]) - (s0[j] * c0[k] + c0[j] * s0[k]);
+                    double minus = (s1[j] * c1[k] - c1[j] * s1[k]) - (s0[j] * c0[k] - c0[j] * s0[k]);
+                    sum += weight[j] * w * (CosineIntegral(a[j] + a[k], b[j] + b[k], plus, dt, tMid) + CosineIntegral(a[j] - a[k], b[j] - b[k], minus, dt, tMid));
+                }
+            }
+            return sum;
+        }
+
+        // The integral of cos(a + b t) over an interval of the length dt about tMid, given the difference of sin(a + b t) at its
+        // ends: that over b, or, where the wave hardly changes along the ray and the difference has no digits left, the cosine
+        // at the middle by the length
+        private static double CosineIntegral(double a, double b, double sineDifference, double dt, double tMid)
+        {
+            if (Math.Abs(b * dt) < 1e-5)
+            {
+                return dt * Math.Cos(a + b * tMid);
+            }
+            return sineDifference / b;
+        }
+
         private static double Fraction(double v)
         {
             return v - Math.Floor(v);
@@ -350,12 +388,14 @@ namespace pbrt
 
         // CosineNoise Private Members
         private readonly bool squared;
-        private readonly int octaves, count, integralCount;
-        // (the waves of the integral: those of the field, or of its square written out)
-        private readonly double[] ix, iy, iz, integralPhase, integralWeight;
-        private readonly double integralOffset;
+        private readonly int octaves, count;
         private readonly double[] sx, sy, sz, phase, weight;
-        private readonly double amplitude, offset, norm;
+        private readonly double amplitude, offset, norm, mean;
+        // (the ray that PrepareRay was given, of the thread)
+        [ThreadStatic]
+        private static double[] rayPhase, rayRate, startSin, startCos, endSin, endCos;
+        [ThreadStatic]
+        private static double preparedField;
     }
 
     // CosineNoiseTexture Definition
