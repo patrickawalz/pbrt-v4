@@ -8,6 +8,8 @@
 //   Ci                          the generated shader returns its closure in the output "out"; a surface shader of a renderer sets Ci
 //   #include "mx_funcs.h"       is written with its full path, so that the source compiles from memory
 //   file names                  are resolved against the document, so that its images are found
+//   images                      are flipped vertically (the option fileTextureVerticalFlip of the generator), as for every host whose
+//                               texture() has the first row of the image at the top
 //   parameters                  the generator names a parameter <node>_<input>; the inputs of the surface shader node of the material
 //                               are known by their own names as well ("base_color"), and Translate returns that table
 //
@@ -94,6 +96,8 @@ namespace OSL
                     generator.setUnitSystem(units);
                     context.getOptions().targetDistanceUnit = "meter";
                     context.getOptions().targetColorSpaceOverride = "lin_rec709";
+                    // MaterialX has the first row of an image at v = 0; texture() of OSL has it at t = 1
+                    context.getOptions().fileTextureVerticalFlip = true;
                     generator.registerTypeDefs(document);
 
                     shaderName = "mtlx_" + MaterialX.Mx.createValidName(element.getName());
