@@ -268,7 +268,7 @@ namespace pbrt
         }
     }
 
-    // The integral that the medium has in closed form (Medium.ClosedFormTransmittance: the cosine noise medium); every other
+    // The integral that the medium has in closed form (Medium.ClosedFormTransmittance: the cosine noise and the kernel noise media); every other
     // medium, and a segment the medium cannot do, falls back to ratio tracking
     public sealed unsafe class ClosedFormEstimator : RatioTrackingEstimator
     {

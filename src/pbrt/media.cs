@@ -217,6 +217,14 @@ namespace pbrt
                     return cosineNoise.SampleT_maj(ray, tMax, u, ref rng, lambda, callback);
                 return SampleT_maj<CosineNoiseMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             }
+            else if (m is KernelNoiseMedium)
+            {
+                // (the distances of a kernel noise are sampled from its closed form, without a majorant)
+                KernelNoiseMedium kernelNoise = (KernelNoiseMedium)m;
+                if (kernelNoise.ClosedFormSampling())
+                    return kernelNoise.SampleT_maj(ray, tMax, u, ref rng, lambda, callback);
+                return SampleT_maj<KernelNoiseMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            }
             else if (m is TextureMedium)
                 return SampleT_maj<TextureMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is NanoVDBMedium)
@@ -2056,6 +2064,10 @@ namespace pbrt
             {
                 m = CosineNoiseMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
+            else if (name == "kernelnoise")
+            {
+                m = KernelNoiseMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
             else if (name == "atmosphere")
             {
                 m = AtmosphereMedium.Create(parameters, loc, alloc);
@@ -2079,8 +2091,8 @@ namespace pbrt
             if (m == null)
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
-            // (the cosine noise medium has its transmittance in closed form, and takes it unless told otherwise)
-            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" ? "closedform" : "ratio");
+            // (the cosine and the kernel noise media have their transmittance in closed form, and take it unless told otherwise)
+            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" || name == "kernelnoise" ? "closedform" : "ratio");
             m.CreateEmissionSampling(parameters, loc);
 
             parameters.ReportUnused();
