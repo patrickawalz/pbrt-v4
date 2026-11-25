@@ -653,21 +653,158 @@ namespace pbrt
 
             // Optionally clamp sensor RGB value
             Float m = std.max(rgb.r, std.max(rgb.g, rgb.b));
+            Float clamp = 1;
             if (m > maxComponentValue)
-                rgb *= maxComponentValue / m;
+            {
+                clamp = maxComponentValue / m;
+                rgb *= clamp;
+            }
 
             pbrt.DCHECK(pbrt.InsideExclusive(pFilm, pixelBounds));
+            // (not in pbrt-v4) The sample goes to the tile of the thread if it has one, and to the film directly if not
+            TileBuffer buffer = tile;
+            if (buffer != null && buffer.film != this)
+                buffer = null;
+            int at = 0;
+            if (buffer != null)
+            {
+                pbrt.DCHECK(pbrt.InsideExclusive(pFilm, buffer.bounds));
+                at = (pFilm.y - buffer.bounds.pMin.y) * (buffer.bounds.pMax.x - buffer.bounds.pMin.x) + (pFilm.x - buffer.bounds.pMin.x);
+            }
+
+            // (not in pbrt-v4) What the sample has of the light layers but the default goes to them, clamped as the whole is, and
+            // the default has the rest
+            SampledSpectrum[] layered = LightLayers.Scratch();
+            if (layered != null)
+            {
+                for (int layer = 1; layer < layered.Length && layer < layerPixels.Length; ++layer)
+                {
+                    if (!layered[layer])
+                        continue;
+                    RGB layerRGB = clamp * sensor.ToSensorRGB(layered[layer], lambda);
+                    rgb -= layerRGB;
+                    if (buffer != null)
+                    {
+                        double* sums = buffer.sums[layer];
+                        for (int c = 0; c < 3; ++c)
+                            sums[3 * at + c] += weight * layerRGB[c];
+                    }
+                    else
+                    {
+                        ref Pixel layerPixel = ref layerPixels[layer][pFilm];
+                        for (int c = 0; c < 3; ++c)
+                            layerPixel.rgbSum[c] += weight * layerRGB[c];
+                    }
+                }
+                LightLayers.Clear();
+            }
+
             // Update pixel values with filtered sample contribution
+            if (buffer != null)
+            {
+                double* sums = buffer.sums[0];
+                for (int c = 0; c < 3; ++c)
+                    sums[3 * at + c] += weight * rgb[c];
+                buffer.weights[at] += weight;
+                return;
+            }
             ref Pixel pixel = ref pixels[pFilm];
             for (int c = 0; c < 3; ++c)
                 pixel.rgbSum[c] += weight * rgb[c];
             pixel.weightSum += weight;
         }
 
+        // (not in pbrt-v4) RGBFilm::TileBuffer Definition: the sums of the samples that a thread takes in a tile, for each layer
+        sealed class TileBuffer
+        {
+            public RGBFilm film;
+            public Bounds2i bounds;
+            public int capacity;
+            public double*[] sums;
+            public double* weights;
+        }
+
+        public override void SetLayerCount(int count)
+        {
+            if (count <= layerPixels.Length)
+                return;
+            Array2D<Pixel>[] grown = new Array2D<Pixel>[count];
+            for (int layer = 0; layer < count; ++layer)
+                grown[layer] = layer < layerPixels.Length ? layerPixels[layer] : new Array2D<Pixel>(pixelBounds);
+            layerPixels = grown;
+        }
+
+        public override void BeginTile(Bounds2i tileBounds)
+        {
+            // A buffer that has been merged, or a new one
+            TileBuffer buffer;
+            int area = tileBounds.Area();
+            int layers = layerPixels.Length;
+            if (!freeTiles.TryDequeue(out buffer) || buffer.capacity < area || buffer.sums.Length != layers)
+            {
+                buffer = new TileBuffer();
+                buffer.film = this;
+                buffer.capacity = Math.Max(area, 32 * 32);
+                buffer.sums = new double*[layers];
+                for (int layer = 0; layer < layers; ++layer)
+                    buffer.sums[layer] = (double*)System.Runtime.InteropServices.NativeMemory.AllocZeroed((nuint)(3 * buffer.capacity), sizeof(double));
+                buffer.weights = (double*)System.Runtime.InteropServices.NativeMemory.AllocZeroed((nuint)buffer.capacity, sizeof(double));
+            }
+            buffer.bounds = tileBounds;
+            tile = buffer;
+        }
+
+        public override void EndTile()
+        {
+            TileBuffer buffer = tile;
+            if (buffer == null || buffer.film != this)
+                return;
+            tile = null;
+            filledTiles.Enqueue(buffer);
+        }
+
+        public override int MergeTiles()
+        {
+            int merged = 0;
+            TileBuffer buffer;
+            while (filledTiles.TryDequeue(out buffer))
+            {
+                int width = buffer.bounds.pMax.x - buffer.bounds.pMin.x, area = buffer.bounds.Area();
+                for (int layer = 0; layer < buffer.sums.Length; ++layer)
+                {
+                    double* sums = buffer.sums[layer];
+                    Array2D<Pixel> into = layerPixels[layer];
+                    for (int i = 0; i < area; ++i)
+                    {
+                        ref Pixel pixel = ref into[buffer.bounds.pMin.x + i % width, buffer.bounds.pMin.y + i / width];
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            pixel.rgbSum[c] += sums[3 * i + c];
+                            sums[3 * i + c] = 0;
+                        }
+                        if (layer == 0)
+                        {
+                            pixel.weightSum += buffer.weights[i];
+                            buffer.weights[i] = 0;
+                        }
+                    }
+                }
+                freeTiles.Enqueue(buffer);
+                ++merged;
+            }
+            return merged;
+        }
+
         public override RGB GetPixelRGB(Point2i p, Float splatScale = 1)
         {
             ref Pixel pixel = ref pixels[p];
             RGB rgb = new RGB((Float)pixel.rgbSum[0], (Float)pixel.rgbSum[1], (Float)pixel.rgbSum[2]);
+            // (not in pbrt-v4) with the light layers but the default, each as it is
+            for (int layer = 1; layer < layerPixels.Length; ++layer)
+            {
+                ref Pixel layerPixel = ref layerPixels[layer][p];
+                rgb += new RGB((Float)layerPixel.rgbSum[0], (Float)layerPixel.rgbSum[1], (Float)layerPixel.rgbSum[2]);
+            }
             // Normalize _rgb_ with weight sum
             Float weightSum = (Float)pixel.weightSum;
             if (weightSum != 0)
@@ -676,11 +813,79 @@ namespace pbrt
             // Add splat value at pixel
             for (int c = 0; c < 3; ++c)
                 rgb[c] += splatScale * (Float)(double)pixel.rgbSplat(c) / filterIntegral;
+            for (int layer = 1; layer < layerPixels.Length; ++layer)
+            {
+                ref Pixel layerPixel = ref layerPixels[layer][p];
+                for (int c = 0; c < 3; ++c)
+                    rgb[c] += splatScale * (Float)(double)layerPixel.rgbSplat(c) / filterIntegral;
+            }
 
             // Convert _rgb_ to output RGB color space
             rgb = outputRGBFromSensorRGB * rgb;
 
             return rgb;
+        }
+
+        // (not in pbrt-v4) The output RGB of one light layer at a pixel
+        private RGB GetLayerRGB(int layer, Point2i p, Float splatScale)
+        {
+            ref Pixel layerPixel = ref layerPixels[layer][p];
+            RGB rgb = new RGB((Float)layerPixel.rgbSum[0], (Float)layerPixel.rgbSum[1], (Float)layerPixel.rgbSum[2]);
+            // (the weights of the samples are the default layer's)
+            Float weightSum = (Float)pixels[p].weightSum;
+            if (weightSum != 0)
+                rgb /= weightSum;
+            for (int c = 0; c < 3; ++c)
+                rgb[c] += splatScale * (Float)(double)layerPixel.rgbSplat(c) / filterIntegral;
+            return outputRGBFromSensorRGB * rgb;
+        }
+
+        // (not in pbrt-v4) The image with the settings of the light layers: R, G and B are the sum of the layers, each times its
+        // factor, and where there is more than one layer each is also there as it is, in the channels name.R, name.G and name.B.
+        // The loop is the calling thread's own: a paused render has an image too.
+        public override Image GetImage(ImageMetadata metadata, Float splatScale, LightLayers layers)
+        {
+            int count = layerPixels.Length;
+            PixelFormat format = writeFP16 ? PixelFormat.Half : PixelFormat.Float;
+            Vector2i diag = pixelBounds.Diagonal();
+            List<string> channels = new List<string> { "R", "G", "B" };
+            RGB[] factors = new RGB[count];
+            for (int layer = 0; layer < count; ++layer)
+            {
+                factors[layer] = layer < layers.Count ? layers.Factor(layer, colorSpace) : new RGB(1, 1, 1);
+                if (count > 1)
+                {
+                    string name = layer < layers.Count ? layers[layer].name : "layer" + layer;
+                    channels.Add(name + ".R");
+                    channels.Add(name + ".G");
+                    channels.Add(name + ".B");
+                }
+            }
+            Image image = new Image(format, new Point2i(diag.x, diag.y), channels.ToArray());
+            Float limit = writeFP16 ? 65504 : Infinity;
+            foreach (Point2i p in pixelBounds)
+            {
+                Point2i pOffset = new Point2i(p.x - pixelBounds.pMin.x, p.y - pixelBounds.pMin.y);
+                RGB sum = new RGB(0, 0, 0);
+                for (int layer = 0; layer < count; ++layer)
+                {
+                    RGB rgb = GetLayerRGB(layer, p, splatScale);
+                    sum += new RGB(factors[layer].r * rgb.r, factors[layer].g * rgb.g, factors[layer].b * rgb.b);
+                    if (count > 1)
+                    {
+                        for (int c = 0; c < 3; ++c)
+                            image.SetChannel(pOffset, 3 + 3 * layer + c, std.min(rgb[c], limit));
+                    }
+                }
+                for (int c = 0; c < 3; ++c)
+                    image.SetChannel(pOffset, c, std.min(sum[c], limit));
+            }
+
+            metadata.pixelBounds = pixelBounds;
+            metadata.fullResolution = fullResolution;
+            metadata.colorSpace = colorSpace;
+
+            return image;
         }
 
         public override RGB ToOutputRGB(SampledSpectrum L, SampledWavelengths lambda)
@@ -691,7 +896,8 @@ namespace pbrt
 
         public override void ResetPixel(Point2i p)
         {
-            pixels[p] = default;
+            for (int layer = 0; layer < layerPixels.Length; ++layer)
+                layerPixels[layer][p] = default;
         }
 
         // RGBFilm Method Definitions
@@ -700,6 +906,7 @@ namespace pbrt
             : base(p)
         {
             pixels = new Array2D<Pixel>(p.pixelBounds, alloc);
+            layerPixels = new Array2D<Pixel>[] { pixels };
             this.colorSpace = colorSpace;
             this.maxComponentValue = maxComponentValue;
             this.writeFP16 = writeFP16;
@@ -713,6 +920,13 @@ namespace pbrt
 
         public override void AddSplat(Point2f p, SampledSpectrum L, SampledWavelengths lambda)
         {
+            AddSplat(p, L, lambda, 0);
+        }
+
+        public override void AddSplat(Point2f p, SampledSpectrum L, SampledWavelengths lambda, int layer)
+        {
+            // (not in pbrt-v4: the splats of a light layer go to the sums of that layer)
+            Array2D<Pixel> layerSplats = layer < layerPixels.Length ? layerPixels[layer] : pixels;
             pbrt.CHECK(!L.HasNaNs());
             // Convert sample radiance to _PixelSensor_ RGB
             RGB rgb = sensor.ToSensorRGB(L, lambda);
@@ -735,7 +949,7 @@ namespace pbrt
                 Float wt = filter.Evaluate((Point2f)(p - (Point2f)pi - new Vector2f(0.5f, 0.5f)));
                 if (wt != 0)
                 {
-                    ref Pixel pixel = ref pixels[pi];
+                    ref Pixel pixel = ref layerSplats[pi];
                     for (int i = 0; i < 3; ++i)
                         pixel.rgbSplat(i).Add(wt * rgb[i]);
                 }
@@ -744,7 +958,8 @@ namespace pbrt
 
         public override void WriteImage(ImageMetadata metadata, Float splatScale = 1)
         {
-            Image image = GetImage(metadata, splatScale);
+            // (not in pbrt-v4: a film of more than one light layer is written with the settings of the layers, and the layers)
+            Image image = layerPixels.Length > 1 ? GetImage(metadata, splatScale, LightLayers.Scene) : GetImage(metadata, splatScale);
             pbrt.LOG_VERBOSE("Writing image %s with bounds %s", filename, pixelBounds);
             image.Write(filename, metadata);
         }
@@ -812,6 +1027,12 @@ namespace pbrt
         Float filterIntegral;
         SquareMatrix3 outputRGBFromSensorRGB;
         Array2D<Pixel> pixels;
+        // (not in pbrt-v4) The pixels of each light layer; those of the default layer, number 0, are _pixels_
+        Array2D<Pixel>[] layerPixels;
+        // (the tile that the calling thread is taking samples in, the tiles handed over and the tiles to use again)
+        [ThreadStatic] static TileBuffer tile;
+        System.Collections.Concurrent.ConcurrentQueue<TileBuffer> filledTiles = new System.Collections.Concurrent.ConcurrentQueue<TileBuffer>();
+        System.Collections.Concurrent.ConcurrentQueue<TileBuffer> freeTiles = new System.Collections.Concurrent.ConcurrentQueue<TileBuffer>();
     }
 
     // GBufferFilm Definition
@@ -1474,6 +1695,56 @@ namespace pbrt
 
     public abstract unsafe partial class Film
     {
+        // (not in pbrt-v4) Film Interface for progressive rendering and light layers. A film that does nothing about them is a
+        // film of one layer that is written directly, as all films were.
+        //
+        // GetImage with the layers: the image with every light layer times what its settings make of it. This is the image for
+        // a viewer and for the file: it may be asked for at any time by the thread that merges the tiles (RenderSession).
+        public virtual Image GetImage(ImageMetadata metadata, Float splatScale, LightLayers layers)
+        {
+            return GetImage(metadata, splatScale);
+        }
+
+        // A splat of light of one layer
+        public virtual void AddSplat(Point2f p, SampledSpectrum v, SampledWavelengths lambda, int layer)
+        {
+            AddSplat(p, v, lambda);
+        }
+
+        // The number of light layers of the scene, before the render
+        public virtual void SetLayerCount(int count)
+        {
+        }
+
+        // The calling thread starts on the samples of a tile, and is done with them. Between the two its AddSample() calls go to
+        // a buffer of the thread, which EndTile() hands over; MergeTiles(), called by one thread only, adds the buffers that have
+        // been handed over to the film and returns how many there were.
+        public virtual void BeginTile(Bounds2i tileBounds)
+        {
+        }
+
+        public virtual void EndTile()
+        {
+        }
+
+        public virtual int MergeTiles()
+        {
+            return 0;
+        }
+
+        // The number of samples taken so far, for the scale of the splats of an image made while the render runs
+        public void CountSamples(long count)
+        {
+            Interlocked.Add(ref samplesCounted, count);
+        }
+
+        public long SamplesCounted()
+        {
+            return Interlocked.Read(ref samplesCounted);
+        }
+
+        private long samplesCounted;
+
         public static Film Create(string name, ParameterDictionary parameters, Float exposureTime,
                                   CameraTransform cameraTransform, Filter filter, FileLoc loc, Allocator alloc)
         {

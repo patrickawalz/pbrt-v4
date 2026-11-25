@@ -16,6 +16,9 @@ namespace pbrt
     // DiffuseAreaLight, UniformInfiniteLight, ImageInfiniteLight, PortalImageInfiniteLight)
     public abstract unsafe partial class Light
     {
+        // (not in pbrt-v4) The light layer of the light: 0 is the layer "default" (lightlayers.cs)
+        public int layer;
+
         // Light Interface
         public abstract SampledSpectrum Phi(SampledWavelengths lambda);
         public abstract LightType Type();

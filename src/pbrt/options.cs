@@ -58,6 +58,10 @@ namespace pbrt
         public string logFile = "";
         public bool logUtilization = false;
         public bool writePartialImages = false;
+        // (not in pbrt-v4) Progressive rendering: stop after this many samples a pixel, or this many seconds, at the end of a
+        // pass (0: no such limit; with neither, the sample count of the sampler)
+        public int haltSpp = 0;
+        public double haltTime = 0;
         public bool recordPixelStatistics = false;
         public bool printStatistics = false;
         public pstd.optional<int> pixelSamples;

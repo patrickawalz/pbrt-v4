@@ -383,8 +383,10 @@ namespace pbrt
 
             Bounds2i pixelBounds = camera.GetFilm().PixelBounds();
             int spp = samplerPrototype.SamplesPerPixel();
-            ProgressReporter progress = new ProgressReporter((int64_t)spp * pixelBounds.Area(), "Rendering",
-                                                             Options.quiet);
+            // (not in pbrt-v4: the progress is that towards the sample count the render stops at, if it stops at one)
+            int progressSpp = Options.haltSpp > 0 ? Options.haltSpp : spp;
+            ProgressReporter progress = new ProgressReporter((int64_t)progressSpp * pixelBounds.Area(), "Rendering",
+                                                             Options.quiet || (Options.haltSpp == 0 && Options.haltTime > 0));
 
             int waveStart = 0, waveEnd = 1, nextWaveSize = 1;
 
@@ -428,30 +430,33 @@ namespace pbrt
             if (Options.displayServer.Length != 0)
                 ErrorExit("--display-server is not supported by Magi.");
 
-            // Render image in waves
-            while (waveStart < spp)
+            // (not in pbrt-v4) Render image in passes of one sample a pixel, until the session says there are to be no more.
+            // The sample of a pixel in a pass is the sample of that index, so a render that ends at _spp_ is the one of pbrt-v4's
+            // waves. A thread takes the samples of a tile into a buffer of the film that it hands over at the end of the tile.
+            Film film = camera.GetFilm();
+            RenderSession session = RenderSession.Begin(film, spp);
+            int pass = 0;
+            while (session.NextPass(pass))
             {
-                // Render current wave's image tiles in parallel
-                int waveStartCopy = waveStart, waveEndCopy = waveEnd;
+                // Render current pass's image tiles in parallel
+                int passCopy = pass;
                 ParallelFor2D(pixelBounds, (Bounds2i tileBounds) =>
                 {
                     // Render image tile given by _tileBounds_
                     ScratchBuffer scratchBuffer = scratchBuffers.Get();
                     Sampler sampler = samplers.Get();
+                    film.BeginTile(tileBounds);
                     try
                     {
                         foreach (Point2i pPixel in tileBounds)
                         {
                             StatsReportPixelStart(pPixel);
                             threadPixel = pPixel;
-                            // Render samples in pixel _pPixel_
-                            for (int sampleIndex = waveStartCopy; sampleIndex < waveEndCopy; ++sampleIndex)
-                            {
-                                threadSampleIndex = sampleIndex;
-                                sampler.StartPixelSample(pPixel, sampleIndex);
-                                EvaluatePixelSample(pPixel, sampleIndex, sampler, scratchBuffer);
-                                scratchBuffer.Reset();
-                            }
+                            // Render sample in pixel _pPixel_
+                            threadSampleIndex = passCopy;
+                            sampler.StartPixelSample(pPixel, passCopy);
+                            EvaluatePixelSample(pPixel, passCopy, sampler, scratchBuffer);
+                            scratchBuffer.Reset();
 
                             StatsReportPixelEnd(pPixel);
                         }
@@ -464,41 +469,58 @@ namespace pbrt
                                                              threadPixel.x, threadPixel.y, threadSampleIndex));
                         throw;
                     }
-                    progress.Update((waveEndCopy - waveStartCopy) * tileBounds.Area());
+                    film.EndTile();
+                    film.CountSamples(tileBounds.Area());
+                    progress.Update(tileBounds.Area());
                 });
+                ++pass;
+                session.PassDone(pass);
 
-                // Update start and end wave
-                waveStart = waveEnd;
-                waveEnd = std.min(spp, waveEnd + nextWaveSize);
-                if (referenceImage == null)
-                    nextWaveSize = std.min(2 * nextWaveSize, 64);
-                if (waveStart == spp)
-                    progress.Done();
-
-                // Optionally write current image to disk
-                if (waveStart == spp || Options.writePartialImages || referenceImage != null)
+                // Optionally write current image to disk, at the passes that ended pbrt-v4's waves
+                if (pass == waveEnd)
                 {
-                    LOG_VERBOSE("Writing image with spp = %d", waveStart);
-                    ImageMetadata metadata = new ImageMetadata();
-                    metadata.renderTimeSeconds = (float)progress.ElapsedSeconds();
-                    metadata.samplesPerPixel = waveStart;
-                    if (referenceImage != null)
+                    waveStart = waveEnd;
+                    waveEnd = waveEnd + nextWaveSize;
+                    if (referenceImage == null)
+                        nextWaveSize = std.min(2 * nextWaveSize, 64);
+                    if (Options.writePartialImages || referenceImage != null)
                     {
-                        ImageMetadata filmMetadata = new ImageMetadata();
-                        Image filmImage =
-                            camera.GetFilm().GetImage(filmMetadata, 1.0f / waveStart);
-                        ImageChannelValues mse =
-                            filmImage.MSE(filmImage.AllChannelsDesc(), referenceImage);
-                        mseOutFile.Write(StringPrintf("%d, %.9g\n", waveStart, mse.Average()));
-                        metadata.MSE = (float)mse.Average();
-                        mseOutFile.Flush();
-                    }
-                    if (waveStart == spp || Options.writePartialImages)
-                    {
-                        camera.InitMetadata(metadata);
-                        camera.GetFilm().WriteImage(metadata, 1.0f / waveStart);
+                        session.Flush();
+                        LOG_VERBOSE("Writing image with spp = %d", waveStart);
+                        ImageMetadata metadata = new ImageMetadata();
+                        metadata.renderTimeSeconds = (float)progress.ElapsedSeconds();
+                        metadata.samplesPerPixel = waveStart;
+                        if (referenceImage != null)
+                        {
+                            ImageMetadata filmMetadata = new ImageMetadata();
+                            Image filmImage =
+                                camera.GetFilm().GetImage(filmMetadata, 1.0f / waveStart);
+                            ImageChannelValues mse =
+                                filmImage.MSE(filmImage.AllChannelsDesc(), referenceImage);
+                            mseOutFile.Write(StringPrintf("%d, %.9g\n", waveStart, mse.Average()));
+                            metadata.MSE = (float)mse.Average();
+                            mseOutFile.Flush();
+                        }
+                        if (Options.writePartialImages)
+                        {
+                            camera.InitMetadata(metadata);
+                            camera.GetFilm().WriteImage(metadata, 1.0f / waveStart);
+                        }
                     }
                 }
+            }
+            progress.Done();
+            session.End();
+
+            // Write the image
+            if (pass > 0)
+            {
+                LOG_VERBOSE("Writing image with spp = %d", pass);
+                ImageMetadata metadata = new ImageMetadata();
+                metadata.renderTimeSeconds = (float)progress.ElapsedSeconds();
+                metadata.samplesPerPixel = pass;
+                camera.InitMetadata(metadata);
+                camera.GetFilm().WriteImage(metadata, 1.0f / pass);
             }
 
             if (mseOutFile != null)
@@ -577,6 +599,8 @@ namespace pbrt
                 bool initializeVisibleSurface = camera.GetFilm().UsesVisibleSurface();
                 L = cameraRay.value().weight * Li(cameraRay.value().ray, ref lambda, sampler, scratchBuffer,
                                                   initializeVisibleSurface ? visibleSurface : null);
+                // (not in pbrt-v4) and what the sample has of the light layers
+                LightLayers.Scale(cameraRay.value().weight);
 
                 // Issue warning if unexpected radiance value is returned
                 if (L.HasNaNs())
@@ -585,6 +609,7 @@ namespace pbrt
                               "%d), sample %d. Setting to black.",
                               pPixel.x, pPixel.y, sampleIndex);
                     L = new SampledSpectrum(0.0f);
+                    LightLayers.Clear();
                 }
                 else if (IsInf(L.y(lambda)))
                 {
@@ -592,6 +617,7 @@ namespace pbrt
                               "sample %d. Setting to black.",
                               pPixel.x, pPixel.y, sampleIndex);
                     L = new SampledSpectrum(0.0f);
+                    LightLayers.Clear();
                 }
             }
             else
@@ -601,6 +627,8 @@ namespace pbrt
             // Add camera ray's contribution to image
             if (diffraction)
             {
+                // (the splats of the point spread function are not split by light layer)
+                LightLayers.Clear();
                 AddCameraSplat(camera, cameraSample.pFilm, L, lambda, sampler);
                 return;
             }
@@ -1062,7 +1090,11 @@ namespace pbrt
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
                         if (depth == 0 || specularBounce)
-                            L += beta * Le0;
+                            {
+                                SampledSpectrum layered = beta * Le0;
+                                L += layered;
+                                LightLayers.Add(light, layered);
+                            }
                         else
                         {
                             // Compute MIS weight for infinite light
@@ -1070,7 +1102,11 @@ namespace pbrt
                                         light.PDF_Li(prevIntrCtx, ray.d, true);
                             Float w_b = PowerHeuristic(1, p_b, 1, p_l);
 
-                            L += beta * w_b * Le0;
+                            {
+                                SampledSpectrum layered = beta * w_b * Le0;
+                                L += layered;
+                                LightLayers.Add(light, layered);
+                            }
                         }
                     }
 
@@ -1083,7 +1119,11 @@ namespace pbrt
                 {
                     // (not in pbrt-v4) emission of an OSL shader comes with no area light to sample: no MIS
                     if (depth == 0 || specularBounce || si.value().intr.areaLight == null)
-                        L += beta * Le;
+                        {
+                            SampledSpectrum layered = beta * Le;
+                            L += layered;
+                            if (si.value().intr.areaLight != null) LightLayers.Add(si.value().intr.areaLight, layered);
+                        }
                     else
                     {
                         // Compute MIS weight for area light
@@ -1092,7 +1132,11 @@ namespace pbrt
                                     areaLight.PDF_Li(prevIntrCtx, ray.d, true);
                         Float w_l = PowerHeuristic(1, p_b, 1, p_l);
 
-                        L += beta * w_l * Le;
+                        {
+                            SampledSpectrum layered = beta * w_l * Le;
+                            L += layered;
+                            LightLayers.Add(areaLight, layered);
+                        }
                     }
                 }
 
@@ -1151,7 +1195,11 @@ namespace pbrt
                     SampledSpectrum Ld = SampleLd(isect, bsdf, ref lambda, sampler);
                     if (!Ld)
                         ++zeroRadiancePaths;
-                    L += beta * Ld;
+                    {
+                        SampledSpectrum layered = beta * Ld;
+                        L += layered;
+                        LightLayers.AddSampled(layered);
+                    }
                 }
 
                 // Sample BSDF to get new path direction
@@ -1220,6 +1268,7 @@ namespace pbrt
 
             // Sample a point on the light source for direct lighting
             Light light = sampledLight.value().light;
+            LightLayers.Sampled(light);
             DCHECK(light != null && sampledLight.value().p > 0);
             pstd.optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, true);
             if (!ls || !ls.value().L || ls.value().pdf == 0)
@@ -5796,7 +5845,11 @@ namespace pbrt
             {
                 if (!polarised)
                 {
-                    L += vp.SampleSegmentPoint(ctx, medium, seg, uniform, ctx.st.beta, out MediumInteraction _, out Vector3f _, out SampledEmitter _);
+                    {
+                        SampledSpectrum layered = vp.SampleSegmentPoint(ctx, medium, seg, uniform, ctx.st.beta, out MediumInteraction _, out Vector3f _, out SampledEmitter _);
+                        L += layered;
+                        LightLayers.AddSampled(layered);
+                    }
                     return;
                 }
                 SampledSpectrum Ls = vp.SampleSegmentPoint(ctx, medium, seg, uniform, new SampledSpectrum(1.0f), out MediumInteraction at,
@@ -5860,7 +5913,11 @@ namespace pbrt
                     {
                         if (!polarised)
                         {
-                            L += Ls;
+                            {
+                                SampledSpectrum layered = Ls;
+                                L += layered;
+                                LightLayers.AddSampled(layered);
+                            }
                         }
                         else
                         {
@@ -5929,7 +5986,11 @@ namespace pbrt
                                 r_sum = r_e + ctx.st.r_l * (T_maj_ / T_maj_[0]) * densityRatio;
                             }
                         }
-                        L += betap * mp.sigma_a * mp.Le / r_sum.Average();
+                        {
+                            SampledSpectrum layered = betap * mp.sigma_a * mp.Le / r_sum.Average();
+                            L += layered;
+                            if (rayMedium != null) LightLayers.Add(rayMedium.layer, layered);
+                        }
                         if (polarised)
                             pL += ctx.st.pa * new PLight(T_maj_ / pdf * mp.sigma_a * mp.Le / r_sum.Average());
                     }
@@ -5985,8 +6046,12 @@ namespace pbrt
                 }
                 else
                 {
-                    L += vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
+                    {
+                        SampledSpectrum layered = vp.SampleLd(intr, null, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
                                      out Vector3f _, out SampledEmitter _, seg);
+                        L += layered;
+                        LightLayers.AddSampled(layered);
+                    }
                 }
                 phaseBsdf = intr.GetBSDF();
                 return true;
@@ -6029,7 +6094,11 @@ namespace pbrt
                     {
                         if (depth == 0 || specularBounce)
                         {
-                            L += ctx.st.beta * Le / ctx.st.r_u.Average();
+                            {
+                                SampledSpectrum layered = ctx.st.beta * Le / ctx.st.r_u.Average();
+                                L += layered;
+                                LightLayers.Add(light, layered);
+                            }
                             if (polarised)
                                 pL += ctx.st.pa * new PLight(Le / ctx.st.r_u.Average());
                         }
@@ -6062,7 +6131,11 @@ namespace pbrt
                                 }
                             }
                             ctx.st.r_l *= p_l;
-                            L += ctx.st.beta * Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average();
+                            {
+                                SampledSpectrum layered = ctx.st.beta * Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average();
+                                L += layered;
+                                LightLayers.Add(light, layered);
+                            }
                             if (polarised)
                                 pL += ctx.st.pa * new PLight(Le / (ctx.st.r_u + ctx.st.r_l + r_uniform).Average());
                         }
@@ -6079,7 +6152,11 @@ namespace pbrt
                     // Add contribution of emission from intersected surface
                     if (depth == 0 || specularBounce || isect.areaLight == null)
                     {
-                        L += ctx.st.beta * LeSurf / ctx.st.r_u.Average();
+                        {
+                            SampledSpectrum layered = ctx.st.beta * LeSurf / ctx.st.r_u.Average();
+                            L += layered;
+                            if (isect.areaLight != null) LightLayers.Add(isect.areaLight, layered);
+                        }
                         if (polarised)
                             pL += ctx.st.pa * PolarisedEmission.AtHit(isect, -ctx.ray.d, ctx.lambda, LeSurf / ctx.st.r_u.Average());
                     }
@@ -6122,7 +6199,11 @@ namespace pbrt
                         }
                         scatterValid = false;
                         ctx.st.r_l *= p_l;
-                        L += ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average();
+                        {
+                            SampledSpectrum layered = ctx.st.beta * LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average();
+                            L += layered;
+                            LightLayers.Add(areaLight, layered);
+                        }
                         if (polarised)
                             pL += ctx.st.pa * PolarisedEmission.AtHit(isect, -ctx.ray.d, ctx.lambda,
                                                                       LeSurf / (ctx.st.r_u + ctx.st.r_l + r_equiangular).Average());
@@ -6186,8 +6267,12 @@ namespace pbrt
                         }
                     }
                     else
-                        L += vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack,
+                        {
+                            SampledSpectrum layered = vp.SampleLd(isect, bsdf, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack,
                                          depth < maxDepth, out Vector3f _, out SampledEmitter _);
+                            L += layered;
+                            LightLayers.AddSampled(layered);
+                        }
                     DCHECK(IsInf(L.y(ctx.lambda)) == false);
                 }
                 scatterValid = false;
@@ -6285,8 +6370,12 @@ namespace pbrt
                         pL += ctx.st.pa * PolarisedEmission.AtPoint(emitterSw.light, emitterSw.point, -wiSw, ctx.lambda, LdSw);
                     }
                     else
-                        L += vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
+                        {
+                            SampledSpectrum layered = vp.SampleLd(pi, Sw, ctx.lambda, ctx.sampler, ctx.st.beta, ctx.st.r_u, ctx.stack, depth < maxDepth,
                                          out Vector3f _, out SampledEmitter _);
+                            L += layered;
+                            LightLayers.AddSampled(layered);
+                        }
 
                     // Sample ray for indirect subsurface scattering
                     Float uSw = ctx.sampler.Get1D();
@@ -6463,6 +6552,7 @@ namespace pbrt
                     return zero;
                 }
                 light = sampledLight.value().light;
+                LightLayers.Sampled(light);
                 pmfChoice = sampledLight.value().p;
                 // (Fong 4.2.3) A point on an area light is chosen from the start of the segment
                 areaLight = light as DiffuseAreaLight;
@@ -6563,6 +6653,7 @@ namespace pbrt
                 if (!sampledLight || sampledLight.value().light is VolumeEmissionLight)
                     return zero;
                 light = sampledLight.value().light;
+                LightLayers.Sampled(light);
                 areaLight = light as DiffuseAreaLight;
                 pstd.optional<LightLiSample> ls = light.SampleLi(lightContext, uLight, lambda, true);
                 if (!ls || !ls.value().L || ls.value().pdf == 0)
@@ -6665,6 +6756,7 @@ namespace pbrt
                 return zero;
             }
             Light light = sampledLight.value().light;
+            LightLayers.Sampled(light);
             Float pmfSegment = sampledLight.value().p;
             pstd.optional<LightLiSample> lsOrigin = light.SampleLi(segment.context, uLight, lambda, true);
             if (!lsOrigin || !lsOrigin.value().L || lsOrigin.value().pdf == 0)
@@ -6801,6 +6893,7 @@ namespace pbrt
             if (!sampledLight)
                 return new SampledSpectrum(0.0f);
             Light light = sampledLight.value().light;
+            LightLayers.Sampled(light);
             DCHECK(light != null && sampledLight.value().p != 0);
 
             // Sample a point on the light source

@@ -30,6 +30,8 @@ namespace pbrt
             : base(LightType.Area, new Transform(), new MediumInterface(medium))
         {
             this.medium = medium;
+            // (the light of the medium is in the medium's light layer)
+            layer = medium.layer;
             moving = medium as TextureMedium;
             this.res = std.max(res, 1);
         }

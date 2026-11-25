@@ -176,6 +176,8 @@ Reformatting options:
                      ParseArg(args, ref iter, end, "quiet", ref options.quiet, onError) ||
                      ParseArg(args, ref iter, end, "render-coord-sys", ref renderCoordSys, onError) ||
                      ParseArg(args, ref iter, end, "seed", ref options.seed, onError) ||
+                     ParseArg(args, ref iter, end, "halt-spp", ref options.haltSpp, onError) ||
+                     ParseArg(args, ref iter, end, "halt-time", ref options.haltTime, onError) ||
                      ParseArg(args, ref iter, end, "spp", ref options.pixelSamples, onError) ||
                      ParseArg(args, ref iter, end, "stats", ref options.printStatistics, onError) ||
                      ParseArg(args, ref iter, end, "toply", ref toPly, onError) ||

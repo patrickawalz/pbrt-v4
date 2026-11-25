@@ -421,7 +421,11 @@ namespace pbrt
                                      accel, lights, filmColorSpace, integrator.loc);
         }
         // BasicScene Public Methods
-        public BasicScene() { }
+        public BasicScene()
+        {
+            // (not in pbrt-v4) A scene starts with the one light layer
+            LightLayers.Scene.Reset();
+        }
 
         public void AddNamedMaterial(string name, SceneEntity material)
         {
@@ -2093,6 +2097,18 @@ namespace pbrt
             {
                 int.TryParse(value, out int sd);
                 Options.seed = sd;
+            }
+            else if (nName == "haltspp")
+            {
+                // (not in pbrt-v4)
+                int.TryParse(value, out int halt);
+                Options.haltSpp = halt;
+            }
+            else if (nName == "halttime")
+            {
+                // (not in pbrt-v4)
+                double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double halt);
+                Options.haltTime = halt;
             }
             else if (nName == "forcediffuse")
             {

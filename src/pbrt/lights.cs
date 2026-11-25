@@ -2694,6 +2694,8 @@ namespace pbrt
             if (light == null)
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create light.", name));
 
+            // (not in pbrt-v4) The light layer of the light
+            light.layer = LightLayers.Scene.Index(parameters.GetOneString("layer", "default"));
             parameters.ReportUnused();
             return light;
         }
@@ -2712,6 +2714,8 @@ namespace pbrt
             if (area == null)
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: unable to create area light.", name));
 
+            // (not in pbrt-v4) The light layer of the light
+            area.layer = LightLayers.Scene.Index(parameters.GetOneString("layer", "default"));
             parameters.ReportUnused();
             return area;
         }

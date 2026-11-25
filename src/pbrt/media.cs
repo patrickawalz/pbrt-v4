@@ -1831,6 +1831,8 @@ namespace pbrt
     {
         // (not in pbrt-v4) How collisions are sampled and shadow-ray transmittance is estimated in this medium
         public VolumeIntegrator volumeIntegrator = VolumeIntegrator.Default;
+        // (not in pbrt-v4) The light layer of what the medium emits: 0 is the layer "default" (lightlayers.cs)
+        public int layer;
 
         // (not in pbrt-v4) An extinction that holds everywhere in the medium (a lower bound), for residual ratio tracking
         // (not in pbrt-v4) For decomposition tracking (Kutz et al. 2017): whether the medium is one set of coefficients and one
@@ -2092,7 +2094,9 @@ namespace pbrt
                 ErrorExit(loc, $"{name}: unable to create medium.");
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
             // (the cosine and the kernel noise media have their transmittance in closed form, and take it unless told otherwise)
-            m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" || name == "kernelnoise" ? "closedform" : "ratio");
+// (not in pbrt-v4) The light layer of what the medium emits
+            m.layer = LightLayers.Scene.Index(parameters.GetOneString("layer", "default"));
+                        m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" || name == "kernelnoise" ? "closedform" : "ratio");
             m.CreateEmissionSampling(parameters, loc);
 
             parameters.ReportUnused();
