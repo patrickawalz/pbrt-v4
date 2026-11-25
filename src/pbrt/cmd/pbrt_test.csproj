@@ -17,7 +17,7 @@
   <ItemGroup>
     <Compile Include="../../ext/gtest/gtest.cs" />
     <Compile Include="pbrt_test.cs" />
-    <Compile Include="../**/*_test.cs" />
+    <Compile Include="../**/*_test.cs" Exclude="../cmd/**" />
     <Compile Include="../../osl/**/*_test.cs" />
     <Compile Remove="../../osl/osl_test/**" />  <!-- the host of the OSL tests has its own Main -->
     <ProjectReference Include="../pbrt_lib.csproj" />
