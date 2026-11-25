@@ -38,6 +38,11 @@
 //                         ("string sampling" "closedform", which is what such a medium does unless told "majorant"). A / s is
 //                         sqrt(2 "waves") for one octave and grows with the octaves; fewer waves leave more contrast at the
 //                         smallest offset that keeps the field positive.
+//     "bool squared"      the density is the square of the sum, (offset + waves / s)^2 over its mean. A square of a sum of cosines
+//                         is a sum of cosines (of the sums and the differences of the waves), so it has the same closed form,
+//                         and it is never negative at any offset: nothing is clamped and nothing is estimated. It costs a
+//                         term for every pair of waves, so it takes fewer of them ("waves" 6 and "octaves" 2 unless given,
+//                         and "offset" 0, where the density is zero on the surfaces where the sum changes sign).
 //     below that          the field goes below zero and the density has empty regions (the look of the paper's clouds). The
 //                         paper clamps the samples and the integrals there and accepts the artefacts, which is biased. Here the closed form is kept as a
 //                         control: the density is the field plus what the clamp adds, r = max(0, -field), and
@@ -58,7 +63,7 @@ namespace pbrt
     public sealed unsafe class CosineNoise
     {
         // CosineNoise Public Methods
-        public CosineNoise(Float frequency, int octaves, int waves, Float lacunarity, Float gain, Float offset)
+        public CosineNoise(Float frequency, int octaves, int waves, Float lacunarity, Float gain, Float offset, bool squared)
         {
             this.octaves = octaves;
             count = waves * octaves;
@@ -109,6 +114,64 @@ namespace pbrt
             }
             norm = Math.Sqrt(0.5 * squares);
             this.offset = offset * norm;
+            this.squared = squared;
+            if (!squared)
+            {
+                // The field is the sum itself
+                integralCount = count;
+                integralOffset = this.offset;
+                ix = sx;
+                iy = sy;
+                iz = sz;
+                integralPhase = phase;
+                integralWeight = weight;
+                return;
+            }
+
+            // The square of the sum, as a sum of cosines again. With g = c + sum_k w_k cos(a_k),
+            //
+            //     g^2 = c^2 + sum_k w_k^2 / 2 + sum_k 2 c w_k cos(a_k) + sum_k w_k^2 / 2 cos(2 a_k)
+            //           + sum_(j < k) w_j w_k (cos(a_j + a_k) + cos(a_j - a_k)),
+            //
+            // and the waves of the sums and of the differences are plane waves like the others.
+            double c = this.offset;
+            integralOffset = c * c + 0.5 * squares;
+            integralCount = (c != 0 ? count : 0) + count + count * (count - 1);
+            ix = new double[integralCount];
+            iy = new double[integralCount];
+            iz = new double[integralCount];
+            integralPhase = new double[integralCount];
+            integralWeight = new double[integralCount];
+            int n = 0;
+            for (int k = 0; k < count; ++k)
+            {
+                if (c != 0)
+                {
+                    ix[n] = sx[k];
+                    iy[n] = sy[k];
+                    iz[n] = sz[k];
+                    integralPhase[n] = phase[k];
+                    integralWeight[n++] = 2.0 * c * weight[k];
+                }
+                ix[n] = 2.0 * sx[k];
+                iy[n] = 2.0 * sy[k];
+                iz[n] = 2.0 * sz[k];
+                integralPhase[n] = 2.0 * phase[k];
+                integralWeight[n++] = 0.5 * weight[k] * weight[k];
+                for (int j = 0; j < k; ++j)
+                {
+                    ix[n] = sx[j] + sx[k];
+                    iy[n] = sy[j] + sy[k];
+                    iz[n] = sz[j] + sz[k];
+                    integralPhase[n] = phase[j] + phase[k];
+                    integralWeight[n++] = weight[j] * weight[k];
+                    ix[n] = sx[j] - sx[k];
+                    iy[n] = sy[j] - sy[k];
+                    iz[n] = sz[j] - sz[k];
+                    integralPhase[n] = phase[j] - phase[k];
+                    integralWeight[n++] = weight[j] * weight[k];
+                }
+            }
         }
 
         // The sum of the weights of the waves: the field lies within this of its offset
@@ -117,28 +180,33 @@ namespace pbrt
             return amplitude;
         }
 
-        // What the field is divided by to give the density: the standard deviation of the sum of the waves
+        // What the field is divided by to give the density: the standard deviation of the sum of the waves, or the mean of the
+        // square of the sum where the field is that
         public double Norm()
         {
-            return norm;
+            return squared ? integralOffset : norm;
         }
 
         // Whether the field is never negative, so that the density is the field and nothing is clamped
         public bool NeverNegative()
         {
-            return offset >= amplitude;
+            return squared || offset >= amplitude;
         }
 
         // A bound of the density: the offset and every wave at its crest
         public double MaxDensity()
         {
+            if (squared)
+            {
+                return (Math.Abs(offset) + amplitude) * (Math.Abs(offset) + amplitude) / integralOffset;
+            }
             return Math.Max(0.0, offset + amplitude) / norm;
         }
 
         // The largest value of what the clamp adds to the field, max(0, -field), in units of the density
         public double ResidualBound()
         {
-            return Math.Max(0.0, amplitude - offset) / norm;
+            return squared ? 0.0 : Math.Max(0.0, amplitude - offset) / norm;
         }
 
         // offset + sum_k w_k cos(S_k . p + phase_k)
@@ -149,13 +217,13 @@ namespace pbrt
             {
                 sum += weight[k] * Math.Cos(sx[k] * px + sy[k] * py + sz[k] * pz + phase[k]);
             }
-            return sum;
+            return squared ? sum * sum : sum;
         }
 
         // The density: the field in standard deviations of the sum of the waves, clamped at zero
         public Float Density(Point3f p)
         {
-            return (Float)(Math.Max(0.0, Field(p.x, p.y, p.z)) / norm);
+            return (Float)(Math.Max(0.0, Field(p.x, p.y, p.z)) / Norm());
         }
 
         // The integral of the field over t in [t0, t1] along o + t d, in closed form. A wave is cos(a + b t) there with
@@ -165,14 +233,14 @@ namespace pbrt
         public double FieldIntegral(double ox, double oy, double oz, double dx, double dy, double dz, double t0, double t1)
         {
             double dt = t1 - t0, tMid = 0.5 * (t0 + t1);
-            double sum = offset * dt;
-            for (int k = 0; k < count; ++k)
+            double sum = integralOffset * dt;
+            for (int k = 0; k < integralCount; ++k)
             {
-                double a = sx[k] * ox + sy[k] * oy + sz[k] * oz + phase[k];
-                double b = sx[k] * dx + sy[k] * dy + sz[k] * dz;
+                double a = ix[k] * ox + iy[k] * oy + iz[k] * oz + integralPhase[k];
+                double b = ix[k] * dx + iy[k] * dy + iz[k] * dz;
                 double half = 0.5 * b * dt;
                 double sinc = Math.Abs(half) < 1e-4 ? 1.0 - half * half / 6.0 : Math.Sin(half) / half;
-                sum += weight[k] * dt * Math.Cos(a + b * tMid) * sinc;
+                sum += integralWeight[k] * dt * Math.Cos(a + b * tMid) * sinc;
             }
             return sum;
         }
@@ -185,7 +253,7 @@ namespace pbrt
                                         out double t, out double toEnd)
         {
             // Bracket the distance, starting from where a field at its mean would reach the target
-            double lo = tStart, hi = Math.Min(tEnd, tStart + target / offset);
+            double lo = tStart, hi = Math.Min(tEnd, tStart + target / integralOffset);
             double valueHi = FieldIntegral(ox, oy, oz, dx, dy, dz, tStart, hi);
             while (valueHi < target)
             {
@@ -241,6 +309,13 @@ namespace pbrt
                 lo += weight[k] * waveLo;
                 hi += weight[k] * waveHi;
             }
+            if (squared)
+            {
+                // The square of an interval
+                double least = lo <= 0 && hi >= 0 ? 0.0 : Math.Min(lo * lo, hi * hi);
+                hi = Math.Max(lo * lo, hi * hi);
+                lo = least;
+            }
         }
 
         // CosineNoise Private Methods
@@ -274,7 +349,11 @@ namespace pbrt
         }
 
         // CosineNoise Private Members
-        private readonly int octaves, count;
+        private readonly bool squared;
+        private readonly int octaves, count, integralCount;
+        // (the waves of the integral: those of the field, or of its square written out)
+        private readonly double[] ix, iy, iz, integralPhase, integralWeight;
+        private readonly double integralOffset;
         private readonly double[] sx, sy, sz, phase, weight;
         private readonly double amplitude, offset, norm;
     }
@@ -332,19 +411,25 @@ namespace pbrt
         public static CosineNoiseTexture Create(Transform renderFromTexture, TextureParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
             TextureMapping3D map = TextureMapping3D.Create(parameters, renderFromTexture, loc, alloc);
-            int octaves = parameters.GetOneInt("octaves", 4);
-            Float offset = parameters.GetOneFloat("offset", 1);
+            // (the square has a term for every pair of waves: fewer of them unless given)
+            bool squared = parameters.GetOneBool("squared", false);
+            int octaves = parameters.GetOneInt("octaves", squared ? 2 : 4);
+            Float offset = parameters.GetOneFloat("offset", squared ? 0 : 1);
             if (octaves < 1 || octaves > 16)
             {
                 ErrorExit(loc, "\"cosinenoise\": \"octaves\" is 1 to 16.");
             }
-            int waves = parameters.GetOneInt("waves", 24);
+            int waves = parameters.GetOneInt("waves", squared ? 6 : 24);
             if (waves < 1 || waves > 64)
             {
                 ErrorExit(loc, "\"cosinenoise\": \"waves\" is 1 to 64.");
             }
+            if (squared && waves * octaves > 64)
+            {
+                ErrorExit(loc, "\"cosinenoise\": \"squared\" takes at most 64 waves in all (\"waves\" times \"octaves\").");
+            }
             CosineNoise noise = new CosineNoise(parameters.GetOneFloat("frequency", 1), octaves, waves, parameters.GetOneFloat("lacunarity", 2),
-                                                parameters.GetOneFloat("gain", 0.5f), offset);
+                                                parameters.GetOneFloat("gain", 0.5f), offset, squared);
             return new CosineNoiseTexture(map, noise, parameters.GetOneFloat("density", 1));
         }
 
@@ -710,19 +795,25 @@ namespace pbrt
             {
                 sigma_s = new ConstantSpectrum(1f);
             }
-            int octaves = parameters.GetOneInt("octaves", 4);
-            Float offset = parameters.GetOneFloat("offset", 1);
+            // (the square has a term for every pair of waves: fewer of them unless given)
+            bool squared = parameters.GetOneBool("squared", false);
+            int octaves = parameters.GetOneInt("octaves", squared ? 2 : 4);
+            Float offset = parameters.GetOneFloat("offset", squared ? 0 : 1);
             if (octaves < 1 || octaves > 16)
             {
                 ErrorExit(loc, "\"cosinenoise\": \"octaves\" is 1 to 16.");
             }
-            int waves = parameters.GetOneInt("waves", 24);
+            int waves = parameters.GetOneInt("waves", squared ? 6 : 24);
             if (waves < 1 || waves > 64)
             {
                 ErrorExit(loc, "\"cosinenoise\": \"waves\" is 1 to 64.");
             }
+            if (squared && waves * octaves > 64)
+            {
+                ErrorExit(loc, "\"cosinenoise\": \"squared\" takes at most 64 waves in all (\"waves\" times \"octaves\").");
+            }
             CosineNoise noise = new CosineNoise(parameters.GetOneFloat("frequency", 1), octaves, waves, parameters.GetOneFloat("lacunarity", 2),
-                                                parameters.GetOneFloat("gain", 0.5f), offset);
+                                                parameters.GetOneFloat("gain", 0.5f), offset, squared);
             // A box of the medium's own space, where one is given
             Point3f far = new Point3f(Infinity, Infinity, Infinity);
             Point3f p0 = parameters.GetOnePoint3f("p0", far);

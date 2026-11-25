@@ -25,7 +25,7 @@ namespace pbrt
         [TEST("CosineNoise", "IntegralAlongARay")]
         public static void IntegralAlongARay()
         {
-            CosineNoise noise = new CosineNoise(3f, 5, 24, 2f, 0.5f, 0.4f);
+            CosineNoise noise = new CosineNoise(3f, 5, 24, 2f, 0.5f, 0.4f, false);
             RNG rng = new RNG(7);
             for (int i = 0; i < 40; ++i)
             {
@@ -51,7 +51,7 @@ namespace pbrt
         [TEST("CosineNoise", "BoundsOverABox")]
         public static void BoundsOverABox()
         {
-            CosineNoise noise = new CosineNoise(2f, 4, 24, 2f, 0.5f, 0.2f);
+            CosineNoise noise = new CosineNoise(2f, 4, 24, 2f, 0.5f, 0.2f, false);
             RNG rng = new RNG(11);
             double slack = 0, width = 0;
             for (int i = 0; i < 60; ++i)
@@ -89,7 +89,7 @@ namespace pbrt
             RNG rng = new RNG(3);
             foreach (Float offset in new Float[] { 12f, 3f, 1f, 0f, -1f })
             {
-                CosineNoise noise = new CosineNoise(5f, 4, 24, 2f, 0.5f, offset);
+                CosineNoise noise = new CosineNoise(5f, 4, 24, 2f, 0.5f, offset, false);
                 // (the sum of the weights is 11.3 standard deviations for four octaves at a gain of a half)
                 EXPECT_EQ(noise.NeverNegative(), offset >= 12);
                 int empty = 0;
@@ -116,7 +116,7 @@ namespace pbrt
 
         private static CosineNoiseMedium Medium(Float offset, bool bounded, Transform renderFromMedium, string transmittance, bool closedFormSampling)
         {
-            CosineNoise noise = new CosineNoise(4f, 4, 24, 2f, 0.5f, offset);
+            CosineNoise noise = new CosineNoise(4f, 4, 24, 2f, 0.5f, offset, false);
             CosineNoiseMedium medium = new CosineNoiseMedium(bounded, bounded ? new Bounds3f(new Point3f(-1, -1, -1), new Point3f(1, 1, 1)) : new Bounds3f(),
                                                              renderFromMedium, new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(0.2f, 0.4f, 1f)),
                                                              new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(1f, 2f, 3f)), 0,
@@ -254,6 +254,98 @@ namespace pbrt
             }
         }
 
+        [TEST("CosineNoise", "SquaredIsExactAtEveryOffset")]
+        public static void SquaredIsExactAtEveryOffset()
+        {
+            // The square of the sum is a sum of cosines: its integral along a ray is the closed form, it is never negative, its
+            // mean is the one it is divided by, and its bounds over a box hold. The medium of it has its transmittance in one
+            // evaluation and its collisions without a majorant, at an offset where the plain noise would be half empty.
+            SampledWavelengths lambda = SampledWavelengths.SampleVisible(0.52f);
+            foreach (Float offset in new Float[] { 0f, 0.7f, -1.5f })
+            {
+                CosineNoise noise = new CosineNoise(4f, 2, 6, 2f, 0.5f, offset, true);
+                EXPECT_TRUE(noise.NeverNegative());
+                EXPECT_EQ(noise.ResidualBound(), 0.0);
+                RNG rng = new RNG(7);
+                for (int i = 0; i < 20; ++i)
+                {
+                    double ox = 4 * rng.Uniform<Float>() - 2, oy = 4 * rng.Uniform<Float>() - 2, oz = 4 * rng.Uniform<Float>() - 2;
+                    double dx = 2 * rng.Uniform<Float>() - 1, dy = 2 * rng.Uniform<Float>() - 1, dz = 2 * rng.Uniform<Float>() - 1;
+                    double t0 = rng.Uniform<Float>(), t1 = t0 + 0.2 + 3 * rng.Uniform<Float>();
+                    double exact = noise.FieldIntegral(ox, oy, oz, dx, dy, dz, t0, t1);
+                    double numeric = Quadrature((double t) => noise.Field(ox + t * dx, oy + t * dy, oz + t * dz), t0, t1, 20000);
+                    EXPECT_NEAR(exact, numeric, 1e-7 * Math.Max(1.0, Math.Abs(numeric)));
+                }
+                double sum = 0, largest = 0;
+                int count = 200000, thin = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    Point3f p = new Point3f(40 * rng.Uniform<Float>() - 20, 40 * rng.Uniform<Float>() - 20, 40 * rng.Uniform<Float>() - 20);
+                    double d = noise.Density(p);
+                    EXPECT_GE(d, 0.0);
+                    sum += d;
+                    largest = Math.Max(largest, d);
+                    if (d < 0.05)
+                    {
+                        ++thin;
+                    }
+                }
+                EXPECT_NEAR(sum / count, 1.0, 0.03);
+                EXPECT_LE(largest, noise.MaxDensity() * (1 + 1e-6));
+                for (int i = 0; i < 30; ++i)
+                {
+                    Point3f corner = new Point3f(4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2, 4 * rng.Uniform<Float>() - 2);
+                    Float size = i % 2 == 0 ? 0.02f : 0.3f;
+                    Bounds3f box = new Bounds3f(corner, corner + new Vector3f(size, size, size));
+                    double lo, hi;
+                    noise.FieldBounds(box, out lo, out hi);
+                    EXPECT_GE(lo, 0.0);
+                    for (int k = 0; k < 500; ++k)
+                    {
+                        Point3f p = box.Lerp(new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>()));
+                        double f = noise.Field(p.x, p.y, p.z);
+                        EXPECT_GE(f, lo - 1e-9);
+                        EXPECT_LE(f, hi + 1e-9);
+                    }
+                }
+
+                CosineNoiseMedium medium = new CosineNoiseMedium(true, new Bounds3f(new Point3f(-1, -1, -1), new Point3f(1, 1, 1)), new Transform(),
+                                                                 new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(0.2f, 0.4f, 1f)),
+                                                                 new RGBUnboundedSpectrum(RGBColorSpace.sRGB, new RGB(1f, 2f, 3f)), 0, 0.5f, noise, true, 32,
+                                                                 new Allocator());
+                Point3f from = new Point3f(-0.5f, -0.4f, -0.45f), to = new Point3f(0.45f, 0.5f, 0.3f);
+                double[] reference = new double[NSpectrumSamples];
+                Reference(medium, from, to, lambda, reference);
+                Ray ray = new Ray(from, 0.5f * (to - from));
+                SampledSpectrum T;
+                ASSERT_TRUE(medium.ClosedFormTransmittance(ray, 2f, ref rng, lambda, out T));
+                for (int c = 0; c < NSpectrumSamples; ++c)
+                {
+                    EXPECT_NEAR(T[c], reference[c], 2e-5 * Math.Max(reference[c], 1e-3));
+                }
+                int walks = 200000, through = 0;
+                for (int i = 0; i < walks; ++i)
+                {
+                    bool collided = false;
+                    SampleT_maj(ray, medium, 2f, rng.Uniform<Float>(), ref rng, lambda,
+                        (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_to) =>
+                        {
+                            collided = true;
+                            EXPECT_NEAR(sigma_maj[0], mp.sigma_a[0] + mp.sigma_s[0], 1e-6f * sigma_maj[0]);
+                            return false;
+                        });
+                    if (!collided)
+                    {
+                        ++through;
+                    }
+                }
+                EXPECT_NEAR((double)through / walks, reference[0], 4 * Math.Sqrt(reference[0] * (1 - reference[0]) / walks));
+                Console.WriteLine("MEASURE squared cosine noise, offset {0}: mean density {1:F4}, largest {2:F2} (bound {3:F2}), {4:F1}% of the points under 0.05; "
+                                  + "transmittance {5:F6} (closed form {6:F6}), walks through {7:F5}", offset, sum / count, largest, noise.MaxDensity(),
+                                  100.0 * thin / count, reference[0], T[0], (double)through / walks);
+            }
+        }
+
         [TEST("CosineNoise", "ClampedDensityIsUnbiased")]
         public static void ClampedDensityIsUnbiased()
         {
@@ -320,7 +412,7 @@ namespace pbrt
         [TEST("CosineNoise", "TextureAndItsBounds")]
         public static void TextureAndItsBounds()
         {
-            CosineNoise noise = new CosineNoise(3f, 4, 24, 2f, 0.5f, 1f);
+            CosineNoise noise = new CosineNoise(3f, 4, 24, 2f, 0.5f, 1f, false);
             CosineNoiseTexture texture = new CosineNoiseTexture(new PointTransformMapping(Scale(2f, 2f, 2f)), noise, 0.8f);
             EXPECT_EQ(texture.MinValue(), 0f);
             EXPECT_NEAR(texture.MaxValue(), 0.8 * noise.MaxDensity(), 1e-5);
