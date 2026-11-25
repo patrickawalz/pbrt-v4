@@ -174,6 +174,14 @@ namespace pbrt
             "Shape \"trianglemesh\" \"point3 P\" [-6 0 -6 6 0 -6 6 0 6 -6 0 6] \"integer indices\" [0 1 2 0 2 3]\n" +
             "AttributeBegin\n  Translate 0 0.6 0\n  Shape \"sphere\" \"float radius\" 0.6\nAttributeEnd\n";
 
+        // A render in the process of the tests leaves what a render sets on its threads: put back for the tests that follow
+        private static void AfterRender()
+        {
+            Wireframe.differentialScale = 1;
+            ForEachThread(() => { Wireframe.differentialScale = 1; });
+            LightLayers.Scene.Reset();
+        }
+
         private static void WaitFor(Func<bool> condition, int milliseconds)
         {
             int waited = 0;
@@ -296,7 +304,7 @@ namespace pbrt
             EXPECT_TRUE((bool)written.image.GetChannelDesc(new string[] { "sky.R", "lamp.G", "default.B" }));
             File.Delete(filename);
             session.Dispose();
-            LightLayers.Scene.Reset();
+            AfterRender();
         }
 
         // A time: the render ends at the end of the pass the time runs out in
@@ -318,7 +326,7 @@ namespace pbrt
             EXPECT_EQ(Image.Read(filename).metadata.samplesPerPixel.value(), session.Passes);
             File.Delete(filename);
             session.Dispose();
-            LightLayers.Scene.Reset();
+            AfterRender();
         }
     }
 }
