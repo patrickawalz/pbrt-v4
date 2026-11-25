@@ -1,0 +1,76 @@
+# The pearlescent pigment of Guillen et al. 2020 (Material "pearlescent", docs/pearlescent.md): coated platelets in a clear
+# container, whose color comes from the interference in the coating. Left to right the coating of the platelets goes from 50 to
+# 150 nm; the front row is over a black base with platelets that lie nearly flat (roughness 0.15), the back row over a light
+# base with platelets that are more spread (0.35).
+LookAt 0 6 -11  0 0.5 0.3  0 1 0
+Camera "perspective" "float fov" 34
+Sampler "independent" "integer pixelsamples" 128 "integer seed" 7
+Integrator "volpath" "integer maxdepth" 12
+Film "rgb" "integer xresolution" 800 "integer yresolution" 450 "string filename" "pearlescent.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.5 0.55 0.65]
+LightSource "distant" "point3 from" [-3 6 -4] "point3 to" [0 0 0] "rgb L" [3.2 3 2.7]
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [0.5 0.5 0.5]
+  Shape "trianglemesh" "integer indices" [0 2 1 0 3 2] "point3 P" [-30 0 -30  30 0 -30  30 0 30  -30 0 30]
+AttributeEnd
+AttributeBegin
+  Translate -4.5 0.8 -1
+  Material "pearlescent" "float coatthickness" 50 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate -2.7 0.8 -1
+  Material "pearlescent" "float coatthickness" 70 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate -0.9 0.8 -1
+  Material "pearlescent" "float coatthickness" 90 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 0.9 0.8 -1
+  Material "pearlescent" "float coatthickness" 110 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 2.7 0.8 -1
+  Material "pearlescent" "float coatthickness" 130 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 4.5 0.8 -1
+  Material "pearlescent" "float coatthickness" 150 "float roughness" 0.15 "rgb reflectance" [0.02 0.02 0.02]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate -4.5 0.8 1.3
+  Material "pearlescent" "float coatthickness" 50 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate -2.7 0.8 1.3
+  Material "pearlescent" "float coatthickness" 70 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate -0.9 0.8 1.3
+  Material "pearlescent" "float coatthickness" 90 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 0.9 0.8 1.3
+  Material "pearlescent" "float coatthickness" 110 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 2.7 0.8 1.3
+  Material "pearlescent" "float coatthickness" 130 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd
+AttributeBegin
+  Translate 4.5 0.8 1.3
+  Material "pearlescent" "float coatthickness" 150 "float roughness" 0.35 "rgb reflectance" [0.6 0.6 0.6]
+  Shape "sphere" "float radius" 0.8
+AttributeEnd

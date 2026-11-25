@@ -1,0 +1,19 @@
+# Production volumetrics: a cloud of kernel noise, whose transmittance along a ray is in closed form (no ray marching and no
+# majorant: docs/exact-transmittance-noises.md), in the shape of a ball displaced by fractal noise ("envelope" "blob", which
+# lives in the unit cube of the medium's space), under a sun and a sky.
+LookAt 0.5 0.55 -1.5  0.5 0.5 0.5  0 1 0
+Camera "perspective" "float fov" 36
+Sampler "independent" "integer pixelsamples" 64 "integer seed" 7
+Integrator "volpath" "integer maxdepth" 40
+Film "rgb" "integer xresolution" 640 "integer yresolution" 480 "string filename" "cloud.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.28 0.42 0.72]
+LightSource "distant" "point3 from" [3 4 -2] "point3 to" [0 0 0] "rgb L" [9 8.4 7.4]
+MakeNamedMedium "cloud" "string type" "kernelnoise" "rgb sigma_a" [0.001 0.001 0.001] "rgb sigma_s" [1 1 1] "float density" 30
+    "float frequency" 2.5 "integer octaves" 3 "float coverage" 0.5 "string envelope" "blob" "float g" 0.7
+AttributeBegin
+  MediumInterface "cloud" ""
+  Material "interface"
+  Translate 0.5 0.5 0.5
+  Shape "sphere" "float radius" 0.8
+AttributeEnd

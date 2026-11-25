@@ -19,7 +19,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace magiview
+namespace controls
 {
     // ZoomPanelMode Definition
     public enum ZoomPanelMode

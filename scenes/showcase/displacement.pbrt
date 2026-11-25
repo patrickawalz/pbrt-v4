@@ -1,0 +1,23 @@
+# Displacement without tessellation: Shape "displacedmesh" traces rays through the displacement itself (docs/displacement.md,
+# src/pbrt/displacedmesh.cs). Each panel is two triangles; the relief is a function of (u, v), so not even a height map is kept.
+LookAt 0 3.4 -6.2  0 0.7 0  0 1 0
+Camera "perspective" "float fov" 36
+Sampler "independent" "integer pixelsamples" 64 "integer seed" 7
+Integrator "volpath" "integer maxdepth" 8
+Film "rgb" "integer xresolution" 640 "integer yresolution" 480 "string filename" "displacement.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.35 0.4 0.5]
+LightSource "distant" "point3 from" [-4 3 -2] "point3 to" [0 0 0] "rgb L" [4 3.7 3.2]
+# The floor: dunes and ripples (noise(), fbm() and turb() are also there, at a higher cost for a ray)
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [0.55 0.48 0.4]
+  Shape "displacedmesh" "integer indices" [0 2 1 0 3 2] "point3 P" [-4 0 -3  4 0 -3  4 0 3  -4 0 3] "normal N" [0 1 0  0 1 0  0 1 0  0 1 0]
+        "point2 uv" [0 0  1 0  1 1  0 1] "string function" "0.5 + 0.3 * sin(7 * pi * u + 2.5 * sin(3 * pi * v)) * sin(5 * pi * v) + 0.2 * sin(31 * pi * u + 4 * sin(9 * pi * v))" "float scale" 0.4
+AttributeEnd
+# The wall: a grid of round studs, in metal
+AttributeBegin
+  Material "conductor" "spectrum eta" "metal-Cu-eta" "spectrum k" "metal-Cu-k" "float roughness" 0.15
+  Shape "displacedmesh" "integer indices" [0 1 2 0 2 3] "point3 P" [-4 0 3  4 0 3  4 3.5 3  -4 3.5 3] "normal N" [0 0 -1  0 0 -1  0 0 -1  0 0 -1]
+        "point2 uv" [0 0  1 0  1 1  0 1]
+        "string function" "sqrt(max(0, 0.16 - pow(fract(16 * u) - 0.5, 2) - pow(fract(7 * v) - 0.5, 2)))" "float scale" 0.35
+AttributeEnd

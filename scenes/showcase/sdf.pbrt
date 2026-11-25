@@ -1,0 +1,38 @@
+# Signed distance fields: Shape "sdf" is sphere traced as written, without a mesh (src/pbrt/sdfshape.cs, sdfparser.cs).
+LookAt 0 2.6 -8  0 0.9 0  0 1 0
+Camera "perspective" "float fov" 36
+Sampler "independent" "integer pixelsamples" 64 "integer seed" 7
+Integrator "volpath" "integer maxdepth" 12
+Film "rgb" "integer xresolution" 800 "integer yresolution" 450 "string filename" "sdf.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.5 0.55 0.65]
+LightSource "distant" "point3 from" [-3 6 -4] "point3 to" [0 0 0] "rgb L" [3.2 3 2.7]
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [0.5 0.5 0.5]
+  Shape "trianglemesh" "integer indices" [0 2 1 0 3 2] "point3 P" [-30 0 -30  30 0 -30  30 0 30  -30 0 30]
+AttributeEnd
+# A smooth blend of a sphere and a box
+AttributeBegin
+  Translate -3.4 1 0
+  Material "coateddiffuse" "rgb reflectance" [0.7 0.25 0.15] "float roughness" 0.1
+  Shape "sdf" "string sdf" "smoothunion(sphere(0.8), translate(box(.45,.45,.45), 0.8,0,0), .3)" "point3 pmin" [-1 -1 -1] "point3 pmax" [1.5 1 1]
+AttributeEnd
+# A gyroid cut by a sphere, in gold
+AttributeBegin
+  Translate -0.9 1 0
+  Material "conductor" "spectrum eta" "metal-Au-eta" "spectrum k" "metal-Au-k" "float roughness" 0.1
+  Shape "sdf" "string sdf" "intersect(gyroid(0.8, 0.1), sphere(1))" "point3 pmin" [-1 -1 -1] "point3 pmax" [1 1 1]
+AttributeEnd
+# A twisted rounded box, in glass
+AttributeBegin
+  Translate 1.4 1.05 0
+  Material "dielectric" "float eta" 1.5
+  Shape "sdf" "string sdf" "twist(box(0.45, 1, 0.45, 0.08), 90)" "point3 pmin" [-0.8 -1.1 -0.8] "point3 pmax" [0.8 1.1 0.8]
+AttributeEnd
+# A Mandelbulb
+AttributeBegin
+  Translate 3.6 1 0
+  Scale 0.85 0.85 0.85
+  Material "diffuse" "rgb reflectance" [0.3 0.5 0.7]
+  Shape "sdf" "string sdf" "mandelbulb()" "point3 pmin" [-1.2 -1.2 -1.2] "point3 pmax" [1.2 1.2 1.2]
+AttributeEnd
