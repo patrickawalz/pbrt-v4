@@ -248,6 +248,80 @@ namespace magiview
                 }
             }
             bitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, 4 * width, 0);
+            ShowThumbnails(image);
+        }
+
+        // A small image of each light layer beside its settings, to tell the layers apart: the layer as it is rendered (its
+        // channels name.R, name.G, name.B of the film's image; before its settings), each at an exposure of its own that brings
+        // its mean to a middle gray, so that a faint layer shows what it lights as well as a bright one
+        private void ShowThumbnails(pbrt.Image image)
+        {
+            LightLayers layers = LightLayers.Scene;
+            int width = image.Resolution().x, height = image.Resolution().y;
+            int thumbWidth = Math.Min(ThumbnailWidth, width), thumbHeight = Math.Max(1, (int)Math.Round((double)thumbWidth * height / width));
+            float[] values = new float[3 * thumbWidth * thumbHeight];
+            byte[] bytes = new byte[4 * thumbWidth * thumbHeight];
+            for (int layer = 0; layer < thumbnails.Count && layer < layers.Count; ++layer)
+            {
+                string name = layers[layer].name;
+                ImageChannelDesc desc = image.GetChannelDesc(new string[] { name + ".R", name + ".G", name + ".B" });
+                if (!desc)
+                {
+                    // (a scene of one layer has no channels of layers: the image itself)
+                    desc = image.GetChannelDesc(new string[] { "R", "G", "B" });
+                }
+                // Each pixel of the small image: the mean of 3 by 3 pixels spread over its part of the film
+                for (int ty = 0; ty < thumbHeight; ++ty)
+                {
+                    for (int tx = 0; tx < thumbWidth; ++tx)
+                    {
+                        float r = 0, g = 0, b = 0;
+                        for (int j = 0; j < 3; ++j)
+                        {
+                            int y = Math.Min(height - 1, (int)((ty + (j + 0.5) / 3) * height / thumbHeight));
+                            for (int i = 0; i < 3; ++i)
+                            {
+                                int x = Math.Min(width - 1, (int)((tx + (i + 0.5) / 3) * width / thumbWidth));
+                                ImageChannelValues rgb = image.GetChannels(new Point2i(x, y), desc);
+                                r += rgb[0] > 0 && !float.IsInfinity(rgb[0]) ? rgb[0] : 0;
+                                g += rgb[1] > 0 && !float.IsInfinity(rgb[1]) ? rgb[1] : 0;
+                                b += rgb[2] > 0 && !float.IsInfinity(rgb[2]) ? rgb[2] : 0;
+                            }
+                        }
+                        int at = 3 * (ty * thumbWidth + tx);
+                        values[at] = r / 9;
+                        values[at + 1] = g / 9;
+                        values[at + 2] = b / 9;
+                    }
+                }
+                // The mean luminance, and again without what is far above it (a few bright pixels would darken the rest)
+                double mean = 0;
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    double limit = pass == 0 ? double.MaxValue : 8 * mean, sum = 0;
+                    for (int at = 0; at < values.Length; at += 3)
+                    {
+                        sum += Math.Min(limit, 0.2126 * values[at] + 0.7152 * values[at + 1] + 0.0722 * values[at + 2]);
+                    }
+                    mean = sum / (thumbWidth * thumbHeight);
+                }
+                float gain = mean > 0 ? (float)(0.2 / mean) : 0;
+                for (int at = 0; at < thumbWidth * thumbHeight; ++at)
+                {
+                    bytes[4 * at] = Encode(gain * values[3 * at + 2]);
+                    bytes[4 * at + 1] = Encode(gain * values[3 * at + 1]);
+                    bytes[4 * at + 2] = Encode(gain * values[3 * at]);
+                    bytes[4 * at + 3] = 255;
+                }
+                WriteableBitmap small = thumbnailBitmaps[layer];
+                if (small == null || small.PixelWidth != thumbWidth || small.PixelHeight != thumbHeight)
+                {
+                    small = new WriteableBitmap(thumbWidth, thumbHeight, 96, 96, PixelFormats.Bgr32, null);
+                    thumbnailBitmaps[layer] = small;
+                    thumbnails[layer].Source = small;
+                }
+                small.WritePixels(new Int32Rect(0, 0, thumbWidth, thumbHeight), bytes, 4 * thumbWidth, 0);
+            }
         }
 
         private static byte Encode(float linear)
@@ -276,6 +350,8 @@ namespace magiview
             {
                 // (the heading stays)
                 layersPanel.Children.RemoveRange(1, layersPanel.Children.Count - 1);
+                thumbnails.Clear();
+                thumbnailBitmaps.Clear();
             }
             for (; layersShown < layers.Count; ++layersShown)
             {
@@ -295,6 +371,15 @@ namespace magiview
             enabled.Checked += (object sender, RoutedEventArgs e) => { layer.enabled = true; LayersChanged(); };
             enabled.Unchecked += (object sender, RoutedEventArgs e) => { layer.enabled = false; LayersChanged(); };
             row.Children.Add(enabled);
+            // (the small image of the layer: ShowThumbnails)
+            System.Windows.Controls.Image thumbnail = new System.Windows.Controls.Image();
+            thumbnail.Width = ThumbnailWidth;
+            thumbnail.Stretch = Stretch.Uniform;
+            thumbnail.HorizontalAlignment = HorizontalAlignment.Left;
+            thumbnail.Margin = new Thickness(18, 4, 0, 4);
+            thumbnails.Add(thumbnail);
+            thumbnailBitmaps.Add(null);
+            row.Children.Add(thumbnail);
             row.Children.Add(LayerSlider("scale", 0, 8, layer.scale, (double value) => { layer.scale = (float)value; }));
             row.Children.Add(LayerSlider("temperature (K, 0: none)", 0, 12000, layer.temperature, (double value) =>
             {
@@ -510,6 +595,10 @@ namespace magiview
         private byte[] pixels;
         private int showing;
         private int layersShown;
+        // The small images of the layers, in the order of their rows
+        private const int ThumbnailWidth = 192;
+        private readonly System.Collections.Generic.List<System.Windows.Controls.Image> thumbnails = new System.Collections.Generic.List<System.Windows.Controls.Image>();
+        private readonly System.Collections.Generic.List<WriteableBitmap> thumbnailBitmaps = new System.Collections.Generic.List<WriteableBitmap>();
         private readonly DispatcherTimer statusTimer;
     }
 }
