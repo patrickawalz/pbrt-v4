@@ -207,6 +207,8 @@ namespace pbrt
                 return SampleT_maj<GridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is RGBGridMedium)
                 return SampleT_maj<RGBGridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is TemporalGridMedium)
+                return SampleT_maj<TemporalGridMedium, DDAMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CloudMedium)
                 return SampleT_maj<CloudMedium, HomogeneousMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CosineNoiseMedium)
@@ -2057,6 +2059,11 @@ namespace pbrt
             else if (name == "rgbgrid")
             {
                 m = RGBGridMedium.Create(parameters, renderFromMedium, loc, alloc);
+            }
+            else if (name == "temporalgrid")
+            {
+                // (not in pbrt-v4) A grid whose voxels are functions of time: volumetric motion blur (temporalgrid.cs)
+                m = TemporalGridMedium.Create(parameters, renderFromMedium, loc, alloc);
             }
             else if (name == "cloud")
             {
