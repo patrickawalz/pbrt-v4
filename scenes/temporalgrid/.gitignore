@@ -1,0 +1,3 @@
+# (the scenes that gen.py writes are large: they are made, not kept)
+*.pbrt
+*.exr

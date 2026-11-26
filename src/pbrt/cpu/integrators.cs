@@ -2355,7 +2355,7 @@ namespace pbrt
                     return zero;
 
                 // The scattering at the point
-                MediumProperties mp = medium.SamplePoint(p, lambda);
+                MediumProperties mp = medium.SamplePoint(p, lambda, ctx.ray.time);
                 if (!mp.sigma_s || !(mp.sigma_s[0] > 0))
                     return zero;
                 MediumInteraction intr = new MediumInteraction(p, -direction, ctx.ray.time, medium, mp.phase);
@@ -6518,7 +6518,7 @@ namespace pbrt
                 return zero;
 
             // The scattering at the point
-            MediumProperties mp = medium.SamplePoint(p, lambda);
+            MediumProperties mp = medium.SamplePoint(p, lambda, ctx.ray.time);
             if (!mp.sigma_s)
                 return zero;
             MediumInteraction intr = new MediumInteraction(p, -segment.direction, ctx.ray.time, medium, mp.phase);
@@ -6702,7 +6702,7 @@ namespace pbrt
             MediumEvents.FinishSegment(ref T_seg, ref rl_seg, ref ru_seg, T_maj);
 
             // The scattering at the point, and the connection to the sun from there
-            MediumProperties mp = medium.SamplePoint(p, lambda);
+            MediumProperties mp = medium.SamplePoint(p, lambda, ctx.ray.time);
             if (!mp.sigma_s)
             {
                 return zero;
