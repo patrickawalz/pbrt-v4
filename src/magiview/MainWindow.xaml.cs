@@ -252,8 +252,7 @@ namespace magiview
         }
 
         // A small image of each light layer beside its settings, to tell the layers apart: the layer as it is rendered (its
-        // channels name.R, name.G, name.B of the film's image; before its settings), each at an exposure of its own that brings
-        // its mean to a middle gray, so that a faint layer shows what it lights as well as a bright one
+        // channels name.R, name.G, name.B of the film's image; before its settings), at the exposure of the render
         private void ShowThumbnails(pbrt.Image image)
         {
             LightLayers layers = LightLayers.Scene;
@@ -294,18 +293,8 @@ namespace magiview
                         values[at + 2] = b / 9;
                     }
                 }
-                // The mean luminance, and again without what is far above it (a few bright pixels would darken the rest)
-                double mean = 0;
-                for (int pass = 0; pass < 2; ++pass)
-                {
-                    double limit = pass == 0 ? double.MaxValue : 8 * mean, sum = 0;
-                    for (int at = 0; at < values.Length; at += 3)
-                    {
-                        sum += Math.Min(limit, 0.2126 * values[at] + 0.7152 * values[at + 1] + 0.0722 * values[at + 2]);
-                    }
-                    mean = sum / (thumbWidth * thumbHeight);
-                }
-                float gain = mean > 0 ? (float)(0.2 / mean) : 0;
+                // (at the exposure of the render: a layer is as bright here as its part of the image)
+                float gain = (float)Math.Pow(2, exposureSlider.Value);
                 for (int at = 0; at < thumbWidth * thumbHeight; ++at)
                 {
                     bytes[4 * at] = Encode(gain * values[3 * at + 2]);
