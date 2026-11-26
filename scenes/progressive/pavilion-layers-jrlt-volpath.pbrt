@@ -1,0 +1,90 @@
+# The Barcelona Pavilion of the pbrt-v4 scenes, by day and by night in one render: the lights of pavilion-day.pbrt and of
+# pavilion-night.pbrt, each in a light layer of its own (docs/progressive-rendering.md). In magiview the layers are switched and
+# mixed while it renders; the image file has R, G, B and name.R, name.G, name.B for each layer.
+#
+# This file goes into the barcelona-pavilion directory of pbrt-v4-scenes (github.com/mmp/pbrt-v4-scenes), beside
+# pavilion-day.pbrt: it reads that scene's materials.pbrt, geometry.pbrt and textures (and, as they do, ../landscape/textures
+# and ../landscape/geometry).
+#
+# The camera and the film are those of the day scene. The night scene is exposed at iso 250 against the day's 500, so the
+# lights of the night are here at half their values.
+#
+# The integrator is "jrlt" (Jump Restore light transport) over the paths of "volpath". "jrlt" does not write light layers yet and
+# does not render in passes: all light is in the layer "default" (the settings of the other layers change nothing), and the
+# image is there when the render ends, not while it runs.
+
+Film "rgb"
+    "float iso" [ 500 ]
+    "string filename" [ "pavilion-layers-jrlt-volpath.exr" ]
+    "integer yresolution" [ 850 ]
+    "integer xresolution" [ 1600 ]
+    "float maxcomponentvalue" 50
+Scale -1 1 1
+LookAt -10 2.25 10
+    7 1.75 -3
+    0 1 0
+Camera "perspective"
+    "float lensradius" [ 0.0125 ]
+    "float focaldistance" [ 15 ]
+    "float fov" [ 45 ]
+Integrator "jrlt"
+    "string pathestimator" [ "volpath" ]
+    "integer mutationsperpixel" [ 256 ]
+
+WorldBegin
+
+# Day: the sky with its sun
+AttributeBegin
+    Rotate -10 0 0 1
+    Rotate -160 0 1 0
+    Rotate -90 1 0 0
+    LightSource "infinite"
+        "string filename" "textures/sky.exr"
+        "string layer" "day sky"
+AttributeEnd
+
+# Night: the sky (0.5 in the night scene)
+AttributeBegin
+    Rotate -10 0 0 1
+    Rotate -140 0 1 0
+    Rotate -90 1 0 0
+    LightSource "infinite"
+        "string filename" [ "textures/night.exr" ]
+        "float scale" [ 0.25 ]
+        "string layer" "night sky"
+AttributeEnd
+
+# Night: the light of the back room, not directly visible (750 in the night scene)
+AttributeBegin
+    AreaLightSource "diffuse"
+        "float scale" [ 375 ]
+        "blackbody L" [ 3500 ]
+        "string layer" "back room"
+    Translate 10 4 2.5
+    Shape "sphere"
+        "float radius" [ 0.1 ]
+AttributeEnd
+
+# Night: the visible light behind the door (75 in the night scene)
+AttributeBegin
+    AreaLightSource "diffuse"
+        "float scale" [ 37.5 ]
+        "blackbody L" [ 3500 ]
+        "string layer" "door"
+    Translate 12 4 5.5
+    Shape "sphere"
+        "float radius" [ 0.05 ]
+AttributeEnd
+
+# Night: the candles in the floating wood lanterns (25000 in the night scene)
+AttributeBegin
+    AreaLightSource "diffuse"
+        "float scale" [ 12500 ]
+        "blackbody L" [ 2500 ]
+        "string layer" "lanterns"
+    Shape "plymesh"
+        "string filename" [ "geometry/mesh_00005.ply" ]
+AttributeEnd
+
+Include "materials.pbrt"
+Include "geometry.pbrt"
