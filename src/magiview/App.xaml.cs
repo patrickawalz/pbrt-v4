@@ -24,7 +24,12 @@ namespace magiview
         // What the renderer has written since the last call
         public static string NewMessages()
         {
-            string all = messages.ToString();
+            string all;
+            // (the writer that the threads share locks itself for each write; the text is in the one behind it)
+            lock (messages)
+            {
+                all = buffer.ToString();
+            }
             string added = all.Substring(Math.Min(shown, all.Length));
             shown = all.Length;
             return added;
@@ -62,7 +67,8 @@ namespace magiview
         }
 
         // App Private Members
-        private static readonly TextWriter messages = TextWriter.Synchronized(new StringWriter());
+        private static readonly StringWriter buffer = new StringWriter();
+        private static readonly TextWriter messages = TextWriter.Synchronized(buffer);
         private static int shown;
     }
 }
