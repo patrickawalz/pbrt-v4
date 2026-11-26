@@ -5,11 +5,12 @@
 // 2014; the single-ray traversal of Embree's bvh8 with its binned SAH builder, the configuration Embree takes for incoherent
 // rays on AVX2). Written from the papers and the published design, not from Embree's source.
 //
-// The file is self-contained: nothing else of the renderer is changed by it or needed by it but the Primitive interface. To
-// be chosen in a scene (Accelerator "simdbvh") it takes one line in CreateAccelerator (cpu/aggregates.cs), which is not here:
+// The file is self-contained: it needs nothing of the renderer but the Primitive interface. A scene takes it with
 //
-//     else if (name == "simdbvh")
-//         accel = SimdBVHAggregate.Create(prims, parameters);
+//     Accelerator "simdbvh"            ("integer maxnodeprims": the most primitives of a leaf, 4; up to 16)
+//
+// (one line of CreateAccelerator in cpu/aggregates.cs; and with it the objects that are instanced and the primitives of a shape,
+// which pbrt always puts in a BVHAggregate of their own, are in a SimdBVHAggregate too: two lines of scene.cs).
 //
 // The node. The boxes of the 8 children are kept by coordinate (the 8 least x, the 8 least y, ... the 8 largest z: six vectors
 // of 8 floats), then the 8 children: 256 bytes, four cache lines, at an address that is a multiple of 64. A child is a node

@@ -1224,7 +1224,8 @@ namespace pbrt
                         // Create single _Primitive_ for _prims_
                         if (prims.Count > 1)
                         {
-                            Primitive bvh = new BVHAggregate(prims);
+                            // (not in pbrt-v4: with Accelerator "simdbvh" the primitives of a shape are in one too)
+                            Primitive bvh = accelerator.name == "simdbvh" ? new SimdBVHAggregate(prims) : new BVHAggregate(prims);
                             prims = new List<Primitive>();
                             prims.Add(bvh);
                         }
@@ -1257,7 +1258,8 @@ namespace pbrt
 
                 if (instancePrimitives.Count > 1)
                 {
-                    Primitive bvh = new BVHAggregate(instancePrimitives);
+                    // (not in pbrt-v4: with Accelerator "simdbvh" the objects that are instanced are in one too)
+                    Primitive bvh = accelerator.name == "simdbvh" ? new SimdBVHAggregate(instancePrimitives) : new BVHAggregate(instancePrimitives);
                     instancePrimitives = new List<Primitive>();
                     instancePrimitives.Add(bvh);
                 }

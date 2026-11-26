@@ -1,0 +1,25 @@
+# The second view of the landscape of the pbrt-v4 scenes (github.com/mmp/pbrt-v4-scenes, landscape/view-2.pbrt), by "mlt"
+# (Metropolis light transport) over the paths of "volpath", with the BVH of 8 children a node (Accelerator "simdbvh",
+# src/pbrt/cpu/simdbvh.cs). This file goes into the landscape directory of pbrt-v4-scenes, beside view-2.pbrt: it reads that
+# scene's geometry and textures. For the same render with pbrt's BVH, take the Accelerator line out.
+
+Transform [ 0.3471052 -0.60403454 -0.7173982 0 -1.110223e-16 0.7649586 -0.6440794 0 0.9378262 0.22356331 0.26552114 0 -159.12659 792.3986 7773.603 1  ]
+Camera "perspective"
+    "float lensradius" [ 0.225 ]
+    "float focaldistance" [ 5000 ]
+    "float fov" [ 31.417274 ]
+Integrator "mlt"
+    "string pathestimator" [ "volpath" ]
+    "integer mutationsperpixel" [ 256 ]
+Accelerator "simdbvh"
+Film "rgb"
+    "string filename" [ "view-2-mlt-volpath-simdbvh.exr" ]
+    "integer yresolution" [ 2160 ]
+    "integer xresolution" [ 3840 ]
+    "float iso" 400
+    "float whitebalance" 9000
+
+
+WorldBegin
+
+Include "geometry/geometry.pbrt"

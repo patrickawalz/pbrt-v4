@@ -20,6 +20,9 @@ namespace pbrt
                 accel = BVHAggregate.Create(prims, parameters);
             else if (name == "kdtree")
                 accel = KdTreeAggregate.Create(prims, parameters);
+            else if (name == "simdbvh")
+                // (not in pbrt-v4) A BVH of 8 children a node, traversed with AVX (cpu/simdbvh.cs)
+                accel = SimdBVHAggregate.Create(prims, parameters);
             else
                 ErrorExit(StringPrintf("%s: accelerator type unknown.", name));
 
