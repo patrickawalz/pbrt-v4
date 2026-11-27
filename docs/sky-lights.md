@@ -167,6 +167,27 @@ there at all:
 
 (on Windows `copy /b part1 + part2 PragueSkyModelDatasetFull.dat`; its MD5 is dcfa2bd165cf803c1791c469e05d134c).
 
+### Where to put a dataset
+
+Download one file from the release page, <https://github.com/patrickawalz/pbrt-v4/releases/tag/prague-sky-datasets-v1>,
+and put it in the directory of the program (where `pbrt.dll` / `pbrt.exe` and, for the viewer, `magiview.exe` are).
+`PragueSkyVisible.dat` (154 MB) is the one for an observer on the ground, with polarisation. Do not rename it.
+
+The light looks for the dataset in this order:
+
+1. `"string filename"` as given: beside the scene file, or a whole path;
+2. a file of that name in the directory of the program;
+3. a file of that name in the directory named by the environment variable `PRAGUE_SKY_DATASETS`.
+
+Without `"filename"` it takes the first of `PragueSkyFullWide.dat`, `PragueSkyVisible.dat`, `PragueSkyGround14.dat`,
+`PragueSkyModelDatasetSWIR.dat`, `PragueSkyModelDatasetFull.dat`, `PragueSkyModelDatasetGround.dat` that is in one of the
+three places (with `"altitude"` only the two that have altitudes, with `"polarisation"` not the last). So with a dataset
+beside the program `LightSource "prague" "vector3 sundir" [ ... ]` is enough in a scene. When none is found the error
+names the directories that were searched.
+
+Every dataset of the table is read (each rendered from the same scene: the three wide ones and the two trimmed ones give
+the same image, the two of 11 channels differ from it by under 1%).
+
 The light reads only what it needs: the 16 configurations around its sun elevation, visibility, albedo and altitude,
 for the channels the film can sample (360 to 830 nm), by seeking; nothing else is loaded.
 
