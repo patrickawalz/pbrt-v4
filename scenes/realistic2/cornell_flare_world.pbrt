@@ -1,0 +1,68 @@
+# The world of the Cornell box scenes of camera "realistic2" (cornell_flare_*.pbrt include it after WorldBegin): a Cornell
+# box of 55 cm (the units are metres, as the lens needs), a small bare bulb high in its left, away from the walls, for the
+# flare and the star of diffraction, and three small lights 55 cm in front of the lens, far out of focus, for the shape of
+# the aperture and the vignetting of the lens. Each kind of light is a light layer: "ceiling light", "bulb" and
+# "foreground lights".
+
+# Out of focus lights between the camera and the box
+AttributeBegin
+  AreaLightSource "diffuse" "blackbody L" 2800 "float power" 0 "float scale" 25 "string layer" "foreground lights"
+  AttributeBegin
+    Translate -0.105 0.375 -0.9
+    Shape "sphere" "float radius" 0.006
+  AttributeEnd
+  AttributeBegin
+    Translate 0.108 0.185 -0.9
+    Shape "sphere" "float radius" 0.006
+  AttributeEnd
+  AttributeBegin
+    Translate 0.1 0.39 -0.9
+    Shape "sphere" "float radius" 0.006
+  AttributeEnd
+AttributeEnd
+
+AttributeBegin
+Scale 0.275 0.275 0.275
+# The light of the ceiling
+AttributeBegin
+  AreaLightSource "diffuse" "rgb L" [ 5 4.25 3 ] "bool twosided" false "string layer" "ceiling light"
+  Material "diffuse" "rgb reflectance" [ 0 0 0 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ -0.3 1.98 -0.3  0.3 1.98 -0.3  0.3 1.98 0.3  -0.3 1.98 0.3 ]
+AttributeEnd
+# The bare bulb
+AttributeBegin
+  AreaLightSource "diffuse" "blackbody L" 3200 "float power" 0 "float scale" 25000 "string layer" "bulb"
+  Translate -0.35 1.45 -0.2
+  Shape "sphere" "float radius" 0.012
+AttributeEnd
+# Floor, ceiling, back wall
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [ 0.73 0.73 0.73 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ -1 0 -1  1 0 -1  1 0 1  -1 0 1 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ -1 2 -1  1 2 -1  1 2 1  -1 2 1 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ -1 0 1  1 0 1  1 2 1  -1 2 1 ]
+AttributeEnd
+# Red wall (left), green wall (right)
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [ 0.65 0.05 0.05 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ -1 0 -1  -1 0 1  -1 2 1  -1 2 -1 ]
+AttributeEnd
+AttributeBegin
+  Material "diffuse" "rgb reflectance" [ 0.12 0.45 0.15 ]
+  Shape "trianglemesh" "integer indices" [ 0 1 2 0 2 3 ] "point3 P" [ 1 0 -1  1 0 1  1 2 1  1 2 -1 ]
+AttributeEnd
+# The tall box: rough aluminium
+AttributeBegin
+  Material "conductor" "spectrum eta" "metal-Al-eta" "spectrum k" "metal-Al-k" "float roughness" 0.2
+  Translate -0.4 0.6 0.3
+  Rotate 20 0 1 0
+  Scale 0.3 0.6 0.3
+  Shape "trianglemesh" "integer indices" [ 0 2 1 0 3 2  4 5 6 4 6 7  0 1 5 0 5 4  3 7 6 3 6 2  0 4 7 0 7 3  1 2 6 1 6 5 ] "point3 P" [ -1 -1 -1  1 -1 -1  1 -1 1  -1 -1 1  -1 1 -1  1 1 -1  1 1 1  -1 1 1 ]
+AttributeEnd
+# The sphere: glass
+AttributeBegin
+  Material "dielectric" "float eta" 1.5
+  Translate 0.45 0.4 -0.2
+  Shape "sphere" "float radius" 0.4
+AttributeEnd
+AttributeEnd

@@ -1,0 +1,12 @@
+# Cornell box through the 50 mm double Gauss lens with a single coating, stopped down to a pentagon of 3 mm: the star of
+# diffraction around the bulb, pentagonal ghosts and discs, and no vignetting
+LookAt 0 0.275 -1.45  0 0.275 0  0 1 0
+Camera "realistic2" "string lensfile" "dgauss.50mm.dat" "float focusdistance" 1.4
+    "float aperturediameters" [ 3 ] "string apertures" [ "pentagon" ] "string diffraction" "aperture"
+    "bool ghosts" true "string coating" "single" "float sensorreflectance" 0.03
+    "float dirt" 0.02 "float dirtg" 0.9 "float barrelalbedo" 0.04
+Sampler "independent" "integer pixelsamples" 256 "integer seed" 1
+Integrator "bdpt" "integer maxdepth" 8
+Film "rgb" "integer xresolution" 512 "integer yresolution" 512 "float iso" 3200 "string filename" "cornell_flare_stopped-bdpt.exr"
+WorldBegin
+Include "cornell_flare_world.pbrt"
