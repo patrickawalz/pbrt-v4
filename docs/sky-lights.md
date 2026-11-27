@@ -284,10 +284,12 @@ values to the last bit, `SunLight2.SameAsSun`). It is the sun alone: the light t
 * `solar` is the table of the Prague sky model (280 to 2500 nm, 1277 W/m^2 in that range, 129093 lux), as the irradiance
   of a surface that faces the sun whatever `angle` is; the radiance is in the units of the sky lights (the Y of the film
   is cd/m^2). `illuminance` rescales it (above the atmosphere).
-* The atmosphere is closed form: Rayleigh (Hansen and Travis 1974), aerosols by Angstrom's law with Preetham's turbidity,
-  and ozone's Chappuis band as a fitted bell (ours, good to about 15% of what ozone takes), each times its air mass
-  (Kasten and Young 1989). It is evaluated for each point of the disc, so the lower edge of a low sun is darker and
-  redder. Not in it: water vapour and oxygen bands, the height of the observer, refraction.
+* The atmosphere: the air and the ozone are those of the medium `atmosphere` (`atmosphere.cs`, the data of libRadtran),
+  taken straight down: Rayleigh by the cross section of Bodhaine et al. over the column of the U.S. Standard Atmosphere,
+  ozone by the measured cross sections of Serdyuchenko and Gorshelev at the temperature of each altitude (0.0415 at the
+  peak of the Chappuis band, 602 nm, for 300 Dobson units); aerosols by Angstrom's law with Preetham's turbidity. Each
+  times its air mass (Kasten and Young 1989). It is evaluated for each point of the disc, so the lower edge of a low sun
+  is darker and redder. Not in it: water vapour and oxygen bands, the height of the observer, refraction.
 * `neckel` is a polynomial of the fifth order in the cosine at the sun's surface with coefficients by wavelength (303 to
   1100 nm), divided by its mean over the disc so that the irradiance stays.
 
@@ -295,7 +297,7 @@ Direct illuminance of a surface facing the sun, lux (`SunLight2.Atmosphere`):
 
 | Turbidity | 90 degrees | 30 | 10 | 5 | 2 | 0 |
 |---|---|---|---|---|---|---|
-| 1 | 113847 | 100560 | 65073 | 38359 | 15781 | 3485 |
-| 2 | 103135 | 82609 | 37703 | 14186 | 2526 | 113 |
-| 3 | 93439 | 67888 | 21904 | 5292 | 416 | 4 |
-| 6 | 69524 | 37758 | 4363 | 288 | 2 | 0 |
+| 1 | 114088 | 100985 | 65832 | 39119 | 16251 | 3623 |
+| 2 | 103353 | 82962 | 38152 | 14478 | 2606 | 118 |
+| 3 | 93638 | 68179 | 22170 | 5404 | 429 | 4 |
+| 6 | 69674 | 37924 | 4419 | 295 | 2 | 0 |

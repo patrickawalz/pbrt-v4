@@ -163,11 +163,28 @@ namespace pbrt
         [TEST("SunLight2", "Atmosphere")]
         public static void Atmosphere()
         {
-            // (pure air, no ozone, the sun at the zenith: the Rayleigh optical depth, 0.0973 at 550 nm)
-            EXPECT_NEAR(0.0973, -Math.Log(SunLight2.AtmosphericTransmittance(550, 1, 1, 0)), 2e-3);
-            EXPECT_NEAR(0.3643, -Math.Log(SunLight2.AtmosphericTransmittance(400, 1, 1, 0)), 4e-3);
-            // (ozone: 0.0403 at the peak for 300 Dobson units)
-            EXPECT_NEAR(0.0403, Math.Log(SunLight2.AtmosphericTransmittance(592, 1, 1, 0) / SunLight2.AtmosphericTransmittance(592, 1, 1, 300)), 1e-4);
+            // (pure air, no ozone, the sun at the zenith: the Rayleigh optical depth; Hansen and Travis's formula for it,
+            // 0.008569 l^-4 (1 + 0.0113 l^-2 + 0.00013 l^-4), gives 0.0973 at 550 nm and 0.3643 at 400 nm)
+            double rayleigh550 = -Math.Log(SunLight2.AtmosphericTransmittance(550, 1, 1, 0)), rayleigh400 = -Math.Log(SunLight2.AtmosphericTransmittance(400, 1, 1, 0));
+            EXPECT_NEAR(0.0973, rayleigh550, 2e-3);
+            EXPECT_NEAR(0.3643, rayleigh400, 6e-3);
+            // (ozone: the Chappuis band, about 0.04 at its peak near 600 nm for 300 Dobson units; in proportion to the amount)
+            double peak = 0, peakAt = 0;
+            for (double lambda = 400; lambda <= 800; lambda += 1)
+            {
+                double depth = SunLight2.OzoneOpticalDepth(lambda, 300);
+                if (depth > peak)
+                {
+                    peak = depth;
+                    peakAt = lambda;
+                }
+            }
+            Console.WriteLine("Rayleigh optical depth " + rayleigh550.ToString("F4") + " at 550 nm, " + rayleigh400.ToString("F4") + " at 400 nm; ozone, 300 DU: " +
+                              peak.ToString("F4") + " at its peak, " + peakAt + " nm; " + SunLight2.OzoneOpticalDepth(500, 300).ToString("F4") + " at 500 nm, " +
+                              SunLight2.OzoneOpticalDepth(700, 300).ToString("F4") + " at 700 nm");
+            CHECK(peak > 0.035 && peak < 0.047 && peakAt > 560 && peakAt < 615);
+            EXPECT_NEAR(SunLight2.OzoneOpticalDepth(592, 300), Math.Log(SunLight2.AtmosphericTransmittance(592, 1, 1, 0) / SunLight2.AtmosphericTransmittance(592, 1, 1, 300)), 1e-6);
+            EXPECT_NEAR(1.5 * SunLight2.OzoneOpticalDepth(592, 300), SunLight2.OzoneOpticalDepth(592, 450), 1e-12);
             // (the air mass at the horizon: 38 of Kasten and Young)
             EXPECT_NEAR(37.92, Math.Log(SunLight2.AtmosphericTransmittance(700, 0, 1, 0)) / Math.Log(SunLight2.AtmosphericTransmittance(700, 1, 1, 0)), 0.05);
 

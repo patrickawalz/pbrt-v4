@@ -18,13 +18,13 @@
 //
 // 2. "float turbidity" (absent or 0: no atmosphere; from 1, pure air, by 2 to 3, clear, to 10, hazy): what of the sun's
 //    own light comes through the atmosphere to an observer on the ground, by the elevation of the sun over the horizon of
-//    "vector3 up" (0 0 1), in closed form:
-//      air (Rayleigh)   optical depth 0.008569 l^-4 (1 + 0.0113 l^-2 + 0.00013 l^-4), l in micrometres (Hansen and
-//                       Travis 1974)
-//      aerosols         b l^-1.3 with b = 0.04608 turbidity - 0.04586 (Angstrom's law, as Preetham et al. 1999 have it)
-//      ozone            the Chappuis band as a bell of two widths around 592 nm, 0.0403 at its peak for 300 Dobson units
-//                       ("float ozone", 300): a fit of ours to the band, good to about 15 percent of what ozone takes,
-//                       which is at most 4 percent at the zenith
+//    "vector3 up" (0 0 1). The air and the ozone are those of the medium "atmosphere" (atmosphere.cs, the data of
+//    libRadtran), taken straight down through it:
+//      air (Rayleigh)   the cross section of Bodhaine et al. (1999) times the column of the U.S. Standard Atmosphere 1976
+//      ozone            the measured cross sections of Serdyuchenko and Gorshelev at the temperature of each altitude,
+//                       along the ozone profile of the U.S. standard atmosphere, scaled to "float ozone" Dobson units (300)
+//      aerosols         b l^-1.3, l in micrometres, with b = 0.04608 turbidity - 0.04586 (Angstrom's law, as Preetham et
+//                       al. 1999 have it)
 //    each times its air mass: Kasten and Young (1989) for air and aerosols, 1 / (cos z + 0.50572 (96.07995 - z)^-1.6364)
 //    with the zenith angle z in degrees, and that of a layer at 22 km for ozone. The transmittance is that of each point
 //    of the disc (its lower edge is redder near the horizon). A sun below the horizon keeps the transmittance of the
@@ -121,15 +121,51 @@ namespace pbrt
             // (a layer at the height h over a planet of the radius r: (1 + h / r) / sqrt(cos^2 + 2 h / r), h 22 km)
             const double ozoneHeight = 22000.0 / 6378000.0;
             double ozoneMass = (1 + ozoneHeight) / Math.Sqrt(cosine * cosine + 2 * ozoneHeight);
-            double l = lambdaNm / 1000;
-            double l2 = l * l;
-            double rayleigh = 0.008569 / (l2 * l2) * (1 + 0.0113 / l2 + 0.00013 / (l2 * l2));
+            double rayleigh = AtmosphereProfile.RayleighCrossSection(lambdaNm) * airColumn;
             double beta = Math.Max(0, 0.04608 * turbidity - 0.04586);
-            double aerosol = beta * Math.Pow(l, -1.3);
-            double offset = lambdaNm - 592;
-            double width = offset < 0 ? 54 : 62;
-            double chappuis = 0.0403 * (ozone / 300) * Math.Exp(-offset * offset / (2 * width * width));
-            return Math.Exp(-(rayleigh + aerosol) * airMass - chappuis * ozoneMass);
+            double aerosol = beta * Math.Pow(lambdaNm / 1000, -1.3);
+            double absorbed = OzoneOpticalDepth(lambdaNm, ozone);
+            return Math.Exp(-(rayleigh + aerosol) * airMass - absorbed * ozoneMass);
+        }
+
+        // The air and the ozone of the medium "atmosphere" straight down through it: the molecules of air over a square
+        // metre, the ozone of the standard profile in Dobson units, and its optical depth at the wavelengths of the data
+        // (every AtmosphereData.OzoneLambdaStep from OzoneLambdaStart), with the cross section of each altitude's temperature
+        static readonly double airColumn;
+        static readonly double standardOzone;
+        static readonly double[] ozoneDepth;
+
+        static SunLight2()
+        {
+            const double top = 100000, step = 100;
+            AtmosphereProfile profile = new AtmosphereProfile(top);
+            double[][] cross = AtmosphereData.OzoneCrossSectionByTemperature;
+            double[] temperatures = AtmosphereData.OzoneTemperatures;
+            ozoneDepth = new double[cross[0].Length];
+            double air = 0, ozoneColumn = 0;
+            for (double h = 0.5 * step; h < top; h += step)
+            {
+                air += profile.NumberDensityExact(h) * step;
+                double density = AtmosphereProfile.LogLinear(AtmosphereData.OzoneProfileAltitude, AtmosphereData.OzoneProfileDensity, h);
+                ozoneColumn += density * step;
+                double temperature = AtmosphereProfile.PiecewiseLinear(AtmosphereData.AirProfileAltitude, AtmosphereData.AirProfileTemperature, h);
+                double t = Math.Clamp((temperature - temperatures[0]) / (temperatures[1] - temperatures[0]), 0.0, temperatures.Length - 1.0);
+                int lower = Math.Min((int)t, temperatures.Length - 2);
+                double f = t - lower;
+                for (int i = 0; i < ozoneDepth.Length; ++i)
+                {
+                    ozoneDepth[i] += density * step * ((1 - f) * cross[lower][i] + f * cross[lower + 1][i]);
+                }
+            }
+            airColumn = air;
+            // (1 Dobson unit is 2.687e20 molecules per m^2)
+            standardOzone = ozoneColumn / 2.687e20;
+        }
+
+        // The optical depth of the ozone straight down at a wavelength in nm, for the Dobson units
+        public static double OzoneOpticalDepth(double lambdaNm, double ozone)
+        {
+            return ozone / standardOzone * AtmosphereProfile.Linear(AtmosphereData.OzoneLambdaStart, AtmosphereData.OzoneLambdaStep, ozoneDepth, lambdaNm);
         }
 
         // The irradiance of the sun above the atmosphere at a wavelength in nm, W m^-2 nm^-1: the radiance of the table of
