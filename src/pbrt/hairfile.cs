@@ -91,10 +91,11 @@ namespace pbrt
                         z[i] = set.points[3 * (first + i) + 2];
                         width[i] = scale * (set.thickness != null ? set.thickness[first + i] : set.defaultThickness);
                     }
-                    x = basis.Vectors(x, 3);
-                    y = basis.Vectors(y, 3);
-                    z = basis.Vectors(z, 3);
-                    width = basis.Curves(width, 3);
+                    StrandBasis strandBasis = basis.Parameterized(x, y, z);
+                    x = strandBasis.Vectors(x, 3);
+                    y = strandBasis.Vectors(y, 3);
+                    z = strandBasis.Vectors(z, 3);
+                    width = strandBasis.Curves(width, 3);
                     for (int curve = 0; curve < x.Length / 4; ++curve)
                     {
                         List<ParsedParameter> own = new List<ParsedParameter>();
@@ -173,7 +174,8 @@ namespace pbrt
             int maxDepth = parameters.GetOneInt("maxdepth", 6), steps = Math.Max(1, parameters.GetOneInt("steps", 4));
             bool hasBasis = parameters.GetOneString("basis", "") != "";
             StrandBasis basis = hasBasis ? StrandBasis.Read(parameters, "hairfile", "catmull-rom", 3, loc)
-                                         : new StrandBasis("catmull-rom", 3, 1, parameters.GetOneString("wrap", "pinned"), 0.5, null);
+                                         : new StrandBasis("catmull-rom", 3, 1, parameters.GetOneString("wrap", "pinned"), 0.5, null,
+                                                           parameters.GetOneFloat("parameterization", 0));
             HairStrandSet set = CyHair.Read(filename);
             List<Float> positions = new List<Float>(), normals = new List<Float>(), uvs = new List<Float>();
             List<int> indices = new List<int>();
@@ -197,10 +199,11 @@ namespace pbrt
                     z[i] = set.points[3 * (first + i) + 2];
                     radius[i] = 0.5 * scale * (set.thickness != null ? set.thickness[first + i] : set.defaultThickness);
                 }
-                x = basis.Vectors(x, 3);
-                y = basis.Vectors(y, 3);
-                z = basis.Vectors(z, 3);
-                radius = basis.Curves(radius, 3);
+                StrandBasis strandBasis = basis.Parameterized(x, y, z);
+                x = strandBasis.Vectors(x, 3);
+                y = strandBasis.Vectors(y, 3);
+                z = strandBasis.Vectors(z, 3);
+                radius = strandBasis.Curves(radius, 3);
                 int curves = x.Length / 4;
                 List<SdfVector> centers = new List<SdfVector>(), tangents = new List<SdfVector>();
                 List<double> radii = new List<double>(), along = new List<double>();

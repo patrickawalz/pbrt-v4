@@ -398,5 +398,256 @@ namespace pbrt
                 }
             }
         }
+
+        // The points of a strand at uneven distances: `count` of them, in three coordinates
+        private static void UnevenPoints(int count, int seed, out double[] x, out double[] y, out double[] z)
+        {
+            Random random = new Random(seed);
+            x = new double[count];
+            y = new double[count];
+            z = new double[count];
+            double px = 0, py = 0, pz = 0;
+            for (int i = 0; i < count; ++i)
+            {
+                // (steps from a hundredth to ten: three orders between neighbors)
+                double length = Math.Pow(10, 3 * random.NextDouble() - 2);
+                double dx = 2 * random.NextDouble() - 1, dy = 2 * random.NextDouble() - 1, dz = 2 * random.NextDouble() - 1;
+                double norm = Math.Sqrt(dx * dx + dy * dy + dz * dz) + 1e-9;
+                px += length * dx / norm;
+                py += length * dy / norm;
+                pz += length * dz / norm;
+                x[i] = px;
+                y[i] = py;
+                z[i] = pz;
+            }
+        }
+
+        // The control values with those of "pinned" or of a closed strand around them, and the knots of the points
+        private static double[] Around(double[] g, string wrap)
+        {
+            int n = g.Length;
+            if (wrap == "pinned")
+            {
+                double[] control = new double[n + 2];
+                Array.Copy(g, 0, control, 1, n);
+                control[0] = 2 * g[0] - g[1];
+                control[n + 1] = 2 * g[n - 1] - g[n - 2];
+                return control;
+            }
+            if (wrap == "periodic")
+            {
+                double[] control = new double[n + 3];
+                for (int i = 0; i < n + 3; ++i)
+                {
+                    control[i] = g[i % n];
+                }
+                return control;
+            }
+            return g;
+        }
+
+        // Catmull-Rom with the knots k at the four values g from `at`, at the knot value t between k[at + 1] and k[at + 2]: the
+        // pyramid of Barry and Goldman, which the two papers start from
+        private static double Pyramid(double[] g, double[] k, int at, double t)
+        {
+            double t0 = k[at], t1 = k[at + 1], t2 = k[at + 2], t3 = k[at + 3];
+            double a1 = (t1 - t) / (t1 - t0) * g[at] + (t - t0) / (t1 - t0) * g[at + 1];
+            double a2 = (t2 - t) / (t2 - t1) * g[at + 1] + (t - t1) / (t2 - t1) * g[at + 2];
+            double a3 = (t3 - t) / (t3 - t2) * g[at + 2] + (t - t2) / (t3 - t2) * g[at + 3];
+            double b1 = (t2 - t) / (t2 - t0) * a1 + (t - t0) / (t2 - t0) * a2;
+            double b2 = (t3 - t) / (t3 - t1) * a2 + (t - t1) / (t3 - t1) * a3;
+            return (t2 - t) / (t2 - t1) * b1 + (t - t1) / (t2 - t1) * b2;
+        }
+
+        // "parameterization": the Bezier curves are the Catmull-Rom curve of the knots of the points (the distance between two
+        // points raised to the power), for the points and for a value along them, with every wrap
+        [TEST("StrandBasis", "ParameterizedIsTheCurveOfItsKnots")]
+        public static void ParameterizedIsTheCurveOfItsKnots()
+        {
+            double worst = 0;
+            int curvesSeen = 0;
+            foreach (double power in new double[] { 0.25, 0.5, 2.0 / 3.0, 1 })
+            {
+                foreach (string wrap in new string[] { "nonperiodic", "pinned", "periodic" })
+                {
+                    for (int seed = 1; seed <= 6; ++seed)
+                    {
+                        int n = 5 + seed;
+                        UnevenPoints(n, 10 * seed + 3, out double[] x, out double[] y, out double[] z);
+                        double[] radius = Values(n, seed);
+                        StrandBasis basis = new StrandBasis("catmull-rom", 3, 1, wrap, 0.5, null, power).Parameterized(x, y, z);
+                        CHECK(basis.Check(n) == null);
+                        double[] ax = Around(x, wrap), ay = Around(y, wrap), az = Around(z, wrap);
+                        double[] knots = new double[ax.Length];
+                        for (int i = 1; i < ax.Length; ++i)
+                        {
+                            double dx = ax[i] - ax[i - 1], dy = ay[i] - ay[i - 1], dz = az[i] - az[i - 1];
+                            knots[i] = knots[i - 1] + Math.Pow(Math.Sqrt(dx * dx + dy * dy + dz * dz), power);
+                        }
+                        double[][] given = { x, y, z, radius };
+                        for (int value = 0; value < 4; ++value)
+                        {
+                            double[] curves = value < 3 ? basis.Vectors(given[value], 3) : basis.Curves(given[value], 3);
+                            double[] around = Around(given[value], wrap);
+                            CHECK_EQ(curves.Length / 4, around.Length - 3);
+                            double scale = 0;
+                            foreach (double g in around)
+                            {
+                                scale = Math.Max(scale, Math.Abs(g));
+                            }
+                            for (int c = 0; c < curves.Length / 4; ++c)
+                            {
+                                ++curvesSeen;
+                                for (int j = 0; j <= 16; ++j)
+                                {
+                                    double u = j / 16.0;
+                                    double t = (1 - u) * knots[c + 1] + u * knots[c + 2];
+                                    worst = Math.Max(worst, Math.Abs(Bezier(curves, 3, c, u) - Pyramid(around, knots, c, t)) / scale);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("parameterized catmull-rom: " + curvesSeen + " curves differ from the pyramid of their knots by " + worst + " (relative)");
+            CHECK_LT(worst, 1e-9);
+        }
+
+        // Points at even distances have uniform knots whatever the power: the curve of the matrix
+        [TEST("StrandBasis", "ParameterizedWithEvenPointsIsUniform")]
+        public static void ParameterizedWithEvenPointsIsUniform()
+        {
+            int n = 9;
+            double[] x = new double[n], y = new double[n], z = new double[n];
+            for (int i = 0; i < n; ++i)
+            {
+                // (a ring: the same chord between every two neighbors)
+                x[i] = 3 * Math.Cos(2 * Math.PI * i / n);
+                y[i] = 3 * Math.Sin(2 * Math.PI * i / n);
+                z[i] = 0.5;
+            }
+            double[] radius = Values(n, 4);
+            double worst = 0;
+            foreach (string name in new string[] { "catmull-rom", "monotone" })
+            {
+                foreach (double power in new double[] { 0.5, 1 })
+                {
+                    StrandBasis uniform = new StrandBasis(name, 3, 1, "periodic", 0.5, null);
+                    StrandBasis basis = new StrandBasis(name, 3, 1, "periodic", 0.5, null, power).Parameterized(x, y, z);
+                    double[][] given = { x, y, z, radius };
+                    for (int value = 0; value < 4; ++value)
+                    {
+                        double[] expected = value < 3 ? uniform.Vectors(given[value], 3) : uniform.Curves(given[value], 3);
+                        double[] curves = value < 3 ? basis.Vectors(given[value], 3) : basis.Curves(given[value], 3);
+                        CHECK_EQ(curves.Length, expected.Length);
+                        for (int i = 0; i < curves.Length; ++i)
+                        {
+                            worst = Math.Max(worst, Math.Abs(curves[i] - expected[i]));
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("parameterized, even points: differs from the uniform basis by " + worst);
+            CHECK_LT(worst, 1e-12);
+        }
+
+        // The distance of a curve from the line through its two points, over the distance between them: no more than a quarter
+        // for the centripetal and the chordal curve and an eighth for the power 2/3 (section 4 of the papers), whatever the
+        // neighbors. The uniform curve has no such bound. And the centripetal curve does not stop where it is looked at (the
+        // papers: no cusp; they give no least speed).
+        [TEST("StrandBasis", "CentripetalStaysByItsEdges")]
+        public static void CentripetalStaysByItsEdges()
+        {
+            double[] powers = { 0, 0.5, 2.0 / 3.0, 1 };
+            double[] farthest = new double[4], slowest = { double.MaxValue, double.MaxValue, double.MaxValue, double.MaxValue };
+            for (int seed = 1; seed <= 400; ++seed)
+            {
+                int n = 8;
+                UnevenPoints(n, seed, out double[] x, out double[] y, out double[] z);
+                for (int p = 0; p < 4; ++p)
+                {
+                    StrandBasis basis = new StrandBasis("catmull-rom", 3, 1, "pinned", 0.5, null, powers[p]).Parameterized(x, y, z);
+                    double[] cx = basis.Vectors(x, 3), cy = basis.Vectors(y, 3), cz = basis.Vectors(z, 3);
+                    CHECK_EQ(cx.Length, 4 * (n - 1));
+                    for (int c = 0; c < n - 1; ++c)
+                    {
+                        double ex = x[c + 1] - x[c], ey = y[c + 1] - y[c], ez = z[c + 1] - z[c];
+                        double edge = Math.Sqrt(ex * ex + ey * ey + ez * ez);
+                        for (int j = 0; j <= 64; ++j)
+                        {
+                            double t = j / 64.0;
+                            double dx = Bezier(cx, 3, c, t) - x[c], dy = Bezier(cy, 3, c, t) - y[c], dz = Bezier(cz, 3, c, t) - z[c];
+                            double along = (dx * ex + dy * ey + dz * ez) / edge;
+                            double away = Math.Sqrt(Math.Max(0, dx * dx + dy * dy + dz * dz - along * along));
+                            farthest[p] = Math.Max(farthest[p], away / edge);
+                            // (the speed of the curve over the distance between its points)
+                            double s = 1 - t;
+                            double vx = 3 * (s * s * (cx[4 * c + 1] - cx[4 * c]) + 2 * s * t * (cx[4 * c + 2] - cx[4 * c + 1]) + t * t * (cx[4 * c + 3] - cx[4 * c + 2]));
+                            double vy = 3 * (s * s * (cy[4 * c + 1] - cy[4 * c]) + 2 * s * t * (cy[4 * c + 2] - cy[4 * c + 1]) + t * t * (cy[4 * c + 3] - cy[4 * c + 2]));
+                            double vz = 3 * (s * s * (cz[4 * c + 1] - cz[4 * c]) + 2 * s * t * (cz[4 * c + 2] - cz[4 * c + 1]) + t * t * (cz[4 * c + 3] - cz[4 * c + 2]));
+                            slowest[p] = Math.Min(slowest[p], Math.Sqrt(vx * vx + vy * vy + vz * vz) / edge);
+                        }
+                    }
+                }
+            }
+            for (int p = 0; p < 4; ++p)
+            {
+                Console.WriteLine("power " + powers[p].ToString("F3") + ": farthest from the line of its two points " + farthest[p].ToString("F4") +
+                                  " of their distance; slowest speed " + slowest[p].ToString("G4") + " of it");
+            }
+            CHECK_GT(farthest[0], 1);
+            CHECK_LT(farthest[1], 0.25 + 1e-9);
+            CHECK_LT(farthest[2], 0.125 + 1e-9);
+            CHECK_LT(farthest[3], 0.25 + 1e-9);
+            CHECK_GT(slowest[1], 0);
+        }
+
+        // "monotone" with a parameterization: the values between two points stay between theirs, also with points that are the
+        // same (no interval between them), and the curve still goes through the values
+        [TEST("StrandBasis", "ParameterizedMonotoneStaysBetweenThePoints")]
+        public static void ParameterizedMonotoneStaysBetweenThePoints()
+        {
+            double outside = 0, misses = 0;
+            foreach (bool closed in new bool[] { false, true })
+            {
+                for (int seed = 1; seed <= 40; ++seed)
+                {
+                    int n = 9;
+                    UnevenPoints(n, seed, out double[] x, out double[] y, out double[] z);
+                    if (seed % 4 == 0)
+                    {
+                        x[4] = x[3];
+                        y[4] = y[3];
+                        z[4] = z[3];
+                    }
+                    double[] g = seed % 2 == 0 ? Values(n, seed) : new double[] { 1, 1, 1, 0.05, 0, 0, 0.7, 0.2, 0.2 };
+                    StrandBasis basis = new StrandBasis("monotone", 3, 1, closed ? "periodic" : "nonperiodic", 0.5, null, 0.5).Parameterized(x, y, z);
+                    double[] held = basis.Curves(g, 3);
+                    int curves = closed ? n : n - 1;
+                    CHECK_EQ(held.Length, 4 * curves);
+                    foreach (double[] coordinate in new double[][] { basis.Vectors(x, 3), basis.Vectors(y, 3), basis.Vectors(z, 3), held })
+                    {
+                        foreach (double value in coordinate)
+                        {
+                            CHECK(!double.IsNaN(value) && !double.IsInfinity(value));
+                        }
+                    }
+                    for (int s = 0; s < curves; ++s)
+                    {
+                        int from = closed ? (s + 1) % n : s;
+                        double a = g[from], b = g[(from + 1) % n], low = Math.Min(a, b), high = Math.Max(a, b);
+                        misses = Math.Max(misses, Math.Max(Math.Abs(held[4 * s] - a), Math.Abs(held[4 * s + 3] - b)));
+                        for (int k = 0; k <= 50; ++k)
+                        {
+                            double value = Bezier(held, 3, s, k / 50.0);
+                            outside = Math.Max(outside, Math.Max(low - value, value - high));
+                        }
+                    }
+                }
+            }
+            Console.WriteLine("parameterized monotone: leaves the values of its two points by " + outside + ", misses them by " + misses);
+            CHECK_LT(outside, 1e-12);
+            CHECK_LT(misses, 1e-12);
+        }
     }
 }

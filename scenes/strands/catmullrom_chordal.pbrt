@@ -1,0 +1,246 @@
+LookAt 0 0 -11.5  0 0 0  0 1 0
+Camera "perspective" "float fov" 34
+Sampler "independent" "integer pixelsamples" 64 "integer seed" 7
+Integrator "volpath" "integer maxdepth" 4
+Film "rgb" "integer xresolution" 720 "integer yresolution" 420 "string filename" "catmullrom_chordal.exr"
+WorldBegin
+LightSource "infinite" "rgb L" [0.45 0.5 0.6]
+LightSource "distant" "point3 from" [-3 5 -8] "point3 to" [0 0 0] "rgb L" [2.6 2.5 2.3]
+AttributeBegin
+Material "diffuse" "rgb reflectance" [0.62 0.62 0.62]
+Shape "trianglemesh" "point3 P" [-9 -5 0.6  9 -5 0.6  9 5 0.6  -9 5 0.6] "integer indices" [0 1 2 0 2 3]
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.75 0.38 0.12]
+Shape "rocap" "point3 P" [-3.94500 1.68966 0.08484 -3.90118 1.69142 0.01748 -3.51485 1.61786 0.02598 -2.74527 0.99119 -0.03932 -2.71983 1.06086 0.03869 -2.42345 2.32329 0.09295 -1.74147 1.77334 -0.06850 -1.71974 1.77973 -0.08809 -1.32991 1.21291 -0.09398] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate -3.94500 1.68966 -0.01516
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -3.90118 1.69142 -0.08252
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -3.51485 1.61786 -0.07402
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.74527 0.99119 -0.13932
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.71983 1.06086 -0.06131
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.42345 2.32329 -0.00705
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -1.74147 1.77334 -0.16850
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -1.71974 1.77973 -0.18809
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -1.32991 1.21291 -0.19398
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.75 0.38 0.12]
+Shape "rocap" "point3 P" [-0.63772 1.51080 0.06849 -0.59128 1.54236 -0.00005 0.09606 1.53599 -0.04437 0.99458 2.34354 0.06804 1.05027 2.30197 -0.05407 1.50236 0.95534 0.05326 2.02461 2.11988 -0.02270 2.09256 2.19802 -0.09989 2.49468 2.21541 -0.00600] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate -0.63772 1.51080 -0.03151
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -0.59128 1.54236 -0.10005
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 0.09606 1.53599 -0.14437
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 0.99458 2.34354 -0.03196
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 1.05027 2.30197 -0.15407
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 1.50236 0.95534 -0.04674
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.02461 2.11988 -0.12270
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.09256 2.19802 -0.19989
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.49468 2.21541 -0.10600
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.75 0.38 0.12]
+Shape "rocap" "point3 P" [2.98763 1.44614 -0.08539 3.03947 1.50880 -0.04604 3.36437 1.34888 0.09282 4.11194 1.02699 -0.05072 4.13789 0.92796 0.05940 4.51982 1.68894 -0.01052 4.90996 1.94784 -0.07381 4.96250 1.86156 -0.01585 5.36660 1.25469 0.09419] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate 2.98763 1.44614 -0.18539
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 3.03947 1.50880 -0.14604
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 3.36437 1.34888 -0.00718
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.11194 1.02699 -0.15072
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.13789 0.92796 -0.04060
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.51982 1.68894 -0.11052
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.90996 1.94784 -0.17381
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.96250 1.86156 -0.11585
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 5.36660 1.25469 -0.00581
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.16 0.42 0.72]
+Shape "rocylinder" "point3 P" [-3.72385 -1.89378 0.07697 -3.69253 -1.91757 0.07088 -3.01817 -2.19950 0.09786 -2.61383 -1.96258 0.05454 -2.57671 -2.00841 -0.08532 -2.24993 -1.47590 -0.05140 -1.60112 -1.79244 -0.00936 -1.53313 -1.79611 0.01491 -0.71722 -2.07576 -0.06917] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate -3.72385 -1.89378 -0.02303
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -3.69253 -1.91757 -0.02912
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -3.01817 -2.19950 -0.00214
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.61383 -1.96258 -0.04546
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.57671 -2.00841 -0.18532
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -2.24993 -1.47590 -0.15140
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -1.60112 -1.79244 -0.10936
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -1.53313 -1.79611 -0.08509
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -0.71722 -2.07576 -0.16917
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.16 0.42 0.72]
+Shape "rocylinder" "point3 P" [-0.35769 -1.12330 -0.05010 -0.32739 -1.06943 0.08808 0.06646 -0.92480 0.07644 0.71669 -1.71781 -0.07923 0.73958 -1.61371 -0.05232 1.45347 -1.96453 0.06474 2.09924 -1.90985 -0.06491 2.15554 -2.00687 -0.05432 2.77794 -1.07140 0.02286] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate -0.35769 -1.12330 -0.15010
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate -0.32739 -1.06943 -0.01192
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 0.06646 -0.92480 -0.02356
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 0.71669 -1.71781 -0.17923
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 0.73958 -1.61371 -0.15232
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 1.45347 -1.96453 -0.03526
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.09924 -1.90985 -0.16491
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.15554 -2.00687 -0.15432
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.77794 -1.07140 -0.07714
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+Material "diffuse" "rgb reflectance" [0.16 0.42 0.72]
+Shape "rocylinder" "point3 P" [2.54654 -0.97396 -0.05920 2.56835 -1.02589 -0.01086 2.87644 -2.08562 -0.02624 3.50690 -2.15263 -0.02757 3.57156 -2.04452 0.03139 4.27703 -1.47334 -0.07193 4.56913 -2.32316 0.08204 4.62448 -2.21904 -0.09575 5.29527 -1.62665 0.04610] "float radius" [0.0750 0.0690 0.0630 0.0570 0.0510 0.0450 0.0390 0.0330 0.0270] "string basis" "catmull-rom" "string wrap" "pinned" "float parameterization" 1
+Material "diffuse" "rgb reflectance" [0.05 0.05 0.05]
+AttributeBegin
+Translate 2.54654 -0.97396 -0.15920
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.56835 -1.02589 -0.11086
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 2.87644 -2.08562 -0.12624
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 3.50690 -2.15263 -0.12757
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 3.57156 -2.04452 -0.06861
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.27703 -1.47334 -0.17193
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.56913 -2.32316 -0.01796
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 4.62448 -2.21904 -0.19575
+Shape "sphere" "float radius" 0.035
+AttributeEnd
+AttributeBegin
+Translate 5.29527 -1.62665 -0.05390
+Shape "sphere" "float radius" 0.035
+AttributeEnd
