@@ -1077,6 +1077,15 @@ namespace pbrt
                     z[i] = points[i].z;
                 }
                 basis = basis.Parameterized(x, y, z);
+                if (parameters.GetOneBool("checkselfintersection", false))
+                {
+                    // (strandbasis.cs: the rules under which the centripetal catmull-rom curve cannot cross itself)
+                    string crossing = basis.SelfIntersection(x, y, z);
+                    if (crossing != null)
+                    {
+                        pbrt.Warning(loc, (disks ? "rocylinder" : "rocap") + ": the strand is not sure to be free of self-intersections: " + crossing + ".");
+                    }
+                }
                 x = basis.Vectors(x, 3);
                 y = basis.Vectors(y, 3);
                 z = basis.Vectors(z, 3);

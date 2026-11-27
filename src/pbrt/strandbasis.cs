@@ -29,6 +29,11 @@
 //                    color, normal) is taken along with the same knots, and "monotone" holds its tangents in them (Steffen's
 //                    rule for knots that are not uniform). The Bezier values are exact here too: each curve is one cubic.
 //                    Where two points in a row are the same the tangent there is that of the other side (a corner).
+//                    "cardinal" takes it too: its tangents are those of catmull-rom times twice the "tension".
+//                    DistanceBounds: how far each curve can be from the straight piece between its two points, from the
+//                    distances between the points alone (section 4 of the papers; for powers from 0.5).
+//                    SelfIntersection: the three rules of section 5 under which the centripetal curve cannot cross itself
+//                    (the shapes "rocap", "rocylinder" and "hairfile" warn by them with "bool checkselfintersection").
 //   "integer step"   of the cubic bases, as in RenderMan (bezier, power 3; hermite 2; the others 1).
 //   "string wrap"    "nonperiodic" (the default);
 //                    "periodic": the strand is closed, the control points are taken around;
@@ -72,6 +77,92 @@ namespace pbrt
                 PatchBases.TryGet("bezier", out double[,] bezier);
                 toBezier = PatchBases.Multiply(PatchBases.Inverse(bezier), matrix);
             }
+        }
+
+        // For each curve of the strand with the points x, y, z, the largest distance that the curve can have from the straight
+        // piece between its two points, from the distances between the points alone (Yuksel et al., section 4): with d the
+        // length of the piece and r the length of a neighboring piece over d, the curve is within d r^(1 - a) / (4 (1 + r^a)) of
+        // the line through the piece (equation 6) and, past an end of it, within d sqrt(r^2 - r^(4a)) / (3 r^a (1 + r^a)) of
+        // that end (equation 8; nothing for the centripetal curve), for both neighbors. A tube of this radius (and the radius
+        // of the strand) around the piece holds the curve. False without such a bound: a power under 0.5 (where the papers
+        // have none past the ends), a cardinal curve of another tension, "monotone" (other tangents), another basis.
+        public bool DistanceBounds(double[] x, double[] y, double[] z, out double[] bounds)
+        {
+            bounds = null;
+            bool catmullRom = name == "catmull-rom" || (name == "cardinal" && tension == 0.5);
+            if (!catmullRom || !(parameterization >= 0.5))
+            {
+                return false;
+            }
+            double[] controlX = Extended(x), controlY = Extended(y), controlZ = Extended(z);
+            int n = controlX.Length;
+            bool periodic = wrap == "periodic";
+            int count = periodic ? n : n - 3;
+            bounds = new double[count];
+            for (int s = 0; s < count; ++s)
+            {
+                int a = s, b = (s + 1) % n, c = (s + 2) % n, d = (s + 3) % n;
+                double before = Distance(controlX, controlY, controlZ, a, b);
+                double along = Distance(controlX, controlY, controlZ, b, c);
+                double after = Distance(controlX, controlY, controlZ, c, d);
+                bounds[s] = along > 0 ? along * Math.Max(PieceBound(before / along), PieceBound(after / along)) : 0;
+            }
+            return true;
+        }
+
+        // Why the curve of the strand with the points x, y, z may cross itself, or null where it cannot (Yuksel et al., section
+        // 5; the centerline, not the tube around it): the centripetal parameterization, so that no curve has a cusp or a loop;
+        // an angle of more than 60 degrees between the two pieces at every point, so that two curves in a row do not meet again;
+        // and for every two curves that are not in a row, more between their straight pieces than their two distance bounds.
+        // The rules are sufficient, not necessary: a strand that fails them may well be free.
+        public string SelfIntersection(double[] x, double[] y, double[] z)
+        {
+            if (name != "catmull-rom" || parameterization != 0.5)
+            {
+                return "the rules are those of the basis \"catmull-rom\" with the \"parameterization\" 0.5 (centripetal)";
+            }
+            DistanceBounds(x, y, z, out double[] bounds);
+            double[] controlX = Extended(x), controlY = Extended(y), controlZ = Extended(z);
+            int n = controlX.Length;
+            bool periodic = wrap == "periodic";
+            int count = bounds.Length;
+            for (int i = 0; i < (periodic ? n : n - 1); ++i)
+            {
+                if (!(Distance(controlX, controlY, controlZ, i, (i + 1) % n) > 0))
+                {
+                    return "two points in a row are the same (point " + i + ")";
+                }
+            }
+            for (int i = periodic ? 0 : 1; i < (periodic ? n : n - 1); ++i)
+            {
+                int last = (i + n - 1) % n, next = (i + 1) % n;
+                double ax = controlX[last] - controlX[i], ay = controlY[last] - controlY[i], az = controlZ[last] - controlZ[i];
+                double bx = controlX[next] - controlX[i], by = controlY[next] - controlY[i], bz = controlZ[next] - controlZ[i];
+                double cosine = (ax * bx + ay * by + az * bz) / (Math.Sqrt(ax * ax + ay * ay + az * az) * Math.Sqrt(bx * bx + by * by + bz * bz));
+                // (more than 60 degrees: a cosine under one half)
+                if (!(cosine < 0.5))
+                {
+                    return "the angle at point " + (Pinned() ? i - 1 : i) + " is " + (Math.Acos(Math.Clamp(cosine, -1, 1)) * 180 / Math.PI).ToString("F1") +
+                           " degrees, not more than 60";
+                }
+            }
+            for (int s = 0; s < count; ++s)
+            {
+                for (int t = s + 2; t < count; ++t)
+                {
+                    if (periodic && (t + 1) % count == s)
+                    {
+                        continue;
+                    }
+                    double between = PieceDistance(controlX, controlY, controlZ, (s + 1) % n, (s + 2) % n, (t + 1) % n, (t + 2) % n);
+                    if (!(between > bounds[s] + bounds[t]))
+                    {
+                        return "the curves " + s + " and " + t + " are " + between.ToString("G4") + " apart, within their bounds (" + bounds[s].ToString("G4") + " and " +
+                               bounds[t].ToString("G4") + ")";
+                    }
+                }
+            }
+            return null;
         }
 
         // The basis of the parameters of a shape. defaultName, defaultDegree: of the shape ("degree" is only read for bezier and
@@ -124,9 +215,9 @@ namespace pbrt
             double parameterization = parameters.GetOneFloat("parameterization", 0);
             if (parameterization != 0)
             {
-                if (name != "catmull-rom" && name != "monotone")
+                if (name != "catmull-rom" && name != "monotone" && name != "cardinal")
                 {
-                    pbrt.ErrorExit(loc, shape + ": \"parameterization\" is for the bases \"catmull-rom\" and \"monotone\".");
+                    pbrt.ErrorExit(loc, shape + ": \"parameterization\" is for the bases \"catmull-rom\", \"cardinal\" and \"monotone\".");
                 }
                 if (step != 1)
                 {
@@ -324,20 +415,71 @@ namespace pbrt
             double[] control = Extended(g);
             int n = control.Length;
             int count = wrap == "periodic" ? n : n - 3;
+            // (cardinal: the tangents of catmull-rom, which has the tension 0.5, times twice the tension)
+            double scale = name == "cardinal" ? 2 * tension : 1;
             double[] values = new double[4 * count];
             for (int s = 0; s < count; ++s)
             {
                 // (closed, the first curve is from the second point, as that of the matrix)
                 int a = s, b = (s + 1) % n, c = (s + 2) % n, d = (s + 3) % n;
                 double along = intervals[b];
-                double tangentB = KnotTangent(control[a], control[b], control[c], intervals[a], along, hold);
-                double tangentC = KnotTangent(control[b], control[c], control[d], along, intervals[c], hold);
+                double tangentB = scale * KnotTangent(control[a], control[b], control[c], intervals[a], along, hold);
+                double tangentC = scale * KnotTangent(control[b], control[c], control[d], along, intervals[c], hold);
                 values[4 * s] = control[b];
                 values[4 * s + 1] = control[b] + along * tangentB / 3;
                 values[4 * s + 2] = control[c] - along * tangentC / 3;
                 values[4 * s + 3] = control[c];
             }
             return values;
+        }
+
+        // The bound of a curve over the length of its piece, for the neighbor of the length r times that: the larger of
+        // equation 6 (from the line) and equation 8 (from the end, where the root is real)
+        private double PieceBound(double r)
+        {
+            double a = parameterization;
+            if (!(r > 0))
+            {
+                // (the neighbor has no length: the tangent there is along the piece)
+                return 0;
+            }
+            double power = Math.Pow(r, a);
+            double fromLine = r / power / (4 * (1 + power));
+            double inside = r * r - power * power * power * power;
+            double fromEnd = inside > 0 ? Math.Sqrt(inside) / (3 * power * (1 + power)) : 0;
+            return Math.Max(fromLine, fromEnd);
+        }
+
+        private static double Distance(double[] x, double[] y, double[] z, int i, int j)
+        {
+            double dx = x[j] - x[i], dy = y[j] - y[i], dz = z[j] - z[i];
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        // The distance between the straight piece from point a to b and that from c to d (the closest points of two segments:
+        // the unconstrained pair clamped to the segments, one after the other)
+        private static double PieceDistance(double[] x, double[] y, double[] z, int a, int b, int c, int d)
+        {
+            double ux = x[b] - x[a], uy = y[b] - y[a], uz = z[b] - z[a];
+            double vx = x[d] - x[c], vy = y[d] - y[c], vz = z[d] - z[c];
+            double wx = x[a] - x[c], wy = y[a] - y[c], wz = z[a] - z[c];
+            double uu = ux * ux + uy * uy + uz * uz, vv = vx * vx + vy * vy + vz * vz, uv = ux * vx + uy * vy + uz * vz;
+            double uw = ux * wx + uy * wy + uz * wz, vw = vx * wx + vy * wy + vz * wz;
+            double denominator = uu * vv - uv * uv;
+            double s = denominator > 0 ? Math.Clamp((uv * vw - vv * uw) / denominator, 0, 1) : 0;
+            double t = vv > 0 ? (uv * s + vw) / vv : 0;
+            if (t < 0)
+            {
+                t = 0;
+                s = uu > 0 ? Math.Clamp(-uw / uu, 0, 1) : 0;
+            }
+            else if (t > 1)
+            {
+                t = 1;
+                s = uu > 0 ? Math.Clamp((uv - uw) / uu, 0, 1) : 0;
+            }
+            double px = wx + s * ux - t * vx, py = wy + s * uy - t * vy, pz = wz + s * uz - t * vz;
+            return Math.Sqrt(px * px + py * py + pz * pz);
         }
 
         // The tangent, by the knot, at the middle one of three values with the knot intervals `before` and `after` between them:

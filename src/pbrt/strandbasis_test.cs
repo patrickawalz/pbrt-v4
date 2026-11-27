@@ -649,5 +649,198 @@ namespace pbrt
             CHECK_LT(outside, 1e-12);
             CHECK_LT(misses, 1e-12);
         }
+
+        // The distance from the point p to the straight piece from a to b
+        private static double FromPiece(double px, double py, double pz, double ax, double ay, double az, double bx, double by, double bz)
+        {
+            double ex = bx - ax, ey = by - ay, ez = bz - az;
+            double length2 = ex * ex + ey * ey + ez * ez;
+            double t = length2 > 0 ? Math.Clamp(((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / length2, 0, 1) : 0;
+            double dx = px - ax - t * ex, dy = py - ay - t * ey, dz = pz - az - t * ez;
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        // "cardinal" with a parameterization: the tension 0.5 is catmull-rom, 0 gives straight pieces, and the tangents are in
+        // proportion to the tension
+        [TEST("StrandBasis", "ParameterizedCardinalHasTheTension")]
+        public static void ParameterizedCardinalHasTheTension()
+        {
+            double sameAsCatmullRom = 0, straight = 0, proportion = 0;
+            foreach (string wrap in new string[] { "nonperiodic", "pinned", "periodic" })
+            {
+                UnevenPoints(9, 21, out double[] x, out double[] y, out double[] z);
+                double[] radius = Values(9, 2);
+                StrandBasis catmull = new StrandBasis("catmull-rom", 3, 1, wrap, 0.5, null, 0.5).Parameterized(x, y, z);
+                StrandBasis half = new StrandBasis("cardinal", 3, 1, wrap, 0.5, null, 0.5).Parameterized(x, y, z);
+                StrandBasis none = new StrandBasis("cardinal", 3, 1, wrap, 0, null, 0.5).Parameterized(x, y, z);
+                StrandBasis third = new StrandBasis("cardinal", 3, 1, wrap, 0.3, null, 0.5).Parameterized(x, y, z);
+                foreach (double[] g in new double[][] { x, y, z, radius })
+                {
+                    double[] expected = catmull.Vectors(g, 3), same = half.Vectors(g, 3), pieces = none.Curves(g, 3), scaled = third.Vectors(g, 3);
+                    for (int i = 0; i < expected.Length; ++i)
+                    {
+                        sameAsCatmullRom = Math.Max(sameAsCatmullRom, Math.Abs(expected[i] - same[i]));
+                    }
+                    for (int c = 0; c < expected.Length / 4; ++c)
+                    {
+                        double a = expected[4 * c], b = expected[4 * c + 3];
+                        straight = Math.Max(straight, Math.Max(Math.Abs(pieces[4 * c + 1] - a), Math.Abs(pieces[4 * c + 2] - b)));
+                        // (the tangents: 0.3 / 0.5 of those of catmull-rom)
+                        proportion = Math.Max(proportion, Math.Abs((scaled[4 * c + 1] - a) - 0.6 * (expected[4 * c + 1] - a)));
+                        proportion = Math.Max(proportion, Math.Abs((scaled[4 * c + 2] - b) - 0.6 * (expected[4 * c + 2] - b)));
+                    }
+                }
+            }
+            Console.WriteLine("parameterized cardinal: tension 0.5 differs from catmull-rom by " + sameAsCatmullRom + ", tension 0 from straight pieces by " + straight +
+                              ", tension 0.3 from 0.6 of the tangents by " + proportion);
+            CHECK_LT(sameAsCatmullRom, 1e-12);
+            CHECK_LT(straight, 1e-12);
+            CHECK_LT(proportion, 1e-12);
+        }
+
+        // DistanceBounds: no point of a curve is farther from the straight piece between its two points than the bound, which
+        // comes from the distances between the points alone; how much of the bound the curves use is printed
+        [TEST("StrandBasis", "DistanceBoundsHoldTheCurves")]
+        public static void DistanceBoundsHoldTheCurves()
+        {
+            foreach (double power in new double[] { 0.5, 2.0 / 3.0, 0.8, 1 })
+            {
+                double worst = 0, used = 0, largest = 0;
+                int curvesSeen = 0;
+                foreach (string wrap in new string[] { "nonperiodic", "pinned", "periodic" })
+                {
+                    for (int seed = 1; seed <= 300; ++seed)
+                    {
+                        int n = 8;
+                        UnevenPoints(n, 1000 + seed, out double[] x, out double[] y, out double[] z);
+                        StrandBasis basis = new StrandBasis("catmull-rom", 3, 1, wrap, 0.5, null, power).Parameterized(x, y, z);
+                        CHECK(basis.DistanceBounds(x, y, z, out double[] bounds));
+                        double[] cx = basis.Vectors(x, 3), cy = basis.Vectors(y, 3), cz = basis.Vectors(z, 3);
+                        CHECK_EQ(bounds.Length, cx.Length / 4);
+                        for (int c = 0; c < bounds.Length; ++c)
+                        {
+                            double ax = cx[4 * c], ay = cy[4 * c], az = cz[4 * c], bx = cx[4 * c + 3], by = cy[4 * c + 3], bz = cz[4 * c + 3];
+                            double edge = Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay) + (bz - az) * (bz - az));
+                            double farthest = 0;
+                            for (int j = 0; j <= 64; ++j)
+                            {
+                                double t = j / 64.0;
+                                farthest = Math.Max(farthest, FromPiece(Bezier(cx, 3, c, t), Bezier(cy, 3, c, t), Bezier(cz, 3, c, t), ax, ay, az, bx, by, bz));
+                            }
+                            worst = Math.Max(worst, (farthest - bounds[c]) / edge);
+                            used += bounds[c] > 0 ? farthest / bounds[c] : 1;
+                            largest = Math.Max(largest, bounds[c] / edge);
+                            ++curvesSeen;
+                        }
+                    }
+                }
+                Console.WriteLine("power " + power.ToString("F3") + ": " + curvesSeen + " curves, past their bound by " + worst.ToString("G3") +
+                                  " of the piece at most; the curves use " + (100 * used / curvesSeen).ToString("F1") + "% of the bound on average; largest bound " +
+                                  largest.ToString("F4") + " of the piece");
+                CHECK_LT(worst, 1e-9);
+            }
+            // No bound: the uniform curve, "monotone", a cardinal curve of another tension
+            UnevenPoints(8, 5, out double[] ux, out double[] uy, out double[] uz);
+            CHECK(!new StrandBasis("catmull-rom", 3, 1, "pinned", 0.5, null).DistanceBounds(ux, uy, uz, out double[] _));
+            CHECK(!new StrandBasis("monotone", 3, 1, "nonperiodic", 0.5, null, 0.5).Parameterized(ux, uy, uz).DistanceBounds(ux, uy, uz, out double[] _));
+            CHECK(!new StrandBasis("cardinal", 3, 1, "pinned", 0.3, null, 0.5).Parameterized(ux, uy, uz).DistanceBounds(ux, uy, uz, out double[] _));
+            CHECK(new StrandBasis("cardinal", 3, 1, "pinned", 0.5, null, 0.5).Parameterized(ux, uy, uz).DistanceBounds(ux, uy, uz, out double[] _));
+        }
+
+        // The closest that two curves of a strand that are not in a row come to each other, by their points at 33 values each
+        private static double ClosestApproach(double[] cx, double[] cy, double[] cz, bool closed)
+        {
+            int curves = cx.Length / 4;
+            double closest = double.MaxValue;
+            for (int s = 0; s < curves; ++s)
+            {
+                for (int t = s + 2; t < curves; ++t)
+                {
+                    if (closed && (t + 1) % curves == s)
+                    {
+                        continue;
+                    }
+                    for (int i = 0; i <= 32; ++i)
+                    {
+                        double ax = Bezier(cx, 3, s, i / 32.0), ay = Bezier(cy, 3, s, i / 32.0), az = Bezier(cz, 3, s, i / 32.0);
+                        for (int j = 0; j <= 32; ++j)
+                        {
+                            double dx = Bezier(cx, 3, t, j / 32.0) - ax, dy = Bezier(cy, 3, t, j / 32.0) - ay, dz = Bezier(cz, 3, t, j / 32.0) - az;
+                            closest = Math.Min(closest, Math.Sqrt(dx * dx + dy * dy + dz * dz));
+                        }
+                    }
+                }
+            }
+            return closest;
+        }
+
+        // SelfIntersection: a helix passes the rules, a strand that crosses itself and one with a sharp turn do not, and of
+        // strands in a plane at random none that passes comes near itself
+        [TEST("StrandBasis", "SelfIntersectionRules")]
+        public static void SelfIntersectionRules()
+        {
+            StrandBasis centripetal = new StrandBasis("catmull-rom", 3, 1, "pinned", 0.5, null, 0.5);
+            int n = 24;
+            double[] x = new double[n], y = new double[n], z = new double[n];
+            for (int i = 0; i < n; ++i)
+            {
+                x[i] = Math.Cos(0.9 * i);
+                y[i] = Math.Sin(0.9 * i);
+                z[i] = 0.35 * i;
+            }
+            string helix = centripetal.Parameterized(x, y, z).SelfIntersection(x, y, z);
+            Console.WriteLine("helix: " + (helix ?? "free"));
+            CHECK(helix == null);
+
+            // (a figure of eight in a plane: it crosses itself)
+            double[] ex = { 0, 2, 4, 4, 2, 0, 0 }, ey = { 0, 2, 2, 0, 0, 2, 0.3 }, ez = new double[7];
+            string eight = centripetal.Parameterized(ex, ey, ez).SelfIntersection(ex, ey, ez);
+            Console.WriteLine("figure of eight: " + eight);
+            CHECK(eight != null);
+
+            // (a turn of 150 degrees: an angle of 30 between the pieces)
+            double[] sx = { 0, 1, 2, 2 - Math.Cos(Math.PI / 6), 2 - 2 * Math.Cos(Math.PI / 6) }, sy = { 0, 0, 0, 0.5, 1 }, sz = new double[5];
+            string sharp = centripetal.Parameterized(sx, sy, sz).SelfIntersection(sx, sy, sz);
+            Console.WriteLine("sharp turn: " + sharp);
+            CHECK(sharp != null && sharp.Contains("angle at point 2"));
+
+            // (another parameterization: the rules are not for it)
+            CHECK(new StrandBasis("catmull-rom", 3, 1, "pinned", 0.5, null, 1).Parameterized(x, y, z).SelfIntersection(x, y, z) != null);
+
+            // Strands in a plane at random (where a strand crosses itself often): those that pass stay away from themselves
+            Random random = new Random(77);
+            int passed = 0, failed = 0, crossingAmongFailed = 0;
+            double closestPassed = double.MaxValue;
+            for (int trial = 0; trial < 3000; ++trial)
+            {
+                int count = 7;
+                double[] px = new double[count], py = new double[count], pz = new double[count];
+                double heading = 2 * Math.PI * random.NextDouble();
+                for (int i = 1; i < count; ++i)
+                {
+                    heading += (2 * random.NextDouble() - 1) * 1.9;
+                    double length = 0.3 + 1.7 * random.NextDouble();
+                    px[i] = px[i - 1] + length * Math.Cos(heading);
+                    py[i] = py[i - 1] + length * Math.Sin(heading);
+                }
+                StrandBasis basis = centripetal.Parameterized(px, py, pz);
+                double closest = ClosestApproach(basis.Vectors(px, 3), basis.Vectors(py, 3), basis.Vectors(pz, 3), false);
+                if (basis.SelfIntersection(px, py, pz) == null)
+                {
+                    ++passed;
+                    closestPassed = Math.Min(closestPassed, closest);
+                }
+                else
+                {
+                    ++failed;
+                    crossingAmongFailed += closest < 0.02 ? 1 : 0;
+                }
+            }
+            Console.WriteLine("strands in a plane: " + passed + " pass (the closest that one comes to itself: " + closestPassed.ToString("F4") + "), " + failed +
+                              " do not (" + crossingAmongFailed + " of them come within 0.02 of themselves)");
+            CHECK_GT(passed, 100);
+            CHECK_GT(closestPassed, 0.02);
+            CHECK_GT(crossingAmongFailed, 50);
+        }
     }
 }
