@@ -1106,6 +1106,7 @@ namespace pbrt
                 maximum = new SdfVector(Math.Max(maximum.x, x[i]), Math.Max(maximum.y, y[i]), Math.Max(maximum.z, z[i]));
             }
             double diagonal = (maximum - minimum).Length();
+            basis = basis.Parameterized(x, y, z);
             int degree = basis.Degree == 3 ? 3 : 2;
             double[] givenWidths = null;
             if (widthList.Count > 1)

@@ -1561,6 +1561,7 @@ namespace pbrt
             }
             double diagonal = (maximum - minimum).Length();
             double[] givenX = x, givenY = y, givenZ = z;
+            basis = basis.Parameterized(x, y, z);
             x = basis.Vectors(x, 3);
             y = basis.Vectors(y, 3);
             z = basis.Vectors(z, 3);
