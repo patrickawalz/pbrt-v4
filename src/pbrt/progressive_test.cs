@@ -362,6 +362,60 @@ namespace pbrt
             AfterRender();
         }
 
+        // jrlt renders in passes too (without the noise importance): until it is stopped, well past its mutations a pixel
+        [TEST("Progressive", "JrltUntilStopped")]
+        public static void JrltUntilStopped()
+        {
+            string filename = Path.Combine(Path.GetTempPath(), "magi_progressive_jrlt_test.exr");
+            BasicScene basicScene = new BasicScene();
+            BasicSceneBuilder builder = new BasicSceneBuilder(basicScene);
+            ParseString(builder, scene.Replace("FILENAME", filename.Replace("\\", "/"))
+                                      .Replace("Integrator \"path\" \"integer maxdepth\" 5",
+                                               "Integrator \"jrlt\" \"integer maxdepth\" 4 \"integer mutationsperpixel\" 2 \"integer bootstrapsamples\" 2000"));
+            RenderSession session = new RenderSession();
+            EXPECT_EQ(session.HaltSpp, 0);
+            EXPECT_EQ(session.HaltTime, 0.0);
+            session.DevelopInterval = 0.05;
+            RenderSession.Next = session;
+            Thread render = new Thread(() => RenderCPU(basicScene));
+            render.Start();
+            WaitFor(() => session.Passes >= 8 && session.LatestImage != null, 120000);
+            EXPECT_GE(session.Passes, 8);
+            EXPECT_TRUE(render.IsAlive);
+            ASSERT_TRUE(session.LatestImage != null);
+            // Paused and resumed
+            session.Pause();
+            Thread.Sleep(200);
+            int paused = session.Passes;
+            Thread.Sleep(200);
+            EXPECT_EQ(session.Passes, paused);
+            session.Resume();
+            WaitFor(() => session.Passes >= paused + 2, 120000);
+            EXPECT_GE(session.Passes, paused + 2);
+            session.Stop();
+            EXPECT_TRUE(render.Join(120000));
+            int done = session.Passes;
+            EXPECT_EQ(session.Film.SamplesCounted(), (long)done * session.Film.PixelBounds().Area());
+            ImageAndMetadata written = Image.Read(filename);
+            EXPECT_EQ(written.metadata.samplesPerPixel.value(), done);
+            // (the image of the passes: about as bright as the path tracer's of the same scene, whatever their number)
+            ImageChannelDesc desc = written.image.GetChannelDesc(new string[] { "R", "G", "B" });
+            double sum = 0;
+            for (int y = 0; y < written.image.Resolution().y; ++y)
+            {
+                for (int x = 0; x < written.image.Resolution().x; ++x)
+                {
+                    sum += written.image.GetChannels(new Point2i(x, y), desc).Average();
+                }
+            }
+            double meanValue = sum / (written.image.Resolution().x * written.image.Resolution().y);
+            EXPECT_GT(meanValue, 0.1);
+            EXPECT_LT(meanValue, 0.5);
+            File.Delete(filename);
+            session.Dispose();
+            AfterRender();
+        }
+
         // A time: the render ends at the end of the pass the time runs out in
         [TEST("Progressive", "HaltTime")]
         public static void HaltTime()

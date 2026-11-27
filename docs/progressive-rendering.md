@@ -236,10 +236,13 @@ Measured (Magi, a C# port of pbrt-v4; 200x150, 6 spp, independent sampler, seed 
 
 ### Not done, and limits
 
-- **The relatives of MLT** (`erpt`, `pmcer`, `jrlt`, `smmc`, `jrsmmc`), and `mlt` with the noise importance (which renders in
-  stages of set sizes), still run their own loops to their own budget: no passes, no stop conditions, pause only between
-  chains, and all their light in the layer `default`. They render as before. The time of `--halt-time` for `mlt` is that of
-  the passes: the bootstrap comes before it.
+- **`jrlt`, `smmc` and `jrsmmc`** render in passes of one mutation a pixel, as `mlt` does, with the light of each layer in
+  its layer: each pass is an image of its own, and what it learns plans the next. With the noise importance they render in
+  their stages of set sizes instead, as below.
+- **The other relatives of MLT** (`erpt`, `pmcer`), and `mlt`, `jrlt`, `smmc` and `jrsmmc` with the noise importance (which
+  render in stages of set sizes), still run their own loops to their own budget: no passes, no stop conditions, pause only
+  between chains, and all their light in the layer `default`. They render as before. The time of `--halt-time` for `mlt` is
+  that of the passes: the bootstrap comes before it.
 - **Layers** are in `RGBFilm` only. The G-buffer and the spectral film are films of one layer. The polarised paths of
   `volpath` and the volume emission seen through a refractive cap put their light in `default`.
 - **Samplers** made for a fixed count are not stopped at their count when a time limit asks for more passes.

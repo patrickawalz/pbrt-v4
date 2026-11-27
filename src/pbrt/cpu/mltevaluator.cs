@@ -260,8 +260,58 @@ namespace pbrt
             if (!hasCameraRay)
                 return new SampledSpectrum(0.0f);
             StrayLight.skipEmission = strayLights && straySample;
-            SampledSpectrum Lval = weight * volpath.Li(crdRay, ref lambda, sampler, scratchBuffer, null);
+            LightLayers.Clear();
+            SampledSpectrum Li = volpath.Li(crdRay, ref lambda, sampler, scratchBuffer, null);
             StrayLight.skipEmission = false;
+            // (not in pbrt-v4) The walk gathers the light of several lights, of several light layers: the shares of the layers
+            // in the light of the path, for the splat (the walk has left what each layer but the default gave)
+            SampledSpectrum[] layered = LightLayers.Scratch();
+            if (layered == null)
+            {
+                LightLayers.Sampled(0);
+            }
+            else
+            {
+                int used = 0;
+                for (int i = 1; i < layered.Length; ++i)
+                {
+                    if ((bool)layered[i])
+                    {
+                        ++used;
+                    }
+                }
+
+                LightLayerSplit split = new LightLayerSplit();
+                split.layers = new int[used + 1];
+                split.shares = new SampledSpectrum[used + 1];
+                SampledSpectrum rest = new SampledSpectrum(1.0f);
+                int next = 1;
+                for (int i = 1; i < layered.Length; ++i)
+                {
+                    if (!layered[i])
+                    {
+                        continue;
+                    }
+
+                    SampledSpectrum share = new SampledSpectrum(0.0f);
+                    for (int c = 0; c < NSpectrumSamples; ++c)
+                    {
+                        share[c] = Li[c] != 0 ? layered[i][c] / Li[c] : 0;
+                    }
+
+                    split.layers[next] = i;
+                    split.shares[next] = share;
+                    rest -= share;
+                    ++next;
+                }
+
+                split.layers[0] = 0;
+                split.shares[0] = rest;
+                LightLayers.Sampled(split);
+                LightLayers.Clear();
+            }
+
+            SampledSpectrum Lval = weight * Li;
             if (strayLights)
                 Lval *= 2;
             if (Lval.HasNaNs() || IsInf(Lval.y(lambda)))

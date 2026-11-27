@@ -4369,14 +4369,26 @@ namespace pbrt
             double[] previousMean = new double[depthCount];
             long totalOutliers = 0;
             long totalCandidates = 0;
-            for (int stage = 0; stage < stageCount; ++stage)
+            // (progressive rendering, progressive.cs) Without the noise importance the stages differ in nothing but what the one
+            // before learnt (the mean of I, the evaluations of a tour, the outliers), so the render is in passes of one
+            // mutation a pixel instead: each pass is what a stage of one mutation a pixel is, an image of its own, and the image
+            // is their mean. The passes go on until the session ends the render. With the noise importance the render is in
+            // its stages, whose sizes are set beforehand, and the image is there at the end.
+            bool progressive = !noiseImportance;
+            RenderSession session = progressive ? RenderSession.Begin(film, mutationsPerPixel) : null;
+            ProgressReporter progressPasses = progressive
+                ? new ProgressReporter(Options.haltSpp > 0 ? Options.haltSpp : mutationsPerPixel, "Rendering (" + algorithm + ")",
+                                       Options.quiet || (Options.haltSpp == 0 && Options.haltTime > 0))
+                : null;
+            int passes = 0;
+            for (int stage = 0; progressive ? session.NextPass(stage) : stage < stageCount; ++stage)
             {
-                int stageMutationsPerPixel = StageMutations(stage, stageCount);
+                int stageMutationsPerPixel = progressive ? 1 : StageMutations(stage, stageCount);
                 if (stageMutationsPerPixel <= 0)
                 {
                     continue;
                 }
-                MLTStageKind kind = !noiseImportance || stage == 0 ? MLTStageKind.Pilot :
+                MLTStageKind kind = progressive || !noiseImportance || stage == 0 ? MLTStageKind.Pilot :
                                     (schedule != null ? schedule[stage] : MLTStageKind.Noise);
                 importance.Select(kind);
                 Float beta = kind == MLTStageKind.Tail ? tailExponent : 1;
@@ -4393,12 +4405,12 @@ namespace pbrt
                 {
                     return weight > 0 && cValue > 0 ? (beta == 1 ? cValue : MathF.Pow(cValue, beta)) * importance.Weight(p) * weight : 0;
                 };
-                double stageWeight = (double)stageMutationsPerPixel / mutationsPerPixel;
+                double stageWeight = progressive ? 1 : (double)stageMutationsPerPixel / mutationsPerPixel;
                 double stageCandidates = (double)pixelCount * stageMutationsPerPixel / (1.0 + extraPerCandidate);
                 long[] tourEvaluations = new long[1];
                 long[] stageOutliers = new long[1];
                 long stageCandidateCount = 0;
-                MLTNoiseEstimate noise = noiseImportance && stage < stageCount - 1 ? new MLTNoiseEstimate(importance, noiseGroups) : null;
+                MLTNoiseEstimate noise = !progressive && noiseImportance && stage < stageCount - 1 ? new MLTNoiseEstimate(importance, noiseGroups) : null;
                 MLTNoiseEstimate clean = noise != null && detectorInNoise ? new MLTNoiseEstimate(importance, noiseGroups) : null;
                 for (int depth = 0; depth < depthCount; ++depth)
                 {
@@ -4445,8 +4457,10 @@ namespace pbrt
                     }
                     // A tour of Jump Restore: at every state the hold of mean 1 / (1 + K) is deposited, then the tour ends with the
                     // probability K / (1 + K) and otherwise takes a small step, accepted with min(1, I' / I)
+                    // (the light of a state goes to its light layers, and through the diffraction of the camera)
                     void RunTour(ScratchBuffer scratchBuffer, MLTSampler sampler, Point2f pCurrent, SampledSpectrum LCurrent,
-                                 SampledWavelengths lambdaCurrent, Float cCurrent, Float weightCurrent, int rngIndex, double tourNormaliser)
+                                 SampledWavelengths lambdaCurrent, Float cCurrent, Float weightCurrent, int rngIndex, double tourNormaliser,
+                                 int layerCurrent, LightLayerSplit splitCurrent)
                     {
                         RNG rng = new RNG((uint64_t)rngIndex ^ 0x2545F4914F6CDD1DUL);
                         int group = rngIndex % noiseGroups;
@@ -4457,7 +4471,8 @@ namespace pbrt
                             double kill = restoreRate * tourNormaliser / iCurrent;
                             double hold = 1.0 / (1.0 + kill);
                             double factor = restoreRate * tourNormaliser * hold * weightCurrent / iCurrent;
-                            film.AddSplat(pCurrent, LCurrent * (Float)(scale * factor), lambdaCurrent);
+                            AddLayeredSplat(camera, film, pCurrent, LCurrent * (Float)(scale * factor), lambdaCurrent, layerCurrent, splitCurrent,
+                                            ref rng);
                             if (noise != null)
                             {
                                 Note(group, pCurrent, cCurrent * scaleNoise * factor, detectorInNoise && detector.IsOutlier(pCurrent, cCurrent));
@@ -4470,6 +4485,8 @@ namespace pbrt
                             Point2f pProposed;
                             SampledWavelengths lambdaProposed;
                             SampledSpectrum LProposed = L(scratchBuffer, sampler, depthIndex, out pProposed, out lambdaProposed);
+                            int layerProposed = LightLayers.SampledLayer();
+                            LightLayerSplit splitProposed = LightLayers.SampledSplit();
                             ++evaluations;
                             Float cProposed = c(LProposed, lambdaProposed);
                             Float weightProposed = detectorWeight(cProposed, pProposed);
@@ -4483,6 +4500,8 @@ namespace pbrt
                                 cCurrent = cProposed;
                                 weightCurrent = weightProposed;
                                 iCurrent = iProposed;
+                                layerCurrent = layerProposed;
+                                splitCurrent = splitProposed;
                                 sampler.Accept();
                             }
                             else
@@ -4494,7 +4513,7 @@ namespace pbrt
                         System.Threading.Interlocked.Add(ref tourEvaluations[0], evaluations);
                     }
                     ProgressReporter progressRender = new ProgressReporter(candidates, "Rendering (" + algorithm + ", stage " + (stage + 1) +
-                                                                           " of " + stageCount + ", depth " + depth + ")", Options.quiet);
+                                                                           " of " + stageCount + ", depth " + depth + ")", Options.quiet || progressive);
                     ParallelFor(0, candidates, (long j) =>
                     {
                         ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
@@ -4503,6 +4522,8 @@ namespace pbrt
                         Point2f pCurrent;
                         SampledWavelengths lambdaCurrent;
                         SampledSpectrum LCurrent = L(scratchBuffer, sampler, depthIndex, out pCurrent, out lambdaCurrent);
+                        int layerCandidate = LightLayers.SampledLayer();
+                        LightLayerSplit splitCandidate = LightLayers.SampledSplit();
                         Float cCurrent = c(LCurrent, lambdaCurrent);
                         scratchBuffer.Reset();
                         if (useDetector)
@@ -4520,7 +4541,9 @@ namespace pbrt
                         if (weight < 1)
                         {
                             // The Monte Carlo part f (1 - w): the paths that are not outliers count as they are
-                            film.AddSplat(pCurrent, LCurrent * (Float)(scale * (1 - weight)), lambdaCurrent);
+                            RNG splatRng = new RNG((uint64_t)rngIndex ^ 0x6A09E667F3BCC909UL);
+                            AddLayeredSplat(camera, film, pCurrent, LCurrent * (Float)(scale * (1 - weight)), lambdaCurrent, layerCandidate,
+                                            splitCandidate, ref splatRng);
                             if (noise != null)
                             {
                                 Note(group, pCurrent, cCurrent * scaleNoise * (1 - weight), outlier);
@@ -4536,7 +4559,8 @@ namespace pbrt
                             }
                             else if (jumpRestore)
                             {
-                                RunTour(scratchBuffer, sampler, pCurrent, LCurrent, lambdaCurrent, cCurrent, weight, rngIndex, normaliser);
+                                RunTour(scratchBuffer, sampler, pCurrent, LCurrent, lambdaCurrent, cCurrent, weight, rngIndex, normaliser,
+                                        layerCandidate, splitCandidate);
                             }
                         }
                         progressRender.Update(1);
@@ -4565,9 +4589,12 @@ namespace pbrt
                             Point2f pSeed;
                             SampledWavelengths lambdaSeed;
                             SampledSpectrum LSeed = L(scratchBuffer, sampler, depthIndex, out pSeed, out lambdaSeed);
+                            int layerSeed = LightLayers.SampledLayer();
+                            LightLayerSplit splitSeed = LightLayers.SampledSplit();
                             Float cSeed = c(LSeed, lambdaSeed);
                             scratchBuffer.Reset();
-                            RunTour(scratchBuffer, sampler, pSeed, LSeed, lambdaSeed, cSeed, detectorWeight(cSeed, pSeed), seedIndex, tourNormaliser);
+                            RunTour(scratchBuffer, sampler, pSeed, LSeed, lambdaSeed, cSeed, detectorWeight(cSeed, pSeed), seedIndex, tourNormaliser,
+                                    layerSeed, splitSeed);
                         });
                     }
 
@@ -4590,7 +4617,7 @@ namespace pbrt
                         long chainOffset = nextIndex;
                         nextIndex += chains;
                         ProgressReporter progressChains = new ProgressReporter(chains, "Rendering (" + algorithm + " chains, stage " + (stage + 1) +
-                                                                               " of " + stageCount + ", depth " + depth + ")", Options.quiet);
+                                                                               " of " + stageCount + ", depth " + depth + ")", Options.quiet || progressive);
                         ParallelFor(0, chains, (long chain) =>
                         {
                             ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
@@ -4601,6 +4628,8 @@ namespace pbrt
                             Point2f pCurrent;
                             SampledWavelengths lambdaCurrent;
                             SampledSpectrum LCurrent = L(scratchBuffer, sampler, depthIndex, out pCurrent, out lambdaCurrent);
+                            int layerCurrent = LightLayers.SampledLayer();
+                            LightLayerSplit splitCurrent = LightLayers.SampledSplit();
                             Float cCurrent = c(LCurrent, lambdaCurrent);
                             Float weightCurrent = detectorWeight(cCurrent, pCurrent);
                             Float iCurrent = importanceOf(cCurrent, pCurrent, weightCurrent);
@@ -4611,6 +4640,8 @@ namespace pbrt
                                 Point2f pProposed;
                                 SampledWavelengths lambdaProposed;
                                 SampledSpectrum LProposed = L(scratchBuffer, sampler, depthIndex, out pProposed, out lambdaProposed);
+                                int layerProposed = LightLayers.SampledLayer();
+                                LightLayerSplit splitProposed = LightLayers.SampledSplit();
                                 Float cProposed = c(LProposed, lambdaProposed);
                                 Float weightProposed = detectorWeight(cProposed, pProposed);
                                 Float iProposed = importanceOf(cProposed, pProposed, weightProposed);
@@ -4618,14 +4649,16 @@ namespace pbrt
                                 if (accept > 0)
                                 {
                                     double factorProposed = accept * weightProposed / iProposed;
-                                    film.AddSplat(pProposed, LProposed * (Float)(stepScale * factorProposed), lambdaProposed);
+                                    AddLayeredSplat(camera, film, pProposed, LProposed * (Float)(stepScale * factorProposed), lambdaProposed,
+                                                    layerProposed, splitProposed, ref rng);
                                     if (noise != null)
                                     {
                                         Note(group, pProposed, cProposed * stepScaleNoise * factorProposed, detectorInNoise && detector.IsOutlier(pProposed, cProposed));
                                     }
                                 }
                                 double factorCurrent = (1 - accept) * weightCurrent / iCurrent;
-                                film.AddSplat(pCurrent, LCurrent * (Float)(stepScale * factorCurrent), lambdaCurrent);
+                                AddLayeredSplat(camera, film, pCurrent, LCurrent * (Float)(stepScale * factorCurrent), lambdaCurrent, layerCurrent,
+                                                splitCurrent, ref rng);
                                 if (noise != null)
                                 {
                                     Note(group, pCurrent, cCurrent * stepScaleNoise * factorCurrent, detectorInNoise && detector.IsOutlier(pCurrent, cCurrent));
@@ -4638,6 +4671,8 @@ namespace pbrt
                                     cCurrent = cProposed;
                                     weightCurrent = weightProposed;
                                     iCurrent = iProposed;
+                                    layerCurrent = layerProposed;
+                                    splitCurrent = splitProposed;
                                     sampler.Accept();
                                 }
                                 else
@@ -4666,13 +4701,27 @@ namespace pbrt
                 {
                     importance.UpdateFromStage(noise, stageMutationsPerPixel, noiseExponent, noiseEpsilon, noiseBlurRadius, noiseRobust, tailExponent, clean);
                 }
-                if (!Options.quiet)
+                if (progressive)
+                {
+                    // (the samples of the pass, for the images made while the render runs)
+                    film.CountSamples((long)film.PixelBounds().Area());
+                    ++passes;
+                    session.PassDone(passes);
+                    progressPasses.Update(1);
+                }
+                else if (!Options.quiet)
                 {
                     Console.WriteLine(StringPrintf("%s stage %d (%s): %d candidates, %d outliers (%f%%), %f tour evaluations per candidate",
                                                    algorithm, stage + 1, kind.ToString(), stageCandidateCount, stageOutliers[0],
                                                    100.0 * stageOutliers[0] / Math.Max(1, stageCandidateCount), extraPerCandidate));
                 }
             }
+            if (progressive)
+            {
+                progressPasses.Done();
+                session.End();
+            }
+
             if (writeImportance)
             {
                 importance.WritePFM(RemoveExtension(film.GetFilename()) + ".importance.pfm", MLTStageKind.Noise);
@@ -4682,6 +4731,17 @@ namespace pbrt
             ImageMetadata metadata = new ImageMetadata();
             metadata.renderTimeSeconds = (float)timer.ElapsedSeconds();
             camera.InitMetadata(metadata);
+            if (progressive)
+            {
+                metadata.samplesPerPixel = passes;
+                if (passes > 0)
+                {
+                    camera.GetFilm().WriteImage(metadata, (Float)1 / passes);
+                }
+
+                return;
+            }
+
             camera.GetFilm().WriteImage(metadata, (Float)1);
         }
 

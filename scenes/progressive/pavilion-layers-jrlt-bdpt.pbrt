@@ -9,9 +9,8 @@
 # The camera and the film are those of the day scene. The night scene is exposed at iso 250 against the day's 500, so the
 # lights of the night are here at half their values.
 #
-# The integrator is "jrlt" (Jump Restore light transport) over the paths of "bdpt". "jrlt" does not write light layers yet and
-# does not render in passes: all light is in the layer "default" (the settings of the other layers change nothing), and the
-# image is there when the render ends, not while it runs.
+# The integrator is "jrlt" (Jump Restore light transport) over the paths of "bdpt". It renders in passes, with the light of
+# each layer in its layer, as "mlt" does.
 
 Film "rgb"
     "float iso" [ 500 ]

@@ -1,4 +1,4 @@
-# Writes the Cornell box scenes of camera "realistic2": three cameras, each with three integrators. The world is
+# Writes the Cornell box scenes of camera "realistic2": three cameras, each with five integrators. The world is
 # cornell_flare_world.pbrt.
 CAMERAS = [
     ("plain",
@@ -21,6 +21,8 @@ CAMERAS = [
 INTEGRATORS = [
     ("mlt-volpath", 'Integrator "mlt" "string pathestimator" "volpath" "integer maxdepth" 8 "integer mutationsperpixel" 512'),
     ("mlt-bdpt", 'Integrator "mlt" "string pathestimator" "bdpt" "integer maxdepth" 8 "integer mutationsperpixel" 512'),
+    ("jrlt-volpath", 'Integrator "jrlt" "string pathestimator" "volpath" "integer maxdepth" 8 "integer mutationsperpixel" 512'),
+    ("jrlt-bdpt", 'Integrator "jrlt" "string pathestimator" "bdpt" "integer maxdepth" 8 "integer mutationsperpixel" 512'),
     ("bdpt", 'Integrator "bdpt" "integer maxdepth" 8'),
 ]
 
