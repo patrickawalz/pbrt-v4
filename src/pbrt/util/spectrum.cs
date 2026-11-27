@@ -12,6 +12,15 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+// (not in pbrt-v4) The values of a SampledSpectrum are one SIMD register: four floats, or four doubles
+#if PBRT_FLOAT_AS_DOUBLE
+using SpectrumVector = System.Runtime.Intrinsics.Vector256<double>;
+using SpectrumVectors = System.Runtime.Intrinsics.Vector256;
+#else
+using SpectrumVector = System.Runtime.Intrinsics.Vector128<float>;
+using SpectrumVectors = System.Runtime.Intrinsics.Vector128;
+#endif
 
 namespace pbrt
 {
@@ -65,56 +74,63 @@ namespace pbrt
         }
 
         // SampledSpectrum Inline Functions
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum SafeDiv(SampledSpectrum a, SampledSpectrum b)
         {
-            SampledSpectrum r = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                r[i] = (b[i] != 0) ? a[i] / b[i] : 0;
-            return r;
+            // (b != 0) ? a / b : 0
+            return new SampledSpectrum(SpectrumVectors.ConditionalSelect(SpectrumVectors.Equals(b.values, SpectrumVector.Zero),
+                                                                         SpectrumVector.Zero, a.values / b.values));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum Clamp(SampledSpectrum s, Float low, Float high)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = Clamp(s[i], low, high);
+            // (val < low) ? low : (val > high) ? high : val
+            SpectrumVector lowVector = SpectrumVectors.Create(low);
+            SpectrumVector highVector = SpectrumVectors.Create(high);
+            SpectrumVector upper = SpectrumVectors.ConditionalSelect(SpectrumVectors.GreaterThan(s.values, highVector), highVector, s.values);
+            SampledSpectrum ret = new SampledSpectrum(
+                SpectrumVectors.ConditionalSelect(SpectrumVectors.LessThan(s.values, lowVector), lowVector, upper));
             DCHECK(!ret.HasNaNs());
             return ret;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum ClampZero(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = std.max<Float>(0, s[i]);
+            // (0 < val) ? val : 0
+            SampledSpectrum ret = new SampledSpectrum(
+                SpectrumVectors.ConditionalSelect(SpectrumVectors.LessThan(SpectrumVector.Zero, s.values), s.values, SpectrumVector.Zero));
             DCHECK(!ret.HasNaNs());
             return ret;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum Abs(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = std.abs(s[i]);
-            return ret;
+            return new SampledSpectrum(SpectrumVectors.Abs(s.values));
         }
 
-        public static SampledSpectrum Sqr(SampledSpectrum s) { return s * s; }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static SampledSpectrum Sqr(SampledSpectrum s)
+        {
+            return s * s;
+        }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum Sqrt(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = std.sqrt(s[i]);
+            SampledSpectrum ret = new SampledSpectrum(SpectrumVectors.Sqrt(s.values));
             DCHECK(!ret.HasNaNs());
             return ret;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum SafeSqrt(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = SafeSqrt(s[i]);
+            // sqrt((0 < val) ? val : 0)
+            SampledSpectrum ret = new SampledSpectrum(SpectrumVectors.Sqrt(
+                SpectrumVectors.ConditionalSelect(SpectrumVectors.LessThan(SpectrumVector.Zero, s.values), s.values, SpectrumVector.Zero)));
             DCHECK(!ret.HasNaNs());
             return ret;
         }
@@ -198,136 +214,118 @@ namespace pbrt
     }
 
     // SampledSpectrum Definition
+    // (not in pbrt-v4) The values are one SIMD register (four floats in a Vector128, or four doubles in a Vector256): the
+    // arithmetic is that of the register, value by value as before, so the results are the same to the last bit. The sums and
+    // the comparisons across the values (Average, MinComponentValue, MaxComponentValue) keep their order.
     public unsafe struct SampledSpectrum
     {
         // SampledSpectrum Public Methods
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator +=(SampledSpectrum s)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] += s.values[i];
+            values += s.values;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator -=(SampledSpectrum s)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] -= s.values[i];
+            values -= s.values;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator *=(SampledSpectrum s)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] *= s.values[i];
+            values *= s.values;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator *=(Float a)
         {
             DCHECK(!IsNaN(a));
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] *= a;
+            values *= a;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator /=(SampledSpectrum s)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                DCHECK_NE(0, s.values[i]);
-                values[i] /= s.values[i];
-            }
+            DCHECK(!SpectrumVectors.EqualsAny(s.values, SpectrumVector.Zero));
+            values /= s.values;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void operator /=(Float a)
         {
             DCHECK_NE(a, 0);
             DCHECK(!IsNaN(a));
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] /= a;
+            values /= SpectrumVectors.Create(a);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator +(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = s1;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] += s2.values[i];
-            return ret;
+            return new SampledSpectrum(s1.values + s2.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator -(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = s1;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] -= s2.values[i];
-            return ret;
+            return new SampledSpectrum(s1.values - s2.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator -(Float a, SampledSpectrum s)
         {
             DCHECK(!IsNaN(a));
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] = a - s.values[i];
-            return ret;
+            return new SampledSpectrum(SpectrumVectors.Create(a) - s.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator *(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = s1;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] *= s2.values[i];
-            return ret;
+            return new SampledSpectrum(s1.values * s2.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator *(SampledSpectrum s, Float a)
         {
             DCHECK(!IsNaN(a));
-            SampledSpectrum ret = s;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] *= a;
-            return ret;
+            return new SampledSpectrum(s.values * a);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator *(Float a, SampledSpectrum s)
         {
             return s * a;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator /(SampledSpectrum s1, SampledSpectrum s2)
         {
-            SampledSpectrum ret = s1;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                DCHECK_NE(0, s2.values[i]);
-                ret.values[i] /= s2.values[i];
-            }
-            return ret;
+            DCHECK(!SpectrumVectors.EqualsAny(s2.values, SpectrumVector.Zero));
+            return new SampledSpectrum(s1.values / s2.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator /(SampledSpectrum s, Float a)
         {
             DCHECK_NE(a, 0);
             DCHECK(!IsNaN(a));
-            SampledSpectrum ret = s;
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                ret.values[i] /= a;
-            }
-            return ret;
+            return new SampledSpectrum(s.values / SpectrumVectors.Create(a));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum operator -(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret.values[i] = -s.values[i];
-            return ret;
+            return new SampledSpectrum(-s.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(SampledSpectrum s1, SampledSpectrum s2)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                if (s1.values[i] != s2.values[i]) return false;
-            return true;
+            return SpectrumVectors.EqualsAll(s1.values, s2.values);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(SampledSpectrum s1, SampledSpectrum s2)
         {
             return !(s1 == s2);
@@ -338,7 +336,7 @@ namespace pbrt
             string str = "[ ";
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values[i]);
+                str += string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6}", values.GetElement(i));
                 if (i + 1 < NSpectrumSamples)
                     str += ", ";
             }
@@ -346,12 +344,11 @@ namespace pbrt
             return str;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool HasNaNs()
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                if (IsNaN(values[i]))
-                    return true;
-            return false;
+            // (only a NaN is not equal to itself)
+            return !SpectrumVectors.EqualsAll(values, values);
         }
 
         public XYZ ToXYZ(SampledWavelengths lambda)
@@ -385,10 +382,17 @@ namespace pbrt
         {
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public SampledSpectrum(Float c)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] = c;
+            values = SpectrumVectors.Create(c);
+        }
+
+        // (not in pbrt-v4) From the register itself
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public SampledSpectrum(SpectrumVector values)
+        {
+            this.values = values;
         }
 
         public static explicit operator SampledSpectrum(Float c)
@@ -399,54 +403,59 @@ namespace pbrt
         public SampledSpectrum(pstd.span<Float> v)
         {
             DCHECK_EQ(NSpectrumSamples, (int)v.size());
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                values[i] = v[i];
+            values = SpectrumVectors.Create(v[0], v[1], v[2], v[3]);
         }
 
         public ref Float this[int i]
         {
             [UnscopedRef]
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 DCHECK(i >= 0 && i < NSpectrumSamples);
-                return ref values[i];
+                return ref Unsafe.Add(ref Unsafe.As<SpectrumVector, Float>(ref values), i);
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static implicit operator bool(SampledSpectrum s)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                if (s.values[i] != 0)
-                    return true;
-            return false;
+            // (some value is not zero)
+            return !SpectrumVectors.EqualsAll(s.values, SpectrumVector.Zero);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Float MinComponentValue()
         {
-            Float m = values[0];
-            for (int i = 1; i < NSpectrumSamples; ++i)
-                m = std.min(m, values[i]);
+            Float m = values.GetElement(0);
+            m = std.min(m, values.GetElement(1));
+            m = std.min(m, values.GetElement(2));
+            m = std.min(m, values.GetElement(3));
             return m;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Float MaxComponentValue()
         {
-            Float m = values[0];
-            for (int i = 1; i < NSpectrumSamples; ++i)
-                m = std.max(m, values[i]);
+            Float m = values.GetElement(0);
+            m = std.max(m, values.GetElement(1));
+            m = std.max(m, values.GetElement(2));
+            m = std.max(m, values.GetElement(3));
             return m;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Float Average()
         {
-            Float sum = values[0];
-            for (int i = 1; i < NSpectrumSamples; ++i)
-                sum += values[i];
+            Float sum = values.GetElement(0);
+            sum += values.GetElement(1);
+            sum += values.GetElement(2);
+            sum += values.GetElement(3);
             return sum / NSpectrumSamples;
         }
 
-        // SampledSpectrum Private Members
-        private fixed Float values[NSpectrumSamples];
+        // SampledSpectrum Private Members: the NSpectrumSamples (four) values
+        internal SpectrumVector values;
     }
 
     // SampledWavelengths Definition
