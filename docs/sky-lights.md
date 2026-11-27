@@ -262,3 +262,40 @@ in the horizon, and the density above is that of the direction plus that of its 
 carries light. After the fix `hosek`: `path` 1800.1, `bdpt` 1798.1 (before: 1800.2, 1783.9).
 
 `bdpt` itself still has this behaviour for any light that can emit a ray without light with nonzero probability.
+
+## `sun2`: the sun light with a solar spectrum, an atmosphere and measured limb darkening
+
+    LightSource "sun2" "point3 from" [ -0.55 -0.5 0.45 ] "point3 to" [ 0 0 0 ]
+        "string spectrum" "solar" "float turbidity" 3 "string limb" "neckel"
+
+A copy of the light `sun` (`sunlight2.cs`) with three additions, each optional; without them it is `sun` (the same
+values to the last bit, `SunLight2.SameAsSun`). It is the sun alone: the light that the atmosphere scatters is the sky
+(`hosek`, `prague` with `"bool sun" false`, or a medium).
+
+| Parameter | Default | |
+|---|---|---|
+| `string spectrum` | | `solar`: the sun above the atmosphere in place of `L`, in absolute units |
+| `float turbidity` | 0 (no atmosphere) | 1 pure air, 2 to 3 clear, 10 hazy: what comes through the atmosphere to the ground |
+| `vector3 up` | `0 0 1` | The zenith, for the elevation of the sun |
+| `float ozone` | 300 | Dobson units |
+| `string limb` | `linear` | `linear` (that of `sun`), `neckel` (Neckel and Labs 1994), `none` |
+| `from`, `to`, `angle`, `L`, `scale`, `illuminance`, `limbdarkening` | | As for `sun` |
+
+* `solar` is the table of the Prague sky model (280 to 2500 nm, 1277 W/m^2 in that range, 129093 lux), as the irradiance
+  of a surface that faces the sun whatever `angle` is; the radiance is in the units of the sky lights (the Y of the film
+  is cd/m^2). `illuminance` rescales it (above the atmosphere).
+* The atmosphere is closed form: Rayleigh (Hansen and Travis 1974), aerosols by Angstrom's law with Preetham's turbidity,
+  and ozone's Chappuis band as a fitted bell (ours, good to about 15% of what ozone takes), each times its air mass
+  (Kasten and Young 1989). It is evaluated for each point of the disc, so the lower edge of a low sun is darker and
+  redder. Not in it: water vapour and oxygen bands, the height of the observer, refraction.
+* `neckel` is a polynomial of the fifth order in the cosine at the sun's surface with coefficients by wavelength (303 to
+  1100 nm), divided by its mean over the disc so that the irradiance stays.
+
+Direct illuminance of a surface facing the sun, lux (`SunLight2.Atmosphere`):
+
+| Turbidity | 90 degrees | 30 | 10 | 5 | 2 | 0 |
+|---|---|---|---|---|---|---|
+| 1 | 113847 | 100560 | 65073 | 38359 | 15781 | 3485 |
+| 2 | 103135 | 82609 | 37703 | 14186 | 2526 | 113 |
+| 3 | 93439 | 67888 | 21904 | 5292 | 416 | 4 |
+| 6 | 69524 | 37758 | 4363 | 288 | 2 | 0 |
