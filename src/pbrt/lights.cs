@@ -2569,6 +2569,9 @@ namespace pbrt
                 light = DistantLight.Create(renderFromLight, parameters, parameters.ColorSpace(), loc, alloc);
             else if (name == "sun")
                 light = SunLight.Create(renderFromLight, parameters, parameters.ColorSpace(), loc, alloc);
+            // (not in pbrt-v4) "sun" with the solar spectrum, the atmosphere and the measured limb darkening (sunlight2.cs)
+            else if (name == "sun2")
+                light = SunLight2.Create(renderFromLight, parameters, parameters.ColorSpace(), loc, alloc);
             else if (name == "infinite")
             {
                 RGBColorSpace colorSpace = parameters.ColorSpace();
