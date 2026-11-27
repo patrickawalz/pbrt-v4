@@ -20,6 +20,15 @@
 //                    theirs. A radius that falls to zero stays above it, and a step in a color makes no fringe. Where
 //                    nothing is held it is catmull-rom. (Held by coordinate, the points would follow the axes: they are not.)
 //     "hermite", "power"  cubic, as in RenderMan.
+//   "float parameterization"  of "catmull-rom" and "monotone" (with the step 1), after Yuksel, Schaefer and Keyser, "On the
+//                    Parameterization of Catmull-Rom Curves" (2009) and "Parameterization and Applications of Catmull-Rom
+//                    Curves" (2011): the knot of a point is that of the point before plus the distance between the two
+//                    raised to this power. 0 (the default): uniform, the curve of the matrix as before. 0.5: centripetal, the
+//                    one parameterization with no cusp and no loop inside a curve, and the curve no farther from the line
+//                    through its two points than a quarter of their distance. 1: chordal. Every value at the points (radius,
+//                    color, normal) is taken along with the same knots, and "monotone" holds its tangents in them (Steffen's
+//                    rule for knots that are not uniform). The Bezier values are exact here too: each curve is one cubic.
+//                    Where two points in a row are the same the tangent there is that of the other side (a corner).
 //   "integer step"   of the cubic bases, as in RenderMan (bezier, power 3; hermite 2; the others 1).
 //   "string wrap"    "nonperiodic" (the default);
 //                    "periodic": the strand is closed, the control points are taken around;
@@ -36,8 +45,9 @@ namespace pbrt
     public sealed class StrandBasis
     {
         // StrandBasis Public Methods
-        public StrandBasis(string name, int degree, int step, string wrap, double tension, double[] knots)
+        public StrandBasis(string name, int degree, int step, string wrap, double tension, double[] knots, double parameterization = 0)
         {
+            this.parameterization = parameterization;
             this.name = name;
             this.degree = name == "linear" ? 1 : degree;
             this.step = step;
@@ -111,7 +121,45 @@ namespace pbrt
                     knots[i] = knotList[i];
                 }
             }
-            return new StrandBasis(name, degree, step, wrap, tension, knots);
+            double parameterization = parameters.GetOneFloat("parameterization", 0);
+            if (parameterization != 0)
+            {
+                if (name != "catmull-rom" && name != "monotone")
+                {
+                    pbrt.ErrorExit(loc, shape + ": \"parameterization\" is for the bases \"catmull-rom\" and \"monotone\".");
+                }
+                if (step != 1)
+                {
+                    pbrt.ErrorExit(loc, shape + ": \"parameterization\" needs the step 1.");
+                }
+                if (!(parameterization > 0 && parameterization <= 1))
+                {
+                    pbrt.ErrorExit(loc, shape + ": \"parameterization\" is from 0 (uniform) by 0.5 (centripetal) to 1 (chordal).");
+                }
+            }
+            return new StrandBasis(name, degree, step, wrap, tension, knots, parameterization);
+        }
+
+        // The basis for the points of one strand (their three coordinates): with a "parameterization" the knots are those of
+        // these points, for every value of the strand; without one the basis itself. To be called before Curves and Vectors.
+        public StrandBasis Parameterized(double[] x, double[] y, double[] z)
+        {
+            if (parameterization == 0)
+            {
+                return this;
+            }
+            double[] controlX = Extended(x), controlY = Extended(y), controlZ = Extended(z);
+            int n = controlX.Length;
+            double[] steps = new double[wrap == "periodic" ? n : n - 1];
+            for (int j = 0; j < steps.Length; ++j)
+            {
+                int next = (j + 1) % n;
+                double dx = controlX[next] - controlX[j], dy = controlY[next] - controlY[j], dz = controlZ[next] - controlZ[j];
+                steps[j] = Math.Pow(Math.Sqrt(dx * dx + dy * dy + dz * dz), parameterization);
+            }
+            StrandBasis basis = new StrandBasis(name, degree, step, wrap, tension, knots, parameterization);
+            basis.intervals = steps;
+            return basis;
         }
 
         // The degree of the curves: 1, 2 or 3
@@ -188,6 +236,10 @@ namespace pbrt
         // higher one (degree elevation).
         public double[] Curves(double[] g, int to)
         {
+            if (parameterization != 0)
+            {
+                return Raised(Parameterized(g, name == "monotone"), to);
+            }
             return Raised(name == "monotone" ? Monotone(g) : Native(g), to);
         }
 
@@ -195,6 +247,10 @@ namespace pbrt
         // "monotone" holds nothing there
         public double[] Vectors(double[] g, int to)
         {
+            if (parameterization != 0)
+            {
+                return Raised(Parameterized(g, false), to);
+            }
             return Raised(Native(g), to);
         }
 
@@ -238,6 +294,79 @@ namespace pbrt
                 return wrap != "periodic";
             }
             return wrap == "pinned" && degree == 3 && knots == null && step == 1 && (name == "b-spline" || name == "catmull-rom" || name == "cardinal");
+        }
+
+        // The control values with those of "pinned" added: before the first and after the last, the neighbor mirrored in the end
+        private double[] Extended(double[] g)
+        {
+            if (!Pinned())
+            {
+                return g;
+            }
+            int n = g.Length;
+            double[] control = new double[n + 2];
+            Array.Copy(g, 0, control, 1, n);
+            control[0] = 2 * g[0] - g[1];
+            control[n + 1] = 2 * g[n - 1] - g[n - 2];
+            return control;
+        }
+
+        // The Bezier values of the curves of catmull-rom with the knots of the points of the strand (Parameterized): the curve
+        // from the control value b to c, with a before and d after and the knot intervals h between them, has the tangents (by
+        // the knot) of the parabolas through a, b, c and through b, c, d (Barry and Goldman), and so the Bezier values
+        // b, b + h tangent(b) / 3, c - h tangent(c) / 3, c. hold: the tangents of "monotone".
+        private double[] Parameterized(double[] g, bool hold)
+        {
+            if (intervals == null)
+            {
+                throw new InvalidOperationException("StrandBasis: a basis with a \"parameterization\" needs the points of the strand first (Parameterized).");
+            }
+            double[] control = Extended(g);
+            int n = control.Length;
+            int count = wrap == "periodic" ? n : n - 3;
+            double[] values = new double[4 * count];
+            for (int s = 0; s < count; ++s)
+            {
+                // (closed, the first curve is from the second point, as that of the matrix)
+                int a = s, b = (s + 1) % n, c = (s + 2) % n, d = (s + 3) % n;
+                double along = intervals[b];
+                double tangentB = KnotTangent(control[a], control[b], control[c], intervals[a], along, hold);
+                double tangentC = KnotTangent(control[b], control[c], control[d], along, intervals[c], hold);
+                values[4 * s] = control[b];
+                values[4 * s + 1] = control[b] + along * tangentB / 3;
+                values[4 * s + 2] = control[c] - along * tangentC / 3;
+                values[4 * s + 3] = control[c];
+            }
+            return values;
+        }
+
+        // The tangent, by the knot, at the middle one of three values with the knot intervals `before` and `after` between them:
+        // the derivative there of the parabola through the three. Without an interval on one side (two points that are the
+        // same), the slope of the other side. hold: no more than twice the smaller of the two slopes, and none where they turn
+        // (Steffen 1990), so that a value between two points never leaves theirs.
+        private static double KnotTangent(double g0, double g1, double g2, double before, double after, bool hold)
+        {
+            double slopeBefore = before > 0 ? (g1 - g0) / before : 0;
+            double slopeAfter = after > 0 ? (g2 - g1) / after : 0;
+            if (!(before > 0))
+            {
+                return slopeAfter;
+            }
+            if (!(after > 0))
+            {
+                return slopeBefore;
+            }
+            double tangent = (slopeBefore * after + slopeAfter * before) / (before + after);
+            if (!hold)
+            {
+                return tangent;
+            }
+            if (!(slopeBefore * slopeAfter > 0))
+            {
+                return 0;
+            }
+            double held = Math.Min(Math.Abs(tangent), 2 * Math.Min(Math.Abs(slopeBefore), Math.Abs(slopeAfter)));
+            return slopeBefore > 0 ? held : -held;
         }
 
         // The Bezier values of the curves of "monotone" for a value that is not a coordinate: from point to point with the
@@ -405,5 +534,8 @@ namespace pbrt
         private readonly double[] knots;
         private readonly double[,] matrix;
         private readonly double[,] toBezier;
+        // (0: uniform) and, of the basis of one strand, the knot intervals between its control points (with those of "pinned")
+        private readonly double parameterization;
+        private double[] intervals;
     }
 }

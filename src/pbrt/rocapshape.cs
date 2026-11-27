@@ -1076,6 +1076,7 @@ namespace pbrt
                     y[i] = points[i].y;
                     z[i] = points[i].z;
                 }
+                basis = basis.Parameterized(x, y, z);
                 x = basis.Vectors(x, 3);
                 y = basis.Vectors(y, 3);
                 z = basis.Vectors(z, 3);
