@@ -49,6 +49,63 @@ namespace pbrt
             return s <= 1 && t >= 2;
         }
 
+        // (not in pbrt-v4) One sample of the stray light that a light sends through the lens of the camera (see
+        // Camera.HasStrayLight): a point of the front element, a point of a light as that point sees it, and the film point
+        // pRaster where the camera finds that the light arrives, with what the sensor measures of it there (L). False if
+        // nothing arrives. The light of an emissive medium is left to the paths from the camera.
+        public bool SampleStrayLight(Camera camera, LightSampler lightSampler, Float time, ref SampledWavelengths lambda, Point2f uLens,
+                                     Float uChoice, Point2f uLight, Point2f uStray, out Point2f pRaster, out SampledSpectrum L,
+                                     out int layer)
+        {
+            pRaster = default;
+            L = new SampledSpectrum(0.0f);
+            layer = 0;
+            if (!camera.SampleStrayLens(uLens, time, ref lambda, out Interaction lens, out Float pdfLens))
+            {
+                return false;
+            }
+
+            LightSampleContext ctx = new LightSampleContext(lens);
+            pstd.optional<SampledLight> sampledLight = lightSampler.Sample(ctx, uChoice);
+            if (!sampledLight || sampledLight.value().light is VolumeEmissionLight)
+            {
+                return false;
+            }
+
+            Light light = sampledLight.value().light;
+            pstd.optional<LightLiSample> ls = light.SampleLi(ctx, uLight, lambda, false);
+            if (!ls || !ls.value().L || ls.value().pdf == 0)
+            {
+                return false;
+            }
+
+            SampledSpectrum importance = camera.StrayImportance(lens, ls.value().wi, uStray, ref lambda, out pRaster);
+            if (!importance)
+            {
+                return false;
+            }
+
+            SampledSpectrum transmittance = TrSegments(lens, ls.value().pLight, MediumTracking.Start(camera.GetMedium()), lambda,
+                                                       out SampledSpectrum ru, out SampledSpectrum rl, out Medium _);
+            if (!transmittance)
+            {
+                return false;
+            }
+
+            // The light of the light is unpolarised; the optics of the camera polarise it on its way to the sensor
+            SampledSpectrum arriving = ls.value().L * transmittance / (rl.Average() * sampledLight.value().p * ls.value().pdf * pdfLens);
+            L = importance * MeasureStrayLight(camera, new Ray(lens.p(), ls.value().wi, time), arriving, lambda);
+            layer = light.layer;
+            return (bool)L;
+        }
+
+        // (not in pbrt-v4) What the sensor measures of the unpolarised light L that arrives at the lens along the reverse of
+        // cameraRay, relative to its intensity: L itself for an integrator that does not carry polarised light
+        public virtual SampledSpectrum MeasureStrayLight(Camera camera, Ray cameraRay, SampledSpectrum L, SampledWavelengths lambda)
+        {
+            return L;
+        }
+
         public bool Unoccluded(Interaction p0, Interaction p1)
         {
             if (!ThinCoatMaterial.anyInScene)
@@ -553,6 +610,9 @@ namespace pbrt
             if (Options.disableWavelengthJitter)
                 lu = 0.5f;
             SampledWavelengths lambda = camera.GetFilm().SampleWavelengths(lu);
+            // (not in pbrt-v4) The wavelengths of the stray light that is sampled from the lights (the ray may end some of lambda)
+            SampledWavelengths lambdaStray = lambda;
+            LightSampler strayLightSampler = camera.HasStrayLight() ? StrayLightSampler() : null;
 
             // Initialize _CameraSample_ for current sample
             Filter filter = camera.GetFilm().GetFilter();
@@ -598,8 +658,10 @@ namespace pbrt
                 ++nCameraRays;
                 // Evaluate radiance along camera ray
                 bool initializeVisibleSurface = camera.GetFilm().UsesVisibleSurface();
+                StrayLight.skipEmission = strayLightSampler != null && camera.StraySample(cameraSample);
                 L = cameraRay.value().weight * Li(cameraRay.value().ray, ref lambda, sampler, scratchBuffer,
                                                   initializeVisibleSurface ? visibleSurface : null);
+                StrayLight.skipEmission = false;
                 // (not in pbrt-v4) and what the sample has of the light layers
                 LightLayers.Scale(cameraRay.value().weight);
 
@@ -625,6 +687,12 @@ namespace pbrt
             {
                 NoCameraRay(cameraSample, ref lambda, sampler, scratchBuffer);
             }
+            // (not in pbrt-v4) The stray light of the lights that the lens sees
+            if (strayLightSampler != null)
+            {
+                SplatStrayLight(strayLightSampler, cameraSample.time, lambdaStray, sampler);
+            }
+
             // Add camera ray's contribution to image
             if (diffraction)
             {
@@ -636,6 +704,29 @@ namespace pbrt
 
             camera.GetFilm().AddSample(pPixel, L, lambda, visibleSurface,
                                        cameraSample.filterWeight);
+        }
+
+        // (not in pbrt-v4) The light sampler of an integrator that samples the stray light of the lights from the lights (see
+        // Camera.HasStrayLight), and leaves their emission out of the rays of stray light: null (the default) for an
+        // integrator that does not, whose rays of stray light find the lights by themselves
+        protected virtual LightSampler StrayLightSampler()
+        {
+            return null;
+        }
+
+        // (not in pbrt-v4) One sample of the stray light that a light sends through the lens: a point of the front element, a
+        // point of a light as that point sees it, and the splat where the camera finds that the light arrives
+        void SplatStrayLight(LightSampler lightSampler, Float uTime, SampledWavelengths lambda, Sampler sampler)
+        {
+            Point2f uLens = sampler.Get2D();
+            Float uChoice = sampler.Get1D();
+            Point2f uLight = sampler.Get2D();
+            Point2f uStray = sampler.Get2D();
+            if (SampleStrayLight(camera, lightSampler, camera.SampleTime(uTime), ref lambda, uLens, uChoice, uLight, uStray,
+                                 out Point2f pRaster, out SampledSpectrum L, out int layer))
+            {
+                AddCameraSplat(camera, pRaster, L, lambda, sampler, layer);
+            }
         }
 
         // (not in pbrt-v4) Adds the contribution L of the geometric image at the film point pFilm to the film: the contribution
@@ -1029,8 +1120,8 @@ namespace pbrt
                                                  Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("lightpath");
-            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera))
-                ErrorExit("Only the \"perspective\" and \"realistic\" cameras are currently supported with the " +
+            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera) && !(camera is RealisticCamera2))
+                ErrorExit("Only the \"perspective\", \"realistic\" and \"realistic2\" cameras are currently supported with the " +
                           "\"lightpath\" integrator.");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             return new LightPathIntegrator(maxDepth, camera, sampler, aggregate, lights);
@@ -1097,6 +1188,9 @@ namespace pbrt
                     foreach (Light light in infiniteLights)
                     {
                         SampledSpectrum Le0 = light.Le(new Ray(ray), lambda);
+                        // (not in pbrt-v4) the stray light of the lights is sampled from the lights
+                        if (depth == 0 && StrayLight.skipEmission)
+                            continue;
                         if (depth == 0 || specularBounce)
                             {
                                 SampledSpectrum layered = beta * Le0;
@@ -1123,6 +1217,9 @@ namespace pbrt
                 // Incorporate emission from surface hit by ray
                 si.value().intr.rayType = oslRayType;
                 SampledSpectrum Le = si.value().intr.Le(-ray.d, lambda);
+                // (not in pbrt-v4) the stray light of the lights is sampled from the lights
+                if (depth == 0 && StrayLight.skipEmission && si.value().intr.areaLight != null)
+                    Le = new SampledSpectrum(0.0f);
                 if ((bool)Le)
                 {
                     // (not in pbrt-v4) emission of an OSL shader comes with no area light to sample: no MIS
@@ -1313,6 +1410,12 @@ namespace pbrt
             string lightStrategy = parameters.GetOneString("lightsampler", "bvh");
             bool regularize = parameters.GetOneBool("regularize", false);
             return new PathIntegrator(maxDepth, camera, sampler, aggregate, lights, lightStrategy, regularize);
+        }
+
+        // (not in pbrt-v4) The stray light of the lights is sampled from the lights
+        protected override LightSampler StrayLightSampler()
+        {
+            return lightSampler;
         }
 
         // PathIntegrator Private Members
@@ -3097,7 +3200,10 @@ namespace pbrt
             {
                 // Interpret the camera subpath as a complete path
                 Vertex pt = cameraVertices[t - 1];
-                if (pt.IsLight())
+                // (not in pbrt-v4) The light that a ray of stray light meets first is sampled from the lights instead (see
+                // Camera.HasStrayLight): there is no strategy that connects a light to the camera (s = 1, t = 1) to find it
+                bool strayFromLights = t == 2 && StrayLight.skipEmission && !IsVolumeEmission(pt);
+                if (pt.IsLight() && !strayFromLights)
                     L = pt.Le(integrator.infiniteLights, cameraVertices[t - 2], lambda) * pt.beta;
                 DCHECK(!L.HasNaNs());
             }
@@ -3523,8 +3629,8 @@ namespace pbrt
                                             Primitive aggregate, List<Light> lights, FileLoc loc)
         {
             MediumTracking.RequireNoPerEntryVolumes("bdpt");
-            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera))
-                ErrorExit("Only the \"perspective\" and \"realistic\" cameras are currently supported with the " +
+            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera) && !(camera is RealisticCamera2))
+                ErrorExit("Only the \"perspective\", \"realistic\" and \"realistic2\" cameras are currently supported with the " +
                           "\"bdpt\" integrator.");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             bool visualizeStrategies = parameters.GetOneBool("visualizestrategies", false);
@@ -3564,6 +3670,23 @@ namespace pbrt
                                       strategies == "unidirectional", equiangular,
                                       parameters.GetOneInt("equiangularsamples", 1),
                                       parameters.GetOneInt("equiangulardepth", int.MaxValue));
+        }
+
+        // (not in pbrt-v4) The stray light of the lights is sampled from the lights
+        protected override LightSampler StrayLightSampler()
+        {
+            return lightSampler;
+        }
+
+        public override SampledSpectrum MeasureStrayLight(Camera camera, Ray cameraRay, SampledSpectrum L, SampledWavelengths lambda)
+        {
+            if (sensor == null)
+            {
+                return L;
+            }
+
+            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, lambda[0], new PLight(L), sensor.analyser,
+                                                            sensor.analyserAngle, sensor.measurement, -cameraRay.d, sensor.cameraUp);
         }
 
         // BDPTIntegrator Private Members
@@ -3908,7 +4031,35 @@ namespace pbrt
                 camera.GetFilm().WriteImage(metadata, (Float)1 / passes);
         }
 
-        // (not in pbrt-v4) A splat of the light of a path, to the light layer of the path, or to its layers by their shares
+        // (not in pbrt-v4) A splat of the light of a path, to the light layer of the path, or to its layers by their shares. With
+        // the diffraction of the camera (Camera.HasDiffraction) the light of each wavelength goes to its own point, the film
+        // point plus a sample of the point spread function, as in RayIntegrator.AddCameraSplat().
+        static void AddLayeredSplat(Camera camera, Film film, Point2f p, SampledSpectrum L, SampledWavelengths lambda, int layer,
+                                    LightLayerSplit split, ref RNG rng)
+        {
+            if (!camera.HasDiffraction())
+            {
+                AddLayeredSplat(film, p, L, lambda, layer, split);
+                return;
+            }
+
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                Float uSelect = rng.Uniform<Float>();
+                Float uCell = rng.Uniform<Float>();
+                Point2f uInCell = new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>());
+                if (L[i] == 0)
+                {
+                    continue;
+                }
+
+                SampledSpectrum component = new SampledSpectrum(0.0f);
+                component[i] = L[i];
+                camera.SampleDiffractionOffset(p, lambda[i], uSelect, uCell, uInCell, out Vector2f offset);
+                AddLayeredSplat(film, p + offset, component, lambda, layer, split);
+            }
+        }
+
         static void AddLayeredSplat(Film film, Point2f p, SampledSpectrum L, SampledWavelengths lambda, int layer, LightLayerSplit split)
         {
             if (split == null)
@@ -4003,8 +4154,10 @@ namespace pbrt
 
                         // Splat both current and proposed samples to _film_ (f / I, times b)
                         if (accept > 0)
-                            AddLayeredSplat(film, pProposed, LProposed * (accept * b / iProposed), lambdaProposed, layerProposed, splitProposed);
-                        AddLayeredSplat(film, pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent, layerCurrent, splitCurrent);
+                            AddLayeredSplat(camera, film, pProposed, LProposed * (accept * b / iProposed), lambdaProposed, layerProposed,
+                                            splitProposed, ref rng);
+                        AddLayeredSplat(camera, film, pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent, layerCurrent,
+                                        splitCurrent, ref rng);
 
                         // Accept or reject the proposal
                         if (rng.Uniform<Float>() < accept)
@@ -4790,8 +4943,9 @@ namespace pbrt
         public static MLTIntegrator Create(ParameterDictionary parameters, Camera camera, Primitive aggregate,
                                            List<Light> lights, FileLoc loc, string algorithm = "mlt")
         {
-            if (!(camera is PerspectiveCamera))
-                ErrorExit("Only the \"perspective\" camera is currently supported with the " +
+            // (not in pbrt-v4) and the realistic cameras, which have the importance functions here
+            if (!(camera is PerspectiveCamera) && !(camera is RealisticCamera) && !(camera is RealisticCamera2))
+                ErrorExit("Only the \"perspective\", \"realistic\" and \"realistic2\" cameras are currently supported with the " +
                           "\"mlt\" integrator.");
             int maxDepth = parameters.GetOneInt("maxdepth", 5);
             int nBootstrap = parameters.GetOneInt("bootstrapsamples", 100000);
@@ -5676,7 +5830,8 @@ namespace pbrt
                 foreach (Light light in vp.infiniteLights)
                 {
                     SampledSpectrum Le = light.Le(new Ray(ctx.ray), ctx.lambda);
-                    if ((bool)Le)
+                    // (not in pbrt-v4) the stray light of the lights is sampled from the lights
+                    if ((bool)Le && !(depth == 0 && StrayLight.skipEmission))
                     {
                         if (depth == 0 || specularBounce)
                         {
@@ -5733,6 +5888,9 @@ namespace pbrt
             {
                 isect.rayType = oslRayType;
                 SampledSpectrum LeSurf = isect.Le(-ctx.ray.d, ctx.lambda);
+                // (not in pbrt-v4) the stray light of the lights is sampled from the lights
+                if (depth == 0 && StrayLight.skipEmission && isect.areaLight != null)
+                    LeSurf = new SampledSpectrum(0.0f);
                 if ((bool)LeSurf)
                 {
                     // Add contribution of emission from intersected surface
@@ -6621,6 +6779,29 @@ namespace pbrt
                                          lights, lightStrategy, regularize, polarised, analyser, analyserAngle, measurement,
                                          equiangular, equiangularSamples, equiangularMultipleDepth,
                                          parameters.GetOneBool("uniformdistance", false), parameters.GetOneBool("shadowaware", false));
+        }
+
+        // (not in pbrt-v4) The stray light of the lights is sampled from the lights
+        protected override LightSampler StrayLightSampler()
+        {
+            return lightSampler;
+        }
+
+        // (not in pbrt-v4) The same for the Metropolis integrator over this one
+        public LightSampler StrayLights()
+        {
+            return lightSampler;
+        }
+
+        public override SampledSpectrum MeasureStrayLight(Camera camera, Ray cameraRay, SampledSpectrum L, SampledWavelengths lambda)
+        {
+            if (!polarised)
+            {
+                return L;
+            }
+
+            return PolarisedPathIntegrator.MeasureCameraRay(camera, cameraRay, lambda[0], new PLight(L), analyser, analyserAngle,
+                                                            measurement, -cameraRay.d, cameraUp);
         }
 
         // VolPathIntegrator Private Members

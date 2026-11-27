@@ -29,10 +29,12 @@ namespace pbrt
                                                  out Point2f pRaster, out SampledWavelengths lambda);
 
         // The wavelengths and the camera ray of a path, drawn from the sampler in this order: wavelengths, position on the film,
-        // time, lens. False if the camera gives no ray. Shared by every evaluator, so they differ only in what they do with it.
+        // time, lens. False if the camera gives no ray (a lens system loses part of the samples of the film); the wavelengths
+        // and the time are those of the sample all the same. Shared by every evaluator, so they differ only in what they do
+        // with it.
         protected static bool SampleCameraRay(Camera camera, MLTSampler sampler, out Point2f pRaster,
                                               ref SampledWavelengths lambda, out RayDifferential ray,
-                                              out SampledSpectrum weight)
+                                              out SampledSpectrum weight, out Float time, out bool straySample)
         {
             ray = default;
             weight = default;
@@ -49,6 +51,9 @@ namespace pbrt
             cameraSample.pFilm = pRaster;
             cameraSample.time = sampler.Get1D();
             cameraSample.pLens = sampler.Get2D();
+            time = camera.SampleTime(cameraSample.time);
+            // Whether the ray is one of the stray light of the camera (see Camera.HasStrayLight)
+            straySample = camera.StraySample(cameraSample);
 
             // Generate camera ray for MLT camera path
             pstd.optional<CameraRayDifferential> crd = camera.GenerateRayDifferential(cameraSample, ref lambda);
@@ -92,10 +97,17 @@ namespace pbrt
             // (not in pbrt-v4) With the camera subpaths gathering the emission of media, a path of length 0 has the second
             // strategy of the light sample of a medium that connects to the camera
             bool gather = integrator.gatherMediumEmission;
+            // (not in pbrt-v4) With the stray light of a camera (see Camera.HasStrayLight), a path of length 0 has one more
+            // strategy: the light sample of a light that connects to the lens, which is all but the only way to find the flare
+            // of a small light. The rays of stray light of the camera leave the emission of the lights to it.
+            bool strayLights = camera.HasStrayLight();
+            bool strayStrategy = false;
             if (depth == 0)
             {
-                nStrategies = hasEmissiveMedia ? 2 : 1;
-                s = hasEmissiveMedia ? std.min<int>((int)(sampler.Get1D() * nStrategies), nStrategies - 1) : 0;
+                nStrategies = (hasEmissiveMedia ? 2 : 1) + (strayLights ? 1 : 0);
+                int choice = nStrategies > 1 ? std.min<int>((int)(sampler.Get1D() * nStrategies), nStrategies - 1) : 0;
+                strayStrategy = strayLights && choice == nStrategies - 1;
+                s = strayStrategy ? 0 : choice;
                 t = 2 - s;
             }
             else
@@ -106,7 +118,27 @@ namespace pbrt
             }
 
             // Sample wavelengths and the camera ray for the MLT camera path
-            if (!SampleCameraRay(camera, sampler, out pRaster, ref lambda, out RayDifferential crdRay, out SampledSpectrum _))
+            // (not in pbrt-v4) A sample without a camera ray still has the strategy that connects to the camera (t = 1), as
+            // in BDPTIntegrator.NoCameraRay()
+            bool hasCameraRay = SampleCameraRay(camera, sampler, out pRaster, ref lambda, out RayDifferential crdRay,
+                                                out SampledSpectrum cameraWeight, out Float time, out bool straySample);
+            if (strayStrategy)
+            {
+                sampler.StartStream(lightStreamIndex);
+                Point2f uLens = sampler.Get2D();
+                Float uChoice = sampler.Get1D();
+                Point2f uLight = sampler.Get2D();
+                Point2f uStray = sampler.Get2D();
+                if (!integrator.SampleStrayLight(camera, lightSampler, time, ref lambda, uLens, uChoice, uLight, uStray, out pRaster,
+                                                 out SampledSpectrum LStray, out int strayLayer))
+                    return new SampledSpectrum(0.0f);
+                LightLayers.Sampled(strayLayer);
+                // (the film point is inside the pixel bounds, as that of a connection to the camera below)
+                Film strayFilm = camera.GetFilm();
+                return LStray * ((Float)nStrategies * (Float)strayFilm.PixelBounds().Area() / (Float)strayFilm.SampleBounds().Area());
+            }
+
+            if (!hasCameraRay && t != 1)
                 return new SampledSpectrum(0.0f);
 
             // Generate a camera subpath with exactly _t_ vertices
@@ -115,8 +147,10 @@ namespace pbrt
             // (not in pbrt-v4) The s = 0 strategy also takes the emission that the subpath gathers in a medium at its t - 1st
             // vertex, so the subpath may end one vertex short of t
             List<MediumEmissionEnd> emissionEnds = gather && s == 0 ? new List<MediumEmissionEnd>() : null;
-            int nCamera = BDPT.GenerateCameraSubpath(integrator, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
-                                                     cameraVertices, regularize, sensor != null, emissionEnds);
+            int nCamera = hasCameraRay
+                ? BDPT.GenerateCameraSubpath(integrator, crdRay, ref lambda, sampler, scratchBuffer, t, camera,
+                                             cameraVertices, regularize, sensor != null, emissionEnds)
+                : 1;
             if (nCamera != t && !(emissionEnds != null && nCamera >= t - 1))
                 return new SampledSpectrum(0.0f);
 
@@ -125,7 +159,7 @@ namespace pbrt
             Vertex[] lightVertices = new Vertex[s];
             for (int i = 0; i < s; ++i) lightVertices[i] = new Vertex();
             if (BDPT.GenerateLightSubpath(integrator, ref lambda, sampler, camera, scratchBuffer, s,
-                                          cameraVertices[0].time(), lightSampler, lightVertices,
+                                          time, lightSampler, lightVertices,
                                           regularize, sensor != null) != s)
                 return new SampledSpectrum(0.0f);
 
@@ -138,9 +172,13 @@ namespace pbrt
             if (!(s == 1 && t == 1 && !BDPT.IsVolumeEmission(lightVertices[0])))
             {
                 if (nCamera == t)
+                {
+                    StrayLight.skipEmission = strayLights && straySample;
                     Lval = BDPT.ConnectBDPT(integrator, ref lambda, lightVertices, cameraVertices, s, t,
                                             lightSampler, camera, sampler, ref pRasterNew,
                                             ref misWeight, sensor, -crdRay.d);
+                    StrayLight.skipEmission = false;
+                }
                 if (emissionEnds != null)
                 {
                     foreach (MediumEmissionEnd end in emissionEnds)
@@ -152,6 +190,13 @@ namespace pbrt
                 }
             }
             Lval *= (Float)nStrategies;
+            // (not in pbrt-v4) The weight of the camera ray, for the strategies that start there: 1 for the perspective camera,
+            // not for a lens system (the connections to the camera have the importance of the camera instead)
+            if (!pRasterNew)
+            {
+                Lval *= cameraWeight;
+            }
+
             if (pRasterNew)
             {
                 pRaster = pRasterNew.value();
@@ -191,10 +236,34 @@ namespace pbrt
             pRaster = default;
             lambda = default;
             sampler.StartStream(cameraStreamIndex);
-            if (!SampleCameraRay(camera, sampler, out pRaster, ref lambda, out RayDifferential crdRay,
-                                 out SampledSpectrum weight))
+            // (not in pbrt-v4) With the stray light of a camera (see Camera.HasStrayLight) half of the samples are the light
+            // sample of a light that connects to the lens, and the rays of stray light leave the emission of the lights to it
+            bool strayLights = camera.HasStrayLight();
+            bool strayStrategy = strayLights && sampler.Get1D() < 0.5f;
+            bool hasCameraRay = SampleCameraRay(camera, sampler, out pRaster, ref lambda, out RayDifferential crdRay,
+                                                out SampledSpectrum weight, out Float time, out bool straySample);
+            if (strayStrategy)
+            {
+                Point2f uLens = sampler.Get2D();
+                Float uChoice = sampler.Get1D();
+                Point2f uLight = sampler.Get2D();
+                Point2f uStray = sampler.Get2D();
+                if (!volpath.SampleStrayLight(camera, volpath.StrayLights(), time, ref lambda, uLens, uChoice, uLight, uStray, out pRaster,
+                                              out SampledSpectrum LStray, out int strayLayer))
+                    return new SampledSpectrum(0.0f);
+                LightLayers.Sampled(strayLayer);
+                // (the film point is inside the pixel bounds, not the sample bounds that the camera rays are drawn from)
+                Film strayFilm = camera.GetFilm();
+                return LStray * (2 * (Float)strayFilm.PixelBounds().Area() / (Float)strayFilm.SampleBounds().Area());
+            }
+
+            if (!hasCameraRay)
                 return new SampledSpectrum(0.0f);
+            StrayLight.skipEmission = strayLights && straySample;
             SampledSpectrum Lval = weight * volpath.Li(crdRay, ref lambda, sampler, scratchBuffer, null);
+            StrayLight.skipEmission = false;
+            if (strayLights)
+                Lval *= 2;
             if (Lval.HasNaNs() || IsInf(Lval.y(lambda)))
                 return new SampledSpectrum(0.0f);
             return Lval;

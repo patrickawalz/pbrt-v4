@@ -8,6 +8,13 @@ using System;
 namespace pbrt
 {
 
+    // (not in pbrt-v4) Whether the ray that the integrator of this thread is tracing is a ray of stray light whose light from the
+    // lights is sampled from the lights (see Camera.HasStrayLight)
+    public static class StrayLight
+    {
+        [ThreadStatic] public static bool skipEmission;
+    }
+
     // Camera Definition (TaggedPointer<PerspectiveCamera, OrthographicCamera, SphericalCamera, RealisticCamera>)
     // The dispatch methods defined in cameras.h/cameras.cpp are the abstract methods here.
     public abstract unsafe partial class Camera
@@ -40,6 +47,38 @@ namespace pbrt
         public virtual bool HasDiffraction()
         {
             return false;
+        }
+
+        // (not in pbrt-v4) The stray light of the optics of a camera (the ghosts and the veiling glare of RealisticCamera2), for
+        // an integrator that starts its paths at the camera. Such a camera gives part of its samples a ray of stray light
+        // (StraySample() tells which). The stray light of a light that the lens sees directly is all but impossible to find
+        // that way, so the integrator leaves the emission of the lights out of those rays (StrayLight.skipEmission) and
+        // samples it from the lights instead: a point of the front element (SampleStrayLens(), with its density over the area),
+        // a direction wi from there to a light, and the film point pRaster that the light arrives at with the weight
+        // StrayImportance(): the importance of the stray light for a ray that enters the lens there along -wi, times the cosine
+        // at the front element. A camera without stray light (the default) has none of this.
+        public virtual bool HasStrayLight()
+        {
+            return false;
+        }
+
+        public virtual bool StraySample(CameraSample sample)
+        {
+            return false;
+        }
+
+        public virtual bool SampleStrayLens(Point2f u, Float time, ref SampledWavelengths lambda, out Interaction lens, out Float pdf)
+        {
+            lens = null;
+            pdf = 0;
+            return false;
+        }
+
+        public virtual SampledSpectrum StrayImportance(Interaction lens, Vector3f wi, Point2f u, ref SampledWavelengths lambda,
+                                                       out Point2f pRaster)
+        {
+            pRaster = default;
+            return new SampledSpectrum(0.0f);
         }
 
         public virtual bool SampleDiffractionOffset(Point2f pRaster, Float wavelength, Float uSelect, Float uCell, Point2f uInCell,
