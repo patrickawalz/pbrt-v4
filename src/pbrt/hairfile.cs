@@ -61,8 +61,14 @@ namespace pbrt
                     given.Add(Strings(loc, "wrap", "pinned"));
                 }
             }
+            // "bool checkselfintersection": one warning for the file with the number of strands that are not sure to be free of
+            // self-intersections (strandbasis.cs), not one for each strand
+            bool check = parameters.GetOneBool("checkselfintersection", false);
+            given.RemoveAll(parameter => parameter.name == "checkselfintersection");
+            int crossing = 0;
+            string firstCrossing = null;
             StrandBasis basis = null;
-            if (target == "curve")
+            if (target == "curve" || check)
             {
                 basis = StrandBasis.Read(new ParameterDictionary(new List<ParsedParameter>(), given, parameters.ColorSpace()), "hairfile", "catmull-rom", 3, loc);
             }
@@ -74,6 +80,22 @@ namespace pbrt
                 if (count < 2)
                 {
                     continue;
+                }
+                if (check)
+                {
+                    double[] px = new double[count], py = new double[count], pz = new double[count];
+                    for (int i = 0; i < count; ++i)
+                    {
+                        px[i] = set.points[3 * (first + i)];
+                        py[i] = set.points[3 * (first + i) + 1];
+                        pz[i] = set.points[3 * (first + i) + 2];
+                    }
+                    string reason = basis.Check(count) == null ? basis.Parameterized(px, py, pz).SelfIntersection(px, py, pz) : null;
+                    if (reason != null)
+                    {
+                        ++crossing;
+                        firstCrossing ??= "strand " + strand + ": " + reason;
+                    }
                 }
                 pstd.vector<Shape> made;
                 if (target == "curve")
@@ -150,6 +172,10 @@ namespace pbrt
                 {
                     shapes.push_back(made[i]);
                 }
+            }
+            if (crossing > 0)
+            {
+                pbrt.Warning(loc, "hairfile: " + crossing + " of " + set.StrandCount + " strands are not sure to be free of self-intersections (the first, " + firstCrossing + ").");
             }
             return shapes;
         }
