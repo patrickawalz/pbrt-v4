@@ -24,12 +24,22 @@
 // A wavelength has the radiance of the channel of the dataset that it is in (40 nm wide): the model does not interpolate
 // between its channels. The channels that the film can find (360 to 830 nm) are the ones used.
 //
+// Where the dataset is looked for: "filename" as it is given (beside the scene file, or a whole path); then a file of
+// that name beside the program (the directory of pbrt's own files); then in the directory that the environment variable
+// PRAGUE_SKY_DATASETS names. Without "filename", the first of these that is in one of the three places:
+// PragueSkyFullWide.dat, PragueSkyVisible.dat, PragueSkyGround14.dat, PragueSkyModelDatasetSWIR.dat,
+// PragueSkyModelDatasetFull.dat, PragueSkyModelDatasetGround.dat; with an "altitude" only the two that have altitudes
+// (PragueSkyFullWide.dat, PragueSkyModelDatasetFull.dat), and with "polarisation" not the last, which has none. So a
+// dataset put beside the program serves every scene. Any dataset of the model is read: the authors' three and what
+// praguedata makes of them (docs/sky-lights.md says where they are).
+//
 // "string polarisation" "dataset": the sky dome is polarised as the dataset says, by wavelength: linearly, to a degree
 // with a sign, positive across the plane of the sun and the direction and negative in it (the real sky has both, with
 // neutral points between). Only a dataset that holds polarisation can give it. The solar disc and the ground are not
 // polarised.
 
 using System;
+using System.Collections.Generic;
 
 namespace pbrt
 {
@@ -137,7 +147,7 @@ namespace pbrt
 
         public static PragueSkyLight Create(Transform renderFromLight, ParameterDictionary parameters, FileLoc loc, Allocator alloc)
         {
-            string filename = pbrt.ResolveFilename(parameters.GetOneString("filename", ""));
+            string given = parameters.GetOneString("filename", "");
             double visibility = parameters.GetOneFloat("visibility", 59.4f);
             Spectrum albedo = parameters.GetOneSpectrum("albedo", new ConstantSpectrum(0.3f), SpectrumType.Albedo, alloc);
             Float scale = parameters.GetOneFloat("scale", 1.0f);
@@ -153,13 +163,17 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, "\"prague\": above the ground (\"altitude\") the model has the ground in it: \"ground\" is for an observer on the ground.");
             }
-            if (filename.Length == 0)
-            {
-                pbrt.ErrorExit(loc, "\"prague\": \"filename\" must name a dataset of the Prague sky model.");
-            }
             if (polarisation != "none" && polarisation != "dataset")
             {
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: polarisation unknown (none, dataset).", polarisation));
+            }
+            string filename = FindDataset(given, altitude > 0, polarisation == "dataset", out string searched);
+            if (filename == null)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("\"prague\": no dataset of the Prague sky model was found (%s). Looked in: %s. The datasets are at " +
+                                                      "https://github.com/patrickawalz/pbrt-v4/releases/tag/prague-sky-datasets-v1; one beside the program " +
+                                                      "(PragueSkyVisible.dat for an observer on the ground) serves every scene.",
+                                                      given.Length > 0 ? given : "no \"filename\"", searched));
             }
             if (!(visibility > 0))
             {
@@ -188,6 +202,68 @@ namespace pbrt
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: the dataset holds no polarisation.", filename));
             }
             return light;
+        }
+
+        // The dataset to read (null: none found; `searched` then says where it was looked for): the name given, beside the
+        // scene, beside the program or in the directory of PRAGUE_SKY_DATASETS; without a name, the first of the known
+        // datasets that is in one of them and has what is asked (altitudes, polarisation)
+        public static string FindDataset(string given, bool altitudes, bool polarisation, out string searched)
+        {
+            List<string> directories = new List<string>();
+            directories.Add(System.AppContext.BaseDirectory);
+            string environment = System.Environment.GetEnvironmentVariable("PRAGUE_SKY_DATASETS");
+            if (!string.IsNullOrEmpty(environment))
+            {
+                directories.Add(environment);
+            }
+            searched = "the directory of the scene, " + string.Join(", ", directories);
+            if (given.Length > 0)
+            {
+                string beside = pbrt.ResolveFilename(given);
+                if (System.IO.File.Exists(beside))
+                {
+                    return beside;
+                }
+                foreach (string directory in directories)
+                {
+                    string candidate = System.IO.Path.Combine(directory, System.IO.Path.GetFileName(given));
+                    if (System.IO.File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                return null;
+            }
+            List<string> names = new List<string>();
+            names.Add("PragueSkyFullWide.dat");
+            if (!altitudes)
+            {
+                names.Add("PragueSkyVisible.dat");
+                names.Add("PragueSkyGround14.dat");
+                names.Add("PragueSkyModelDatasetSWIR.dat");
+            }
+            names.Add("PragueSkyModelDatasetFull.dat");
+            if (!altitudes && !polarisation)
+            {
+                names.Add("PragueSkyModelDatasetGround.dat");
+            }
+            foreach (string name in names)
+            {
+                string beside = pbrt.ResolveFilename(name);
+                if (System.IO.File.Exists(beside))
+                {
+                    return beside;
+                }
+                foreach (string directory in directories)
+                {
+                    string candidate = System.IO.Path.Combine(directory, name);
+                    if (System.IO.File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+            return null;
         }
 
         private readonly PragueSkyModel model;
