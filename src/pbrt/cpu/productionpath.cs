@@ -887,7 +887,7 @@ namespace pbrt
                         if (around != null && around.volumeIntegrator.onceMore != VolumeOnceMore.None && around.volumeIntegrator.scattering == VolumeScattering.Multiple &&
                             !(around is AggregateMedium) && depth < maxDepth)
                         {
-                            MediumProperties mp = around.SamplePoint(isect.p(), lambda, ray.time);
+                            MediumProperties mp = around.SamplePoint(isect.p(), ray.d, lambda, ray.time);
                             if (mp.phase != null)
                             {
                                 surfaceJoint = new VolumeJoint();

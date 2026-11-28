@@ -137,6 +137,18 @@ namespace pbrt
         // The sum of the volumes of the leaf at the point that hold the point
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
         {
+            return SampleAt(p, new Vector3f(0, 0, 0), false, lambda, time);
+        }
+
+        // (not in pbrt-v4) With the direction of travel, for the media inside whose extinction depends on it
+        public override MediumProperties SamplePoint(Point3f p, Vector3f w, SampledWavelengths lambda, Float time)
+        {
+            return SampleAt(p, w, true, lambda, time);
+        }
+
+        // directed: w is the direction of travel, and the media inside are asked with it
+        private MediumProperties SampleAt(Point3f p, Vector3f w, bool directed, SampledWavelengths lambda, Float time)
+        {
             MediumProperties total = default;
             total.sigma_a = new SampledSpectrum(0f);
             total.sigma_s = new SampledSpectrum(0f);
@@ -149,7 +161,7 @@ namespace pbrt
             if (volumes.Length == 1)
             {
                 AggregateMember only = aggregate.Member(volumes[0]);
-                return only.Inside(p) ? only.medium.SamplePoint(p, lambda, time) : total;
+                return only.Inside(p) ? (directed ? only.medium.SamplePoint(p, w, lambda, time) : only.medium.SamplePoint(p, lambda, time)) : total;
             }
             MediumProperties[] properties = new MediumProperties[volumes.Length];
             SampledSpectrum emission = new SampledSpectrum(0f);
@@ -162,7 +174,7 @@ namespace pbrt
                     properties[k].sigma_s = new SampledSpectrum(0f);
                     continue;
                 }
-                properties[k] = member.medium.SamplePoint(p, lambda, time);
+                properties[k] = (directed ? member.medium.SamplePoint(p, w, lambda, time) : member.medium.SamplePoint(p, lambda, time));
                 total.sigma_a += properties[k].sigma_a;
                 total.sigma_s += properties[k].sigma_s;
                 emission += properties[k].sigma_a * properties[k].Le;

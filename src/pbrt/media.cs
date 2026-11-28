@@ -167,7 +167,7 @@ namespace pbrt
                     {
                         // Call callback function for sample within segment
                         T_maj *= FastExp(-(t - tMin) * sg.sigma_maj);
-                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                         if (!callback(ray.Apply(t), mp, sg.sigma_maj, T_maj))
                         {
                             // Returning out of doubly-nested while loop is not as good perf. wise
@@ -235,6 +235,8 @@ namespace pbrt
                 return SampleT_maj<OSLMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is ScaledMedium)
                 return SampleT_maj<ScaledMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
+            else if (m is SGGXMedium)
+                return SampleT_maj<SGGXMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is CompositeMedium)
                 return SampleT_maj<CompositeMedium, RayMajorantIterator>(ray, rayMedium, tMax, u, ref rng, lambda, callback);
             else if (m is AtmosphereMedium)
@@ -2100,6 +2102,8 @@ namespace pbrt
             // (not in pbrt-v4) The volume integrator of the medium: "string tracker", "string transmittance"
             // (the cosine and the kernel noise media have their transmittance in closed form, and take it unless told otherwise)
             m.volumeIntegrator = VolumeIntegrator.Create(parameters, loc, name == "cosinenoise" || name == "kernelnoise" ? "closedform" : "ratio");
+            // (not in pbrt-v4) "string microflakes": the medium filled with SGGX microflakes (sggxmedium.cs)
+            m = SGGXMedium.Wrap(m, parameters, renderFromMedium, loc, alloc);
             m.CreateEmissionSampling(parameters, loc);
 
             parameters.ReportUnused();

@@ -69,7 +69,19 @@ namespace pbrt
 
         public override MediumProperties SamplePoint(Point3f p, SampledWavelengths lambda, Float time)
         {
-            MediumProperties mp = medium.SamplePoint(p, lambda, time);
+            return SampleAt(p, new Vector3f(0, 0, 0), false, lambda, time);
+        }
+
+        // (not in pbrt-v4) With the direction of travel, for the media inside whose extinction depends on it
+        public override MediumProperties SamplePoint(Point3f p, Vector3f w, SampledWavelengths lambda, Float time)
+        {
+            return SampleAt(p, w, true, lambda, time);
+        }
+
+        // directed: w is the direction of travel, and the media inside are asked with it
+        private MediumProperties SampleAt(Point3f p, Vector3f w, bool directed, SampledWavelengths lambda, Float time)
+        {
+            MediumProperties mp = (directed ? medium.SamplePoint(p, w, lambda, time) : medium.SamplePoint(p, lambda, time));
             mp.sigma_a = mp.sigma_a * scale;
             mp.sigma_s = mp.sigma_s * scale;
             return mp;

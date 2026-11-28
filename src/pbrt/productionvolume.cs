@@ -723,7 +723,7 @@ namespace pbrt
             {
                 // A ray without end in a medium that is the same everywhere: marched as far as the transmittance of the
                 // wavelength that is absorbed least is still above Negligible
-                MediumProperties mp = medium.SamplePoint(ray.o, m_ctx.lambda, ray.time);
+                MediumProperties mp = medium.SamplePoint(ray.o, ray.d, m_ctx.lambda, ray.time);
                 Float least = (mp.sigma_a + mp.sigma_s).MinComponentValue();
                 if (!(least > 0))
                 {
@@ -802,7 +802,7 @@ namespace pbrt
                 return none;
             }
             Point3f c = wi.Apply(t);
-            MediumProperties mp = medium.SamplePoint(c, lambda, wi.time);
+            MediumProperties mp = medium.SamplePoint(c, wi.d, lambda, wi.time);
             Float mean = (mp.sigma_a + mp.sigma_s).Average();
             if (!(bool)mp.sigma_s || !(mean > 0))
             {
@@ -879,7 +879,7 @@ namespace pbrt
             VolumePlace place;
             if (rs.Connect(m_ctx, atC, b, out between, out betweenR, out place) && place.medium != null)
             {
-                MediumProperties at = place.medium.SamplePoint(b, lambda, wi.time);
+                MediumProperties at = place.medium.SamplePoint(b, wi.d, lambda, wi.time);
                 if ((bool)at.sigma_s)
                 {
                     MediumInteraction atB = new MediumInteraction(b, -w, wi.time, place.medium, at.phase);
@@ -1409,7 +1409,7 @@ namespace pbrt
             {
                 return none;
             }
-            MediumProperties mp = medium.SamplePoint(c, lambda, wi.time);
+            MediumProperties mp = medium.SamplePoint(c, wi.d, lambda, wi.time);
             if (!(bool)mp.sigma_s)
             {
                 return none;
@@ -1453,7 +1453,7 @@ namespace pbrt
             {
                 return none;
             }
-            MediumProperties at = medium.SamplePoint(b, lambda, wi.time);
+            MediumProperties at = medium.SamplePoint(b, wi.d, lambda, wi.time);
             if (!(bool)at.sigma_s)
             {
                 return none;
@@ -1612,7 +1612,7 @@ namespace pbrt
                         phase = unit.phase;
                         return WalkEnd.Scattered;
                     }
-                    MediumProperties mp = medium.SamplePoint(point, lambda, wi.time);
+                    MediumProperties mp = medium.SamplePoint(point, wi.d, lambda, wi.time);
                     Float residual = majorant * (1 - pControl);
                     if ((bool)mp.Le)
                     {
@@ -1827,7 +1827,7 @@ namespace pbrt
                     }
                     t += step;
                     T *= Exp(-step * control);
-                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                     if ((bool)mp.Le)
                     {
                         sum += T * mp.sigma_a * mp.Le / largest;
@@ -1979,7 +1979,7 @@ namespace pbrt
                 // Update the shading context
                 Point3f point = wi.Apply(t0 + (i + 0.5f) * step);
                 m_ctx.SetP(point);
-                MediumProperties mp = medium.SamplePoint(point, lambda, wi.time);
+                MediumProperties mp = medium.SamplePoint(point, wi.d, lambda, wi.time);
                 SampledSpectrum sigma_t = mp.sigma_a + mp.sigma_s;
                 before[i] = accumulated;
                 extinction[i] = sigma_t;
@@ -2067,7 +2067,7 @@ namespace pbrt
                 }
                 // Direct lighting at the scatter location
                 Point3f point = wi.Apply(t);
-                MediumProperties mp = medium.SamplePoint(point, lambda, wi.time);
+                MediumProperties mp = medium.SamplePoint(point, wi.d, lambda, wi.time);
                 if (!(bool)mp.sigma_s)
                 {
                     continue;
@@ -2104,7 +2104,7 @@ namespace pbrt
             int n = Steps(t1 - t0, out step);
             for (int i = 0; i < n; ++i)
             {
-                MediumProperties mp = medium.SamplePoint(ray.Apply(t0 + (i + 0.5f) * step), m_ctx.lambda, ray.time);
+                MediumProperties mp = medium.SamplePoint(ray.Apply(t0 + (i + 0.5f) * step), ray.d, m_ctx.lambda, ray.time);
                 accumulated *= Attenuation(mp.sigma_a + mp.sigma_s, step);
             }
             return accumulated;
@@ -2130,7 +2130,7 @@ namespace pbrt
             int n = Steps(t1 - t0, out step);
             for (int i = 0; i < n; ++i)
             {
-                MediumProperties mp = medium.SamplePoint(ray.Apply(t0 + (i + 0.5f) * step), m_ctx.lambda, ray.time);
+                MediumProperties mp = medium.SamplePoint(ray.Apply(t0 + (i + 0.5f) * step), ray.d, m_ctx.lambda, ray.time);
                 SampledSpectrum sigma_t = mp.sigma_a + mp.sigma_s;
                 if ((bool)mp.Le)
                 {
@@ -2152,7 +2152,7 @@ namespace pbrt
         public override bool Integrate(VolumeServices rs, Ray wi, out SampledSpectrum L, out SampledSpectrum transmittance, out SampledSpectrum weight,
                                        out Point3f P, out Ray wo, out VolumeGeometry g)
         {
-            MediumProperties mp = medium.SamplePoint(m_ctx.P, m_ctx.lambda, wi.time);
+            MediumProperties mp = medium.SamplePoint(m_ctx.P, wi.d, m_ctx.lambda, wi.time);
             Float distance;
             bool hit = rs.GetNearestHit(wi, out P, out distance, out g);
             transmittance = Attenuation(mp.sigma_a, distance);
@@ -2267,7 +2267,7 @@ namespace pbrt
         public override bool Integrate(VolumeServices rs, Ray wi, out SampledSpectrum L, out SampledSpectrum transmittance, out SampledSpectrum weight,
                                        out Point3f P, out Ray wo, out VolumeGeometry g)
         {
-            MediumProperties mp = medium.SamplePoint(m_ctx.P, m_ctx.lambda, wi.time);
+            MediumProperties mp = medium.SamplePoint(m_ctx.P, wi.d, m_ctx.lambda, wi.time);
             SampledSpectrum sigma_t = mp.sigma_a + mp.sigma_s;
             Float distance;
             bool hit = rs.GetNearestHit(wi, out P, out distance, out g);
@@ -2421,7 +2421,7 @@ namespace pbrt
                         {
                             // (the weight against the other point is a function of the point: a collision of the control
                             // component, made without a lookup, needs one for it)
-                            MediumProperties mp = medium.SamplePoint(point, lambda, wi.time);
+                            MediumProperties mp = medium.SamplePoint(point, wi.d, lambda, wi.time);
                             Float t = Dot(point - wi.o, wi.d);
                             Float po = about.valid ? about.PDF(t) : 1 / distance;
                             Float mean = (mp.sigma_a + mp.sigma_s).Average();
@@ -2500,7 +2500,7 @@ namespace pbrt
                     if (t >= 0 && t < distance && !IsInf(t) && po > 0)
                     {
                         Point3f point = wi.Apply(t);
-                        MediumProperties mp = medium.SamplePoint(point, lambda, wi.time);
+                        MediumProperties mp = medium.SamplePoint(point, wi.d, lambda, wi.time);
                         if ((bool)mp.sigma_s)
                         {
                             SampledSpectrum rTo = m_ctx.r;
@@ -2553,7 +2553,7 @@ namespace pbrt
         public override bool Integrate(VolumeServices rs, Ray wi, out SampledSpectrum L, out SampledSpectrum transmittance, out SampledSpectrum weight,
                                        out Point3f P, out Ray wo, out VolumeGeometry g)
         {
-            MediumProperties mp = medium.SamplePoint(m_ctx.P, m_ctx.lambda, wi.time);
+            MediumProperties mp = medium.SamplePoint(m_ctx.P, wi.d, m_ctx.lambda, wi.time);
             SampledSpectrum sigma_t = mp.sigma_a + mp.sigma_s;
             Float distance;
             bool hit = rs.GetNearestHit(wi, out P, out distance, out g);
@@ -2627,7 +2627,7 @@ namespace pbrt
         // (in a medium that is the same everywhere the transmittance is known, and is what a path finds: W)
         protected override bool Reach(VolumeServices rs, Ray ray, Float t, out SampledSpectrum through, out SampledSpectrum densities, out SampledSpectrum nulls)
         {
-            MediumProperties mp = medium.SamplePoint(ray.o, m_ctx.lambda, ray.time);
+            MediumProperties mp = medium.SamplePoint(ray.o, ray.d, m_ctx.lambda, ray.time);
             through = Attenuation(mp.sigma_a + mp.sigma_s, t);
             densities = new SampledSpectrum(1f);
             nulls = through;
@@ -2705,7 +2705,7 @@ namespace pbrt
                         if ((bool)T_ray)
                         {
                             MediumEvents.FinishSegment(ref T_ray, ref rl, ref ru, T_last);
-                            MediumProperties there = medium.SamplePoint(wi.Apply(te), lambda, wi.time);
+                            MediumProperties there = medium.SamplePoint(wi.Apply(te), wi.d, lambda, wi.time);
                             SampledSpectrum reached = (there.sigma_a + there.sigma_s) * (pathWeights ? nulls : new SampledSpectrum(1f));
                             emitted += EquiangularShare(rs, wi, te, about.PDF(te), there, T_ray, reached, m_ctx.r * rl, chosen);
                         }

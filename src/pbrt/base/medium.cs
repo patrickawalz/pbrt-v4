@@ -81,6 +81,14 @@ namespace pbrt
             return SamplePoint(p, lambda);
         }
 
+        // (not in pbrt-v4) The properties at a point for light that travels along w (either way): a medium whose extinction
+        // depends on the direction (the microflakes of SGGXMedium, sggxmedium.cs) overrides it; for the others the direction
+        // does not matter. The integrators and the trackers ask with the direction of the ray that they follow.
+        public virtual MediumProperties SamplePoint(Point3f p, Vector3f w, SampledWavelengths lambda, Float time)
+        {
+            return SamplePoint(p, lambda, time);
+        }
+
         // Medium Public Methods
         public abstract RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf);
     }

@@ -104,7 +104,7 @@ namespace pbrt
                         }
                         else
                         {
-                            MediumProperties mp = medium.SamplePoint(p, lambda, ray.time);
+                            MediumProperties mp = medium.SamplePoint(p, ray.d, lambda, ray.time);
                             mp.sigma_a = ClampZero(mp.sigma_a - control.sigma_a);
                             mp.sigma_s = ClampZero(mp.sigma_s - control.sigma_s);
                             goOn = callback(p, mp, sigma_r, T_maj);
@@ -187,7 +187,7 @@ namespace pbrt
                 if (t < tEnd)
                 {
                     T_maj *= FastExp(-(t - tMin) * sigma_maj);
-                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                     if (!callback(ray.Apply(t), mp, sigma_maj, T_maj))
                         return new SampledSpectrum(1f);
                     T_maj = new SampledSpectrum(1f);
@@ -259,7 +259,7 @@ namespace pbrt
                 T = new SampledSpectrum(1f);
                 return false;
             }
-            MediumProperties mp = medium.SamplePoint(ray.o, lambda, ray.time);
+            MediumProperties mp = medium.SamplePoint(ray.o, ray.d, lambda, ray.time);
             Float length = tMax * Length(ray.d);
             if (IsInf(length))
                 length = Float.MaxValue;
@@ -370,7 +370,7 @@ namespace pbrt
                     if (t < sg.tMax)
                     {
                         T_maj *= FastExp(-(t - tMin) * residualMaj);
-                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                        MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                         SampledSpectrum sigma_n = residualMaj - (mp.sigma_a + mp.sigma_s) + control;
                         MediumEvents.RatioTrackingStep(ref T_ray, ref r_l, ref r_u, T_maj, residualMaj, sigma_n);
                         if (!T_ray)
@@ -501,8 +501,8 @@ namespace pbrt
             SampledSpectrum ends = new SampledSpectrum(0f);
             if (matching)
             {
-                MediumProperties first = medium.SamplePoint(ray.Apply(tStart), lambda, ray.time);
-                MediumProperties last = medium.SamplePoint(ray.Apply(tEnd), lambda, ray.time);
+                MediumProperties first = medium.SamplePoint(ray.Apply(tStart), ray.d, lambda, ray.time);
+                MediumProperties last = medium.SamplePoint(ray.Apply(tEnd), ray.d, lambda, ray.time);
                 ends = last.sigma_a + last.sigma_s - first.sigma_a - first.sigma_s;
             }
 
@@ -517,7 +517,7 @@ namespace pbrt
                 }
                 for (int j = 0; j < M; ++j)
                 {
-                    MediumProperties mp = medium.SamplePoint(ray.Apply((Float)(tStart + length * (u + j) / M)), lambda, ray.time);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply((Float)(tStart + length * (u + j) / M)), ray.d, lambda, ray.time);
                     for (int c = 0; c < NSpectrumSamples; ++c)
                     {
                         X[i * NSpectrumSamples + c] -= (double)mp.sigma_a[c] + mp.sigma_s[c];
@@ -692,7 +692,7 @@ namespace pbrt
                     {
                         break;
                     }
-                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                     SampledSpectrum null_ = (new SampledSpectrum(majorant) - mp.sigma_a - mp.sigma_s) / majorant;
                     weight *= null_;
                     if (!weight)
@@ -805,7 +805,7 @@ namespace pbrt
                     {
                         break;
                     }
-                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+                    MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
                     SampledSpectrum null_ = new SampledSpectrum(1f) - (mp.sigma_a + mp.sigma_s - control) / majorant;
                     if (binary)
                     {
@@ -905,7 +905,7 @@ namespace pbrt
                 }
             }
             Float t = (Float)(start[lo] + (depth - before[lo]) / majorant[lo]);
-            MediumProperties mp = medium.SamplePoint(ray.Apply(t), lambda, ray.time);
+            MediumProperties mp = medium.SamplePoint(ray.Apply(t), ray.d, lambda, ray.time);
             return (new SampledSpectrum(majorant[lo]) - mp.sigma_a - mp.sigma_s) / majorant[lo];
         }
 

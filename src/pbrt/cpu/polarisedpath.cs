@@ -51,6 +51,12 @@ namespace pbrt
                 attenuation = pearlescent.MuellerMatrix(wo, wi, fromCamera);
                 return true;
             }
+            SGGXPhaseFunction flakes = phase as SGGXPhaseFunction;
+            if (flakes != null)
+            {
+                // The reflection by the microflake whose normal is the half vector
+                return flakes.MuellerMatrix(wo, wi, fromCamera, out attenuation);
+            }
             HGPhaseFunction hg = phase as HGPhaseFunction;
             if (hg == null || hg.Rayleigh() == 0)
                 return false;
