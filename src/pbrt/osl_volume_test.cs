@@ -1314,7 +1314,8 @@ namespace pbrt
         }
 
         // Renders the OSL scene, the pbrt scene with the same seed, and the pbrt scene with another seed (the noise floor); writes the images with their
-        // labels and the row of the contact sheet. Returns { MAD(osl, ref same seed), MAD(osl, ref other seed), MAD(ref, ref other seed), relative mean difference }
+        // labels and the row of the contact sheet. Returns { MAD(osl, ref same seed), MAD(osl, ref other seed), MAD(ref, ref other seed), relative mean difference,
+        // relative mean difference of the two renders of the reference }
         private static double[] RenderPair(string id, string title, string integratorName, string oslScene, string refScene, int spp, int seed, string note = "")
         {
             string dir = OslVolumeShaders.Directory();
@@ -1323,11 +1324,13 @@ namespace pbrt
             OslRender reference2 = OslRenderTools.Render(id + "_pbrt_b", refScene, spp, seed + 1, "", dir);
             ASSERT_TRUE(osl != null && reference != null && reference2 != null);
             double same = Pixelwise(osl, reference), other = Pixelwise(osl, reference2), floor = Pixelwise(reference, reference2);
-            double[] mo = osl.ChannelMeans(), mr = reference.ChannelMeans();
-            double rel = 0;
+            double[] mo = osl.ChannelMeans(), mr = reference.ChannelMeans(), mr2 = reference2.ChannelMeans();
+            double rel = 0, relFloor = 0;
             for (int c = 0; c < 3; ++c)
             {
                 rel = Math.Max(rel, Math.Abs(mo[c] - mr[c]) / Math.Max(1e-3, mr[c]));
+                // (the same between the two renders of the reference: what the noise alone does to the mean)
+                relFloor = Math.Max(relFloor, Math.Abs(mr2[c] - mr[c]) / Math.Max(1e-3, mr[c]));
             }
             string mad = "MAD " + same.ToString("F5", CultureInfo.InvariantCulture) + "  FLOOR " + floor.ToString("F5", CultureInfo.InvariantCulture);
             string label = integratorName;
@@ -1339,14 +1342,18 @@ namespace pbrt
             Console.WriteLine("[OslVolume] render " + id + " (" + integratorName + ", " + spp + " spp): MAD(osl, ref same seed) " + same.ToString("F5", CultureInfo.InvariantCulture) +
                               ", MAD(osl, ref seed+1) " + other.ToString("F5", CultureInfo.InvariantCulture) + ", noise floor MAD(ref, ref seed+1) " +
                               floor.ToString("F5", CultureInfo.InvariantCulture) + ", means " + OslRenderTools.F(mo) + " vs " + OslRenderTools.F(mr) + "\n    " + p1 + "\n    " + p2);
-            return new double[] { same, other, floor, rel };
+            return new double[] { same, other, floor, rel, relFloor };
         }
 
-        // The OSL render and the reference are equal within the noise: against an independent render of the reference
+        // The OSL render and the reference are equal within the noise: against an independent render of the reference.
+        // The means: within meanTol beyond what the two renders of the reference differ by. (While the OSL render and the
+        // reference drew the same random numbers their means differed by far less than the noise, and meanTol alone was
+        // the limit. They are independent renders now: in the scenes with fireflies two seeds of the reference itself are
+        // 1.5 to 2.9% apart at these sample counts, more than the OSL render is from either.)
         private static void ExpectWithinNoise(double[] r, double ratio, double meanTol)
         {
             EXPECT_LT(r[1], ratio * r[2] + 1e-4);
-            EXPECT_LT(r[3], meanTol);
+            EXPECT_LT(r[3], meanTol + r[4]);
         }
 
         [TEST("OslVolume", "RenderHomogeneousAbsorbing")]
@@ -1357,8 +1364,9 @@ namespace pbrt
             string integ = IntegratorText("volpath");
             double[] r = RenderPair("a1_absorbing", "ABSORBING FOG", "volpath", VolScene(integ, OslFogDecl("m", sa, ss, 0), "", Backdrop + MediumSphere("m")),
                                     VolScene(integ, HomogeneousDecl("m", sa, ss, 0), "", Backdrop + MediumSphere("m")), 64, 3);
-            // the same estimators and the same random numbers: the images agree to the rounding of the spectra
-            EXPECT_LT(r[0], 2e-4);
+            // (with volpath on the volume framework the homogeneous medium of pbrt is integrated in closed form and the OSL
+            // medium by tracking: the two renders no longer draw the same random numbers, and the comparison is the one
+            // against an independent render of the reference, below. The same holds for the other pairs of this file.)
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1370,7 +1378,6 @@ namespace pbrt
             string integ = IntegratorText("volpath");
             double[] r = RenderPair("a2_scattering", "SCATTERING FOG G=0.4", "volpath", VolScene(integ, OslFogDecl("m", sa, ss, 0.4f), "", Backdrop + MediumSphere("m")),
                                     VolScene(integ, HomogeneousDecl("m", sa, ss, 0.4f), "", Backdrop + MediumSphere("m")), 64, 5);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1382,7 +1389,6 @@ namespace pbrt
             string integ = IntegratorText("volpath");
             double[] r = RenderPair("a3_chromatic", "CHROMATIC FOG", "volpath", VolScene(integ, OslFogDecl("m", sa, ss, 0.2f), "", Backdrop + MediumSphere("m")),
                                     VolScene(integ, HomogeneousDecl("m", sa, ss, 0.2f), "", Backdrop + MediumSphere("m")), 64, 7);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1395,7 +1401,6 @@ namespace pbrt
             string pbrtMedium = "MakeNamedMedium \"m\" \"string type\" \"homogeneous\" \"rgb sigma_a\" [0.9 0.9 0.9] \"rgb sigma_s\" [0 0 0] \"rgb Le\" [1 0.5 0.15] \"float Lescale\" 2\n";
             double[] r = RenderPair("a4_emissive", "EMISSIVE FOG", "volpath", VolScene(integ, osl, "", Backdrop + MediumSphere("m")),
                                     VolScene(integ, pbrtMedium, "", Backdrop + MediumSphere("m")), 64, 9);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1409,7 +1414,6 @@ namespace pbrt
             string body = Backdrop;
             double[] r = RenderPair("a5_camera_in_fog", "CAMERA IN FOG", "volpath", VolScene(integ, OslFogDecl("m", sa, ss, 0.3f), "m", body),
                                     VolScene(integ, HomogeneousDecl("m", sa, ss, 0.3f), "m", body), 64, 11);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1425,7 +1429,6 @@ namespace pbrt
             double[] r = RenderPair("a6_nested", "NESTED MEDIA, CAMERA IN OUTER", "volpath",
                                     VolScene(integ, OslFogDecl("A", saA, ssA, 0.1f) + OslFogDecl("B", saB, ssB, -0.2f), "A", shapes),
                                     VolScene(integ, HomogeneousDecl("A", saA, ssA, 0.1f) + HomogeneousDecl("B", saB, ssB, -0.2f), "A", shapes), 64, 13);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1442,7 +1445,6 @@ namespace pbrt
             double[] r = RenderPair("a7_mixed", "PBRT OUTER, OSL INNER", "volpath",
                                     VolScene(integ, HomogeneousDecl("A", saA, ssA, 0.1f) + OslFogDecl("B", saB, ssB, -0.2f), "A", shapes),
                                     VolScene(integ, HomogeneousDecl("A", saA, ssA, 0.1f) + HomogeneousDecl("B", saB, ssB, -0.2f), "A", shapes), 64, 15);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.01);
         }
 
@@ -1455,7 +1457,6 @@ namespace pbrt
             string glass = "AttributeBegin\n  MediumInterface \"m\" \"\"\n  Material \"dielectric\" \"float eta\" 1.5\n  Shape \"sphere\" \"float radius\" 1.3\nAttributeEnd\n";
             double[] r = RenderPair("a8_glass", "OSL MEDIUM IN A GLASS SPHERE", "volpath", VolScene(integ, OslFogDecl("m", sa, ss, 0.5f), "", Backdrop + glass),
                                     VolScene(integ, HomogeneousDecl("m", sa, ss, 0.5f), "", Backdrop + glass), 96, 17);
-            EXPECT_LT(r[0], 2e-4);
             ExpectWithinNoise(r, 1.5, 0.015);
         }
 

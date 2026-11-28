@@ -21,7 +21,11 @@
 // (SampleEmission, VolumeContext.emissionWeight).
 //
 // "bool polarised": the path carries the polarisation of the light (Li, PolarisedGather), and the sensor measures what
-// "analyser" and "measure" say, as "polpath" does. Not here: regularisation, and the equiangular sampling of volpath.
+// "analyser" and "measure" say, as "polpath" does.
+//
+// Integrator "volpath" is this integrator too (VolPathIntegrator in integrators.cs): pbrt-v4's volumetric path tracer no
+// longer walks the media itself. From it come "bool regularize", the visible surface of the first hit and the subsurface
+// scattering of a BSSRDF.
 
 using System;
 using System.Collections.Generic;
@@ -692,7 +696,7 @@ namespace pbrt
             // The collision of a volume that the next ray leaves from, where the volume draws two points jointly
             // (VolumeGeometry.joint); null otherwise
             VolumeJoint joint = null;
-            bool specularBounce = true;
+            bool specularBounce = true, anyNonSpecularBounces = false;
             LightSampleContext prevIntrCtx = default;
             VolumeContext ctx = new VolumeContext();
             ctx.lambda = lambda;
@@ -831,6 +835,7 @@ namespace pbrt
                     }
                     p_b = ps.value().pdf;
                     specularBounce = false;
+                    anyNonSpecularBounces = true;
                     prevIntrCtx = new LightSampleContext(point);
                     ray = point.SpawnRay(ps.value().wi);
                 }
@@ -874,9 +879,19 @@ namespace pbrt
                         MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
                         continue;
                     }
+                    // Initialize _visibleSurf_ at first intersection
+                    if (depth == 0 && visibleSurf != null)
+                    {
+                        visibleSurf.Assign(new VisibleSurface(isect, bsdf.rho(isect.wo, ucRho, uRho), lambda));
+                    }
                     if (depth++ >= maxDepth)
                     {
                         break;
+                    }
+                    // Possibly regularize the BSDF
+                    if (regularize && anyNonSpecularBounces)
+                    {
+                        bsdf.Regularize();
                     }
                     if (IsNonSpecular(bsdf.Flags()))
                     {
@@ -963,9 +978,99 @@ namespace pbrt
                     {
                         etaScale *= Sqr(bs.value().eta);
                     }
+                    anyNonSpecularBounces |= !bs.value().IsSpecular();
                     prevIntrCtx = new LightSampleContext(isect);
                     ray = isect.SpawnRay(ray, bsdf, bs.value().wi, bs.value().flags, bs.value().eta);
                     MediumTracking.CrossSurface(ref rs.stack, isect, ray.d);
+
+                    // Account for attenuated subsurface scattering, if applicable (as pbrt-v4's volpath does)
+                    BSSRDF bssrdf = isect.GetBSSRDF(ray, ref lambda, camera, scratchBuffer);
+                    if (bssrdf != null && bs.value().IsTransmission())
+                    {
+                        // Sample BSSRDF probe segment to find exit point
+                        Float uc = sampler.Get1D();
+                        Point2f up = sampler.Get2D();
+                        pstd.optional<BSSRDFProbeSegment> probeSeg = bssrdf.SampleSp(uc, up);
+                        if (!probeSeg)
+                        {
+                            break;
+                        }
+
+                        // Sample random intersection along BSSRDF probe segment
+                        uint64_t seed = MixBits(FloatToBits((float)sampler.Get1D()));
+                        WeightedReservoirSampler<SubsurfaceInteraction> interactionSampler = new WeightedReservoirSampler<SubsurfaceInteraction>(seed);
+                        // Intersect BSSRDF sampling ray against the scene geometry
+                        Interaction baseIntr = new Interaction(probeSeg.value().p0, ray.time, (Medium)null);
+                        while (true)
+                        {
+                            Ray r = baseIntr.SpawnRayTo(probeSeg.value().p1);
+                            if (r.d == new Vector3f(0, 0, 0))
+                            {
+                                break;
+                            }
+                            pstd.optional<ShapeIntersection> siProbe = Intersect(r, 1);
+                            if (!siProbe)
+                            {
+                                break;
+                            }
+                            baseIntr = siProbe.value().intr;
+                            if (siProbe.value().intr.material == isect.material)
+                            {
+                                interactionSampler.Add(new SubsurfaceInteraction(siProbe.value().intr), 1.0f);
+                            }
+                        }
+                        if (interactionSampler.HasSample() == 0)
+                        {
+                            break;
+                        }
+
+                        // Convert probe intersection to _BSSRDFSample_
+                        SubsurfaceInteraction ssi = interactionSampler.GetSample();
+                        BSSRDFSample bssrdfSample = bssrdf.ProbeIntersectionToSample(ssi, scratchBuffer);
+                        if (!bssrdfSample.Sp || !bssrdfSample.pdf)
+                        {
+                            break;
+                        }
+
+                        // Update path state for subsurface scattering (the densities of the path by wavelength are those of
+                        // the probe; what leaves the subsurface is unpolarised)
+                        Float pdf = interactionSampler.SampleProbability() * bssrdfSample.pdf[0];
+                        beta *= bssrdfSample.Sp / pdf;
+                        ctx.r *= bssrdfSample.pdf / bssrdfSample.pdf[0];
+                        if (polarised)
+                        {
+                            relative *= PAttenuation.Lambert(new SampledSpectrum(1f));
+                        }
+                        SurfaceInteraction pi = ssi;
+                        pi.wo = bssrdfSample.wo;
+                        prevIntrCtx = new LightSampleContext(pi);
+                        // Possibly regularize subsurface BSDF
+                        BSDF Sw = bssrdfSample.Sw;
+                        anyNonSpecularBounces = true;
+                        if (regularize)
+                        {
+                            Sw.Regularize();
+                        }
+
+                        // Account for attenuated direct illumination subsurface scattering
+                        Gather(ref L, ref Lp, beta, relative, ctx, SampleLd(rs, ctx, pi, true, Sw, null, sampler, null));
+
+                        // Sample ray for indirect subsurface scattering
+                        Float uSw = sampler.Get1D();
+                        pstd.optional<BSDFSample> bsSw = Sw.Sample_f(pi.wo, uSw, sampler.Get2D());
+                        if (!bsSw)
+                        {
+                            break;
+                        }
+                        beta *= bsSw.value().f * AbsDot(bsSw.value().wi, pi.shading.n) / bsSw.value().pdf;
+                        p_b = bsSw.value().pdfIsProportional ? Sw.PDF(pi.wo, bsSw.value().wi) : bsSw.value().pdf;
+                        // Don't increment depth this time...
+                        specularBounce = bsSw.value().IsSpecular();
+                        direct = null;
+                        joint = null;
+                        ray = new RayDifferential(pi.SpawnRay(bsSw.value().wi));
+                        MediumTracking.CrossSurface(ref rs.stack, pi, ray.d);
+                    }
                 }
 
                 if (!beta)
@@ -1000,12 +1105,48 @@ namespace pbrt
                                                                                parameters.GetOneString("lightsampler", "bvh"));
             // ("bool polarised": the path carries the polarisation of the light, and the sensor measures what "analyser" and
             // "measure" say, as "polpath" does)
+            integrator.regularize = parameters.GetOneBool("regularize", false);
             integrator.polarised = parameters.GetOneBool("polarised", false);
             PolarisedPathIntegrator.ParseSensor(parameters, loc, out integrator.analyser, out integrator.analyserAngle, out integrator.measurement);
             integrator.cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
             return integrator;
         }
 
+        // What "volpath" sets when it is this integrator (VolPathIntegrator): the polarised sensor, and pbrt-v4's
+        // regularisation of the BSDFs after a non-specular bounce
+        internal void Configure(bool regularize, bool polarised, bool analyser, Float analyserAngle, PolarisedPathIntegrator.Measurement measurement)
+        {
+            this.regularize = regularize;
+            this.polarised = polarised;
+            this.analyser = analyser;
+            this.analyserAngle = analyserAngle;
+            this.measurement = measurement;
+            cameraUp = camera.GetCameraTransform().RenderFromCamera(new Vector3f(0, 1, 0), 0);
+        }
+
+        private static Float[] ToFloats(params double[] v)
+        {
+            Float[] r = new Float[v.Length];
+            for (int i = 0; i < v.Length; ++i)
+            {
+                r[i] = (Float)v[i];
+            }
+            return r;
+        }
+
+        private static Point2f P2(double x, double y) { return new Point2f((Float)x, (Float)y); }
+
+        // The samples of the estimate of the albedo of the first surface (pbrt-v4's, for the visible surface)
+        private static readonly Float[] ucRho = ToFloats(
+            0.75741637, 0.37870818, 0.7083487, 0.18935409, 0.9149363, 0.35417435, 0.5990858, 0.09467703, 0.8578725, 0.45746812, 0.686759, 0.17708716,
+            0.9674518, 0.2995429, 0.5083201, 0.047338516);
+        private static readonly Point2f[] uRho = new Point2f[16] {
+            P2(0.855985, 0.570367), P2(0.381823, 0.851844), P2(0.285328, 0.764262), P2(0.733380, 0.114073),
+            P2(0.542663, 0.344465), P2(0.127274, 0.414848), P2(0.964700, 0.947162), P2(0.594089, 0.643463),
+            P2(0.095109, 0.170369), P2(0.825444, 0.263359), P2(0.429467, 0.454469), P2(0.244460, 0.816459),
+            P2(0.756135, 0.731258), P2(0.516165, 0.152852), P2(0.180888, 0.214174), P2(0.898579, 0.503897)};
+
+        private bool regularize;
         private bool polarised;
         private bool analyser;
         private Float analyserAngle;

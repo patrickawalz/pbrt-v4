@@ -269,6 +269,15 @@ namespace pbrt
         // The collision that the ray given to Volume.Integrate() leaves from, where it was returned with VolumeGeometry.joint;
         // null for any other ray
         public VolumeJoint joint;
+        // For a renderer that keeps the densities of a path in its vertices (bidirectional path tracing; it makes the multiple
+        // scattering volume that tracks, whatever the medium): the renderer is told of every collision (VolumeServices.Collision), and the volume leaves here what the walk along the ray is to
+        // the weights of such a renderer, each relative to the wavelength that samples: the density of the segment as the
+        // walk samples it (segU) and as a shadow ray would (segL), and the scattering coefficient at the collision that
+        // scatters (vtx). They are those of the ray alone, from one, and are current at every collision that is reported, as
+        // is `walked`, the weight of the walk so far.
+        public bool tracked;
+        public SampledSpectrum segU = new SampledSpectrum(1f), segL = new SampledSpectrum(1f), vtx = new SampledSpectrum(1f);
+        public SampledSpectrum walked = new SampledSpectrum(1f);
 
         public Point3f GetP() { return P; }
         public void SetP(Point3f p) { P = p; }
@@ -488,6 +497,8 @@ namespace pbrt
         // for the weights at the next one (the path tracer adds the phase function of the direction it takes, and gives it
         // back in VolumeContext.joint for the ray that leaves from here). Null otherwise.
         public VolumeJoint joint;
+        // The coefficients of the medium at the point of the volume (for VolumeContext.tracked)
+        public MediumProperties properties;
     }
 
     // VolumeServices Definition
@@ -497,6 +508,13 @@ namespace pbrt
         public abstract bool GetNearestHit(Ray ray, out Point3f P, out Float distance, out VolumeGeometry g);
 
         public abstract Float GenerateRandomNumber();
+
+        // A collision of the majorant along the ray of Volume.Integrate(), before its event is chosen, for a renderer that asked
+        // to be told (VolumeContext.tracked): the point, the coefficients there, the majorant and its transmittance since the
+        // collision before
+        public virtual void Collision(VolumeContext ctx, Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj)
+        {
+        }
 
         // A sample of the lights for the point of the context: its direction, its radiance over its density (with the weight
         // of the heuristic that combines it with a direction sampled from the phase function, whose density for wi is asked
@@ -2656,7 +2674,9 @@ namespace pbrt
         public override bool Integrate(VolumeServices rs, Ray wi, out SampledSpectrum L, out SampledSpectrum transmittance, out SampledSpectrum weight,
                                        out Point3f P, out Ray wo, out VolumeGeometry g)
         {
-            if (medium.volumeIntegrator.spectralTracking)
+            // (a renderer that keeps the densities of the path in its vertices weighs its strategies by the densities of the
+            // wavelength that samples: spectral tracking has none, and is not for it)
+            if (medium.volumeIntegrator.spectralTracking && !m_ctx.tracked)
             {
                 return IntegrateSpectral(rs, wi, out L, out transmittance, out weight, out P, out wo, out g);
             }
@@ -2725,6 +2745,11 @@ namespace pbrt
             SampledSpectrum T_end = medium.volumeIntegrator.tracker.SampleT_maj(wi, medium, distance, rs.GenerateRandomNumber(), ref rng, lambda,
                 (Point3f p, MediumProperties mp, SampledSpectrum sigma_maj, SampledSpectrum T_maj) =>
                 {
+                    if (m_ctx.tracked)
+                    {
+                        m_ctx.walked = beta;
+                        rs.Collision(m_ctx, p, mp, sigma_maj, T_maj);
+                    }
                     if ((bool)mp.Le)
                     {
                         Float pdfCollision = sigma_maj[0] * T_maj[0];
@@ -2745,6 +2770,10 @@ namespace pbrt
                         Float pdf = T_maj[0] * mp.sigma_s[0];
                         beta *= T_maj * mp.sigma_s / pdf;
                         r *= T_maj * mp.sigma_s / pdf;
+                        // (the distance to the collision is in the segment, the scattering coefficient at the vertex)
+                        m_ctx.segU *= T_maj / T_maj[0];
+                        m_ctx.segL *= T_maj / T_maj[0];
+                        m_ctx.vtx *= mp.sigma_s / mp.sigma_s[0];
                         scattered = true;
                         point = p;
                         at = mp;
@@ -2760,6 +2789,8 @@ namespace pbrt
                     }
                     beta *= T_maj * sigma_n / pdfNull;
                     r *= T_maj * sigma_n / pdfNull;
+                    m_ctx.segU *= T_maj * sigma_n / pdfNull;
+                    m_ctx.segL *= T_maj * sigma_maj / pdfNull;
                     for (int i = 0; i < NSpectrumSamples; ++i)
                     {
                         if (sigma_maj[i] > 0)
@@ -2787,6 +2818,7 @@ namespace pbrt
                 g = new VolumeGeometry();
                 g.isSurface = false;
                 g.phase = at.phase;
+                g.properties = at;
                 g.scatter = new MediumInteraction(point, -wi.d, wi.time, medium, at.phase);
                 SampledSpectrum product = (at.sigma_a + at.sigma_s) * (pathWeights ? nullsToCollision : new SampledSpectrum(1f));
                 if (weighed || m_ctx.joint != null)
@@ -2804,6 +2836,8 @@ namespace pbrt
             }
             weight = beta * T_end / T_end[0];
             m_ctx.r = r * T_end / T_end[0];
+            m_ctx.segU *= T_end / T_end[0];
+            m_ctx.segL *= T_end / T_end[0];
             return hit;
         }
 
