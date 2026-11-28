@@ -464,12 +464,7 @@ namespace pbrt
         // SampledWavelengths Public Methods
         public static bool operator ==(SampledWavelengths swl1, SampledWavelengths swl2)
         {
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                if (swl1.lambda[i] != swl2.lambda[i] || swl1.pdf[i] != swl2.pdf[i])
-                    return false;
-            }
-            return true;
+            return SpectrumVectors.EqualsAll(swl1.lambda, swl2.lambda) && SpectrumVectors.EqualsAll(swl1.pdf, swl2.pdf);
         }
 
         public static bool operator !=(SampledWavelengths swl1, SampledWavelengths swl2)
@@ -481,10 +476,10 @@ namespace pbrt
         {
             string r = "[ SampledWavelengths lambda: [";
             for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {lambda[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+                r += $" {lambda.GetElement(i):F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
             r += "] pdf: [";
             for (int i = 0; i < NSpectrumSamples; ++i)
-                r += $" {pdf[i]:F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
+                r += $" {pdf.GetElement(i):F6}{(i != NSpectrumSamples - 1 ? ',' : ' ')}";
             r += "] ]";
             return r;
         }
@@ -494,20 +489,19 @@ namespace pbrt
         {
             SampledWavelengths swl = new SampledWavelengths();
             // Sample first wavelength using _u_
-            swl.lambda[0] = Lerp(u, lambda_min, lambda_max);
+            swl[0] = Lerp(u, lambda_min, lambda_max);
 
             // Initialize _lambda_ for remaining wavelengths
             Float delta = (lambda_max - lambda_min) / NSpectrumSamples;
             for (int i = 1; i < NSpectrumSamples; ++i)
             {
-                swl.lambda[i] = swl.lambda[i - 1] + delta;
-                if (swl.lambda[i] > lambda_max)
-                    swl.lambda[i] = lambda_min + (swl.lambda[i] - lambda_max);
+                swl[i] = swl[i - 1] + delta;
+                if (swl[i] > lambda_max)
+                    swl[i] = lambda_min + (swl[i] - lambda_max);
             }
 
             // Compute PDF for sampled wavelengths
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                swl.pdf[i] = 1 / (lambda_max - lambda_min);
+            swl.pdf = SpectrumVectors.Create(1 / (lambda_max - lambda_min));
 
             return swl;
         }
@@ -522,8 +516,8 @@ namespace pbrt
                 if (up > 1)
                     up -= 1;
                 Float pdfValue;
-                swl.lambda[i] = distribution.Sample(up, &pdfValue);
-                swl.pdf[i] = pdfValue;
+                swl[i] = distribution.Sample(up, &pdfValue);
+                swl.pdf = swl.pdf.WithElement(i, pdfValue);
             }
             return swl;
         }
@@ -531,18 +525,18 @@ namespace pbrt
         public ref Float this[int i]
         {
             [UnscopedRef]
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return ref lambda[i];
+                DCHECK(i >= 0 && i < NSpectrumSamples);
+                return ref Unsafe.Add(ref Unsafe.As<SpectrumVector, Float>(ref lambda), i);
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public SampledSpectrum PDF()
         {
-            fixed (Float* pdfPtr = pdf)
-            {
-                return new SampledSpectrum(new pstd.span<Float>(pdfPtr, NSpectrumSamples));
-            }
+            return new SampledSpectrum(pdf);
         }
 
         public void TerminateSecondary()
@@ -550,19 +544,23 @@ namespace pbrt
             if (SecondaryTerminated())
                 return;
             // Update wavelength probabilities for termination of secondary wavelengths
-            for (int i = 1; i < NSpectrumSamples; ++i)
-                pdf[i] = 0;
-            pdf[0] /= NSpectrumSamples;
+            pdf = SpectrumVectors.Create(pdf.GetElement(0) / NSpectrumSamples, 0, 0, 0);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool SecondaryTerminated()
         {
-            for (int i = 1; i < NSpectrumSamples; ++i)
+            return pdf.GetElement(1) == 0 && pdf.GetElement(2) == 0 && pdf.GetElement(3) == 0;
+        }
+
+        // (not in pbrt-v4) The four wavelengths as one register, for the spectra that are evaluated at all of them at once
+        internal SpectrumVector Lambda
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
             {
-                if (pdf[i] != 0)
-                    return false;
+                return lambda;
             }
-            return true;
         }
 
         public static SampledWavelengths SampleVisible(Float u)
@@ -575,8 +573,8 @@ namespace pbrt
                 if (up > 1)
                     up -= 1;
 
-                swl.lambda[i] = SampleVisibleWavelengths(up);
-                swl.pdf[i] = VisibleWavelengthsPDF(swl.lambda[i]);
+                swl[i] = SampleVisibleWavelengths(up);
+                swl.pdf = swl.pdf.WithElement(i, VisibleWavelengthsPDF(swl[i]));
             }
             return swl;
         }
@@ -587,15 +585,16 @@ namespace pbrt
             SampledWavelengths swl = new SampledWavelengths();
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
-                swl.lambda[i] = lambda[i];
-                swl.pdf[i] = pdf[i];
+                swl[i] = lambda[i];
+                swl.pdf = swl.pdf.WithElement(i, pdf[i]);
             }
             return swl;
         }
 
         // SampledWavelengths Private Members
-        private fixed Float lambda[NSpectrumSamples];
-        private fixed Float pdf[NSpectrumSamples];
+        // (not in pbrt-v4) Each of the two is one SIMD register, as the values of a SampledSpectrum
+        private SpectrumVector lambda;
+        private SpectrumVector pdf;
     }
 
     // ConstantSpectrum Definition
@@ -647,6 +646,22 @@ namespace pbrt
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
+            // (not in pbrt-v4) The four table places at once. For a wavelength from 0 to 2^22, where adding a half is exact,
+            // the floor of the wavelength plus a half is lround() of it; any other goes the old way.
+            SpectrumVector wavelengths = lambda.Lambda;
+            if (SpectrumVectors.GreaterThanOrEqualAll(wavelengths, SpectrumVector.Zero) &&
+                SpectrumVectors.LessThanAll(wavelengths, SpectrumVectors.Create((Float)4194304)))
+            {
+                SpectrumVector rounded = SpectrumVectors.Floor(wavelengths + SpectrumVectors.Create((Float)0.5));
+                Float[] table = values;
+                int count = table.Length;
+                int offset0 = (int)rounded.GetElement(0) - lambda_min, offset1 = (int)rounded.GetElement(1) - lambda_min;
+                int offset2 = (int)rounded.GetElement(2) - lambda_min, offset3 = (int)rounded.GetElement(3) - lambda_min;
+                return new SampledSpectrum(SpectrumVectors.Create((uint)offset0 < (uint)count ? table[offset0] : 0,
+                                                                  (uint)offset1 < (uint)count ? table[offset1] : 0,
+                                                                  (uint)offset2 < (uint)count ? table[offset2] : 0,
+                                                                  (uint)offset3 < (uint)count ? table[offset3] : 0));
+            }
             SampledSpectrum s = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
@@ -902,10 +917,7 @@ namespace pbrt
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
-            SampledSpectrum s = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = rsp.Evaluate(lambda[i]);
-            return s;
+            return new SampledSpectrum(rsp.Evaluate(lambda.Lambda));
         }
 
         public RGBAlbedoSpectrum(RGBColorSpace cs, RGB rgb)
@@ -941,10 +953,7 @@ namespace pbrt
 
         public override SampledSpectrum Sample(SampledWavelengths lambda)
         {
-            SampledSpectrum s = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Evaluate(lambda[i]);
-            return s;
+            return new SampledSpectrum(SpectrumVectors.Create(scale) * rsp.Evaluate(lambda.Lambda));
         }
 
         public override string ToString() { return $"[ RGBUnboundedSpectrum rsp: {rsp} ]"; }
@@ -968,9 +977,7 @@ namespace pbrt
         {
             if (illuminant == null)
                 return new SampledSpectrum(0);
-            SampledSpectrum s = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                s[i] = scale * rsp.Evaluate(lambda[i]);
+            SampledSpectrum s = new SampledSpectrum(SpectrumVectors.Create(scale) * rsp.Evaluate(lambda.Lambda));
             return s * illuminant.Sample(lambda);
         }
 

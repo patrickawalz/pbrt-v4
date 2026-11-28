@@ -142,5 +142,76 @@ namespace pbrt
             Console.WriteLine(StringPrintf("  %f ns an iteration (sum %g)", best, check));
             EXPECT_GT(check, 0);
         }
+
+        // The spectra that are evaluated at the four wavelengths at once give at each the value of Evaluate() to the last
+        // bit, and the wavelengths keep what they did (the densities, the termination of the secondary ones)
+        [TEST("SampledSpectrum", "SpectraAtFourWavelengthsAtOnce")]
+        public static void SpectraAtFourWavelengthsAtOnce()
+        {
+            RGBColorSpace space = RGBColorSpace.sRGB;
+            RNG rng = new RNG(31);
+            int compared = 0;
+            for (int trial = 0; trial < 20000; ++trial)
+            {
+                RGB rgb = new RGB(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>());
+                if (trial % 50 == 0)
+                {
+                    rgb = new RGB(trial % 100 == 0 ? 0 : 1, trial % 150 == 0 ? 1 : 0, trial % 200 == 0 ? 1 : 0);
+                }
+                Spectrum[] spectra =
+                {
+                    new RGBAlbedoSpectrum(space, rgb), new RGBUnboundedSpectrum(space, rgb * 7.5f), new RGBIlluminantSpectrum(space, rgb * 3),
+                    Spectra.X(), Spectra.Y(), space.illuminant, new DenselySampledSpectrum(new BlackbodySpectrum(3000 + 4000 * rng.Uniform<Float>()), 400, 700)
+                };
+                SampledWavelengths lambda = trial % 3 == 0 ? SampledWavelengths.SampleUniform(rng.Uniform<Float>())
+                                                           : trial % 3 == 1 ? SampledWavelengths.SampleVisible(rng.Uniform<Float>())
+                                                                            : SampledWavelengths.SampleUniform(rng.Uniform<Float>(), 300, 900);
+                foreach (Spectrum spectrum in spectra)
+                {
+                    SampledSpectrum sampled = spectrum.Sample(lambda);
+                    for (int i = 0; i < NSpectrumSamples; ++i)
+                    {
+                        Float expected = spectrum.Evaluate(lambda[i]);
+                        if (spectrum is RGBIlluminantSpectrum)
+                        {
+                            // (Evaluate() multiplies the three factors in another order than Sample(): to rounding)
+                            EXPECT_NEAR(expected, sampled[i], 1e-5f * std.abs(expected));
+                        }
+                        else
+                        {
+                            EXPECT_EQ(expected, sampled[i]);
+                        }
+                        ++compared;
+                    }
+                }
+            }
+            Console.WriteLine("spectra at four wavelengths at once: " + compared + " values compared");
+
+            SampledWavelengths wavelengths = SampledWavelengths.SampleVisible(0.3f);
+            SampledSpectrum pdf = wavelengths.PDF();
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                EXPECT_EQ(VisibleWavelengthsPDF(wavelengths[i]), pdf[i]);
+            }
+            CHECK(!wavelengths.SecondaryTerminated());
+            SampledWavelengths copy = wavelengths;
+            CHECK(copy == wavelengths);
+            wavelengths.TerminateSecondary();
+            CHECK(wavelengths.SecondaryTerminated());
+            CHECK(copy != wavelengths);
+            EXPECT_EQ(pdf[0] / NSpectrumSamples, wavelengths.PDF()[0]);
+            EXPECT_EQ((Float)0, wavelengths.PDF()[1]);
+            EXPECT_EQ((Float)0, wavelengths.PDF()[3]);
+            wavelengths.TerminateSecondary();
+            EXPECT_EQ(pdf[0] / NSpectrumSamples, wavelengths.PDF()[0]);
+            wavelengths[2] = 555;
+            EXPECT_EQ((Float)555, wavelengths[2]);
+            SampledWavelengths uniform = SampledWavelengths.SampleUniform(0.9f);
+            for (int i = 0; i < NSpectrumSamples; ++i)
+            {
+                CHECK(uniform[i] >= Lambda_min && uniform[i] <= Lambda_max);
+                EXPECT_EQ(1 / (Lambda_max - Lambda_min), uniform.PDF()[i]);
+            }
+        }
     }
 }

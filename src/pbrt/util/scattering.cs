@@ -94,10 +94,8 @@ namespace pbrt
 
         public static SampledSpectrum FrComplex(Float cosTheta_i, SampledSpectrum eta, SampledSpectrum k)
         {
-            SampledSpectrum result = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                result[i] = FrComplex(cosTheta_i, new pstd.complex(eta[i], k[i]));
-            return result;
+            // (not in pbrt-v4) The four wavelengths at once (fresnel_simd.cs): the values of FrComplex() for each
+            return FrComplexAtOnce(cosTheta_i, eta, k);
         }
 
         // BSSRDF Utility Functions

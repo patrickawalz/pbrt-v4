@@ -231,11 +231,7 @@ namespace pbrt
                 SampledSpectrum eta = conductor.Eta(), k = conductor.K();
                 SampledSpectrum Fs = new SampledSpectrum(0.0f), Fp = new SampledSpectrum(0.0f);
                 SampledSpectrum Ds = new SampledSpectrum(0.0f), Dp = new SampledSpectrum(0.0f);
-                for (int i = 0; i < NSpectrumSamples; ++i)
-                {
-                    pbrt.FrComplexPolarised(AbsCosTheta(woLocal), new pstd.complex(eta[i], k[i]), out Fs[i], out Fp[i],
-                                            out Ds[i], out Dp[i]);
-                }
+                pbrt.FrComplexPolarised(AbsCosTheta(woLocal), eta, k, out Fs, out Fp, out Ds, out Dp);
 
                 A = Attenuation.Fresnel(new SampledSpectrum(1.0f), Fs, Fp, Ds, Dp);
             }
@@ -274,9 +270,9 @@ namespace pbrt
                 wm = FaceForward(Normalize(wm), new Normal3f(0, 0, 1));
                 SampledSpectrum eta = conductor.Eta(), k = conductor.K();
                 Float cosWm = AbsDot(woL, wm);
+                pbrt.FrComplexPolarised(cosWm, eta, k, out Fs, out Fp, out Ds, out Dp);
                 for (int i = 0; i < NSpectrumSamples; ++i)
                 {
-                    pbrt.FrComplexPolarised(cosWm, new pstd.complex(eta[i], k[i]), out Fs[i], out Fp[i], out Ds[i], out Dp[i]);
                     Float F = 0.5f * (Fs[i] + Fp[i]);
                     scale[i] = F > 0 ? weight[i] / F : 0;
                 }

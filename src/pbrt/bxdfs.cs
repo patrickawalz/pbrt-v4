@@ -493,16 +493,7 @@ namespace pbrt
                                             bool fromCamera)
         {
             Float cosine = AbsDot(a, m);
-            SampledSpectrum Fs = new SampledSpectrum(0f), Fp = new SampledSpectrum(0f), Ds = new SampledSpectrum(0f), Dp = new SampledSpectrum(0f);
-            for (int i = 0; i < NSpectrumSamples; ++i)
-            {
-                Float fs, fp, ds, dp;
-                FrComplexPolarised(cosine, new pstd.complex(eta[i], k[i]), out fs, out fp, out ds, out dp);
-                Fs[i] = fs;
-                Fp[i] = fp;
-                Ds[i] = ds;
-                Dp[i] = dp;
-            }
+            FrComplexPolarised(cosine, eta, k, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp);
             return Attenuation.Fresnel(new SampledSpectrum(1f), Fs, Fp, Ds, Dp)
                 .Scattered(bsdf.LocalToRender(side * a), bsdf.LocalToRender(side * b), bsdf.LocalToRender(side * m), fromCamera);
         }
@@ -682,6 +673,13 @@ namespace pbrt
         public void Conductor(Float cosine, SampledSpectrum eta, SampledSpectrum k, out SampledSpectrum Fs, out SampledSpectrum Fp,
                               out SampledSpectrum Ds, out SampledSpectrum Dp)
         {
+            if (layerKAt == null && repeat <= 1)
+            {
+                // (the four wavelengths at once: fresnel_simd.cs)
+                pbrt.FrThinFilmPolarised(cosine, 1, IndicesAt(0), IndicesAt(1), IndicesAt(2), IndicesAt(3), layerThickness, false, wavelengths, eta, k, out Fs,
+                                         out Fp, out Ds, out Dp, out SampledSpectrum _, out SampledSpectrum _);
+                return;
+            }
             Fs = new SampledSpectrum(0.0f); Fp = new SampledSpectrum(0.0f);
             Ds = new SampledSpectrum(0.0f); Dp = new SampledSpectrum(0.0f);
             for (int i = 0; i < NSpectrumSamples; ++i)
@@ -705,6 +703,16 @@ namespace pbrt
             Ts = new SampledSpectrum(0.0f); Tp = new SampledSpectrum(0.0f);
             bool inside = cosTheta < 0;
             Float cosine = std.abs(cosTheta);
+            if (layerKAt == null && repeat <= 1)
+            {
+                // (the four wavelengths at once: fresnel_simd.cs)
+                pbrt.FrThinFilmPolarised(cosine, inside ? substrateEta : 1, IndicesAt(0), IndicesAt(1), IndicesAt(2), IndicesAt(3), layerThickness, inside,
+                                         wavelengths, new SampledSpectrum(inside ? 1 : substrateEta), new SampledSpectrum(0), out Fs, out Fp, out Ds, out Dp,
+                                         out DsT, out DpT);
+                Ts = new SampledSpectrum(1) - Fs;
+                Tp = new SampledSpectrum(1) - Fp;
+                return;
+            }
             for (int i = 0; i < NSpectrumSamples; ++i)
             {
                 Float fs, fp, ds, dp, dsT, dpT, ts, tp;
@@ -712,6 +720,12 @@ namespace pbrt
                            out dsT, out dpT, out ts, out tp);
                 Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp; DsT[i] = dsT; DpT[i] = dpT; Ts[i] = ts; Tp[i] = tp;
             }
+        }
+
+        // The indices of the layers at a wavelength of the path
+        private Float[] IndicesAt(int wavelength)
+        {
+            return layerEtaAt != null ? layerEtaAt[wavelength] : layerEta;
         }
 
         private SampledSpectrum wavelengths;
@@ -4086,15 +4100,12 @@ namespace pbrt
                 }
                 m = FaceForward(Normalize(m), new Normal3f(0, 0, 1));
                 SampledSpectrum eta = conductor.Eta(), k = conductor.K();
-                SampledSpectrum Fs = new SampledSpectrum(0f), Fp = new SampledSpectrum(0f), Ds = new SampledSpectrum(0f), Dp = new SampledSpectrum(0f);
                 SampledSpectrum scale = new SampledSpectrum(0f);
                 Float cosine = AbsDot(a, m);
+                FrComplexPolarised(cosine, eta, k, out SampledSpectrum Fs, out SampledSpectrum Fp, out SampledSpectrum Ds, out SampledSpectrum Dp);
                 for (int i = 0; i < NSpectrumSamples; ++i)
                 {
-                    Float fs, fp, ds, dp;
-                    FrComplexPolarised(cosine, new pstd.complex(eta[i], k[i]), out fs, out fp, out ds, out dp);
-                    Fs[i] = fs; Fp[i] = fp; Ds[i] = ds; Dp[i] = dp;
-                    Float F = 0.5f * (fs + fp);
+                    Float F = 0.5f * (Fs[i] + Fp[i]);
                     scale[i] = F > 0 ? 1 / F : 0;
                 }
                 return Attenuation.Fresnel(scale, Fs, Fp, Ds, Dp)

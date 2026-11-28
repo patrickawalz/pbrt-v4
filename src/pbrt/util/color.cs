@@ -10,6 +10,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+#if PBRT_FLOAT_AS_DOUBLE
+using SpectrumVector = System.Runtime.Intrinsics.Vector256<double>;
+using SpectrumVectors = System.Runtime.Intrinsics.Vector256;
+#else
+using SpectrumVector = System.Runtime.Intrinsics.Vector128<float>;
+using SpectrumVectors = System.Runtime.Intrinsics.Vector128;
+#endif
 
 namespace pbrt
 {
@@ -369,6 +376,20 @@ namespace pbrt
         public Float Evaluate(Float lambda)
         {
             return s(EvaluatePolynomial(lambda, c2, c1, c0));  // c0 * lambda^2 + c1 * lambda + c2
+        }
+
+        // (not in pbrt-v4) The values at four wavelengths at once: the operations of Evaluate() on a SIMD register, so each
+        // value is that of Evaluate() to the last bit
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public SpectrumVector Evaluate(SpectrumVector lambda)
+        {
+            // c0 * lambda^2 + c1 * lambda + c2
+            SpectrumVector x = SpectrumVectors.FusedMultiplyAdd(
+                lambda, SpectrumVectors.FusedMultiplyAdd(lambda, SpectrumVectors.Create(c0), SpectrumVectors.Create(c1)), SpectrumVectors.Create(c2));
+            SpectrumVector value = SpectrumVectors.Create((Float).5) + x / (SpectrumVectors.Create((Float)2) * SpectrumVectors.Sqrt(SpectrumVector.One + x * x));
+            // (an infinite x: 1 above, 0 below)
+            SpectrumVector limit = SpectrumVectors.ConditionalSelect(SpectrumVectors.GreaterThan(x, SpectrumVector.Zero), SpectrumVector.One, SpectrumVector.Zero);
+            return SpectrumVectors.ConditionalSelect(SpectrumVectors.IsInfinity(x), limit, value);
         }
 
         // (not in pbrt-v4) The change of the value at a wavelength for a change (dc0, dc1, dc2) of the coefficients

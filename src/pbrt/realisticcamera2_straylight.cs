@@ -513,15 +513,15 @@ namespace pbrt
             Float[][] layerEta = CoatingEta(index, lambda);
             // The layers are listed from the air: the light that arrives in the glass meets them the other way round
             bool reversed = etaI != 1;
-            for (int i = 0; i < pbrt.NSpectrumSamples; ++i)
-            {
-                pbrt.FrThinFilmPolarised(cosI, etaI, layerEta[i], coatingThickness[index], reversed, lambda[i], new pstd.complex(etaT),
-                                         out Float Fs, out Float Fp, out Float Ds, out Float Dp, out Float DsT, out Float DpT);
-                fresnel.Rs[i] = Fs;
-                fresnel.Rp[i] = Fp;
-                fresnel.retardanceR[i] = Ds - Dp;
-                fresnel.retardanceT[i] = DsT - DpT;
-            }
+            // (the four wavelengths at once: fresnel_simd.cs)
+            pbrt.FrThinFilmPolarised(cosI, etaI, layerEta[0], layerEta[1], layerEta[2], layerEta[3], coatingThickness[index], reversed,
+                                     new SampledSpectrum(lambda.Lambda), new SampledSpectrum(etaT), new SampledSpectrum(0),
+                                     out SampledSpectrum filmFs, out SampledSpectrum filmFp, out SampledSpectrum filmDs, out SampledSpectrum filmDp, out SampledSpectrum filmDsT,
+                                     out SampledSpectrum filmDpT);
+            fresnel.Rs = filmFs;
+            fresnel.Rp = filmFp;
+            fresnel.retardanceR = filmDs - filmDp;
+            fresnel.retardanceT = filmDsT - filmDpT;
 
             return fresnel;
         }
