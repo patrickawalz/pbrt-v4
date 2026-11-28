@@ -1452,6 +1452,16 @@ namespace pbrt
             }
         }
 
+        // (not in pbrt-v4) The same with a sample of double precision. A Float has 24 bits, which the choice of the bin uses
+        // up when the table has millions of entries: what is left to compare with q is a few bits or none, and a bin of
+        // next to no probability is then returned whenever the sample lands on it.
+        public int Sample(double u)
+        {
+            int offset = std.min<int>((int)(u * bins.size()), (int)bins.size() - 1);
+            double up = u * bins.size() - offset;
+            return up < bins[offset].q ? offset : bins[offset].alias;
+        }
+
         public override string ToString()
         {
             string s = "[ AliasTable bins: [ ";
