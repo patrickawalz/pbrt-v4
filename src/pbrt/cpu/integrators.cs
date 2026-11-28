@@ -2532,7 +2532,11 @@ namespace pbrt
                 pdfFwd = ps.pdf;
                 ctx.ray = intr.SpawnRay(ps.wi);
                 anyNonSpecularBounces = true;
-                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(ps.pdf, path[vIdx - 1]);
+                // (not in pbrt-v4, which takes the density of the sampled direction for both ways: that holds for a phase
+                // function of the angle between the directions alone. The microflake phase functions have another density the
+                // other way round, and Vertex.Pdf() asks them for it, so the weights of the strategies only sum to one if the
+                // same is asked here.)
+                path[vIdx - 1].pdfRev = path[vIdx].ConvertDensity(intr.phase.PDF(ps.wi, intr.wo), path[vIdx - 1]);
             }
 
             public override bool EndAfterMedium(WalkContext ctx, bool terminated)

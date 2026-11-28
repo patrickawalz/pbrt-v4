@@ -26,6 +26,19 @@
 //                             (I - a a^T) + alpha^2 a a^T for fibres and alpha^2 (I - a a^T) + a a^T for facets, so the
 //                             projected area is at most 1.
 //   "float sggx"              for "matrix": Sxx Syy Szz Sxy Sxz Syz, in the space of the medium, positive definite
+//   "string flakes"           "specular" (the default): the flakes are mirrors. "diffuse": each flake scatters as a matte
+//                             facet. The phase function of diffuse flakes is an integral over the normals with no closed
+//                             form (Heitz et al., section 5.2), so it is not evaluated: at a scattering one normal m that
+//                             the arriving ray sees is drawn (from the point and the direction, so it is the same for
+//                             everything that happens at that scattering), and the phase function of that scattering is
+//                             the cosine lobe around m, <wi, m> / pi. Its mean over the normals is the phase function of
+//                             the paper, so the estimate is unbiased, also with the samples toward the lights and with
+//                             the bidirectional integrators (whose weights add to one whatever the normal is).
+//   "string flakeaxisfield"   three float textures (by name) for the x, y and z of the axis at every point, in the space
+//                             of the medium, of any length: an orientation field, in place of "flakeaxis"
+//   "string flakeroughnessfield"  a float texture (by name) for the roughness at every point, in place of
+//                             "flakeroughness". With a field the majorant of a ray is that of the medium inside (the
+//                             projected area is at most 1), no longer scaled to the ray's own direction.
 //   "spectrum flakek"         polarisation only: the flakes are mirrors of a conductor of the index 1 + i k (none given: a
 //                             perfect mirror). The Mueller matrix of a scattering is that of the reflection by the flake,
 //                             divided by its reflectance: the energy is the albedo of the medium, whatever k is.
@@ -35,8 +48,8 @@
 //
 // What asks for the properties at a point with no direction cannot be answered (Medium.SamplePoint without w): the samplers
 // of emitting media and a few of the estimators of productionvolume.cs still do, and say so when they meet this medium.
-// An emitting medium cannot be given microflakes for the same reason. The flakes are specular; the diffuse flakes of the
-// paper (whose phase function has no closed form) are not here. The matrix is the same everywhere in the medium.
+// An emitting medium cannot be given microflakes for the same reason. Diffuse flakes depolarise. "matrix" is the same
+// everywhere in the medium (the fields are for "fibre" and "surface").
 
 using System;
 
@@ -227,14 +240,80 @@ namespace pbrt
         private SampledSpectrum flakeK;
     }
 
+    // SGGXDiffusePhaseFunction Definition: the phase function of one scattering by diffuse microflakes. The normal of the
+    // flake that scatters is drawn, when it is first needed, from the normals that the arriving ray sees; the phase function
+    // is then the cosine lobe around it whatever it is asked from. arrival points back along the ray, of length 1.
+    public sealed unsafe class SGGXDiffusePhaseFunction : PhaseFunction
+    {
+        public SGGXDiffusePhaseFunction(SGGXPhaseFunction flakes, Vector3f arrival, ulong seed)
+        {
+            this.flakes = flakes;
+            this.arrival = arrival;
+            this.seed = seed;
+        }
+
+        // The normal of the flake of this scattering
+        public Vector3f Normal()
+        {
+            if (!drawn)
+            {
+                RNG rng = new RNG(seed);
+                normal = flakes.SampleNormal(arrival, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                drawn = true;
+            }
+            return normal;
+        }
+
+        // <wi, m> / pi
+        public override Float p(Vector3f wo, Vector3f wi)
+        {
+            return std.max<Float>(0, pbrt.Dot(wi, Normal())) * pbrt.InvPi;
+        }
+
+        public override pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u)
+        {
+            Vector3f m = Normal();
+            Vector3f local = pbrt.SampleCosineHemisphere(u);
+            Vector3f t1, t2;
+            pbrt.CoordinateSystem(m, &t1, &t2);
+            Vector3f wi = pbrt.Normalize(local.x * t1 + local.y * t2 + local.z * m);
+            Float value = p(wo, wi);
+            if (!(value > 0))
+            {
+                return default;
+            }
+            PhaseFunctionSample sample = new PhaseFunctionSample();
+            sample.p = value;
+            sample.wi = wi;
+            sample.pdf = value;
+            return sample;
+        }
+
+        public override Float PDF(Vector3f wo, Vector3f wi)
+        {
+            return p(wo, wi);
+        }
+
+        public override string ToString()
+        {
+            return pbrt.StringPrintf("[ SGGXDiffusePhaseFunction flakes: %s ]", flakes);
+        }
+
+        private SGGXPhaseFunction flakes;
+        private Vector3f arrival, normal;
+        private ulong seed;
+        private bool drawn;
+    }
+
     // SGGXMedium Definition: a medium with microflakes in it
     public sealed unsafe class SGGXMedium : Medium, IMajorantMedium<RayMajorantIterator>
     {
-        public SGGXMedium(Medium medium, SGGXMatrix S, Spectrum flakeK)
+        public SGGXMedium(Medium medium, SGGXMatrix S, Spectrum flakeK, bool diffuse = false)
         {
             this.medium = medium;
             this.S = S;
             this.flakeK = flakeK;
+            this.diffuse = diffuse;
             // (the flakes of a perfect mirror are the same at every wavelength: one phase function for the medium)
             phase = new SGGXPhaseFunction(S, new SampledSpectrum(SGGXPhaseFunction.PerfectMirrorK));
             largest = S.LargestProjectedArea();
@@ -266,10 +345,30 @@ namespace pbrt
         {
             MediumProperties mp = medium.SamplePoint(p, w, lambda, time);
             Float length2 = pbrt.LengthSquared(w);
-            Float area = length2 > 0 ? S.ProjectedArea(w / std.sqrt(length2)) : 0;
+            Vector3f direction = length2 > 0 ? w / std.sqrt(length2) : new Vector3f(0, 0, 1);
+            SGGXMatrix here = S;
+            SGGXPhaseFunction specular = phase;
+            if (HasFields())
+            {
+                here = MatrixAt(p);
+                specular = new SGGXPhaseFunction(here, flakeK != null ? flakeK.Sample(lambda) : new SampledSpectrum(SGGXPhaseFunction.PerfectMirrorK));
+            }
+            else if (flakeK != null)
+            {
+                specular = new SGGXPhaseFunction(here, flakeK.Sample(lambda));
+            }
+            Float area = length2 > 0 ? here.ProjectedArea(direction) : 0;
             mp.sigma_a = mp.sigma_a * area;
             mp.sigma_s = mp.sigma_s * area;
-            mp.phase = flakeK != null ? new SGGXPhaseFunction(S, flakeK.Sample(lambda)) : phase;
+            if (diffuse)
+            {
+                // (the normal of the flake comes from the point and the direction: the same whoever asks about this scattering)
+                mp.phase = new SGGXDiffusePhaseFunction(specular, -direction, pbrt.Hash(p.x, p.y, p.z, direction.x, direction.y, direction.z));
+            }
+            else
+            {
+                mp.phase = specular;
+            }
             return mp;
         }
 
@@ -283,7 +382,7 @@ namespace pbrt
         public override RayMajorantIterator SampleRay(Ray ray, Float tMax, SampledWavelengths lambda, ScratchBuffer buf)
         {
             Float length2 = pbrt.LengthSquared(ray.d);
-            Float area = length2 > 0 ? S.ProjectedArea(ray.d / std.sqrt(length2)) : largest;
+            Float area = length2 > 0 && !HasFields() ? S.ProjectedArea(ray.d / std.sqrt(length2)) : largest;
             return buf.Alloc(new ScaledMajorantIterator(medium.SampleRay(ray, tMax, lambda, buf), std.min(area * 1.0001f, largest * 1.0001f)));
         }
 
@@ -291,6 +390,62 @@ namespace pbrt
         {
             // (no control: the extinction depends on the direction)
             return new SampledSpectrum(0f);
+        }
+
+        public bool HasFields()
+        {
+            return axisNames != null || roughnessName != null;
+        }
+
+        // The matrix at a point (render space) of a medium with fields: the axis and the roughness of the textures there
+        public SGGXMatrix MatrixAt(Point3f p)
+        {
+            TextureEvalContext ctx = new TextureEvalContext(p, default, default, default, default, 0, 0, 0, 0, 0);
+            Vector3f axis = axisInRender;
+            if (axisTextures != null)
+            {
+                Vector3f inMedium = new Vector3f(axisTextures[0].Evaluate(ctx), axisTextures[1].Evaluate(ctx), axisTextures[2].Evaluate(ctx));
+                if (pbrt.LengthSquared(inMedium) > 0)
+                {
+                    axis = pbrt.Normalize(renderFromMedium.Apply(inMedium));
+                }
+            }
+            Float alpha = roughnessTexture != null ? pbrt.Clamp(roughnessTexture.Evaluate(ctx), (Float)0.01, 1) : roughness;
+            return fibres ? SGGXMatrix.Uniaxial(axis, 1, alpha * alpha) : SGGXMatrix.Uniaxial(axis, alpha * alpha, 1);
+        }
+
+        // The fields: the names of the float textures of the axis (three, or null) and of the roughness (or null), with what
+        // takes their place where there is none; the textures themselves come with ResolveTextures()
+        public void SetFields(string[] axisNames, string roughnessName, bool fibres, Vector3f axisInRender, Float roughness, Transform renderFromMedium)
+        {
+            this.axisNames = axisNames;
+            this.roughnessName = roughnessName;
+            this.fibres = fibres;
+            this.axisInRender = axisInRender;
+            this.roughness = roughness;
+            this.renderFromMedium = renderFromMedium;
+            // (the projected area of fibres and of facets is at most 1 whatever the axis and the roughness)
+            largest = 1;
+        }
+
+        // The textures of the fields, once the textures of the scene exist
+        public void ResolveTextures(NamedTextures textures, FileLoc loc)
+        {
+            if (axisNames != null)
+            {
+                axisTextures = new FloatTexture[3];
+                for (int i = 0; i < 3; ++i)
+                {
+                    if (!textures.floatTextures.TryGetValue(axisNames[i], out axisTextures[i]))
+                    {
+                        pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (\"flakeaxisfield\" of a medium of microflakes)", axisNames[i]));
+                    }
+                }
+            }
+            if (roughnessName != null && !textures.floatTextures.TryGetValue(roughnessName, out roughnessTexture))
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (\"flakeroughnessfield\" of a medium of microflakes)", roughnessName));
+            }
         }
 
         // The medium for the parameters of MakeNamedMedium, or the medium itself where they ask for no flakes
@@ -305,6 +460,23 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, "\"microflakes\": an emitting medium cannot have microflakes (what it emits toward a point has no direction yet).");
             }
+            string flakes = parameters.GetOneString("flakes", "specular");
+            if (flakes != "specular" && flakes != "diffuse")
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: flakes unknown (specular, diffuse).", flakes));
+            }
+            System.Collections.Generic.List<string> axisField = parameters.GetStringArray("flakeaxisfield");
+            string roughnessField = parameters.GetOneString("flakeroughnessfield", "");
+            if (axisField.Count != 0 && axisField.Count != 3)
+            {
+                pbrt.ErrorExit(loc, "\"flakeaxisfield\" takes the names of three float textures: the x, y and z of the axis.");
+            }
+            if (kind == "matrix" && (axisField.Count != 0 || roughnessField != ""))
+            {
+                pbrt.ErrorExit(loc, "\"microflakes\" \"matrix\" is the same everywhere: the fields are for \"fibre\" and \"surface\".");
+            }
+            Vector3f axisGiven = new Vector3f(0, 0, 1);
+            Float roughnessGiven = 0.3f;
             SGGXMatrix inMedium;
             if (kind == "matrix")
             {
@@ -328,6 +500,8 @@ namespace pbrt
                     pbrt.ErrorExit(loc, "\"flakeroughness\" is over 0 and to 1.");
                 }
                 axis = pbrt.Normalize(axis);
+                axisGiven = axis;
+                roughnessGiven = alpha;
                 inMedium = kind == "fibre" ? SGGXMatrix.Uniaxial(axis, 1, alpha * alpha) : SGGXMatrix.Uniaxial(axis, alpha * alpha, 1);
             }
             else
@@ -352,7 +526,13 @@ namespace pbrt
                 pbrt.ErrorExit(loc, "\"microflakes\": the SGGX matrix is not positive definite.");
             }
             Spectrum flakeK = parameters.GetOneSpectrum("flakek", null, SpectrumType.Unbounded, alloc);
-            return new SGGXMedium(medium, S, flakeK);
+            SGGXMedium created = new SGGXMedium(medium, S, flakeK, flakes == "diffuse");
+            if (axisField.Count == 3 || roughnessField != "")
+            {
+                created.SetFields(axisField.Count == 3 ? axisField.ToArray() : null, roughnessField != "" ? roughnessField : null, kind == "fibre",
+                                  pbrt.Normalize(renderFromMedium.Apply(axisGiven)), roughnessGiven, renderFromMedium);
+            }
+            return created;
         }
 
         private const string Undirected =
@@ -362,7 +542,17 @@ namespace pbrt
         private Medium medium;
         private SGGXMatrix S;
         private Spectrum flakeK;
+        private bool diffuse;
         private SGGXPhaseFunction phase;
         private Float largest;
+        // The fields
+        private string[] axisNames;
+        private string roughnessName;
+        private FloatTexture[] axisTextures;
+        private FloatTexture roughnessTexture;
+        private bool fibres;
+        private Vector3f axisInRender;
+        private Float roughness;
+        private Transform renderFromMedium;
     }
 }

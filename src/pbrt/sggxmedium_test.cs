@@ -178,5 +178,126 @@ namespace pbrt
                 CHECK(refused);
             }
         }
+
+        // Diffuse flakes: the cosine lobe around one drawn normal, averaged over the normals, is the phase function of the
+        // paper. For flakes that face every direction alike that is the phase function of a matte sphere,
+        // 2 / (3 pi^2) (sin a + (pi - a) cos a) with a the angle between the two directions; for any matrix the mean is the
+        // integral of <wi, m> / pi against the normals that wo sees, and what the medium scatters is the same both ways.
+        [TEST("SGGXMedium", "DiffuseFlakes")]
+        public static void DiffuseFlakes()
+        {
+            RNG rng = new RNG(21);
+            SampledSpectrum mirror = new SampledSpectrum(SGGXPhaseFunction.PerfectMirrorK);
+            int n = 400000;
+
+            SGGXPhaseFunction sphere = new SGGXPhaseFunction(new SGGXMatrix(1, 1, 1, 0, 0, 0), mirror);
+            double worstSphere = 0;
+            for (int trial = 0; trial < 6; ++trial)
+            {
+                Vector3f wo = OnSphere(rng), wi = OnSphere(rng);
+                double mean = 0;
+                for (int i = 0; i < n; ++i)
+                {
+                    mean += new SGGXDiffusePhaseFunction(sphere, wo, (ulong)(trial * n + i)).p(wo, wi) / n;
+                }
+                double angle = Math.Acos(Math.Clamp((double)Dot(wo, wi), -1.0, 1.0));
+                double expected = 2 / (3 * Math.PI * Math.PI) * (Math.Sin(angle) + (Math.PI - angle) * Math.Cos(angle));
+                worstSphere = Math.Max(worstSphere, Math.Abs(mean - expected));
+            }
+
+            double worstMean = 0, worstReciprocity = 0, worstLobe = 0;
+            foreach (SGGXMatrix S in Matrices())
+            {
+                SGGXPhaseFunction flakes = new SGGXPhaseFunction(S, mirror);
+                Vector3f a = OnSphere(rng), b = OnSphere(rng);
+                double fromA = 0, fromB = 0;
+                for (int i = 0; i < n; ++i)
+                {
+                    fromA += new SGGXDiffusePhaseFunction(flakes, a, (ulong)(7 * n + i)).p(a, b) / n;
+                    fromB += new SGGXDiffusePhaseFunction(flakes, b, (ulong)(9 * n + i)).p(b, a) / n;
+                }
+                // (the integral over the normals m that a sees: D(m) <a, m> / sigma(a) times <b, m> / pi)
+                Vector3f t1, t2;
+                CoordinateSystem(a, &t1, &t2);
+                int nTheta = 1500, nPhi = 800;
+                double integral = 0;
+                for (int i = 0; i < nTheta; ++i)
+                {
+                    double theta = 0.5 * Math.PI * (i + 0.5) / nTheta;
+                    double sine = Math.Sin(theta), cosine = Math.Cos(theta);
+                    for (int j = 0; j < nPhi; ++j)
+                    {
+                        double phi = 2 * Math.PI * (j + 0.5) / nPhi;
+                        Vector3f m = (Float)(sine * Math.Cos(phi)) * t1 + (Float)(sine * Math.Sin(phi)) * t2 + (Float)cosine * a;
+                        integral += flakes.D(m) * cosine / S.ProjectedArea(a) * Math.Max(0.0, (double)Dot(b, m)) / Math.PI * sine *
+                                    (0.5 * Math.PI / nTheta) * (2 * Math.PI / nPhi);
+                    }
+                }
+                worstMean = Math.Max(worstMean, Math.Abs(fromA - integral));
+                worstReciprocity = Math.Max(worstReciprocity, Math.Abs(S.ProjectedArea(a) * fromA - S.ProjectedArea(b) * fromB));
+
+                // One lobe: its samples have the density that they say, and the normal faces the arriving ray
+                SGGXDiffusePhaseFunction lobe = new SGGXDiffusePhaseFunction(flakes, a, 12345);
+                CHECK_GT(Dot(lobe.Normal(), a), 0);
+                double total = 0;
+                for (int i = 0; i < 20000; ++i)
+                {
+                    pstd.optional<PhaseFunctionSample> sample = lobe.Sample_p(a, new Point2f(rng.Uniform<Float>(), rng.Uniform<Float>()));
+                    if ((bool)sample)
+                    {
+                        worstLobe = Math.Max(worstLobe, Math.Abs(sample.value().p / sample.value().pdf - 1));
+                        EXPECT_NEAR(std.max<Float>(0, Dot(sample.value().wi, lobe.Normal())) / Pi, sample.value().pdf, 1e-5f);
+                    }
+                    Vector3f w = OnSphere(rng);
+                    total += lobe.p(a, w) * 4 * Math.PI / 20000;
+                }
+                EXPECT_NEAR(1.0, total, 0.03);
+            }
+            Console.WriteLine("SGGX diffuse: the mean lobe of flakes without a direction is off the matte sphere by " + worstSphere +
+                              "; of the six matrices off the integral by " + worstMean + ", off reciprocity by " + worstReciprocity + "; weights off 1 by " + worstLobe);
+            CHECK_LT(worstSphere, 1.5e-3);
+            CHECK_LT(worstMean, 1.5e-3);
+            CHECK_LT(worstReciprocity, 2e-3);
+            CHECK_LT(worstLobe, 1e-5);
+        }
+
+        // The fields: with textures for the axis and the roughness the matrix at a point is that of their values there, the
+        // extinction follows it, and the majorant of a ray is never under it
+        [TEST("SGGXMedium", "OrientationField")]
+        public static void OrientationField()
+        {
+            RNG rng = new RNG(5);
+            HomogeneousMedium inner = new HomogeneousMedium(new ConstantSpectrum(0.5f), new ConstantSpectrum(2), 1, new ConstantSpectrum(0), 1, 0, Allocator.Default);
+            SampledWavelengths lambda = SampledWavelengths.SampleUniform(0.7f);
+            // (the medium turned a quarter about z: its x axis is the y axis of render space)
+            Transform renderFromMedium = Rotate(90, new Vector3f(0, 0, 1));
+            foreach (bool fibres in new bool[] { true, false })
+            {
+                SGGXMedium medium = new SGGXMedium(inner, SGGXMatrix.Uniaxial(new Vector3f(0, 0, 1), 1, 0.09f), null);
+                medium.SetFields(new string[] { "ax", "ay", "az" }, "rough", fibres, new Vector3f(0, 0, 1), 0.3f, renderFromMedium);
+                NamedTextures textures = new NamedTextures();
+                textures.floatTextures["ax"] = new FloatConstantTexture(2);
+                textures.floatTextures["ay"] = new FloatConstantTexture(0);
+                textures.floatTextures["az"] = new FloatConstantTexture(0);
+                textures.floatTextures["rough"] = new FloatConstantTexture(0.2f);
+                medium.ResolveTextures(textures, new FileLoc());
+                CHECK(medium.HasFields());
+                SGGXMatrix expected = fibres ? SGGXMatrix.Uniaxial(new Vector3f(0, 1, 0), 1, 0.04f) : SGGXMatrix.Uniaxial(new Vector3f(0, 1, 0), 0.04f, 1);
+                SGGXMatrix here = medium.MatrixAt(new Point3f(0.3f, 0.1f, -2));
+                EXPECT_NEAR(expected.xx, here.xx, 1e-5f);
+                EXPECT_NEAR(expected.yy, here.yy, 1e-5f);
+                EXPECT_NEAR(expected.zz, here.zz, 1e-5f);
+                EXPECT_NEAR(expected.xy, here.xy, 1e-5f);
+                for (int i = 0; i < 200; ++i)
+                {
+                    Vector3f w = OnSphere(rng);
+                    Point3f p = new Point3f(rng.Uniform<Float>(), rng.Uniform<Float>(), rng.Uniform<Float>());
+                    MediumProperties mp = medium.SamplePoint(p, w, lambda, 0);
+                    EXPECT_NEAR(2 * expected.ProjectedArea(w), mp.sigma_s[0], 1e-4f);
+                    RayMajorantIterator iterator = medium.SampleRay(new Ray(p, w), 1, lambda, new ScratchBuffer());
+                    CHECK_GE(iterator.Next().value().sigma_maj[0], mp.sigma_a[0] + mp.sigma_s[0]);
+                }
+            }
+        }
     }
 }

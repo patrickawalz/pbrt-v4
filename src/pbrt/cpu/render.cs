@@ -24,13 +24,18 @@ namespace pbrt
             LOG_VERBOSE("Finished textures");
 
             // (not in pbrt-v4) Texture media driven by a named texture get it now that the textures exist
+            // (a medium of microflakes has its own textures, and the medium that the flakes are in may have some)
             foreach (KeyValuePair<string, Medium> m in media)
-                if (m.Value is TextureMedium textureMedium)
+            {
+                if (m.Value is SGGXMedium flakeMedium)
+                    flakeMedium.ResolveTextures(textures, new FileLoc());
+                if ((m.Value is SGGXMedium inFlakes ? inFlakes.Inner() : m.Value) is TextureMedium textureMedium)
                     textureMedium.ResolveTextures(textures, new FileLoc());
+            }
 
             // (not in pbrt-v4) OSL media analyze their shaders and build their majorants now that the scene (the render space) is known
             foreach (KeyValuePair<string, Medium> m in media)
-                if (m.Value is OSLMedium oslMedium)
+                if ((m.Value is SGGXMedium inFlakes ? inFlakes.Inner() : m.Value) is OSLMedium oslMedium)
                     oslMedium.Prepare();
 
             // Lights
