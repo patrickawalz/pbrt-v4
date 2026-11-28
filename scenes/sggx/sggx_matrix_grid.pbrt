@@ -1,0 +1,16 @@
+# "microflakes" "matrix" with a grid of matrices (six values a voxel: Sxx Syy Szz Sxy Sxz Syz): fibres along z on the left,
+# facets that face z, with a projected area over 1 (denser), on the right.
+LookAt 0 -5 1.5  0 0 0  0 0 1
+Camera "perspective" "float fov" 40
+Sampler "independent" "integer pixelsamples" 256 "integer seed" 4
+Integrator "volpath" "integer maxdepth" 30
+Film "rgb" "integer xresolution" 360 "integer yresolution" 270 "string filename" "sggx_matrix_grid.exr"
+WorldBegin
+MakeNamedMedium "flakes" "string type" "homogeneous" "rgb sigma_a" [0.3 0.5 0.9] "rgb sigma_s" [3 3 3] "string microflakes" "matrix" "integer flakenx" 2 "integer flakeny" 1 "integer flakenz" 1 "point3 flakep0" [-1.2 -1.2 -1.2] "point3 flakep1" [1.2 1.2 1.2] "float sggxgrid" [1 1 0.04 0 0 0   0.1 0.1 2 0 0 0]
+LightSource "distant" "point3 from" [3 -2 4] "point3 to" [0 0 0] "rgb L" [6 6 6]
+LightSource "infinite" "rgb L" [0.1 0.12 0.15]
+AttributeBegin
+MediumInterface "flakes" ""
+Material "interface"
+Shape "sphere" "float radius" 1.2
+AttributeEnd

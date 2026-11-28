@@ -3540,6 +3540,19 @@ namespace pbrt
             return Math.Max(1, (int)Math.Round(mutationsPerPixel * Math.Pow(stageGrowth, stage) / total));
         }
 
+        // (not in pbrt-v4) L weight / importance, what a state adds to the film. pbrt-v4 writes L * (weight / importance); for a
+        // state so dark that its importance is a denormal number the quotient overflows, and infinity times the components of
+        // L that are zero is not a number. L / importance is of the order of one whatever the state, so then that goes first.
+        static SampledSpectrum SplatValue(SampledSpectrum L, Float weight, Float importance)
+        {
+            Float quotient = weight / importance;
+            if (Float.IsFinite(quotient))
+            {
+                return L * quotient;
+            }
+            return L / importance * weight;
+        }
+
         // MLTIntegrator Method Definitions
         SampledSpectrum L(ScratchBuffer scratchBuffer, MLTSampler sampler, int depth, out Point2f pRaster,
                           out SampledWavelengths lambda)
@@ -3717,7 +3730,9 @@ namespace pbrt
 
                     // Select initial state from the set of bootstrap samples
                     RNG rng = new RNG((uint64_t)(i + (int64_t)stage * nChains));
-                    int bootstrapIndex = bootstrapTable.Sample(rng.Uniform<Float>());
+                    // (not in pbrt-v4: a sample of double precision. The table has nBootstrap (maxDepth + 1) entries, millions with deep
+                    // paths, and a Float sample then returns states of next to no importance: see AliasTable.Sample(double))
+                    int bootstrapIndex = bootstrapTable.Sample(rng.Uniform<double>());
                     int depth = bootstrapIndex % nDepths;
                     int half = i % noiseGroups;
 
@@ -3748,10 +3763,10 @@ namespace pbrt
                         // Splat both current and proposed samples to _film_ (f / I, times b)
                         if (accept > 0)
                         {
-                            film.AddSplat(pProposed, LProposed * (accept * b / iProposed), lambdaProposed);
+                            film.AddSplat(pProposed, SplatValue(LProposed, accept * b, iProposed), lambdaProposed);
                             noise?.Add((int)pProposed.x - boundsMin.x, (int)pProposed.y - boundsMin.y, half, accept, accept * b * cProposed / iProposed);
                         }
-                        film.AddSplat(pCurrent, LCurrent * ((1 - accept) * b / iCurrent), lambdaCurrent);
+                        film.AddSplat(pCurrent, SplatValue(LCurrent, (1 - accept) * b, iCurrent), lambdaCurrent);
                         noise?.Add((int)pCurrent.x - boundsMin.x, (int)pCurrent.y - boundsMin.y, half, 1 - accept, (1 - accept) * b * cCurrent / iCurrent);
 
                         // Accept or reject the proposal
@@ -3882,8 +3897,8 @@ namespace pbrt
                                 Float cProposed = c(LProposed, lambdaProposed);
                                 Float accept = std.min<Float>(1, cProposed / cCurrent);
                                 if (accept > 0)
-                                    film.AddSplat(pProposed, LProposed * (accept * scale / cProposed), lambdaProposed);
-                                film.AddSplat(pCurrent, LCurrent * ((1 - accept) * scale / cCurrent), lambdaCurrent);
+                                    film.AddSplat(pProposed, SplatValue(LProposed, accept * scale, cProposed), lambdaProposed);
+                                film.AddSplat(pCurrent, SplatValue(LCurrent, (1 - accept) * scale, cCurrent), lambdaCurrent);
                                 if (rng.Uniform<Float>() < accept)
                                 {
                                     pCurrent = pProposed;
@@ -4193,7 +4208,7 @@ namespace pbrt
                             ScratchBuffer scratchBuffer = threadScratchBuffers.Get();
                             RNG rng = new RNG(MixBits((uint64_t)(chainOffset + chain)) ^ 0x9E3779B97F4A7C15UL);
                             int group = (int)(chain % noiseGroups);
-                            int seedIndex = seedList[seedTable.Sample(rng.Uniform<Float>())].index;
+                            int seedIndex = seedList[seedTable.Sample(rng.Uniform<double>())].index;
                             MLTSampler sampler = new MLTSampler(mutationsPerPixel, seedIndex, sigma, 0, MLTPathEvaluator.nSampleStreams);
                             Point2f pCurrent;
                             SampledWavelengths lambdaCurrent;
@@ -4475,8 +4490,8 @@ namespace pbrt
                         Float accept = std.min<Float>(1, cProposed / member.cCurrent);
                         acceptance[kernel] += accept;
                         if (accept > 0)
-                            film.AddSplat(pProposed, LProposed * (accept * scale[member.depth] / cProposed), lambdaProposed);
-                        film.AddSplat(member.pCurrent, member.LCurrent * ((1 - accept) * scale[member.depth] / member.cCurrent),
+                            film.AddSplat(pProposed, SplatValue(LProposed, accept * scale[member.depth], cProposed), lambdaProposed);
+                        film.AddSplat(member.pCurrent, SplatValue(member.LCurrent, (1 - accept) * scale[member.depth], member.cCurrent),
                                       member.lambdaCurrent);
                         if (member.rng.Uniform<Float>() < accept)
                         {

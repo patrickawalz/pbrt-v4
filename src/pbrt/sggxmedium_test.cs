@@ -274,7 +274,8 @@ namespace pbrt
             foreach (bool fibres in new bool[] { true, false })
             {
                 SGGXMedium medium = new SGGXMedium(inner, SGGXMatrix.Uniaxial(new Vector3f(0, 0, 1), 1, 0.09f), null);
-                medium.SetFields(new string[] { "ax", "ay", "az" }, "rough", fibres, new Vector3f(0, 0, 1), 0.3f, renderFromMedium);
+                medium.SetFields(new SGGXField[] { new SGGXTextureField("ax"), new SGGXTextureField("ay"), new SGGXTextureField("az") }, new SGGXTextureField("rough"),
+                                 fibres, new Vector3f(0, 0, 1), 0.3f, renderFromMedium);
                 NamedTextures textures = new NamedTextures();
                 textures.floatTextures["ax"] = new FloatConstantTexture(2);
                 textures.floatTextures["ay"] = new FloatConstantTexture(0);
@@ -298,6 +299,153 @@ namespace pbrt
                     CHECK_GE(iterator.Next().value().sigma_maj[0], mp.sigma_a[0] + mp.sigma_s[0]);
                 }
             }
+        }
+
+        // A homogeneous medium with these parameters ("type name" and a value or [values], as in a scene), turned a quarter
+        // about z: x of the medium is y of render space
+        static Medium Flakes(string text)
+        {
+            System.Collections.Generic.List<ParsedParameter> list = new System.Collections.Generic.List<ParsedParameter>();
+            text = "\"rgb sigma_a\" [0.5 0.5 0.5] \"rgb sigma_s\" [2 2 2] " + text;
+            foreach (System.Text.RegularExpressions.Match match in
+                     System.Text.RegularExpressions.Regex.Matches(text, "\"([a-z0-9]+) ([A-Za-z_0-9]+)\"\\s*(\\[[^\\]]*\\]|\"[^\"]*\"|\\S+)"))
+            {
+                ParsedParameter parameter = new ParsedParameter(new FileLoc());
+                parameter.type = match.Groups[1].Value;
+                parameter.name = match.Groups[2].Value;
+                string values = match.Groups[3].Value.Trim('[', ']');
+                if (parameter.type == "string")
+                {
+                    foreach (System.Text.RegularExpressions.Match quoted in System.Text.RegularExpressions.Regex.Matches(values, "\"([^\"]*)\""))
+                    {
+                        parameter.AddString(quoted.Groups[1].Value);
+                    }
+                }
+                else
+                {
+                    foreach (string value in values.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (parameter.type == "integer")
+                        {
+                            parameter.AddInt(int.Parse(value));
+                        }
+                        else
+                        {
+                            parameter.AddFloat((Float)double.Parse(value, System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                    }
+                }
+                list.Add(parameter);
+            }
+            return Medium.Create("homogeneous", new ParameterDictionary(list, RGBColorSpace.sRGB), Rotate(90, new Vector3f(0, 0, 1)), new FileLoc(), Allocator.Default);
+        }
+
+        static string SceneFile(string directoryName, string name)
+        {
+            string directory = AppContext.BaseDirectory;
+            for (int i = 0; i < 12 && directory != null; ++i)
+            {
+                string candidate = System.IO.Path.Combine(directory, "scenes", directoryName, name);
+                if (System.IO.File.Exists(candidate))
+                {
+                    return candidate;
+                }
+                directory = System.IO.Path.GetDirectoryName(directory);
+            }
+            return null;
+        }
+
+        // The fields from the values of a grid: a grid of one value is the uniform medium; a grid of matrices gives the
+        // matrix of the voxel (turned with the medium), no flakes where it has none, never more than "sggxmax", and a
+        // majorant that holds between the voxels too
+        [TEST("SGGXMedium", "GridFields")]
+        public static void GridFields()
+        {
+            RNG rng = new RNG(17);
+            SampledWavelengths lambda = SampledWavelengths.SampleUniform(0.3f);
+            // (the medium is turned a quarter about z: x of the medium is y of render space)
+            SGGXMedium axis = (SGGXMedium)Flakes("\"string microflakes\" \"fibre\" \"float flakeroughness\" 0.2 \"integer flakenx\" 2 \"integer flakeny\" 1 \"integer flakenz\" 1 " +
+                                                 "\"float flakeaxisgrid\" [3 0 0  3 0 0] \"float flakeroughnessgrid\" [0.4 0.4]");
+            CHECK(axis.HasFields());
+            SGGXMatrix expected = SGGXMatrix.Uniaxial(new Vector3f(0, 1, 0), 1, 0.16f);
+            // (render space (-y, x) is the medium's (x, y): the point is inside the unit box of the medium)
+            Point3f inside = new Point3f(-0.5f, 0.5f, 0.5f);
+            SGGXMatrix here = axis.MatrixAt(inside);
+            EXPECT_NEAR(expected.xx, here.xx, 1e-5f);
+            EXPECT_NEAR(expected.yy, here.yy, 1e-5f);
+            EXPECT_NEAR(expected.zz, here.zz, 1e-5f);
+            // (outside the grid the values are zero: the axis of "flakeaxis", z, and the least roughness)
+            SGGXMatrix outside = axis.MatrixAt(new Point3f(5, 5, 5));
+            EXPECT_NEAR(1, outside.xx, 1e-5f);
+            EXPECT_NEAR(0.0001f, outside.zz, 1e-6f);
+
+            // Matrices: voxel 0 has none, voxel 1 fibres along the medium's x of projected area up to 2, voxel 2 a matrix with
+            // all six coefficients
+            string six = "0 0 0 0 0 0   0.04 4 4 0 0 0   0.5 0.3 0.2 0.1 0.05 -0.02";
+            SGGXMedium matrices = (SGGXMedium)Flakes("\"string microflakes\" \"matrix\" \"float sggx\" [0.25 0.25 0.25 0 0 0] \"integer flakenx\" 3 \"integer flakeny\" 1 " +
+                                                     "\"integer flakenz\" 1 \"point3 flakep0\" [0 0 0] \"point3 flakep1\" [3 1 1] \"float sggxgrid\" [" + six + "]");
+            // (the centres of the voxels, medium (0.5, 1.5, 2.5; 0.5; 0.5) = render (-0.5, x, 0.5))
+            SGGXMatrix none = matrices.MatrixAt(new Point3f(-0.5f, 0.5f, 0.5f));
+            EXPECT_NEAR(0.25f, none.xx, 1e-6f);
+            EXPECT_NEAR(0.25f, none.zz, 1e-6f);
+            SGGXMatrix fibres = matrices.MatrixAt(new Point3f(-0.5f, 1.5f, 0.5f));
+            EXPECT_NEAR(4, fibres.xx, 1e-4f);
+            EXPECT_NEAR(0.04f, fibres.yy, 1e-5f);
+            EXPECT_NEAR(4, fibres.zz, 1e-4f);
+            SGGXMatrix full = matrices.MatrixAt(new Point3f(-0.5f, 2.5f, 0.5f));
+            // (R S R^T for the quarter turn: x -> y, y -> -x)
+            EXPECT_NEAR(0.3f, full.xx, 1e-5f);
+            EXPECT_NEAR(0.5f, full.yy, 1e-5f);
+            EXPECT_NEAR(0.2f, full.zz, 1e-5f);
+            EXPECT_NEAR(-0.1f, full.xy, 1e-5f);
+            EXPECT_NEAR(0.02f, full.xz, 1e-5f);
+            EXPECT_NEAR(0.05f, full.yz, 1e-5f);
+            double tightest = 0;
+            for (int i = 0; i < 4000; ++i)
+            {
+                Vector3f w = OnSphere(rng);
+                Point3f p = new Point3f(-rng.Uniform<Float>(), 3.4f * rng.Uniform<Float>() - 0.2f, rng.Uniform<Float>());
+                MediumProperties mp = matrices.SamplePoint(p, w, lambda, 0);
+                Float majorant = matrices.SampleRay(new Ray(p, w), 1, lambda, new ScratchBuffer()).Next().value().sigma_maj[0];
+                CHECK_GE(majorant, mp.sigma_a[0] + mp.sigma_s[0]);
+                tightest = Math.Max(tightest, (mp.sigma_a[0] + mp.sigma_s[0]) / majorant);
+                EXPECT_NEAR(2.5f * matrices.MatrixAt(p).ProjectedArea(w), mp.sigma_a[0] + mp.sigma_s[0], 1e-4f);
+            }
+            Console.WriteLine("SGGX grid of matrices: the extinction reaches " + tightest + " of the majorant");
+            CHECK_GT(tightest, 0.9);
+
+            // "sggxmax" under the largest of the grid: the matrices over it are scaled down to it, the others are as given
+            SGGXMedium limited = (SGGXMedium)Flakes("\"string microflakes\" \"matrix\" \"float sggx\" [0.25 0.25 0.25 0 0 0] \"integer flakenx\" 3 \"integer flakeny\" 1 " +
+                                                    "\"integer flakenz\" 1 \"point3 flakep0\" [0 0 0] \"point3 flakep1\" [3 1 1] \"float sggxmax\" 1 \"float sggxgrid\" [" + six + "]");
+            SGGXMatrix scaled = limited.MatrixAt(new Point3f(-0.5f, 1.5f, 0.5f));
+            EXPECT_NEAR(1, scaled.LargestProjectedArea(), 1e-5f);
+            EXPECT_NEAR(0.01f, scaled.yy, 1e-6f);
+            EXPECT_NEAR(0.5f, limited.MatrixAt(new Point3f(-0.5f, 2.5f, 0.5f)).yy, 1e-5f);
+        }
+
+        // The fields from the float grids of a NanoVDB file: the level set of a torus as the roughness of fibres
+        [TEST("SGGXMedium", "NanoVDBFields")]
+        public static void NanoVDBFields()
+        {
+            string file = SceneFile("sdf", "level_set_torus.nvdb");
+            if (file == null)
+            {
+                Console.WriteLine("SGGX NanoVDB test skipped: scenes/sdf/level_set_torus.nvdb not found");
+                return;
+            }
+            nanovdb.GridHandle<NanoVDBBuffer> first = nanovdb.io.IO.readGrid<NanoVDBBuffer>(file, 0, 0, new NanoVDBBuffer(Allocator.Default));
+            string name = first.grid<float>().gridName();
+            SGGXMedium medium = (SGGXMedium)Flakes("\"string microflakes\" \"fibre\" \"vector3 flakeaxis\" [0 0 1] \"string flakegridfile\" \"" + file.Replace("\\", "/") +
+                                                   "\" \"string flakeroughnessgridname\" \"" + name + "\"");
+            CHECK(medium.HasFields());
+            // createLevelSetTorus(0.7, 0.25) around the y axis of the grid's space, which is the medium's: 0.1 outside the
+            // surface at the medium's (1.05, 0, 0), render (0, 1.05, 0). The roughness there is the distance, 0.1.
+            SGGXMatrix at = medium.MatrixAt(new Point3f(0, 1.05f, 0));
+            Console.WriteLine("SGGX NanoVDB: grid \"" + name + "\", alpha^2 0.1 outside the torus " + at.zz);
+            EXPECT_NEAR(0.01f, at.zz, 0.002f);
+            EXPECT_NEAR(1, at.xx, 1e-5f);
+            // (inside the torus the distance is negative: the least roughness)
+            EXPECT_NEAR(0.0001f, medium.MatrixAt(new Point3f(0, 0.7f, 0)).zz, 1e-6f);
         }
     }
 }

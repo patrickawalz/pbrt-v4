@@ -1,0 +1,16 @@
+# The axis and the roughness of fibres from the values of a grid: here on the grid of the "uniformgrid" medium itself
+# ("flakenx", "flakeny", "flakenz", "flakep0", "flakep1" give the flakes a grid of their own). Three values a voxel for the axis.
+LookAt 0 -5 1.5  0 0 0  0 0 1
+Camera "perspective" "float fov" 40
+Sampler "independent" "integer pixelsamples" 256 "integer seed" 4
+Integrator "volpath" "integer maxdepth" 30
+Film "rgb" "integer xresolution" 360 "integer yresolution" 270 "string filename" "sggx_axis_grid.exr"
+WorldBegin
+MakeNamedMedium "flakes" "string type" "uniformgrid" "integer nx" 2 "integer ny" 2 "integer nz" 1 "point3 p0" [-1.2 -1.2 -1.2] "point3 p1" [1.2 1.2 1.2] "float density" [1 0.6 0.8 1.2] "rgb sigma_a" [0.3 0.5 0.9] "rgb sigma_s" [3 3 3] "string microflakes" "fibre" "float flakeroughness" 0.25 "float flakeaxisgrid" [1 0 0  0 1 0  0 0 1  1 1 0] "float flakeroughnessgrid" [0.2 0.5 0.3 0.8]
+LightSource "distant" "point3 from" [3 -2 4] "point3 to" [0 0 0] "rgb L" [6 6 6]
+LightSource "infinite" "rgb L" [0.1 0.12 0.15]
+AttributeBegin
+MediumInterface "flakes" ""
+Material "interface"
+Shape "sphere" "float radius" 1.2
+AttributeEnd

@@ -39,6 +39,23 @@
 //   "string flakeroughnessfield"  a float texture (by name) for the roughness at every point, in place of
 //                             "flakeroughness". With a field the majorant of a ray is that of the medium inside (the
 //                             projected area is at most 1), no longer scaled to the ray's own direction.
+//   "string sggxfield"        for "matrix": six float textures (by name) for Sxx Syy Szz Sxy Sxz Syz at every point, in
+//                             the space of the medium. Where they give no positive definite matrix the flakes are those
+//                             of "sggx" (not given: the same in every direction).
+//   "float sggxmax"           the largest projected area, sqrt of the largest eigenvalue, that the field of matrices may
+//                             have: the majorant of a ray is that of the medium inside times this. A matrix over it is
+//                             scaled down to it. Default: the largest of the voxels for "sggxgrid", otherwise 1.
+//   The same three fields from grids in place of textures, in the space of the medium:
+//   "float flakeaxisgrid" (three values a voxel), "float flakeroughnessgrid" (one), "float sggxgrid" (six): the values of
+//                             a grid of "integer flakenx", "flakeny", "flakenz" voxels between "point3 flakep0" and
+//                             "flakep1", which are the medium's own "nx", "ny", "nz", "p0", "p1" where they are not
+//                             given: the grid of a "uniformgrid" medium. The voxels in the order of "density" (x
+//                             fastest), interpolated as it is; zero outside (the uniform axis, the least roughness, the
+//                             matrix of "sggx").
+//   "string flakeaxisgridnames" (three), "string flakeroughnessgridname", "string sggxgridnames" (six): float grids of the
+//                             NanoVDB file "string flakegridfile", which is the medium's own "filename" where it is not
+//                             given: grids beside the density of a "nanovdb" medium. (The NanoVDB port reads float grids,
+//                             not grids of vectors: one grid for each component.)
 //   "spectrum flakek"         polarisation only: the flakes are mirrors of a conductor of the index 1 + i k (none given: a
 //                             perfect mirror). The Mueller matrix of a scattering is that of the reflection by the flake,
 //                             divided by its reflectance: the energy is the albedo of the medium, whatever k is.
@@ -48,8 +65,7 @@
 //
 // What asks for the properties at a point with no direction cannot be answered (Medium.SamplePoint without w): the samplers
 // of emitting media and a few of the estimators of productionvolume.cs still do, and say so when they meet this medium.
-// An emitting medium cannot be given microflakes for the same reason. Diffuse flakes depolarise. "matrix" is the same
-// everywhere in the medium (the fields are for "fibre" and "surface").
+// An emitting medium cannot be given microflakes for the same reason. Diffuse flakes depolarise.
 
 using System;
 
@@ -81,6 +97,11 @@ namespace pbrt
         public Vector3f Times(Vector3f v)
         {
             return new Vector3f(xx * v.x + xy * v.y + xz * v.z, xy * v.x + yy * v.y + yz * v.z, xz * v.x + yz * v.y + zz * v.z);
+        }
+
+        public bool IsPositiveDefinite()
+        {
+            return xx > 0 && xx * yy - xy * xy > 0 && Determinant() > 0;
         }
 
         public Float Determinant()
@@ -394,58 +415,174 @@ namespace pbrt
 
         public bool HasFields()
         {
-            return axisNames != null || roughnessName != null;
+            return axisFields != null || roughnessField != null || matrixFields != null;
         }
 
-        // The matrix at a point (render space) of a medium with fields: the axis and the roughness of the textures there
+        // The matrix at a point (render space) of a medium with fields: that of the axis and the roughness there, or the
+        // matrix that is given there
         public SGGXMatrix MatrixAt(Point3f p)
         {
-            TextureEvalContext ctx = new TextureEvalContext(p, default, default, default, default, 0, 0, 0, 0, 0);
-            Vector3f axis = axisInRender;
-            if (axisTextures != null)
+            Point3f pMedium = mediumFromRender.Apply(p);
+            if (matrixFields != null)
             {
-                Vector3f inMedium = new Vector3f(axisTextures[0].Evaluate(ctx), axisTextures[1].Evaluate(ctx), axisTextures[2].Evaluate(ctx));
+                SGGXMatrix given = new SGGXMatrix(matrixFields[0].Evaluate(p, pMedium), matrixFields[1].Evaluate(p, pMedium), matrixFields[2].Evaluate(p, pMedium),
+                                                  matrixFields[3].Evaluate(p, pMedium), matrixFields[4].Evaluate(p, pMedium), matrixFields[5].Evaluate(p, pMedium));
+                if (!given.IsPositiveDefinite())
+                {
+                    // (no flakes are given here: those of "sggx")
+                    return S;
+                }
+                // (the majorant of a ray is for projected areas to matrixLargest: a matrix over it is scaled down to it)
+                Float area = given.LargestProjectedArea();
+                if (area > matrixLargest)
+                {
+                    Float scale = pbrt.Sqr(matrixLargest / area);
+                    given = new SGGXMatrix(given.xx * scale, given.yy * scale, given.zz * scale, given.xy * scale, given.xz * scale, given.yz * scale);
+                }
+                return ToRender(given, renderFromMedium);
+            }
+            Vector3f axis = axisInRender;
+            if (axisFields != null)
+            {
+                Vector3f inMedium = new Vector3f(axisFields[0].Evaluate(p, pMedium), axisFields[1].Evaluate(p, pMedium), axisFields[2].Evaluate(p, pMedium));
                 if (pbrt.LengthSquared(inMedium) > 0)
                 {
                     axis = pbrt.Normalize(renderFromMedium.Apply(inMedium));
                 }
             }
-            Float alpha = roughnessTexture != null ? pbrt.Clamp(roughnessTexture.Evaluate(ctx), (Float)0.01, 1) : roughness;
+            Float alpha = roughnessField != null ? pbrt.Clamp(roughnessField.Evaluate(p, pMedium), (Float)0.01, 1) : roughness;
             return fibres ? SGGXMatrix.Uniaxial(axis, 1, alpha * alpha) : SGGXMatrix.Uniaxial(axis, alpha * alpha, 1);
         }
 
-        // The fields: the names of the float textures of the axis (three, or null) and of the roughness (or null), with what
-        // takes their place where there is none; the textures themselves come with ResolveTextures()
-        public void SetFields(string[] axisNames, string roughnessName, bool fibres, Vector3f axisInRender, Float roughness, Transform renderFromMedium)
+        // The fields of fibres and facets: the three components of the axis (or null) and the roughness (or null), with what
+        // takes their place where there is none
+        public void SetFields(SGGXField[] axisFields, SGGXField roughnessField, bool fibres, Vector3f axisInRender, Float roughness, Transform renderFromMedium)
         {
-            this.axisNames = axisNames;
-            this.roughnessName = roughnessName;
+            this.axisFields = axisFields;
+            this.roughnessField = roughnessField;
             this.fibres = fibres;
             this.axisInRender = axisInRender;
             this.roughness = roughness;
             this.renderFromMedium = renderFromMedium;
+            mediumFromRender = pbrt.Inverse(renderFromMedium);
             // (the projected area of fibres and of facets is at most 1 whatever the axis and the roughness)
             largest = 1;
+        }
+
+        // The field of a matrix: its six coefficients in the space of the medium, and the largest projected area that it may
+        // have (the matrix of the constructor is where the field has none)
+        public void SetMatrixFields(SGGXField[] matrixFields, Float matrixLargest, Transform renderFromMedium)
+        {
+            this.matrixFields = matrixFields;
+            this.matrixLargest = matrixLargest;
+            this.renderFromMedium = renderFromMedium;
+            mediumFromRender = pbrt.Inverse(renderFromMedium);
+            largest = std.max(matrixLargest, S.LargestProjectedArea());
         }
 
         // The textures of the fields, once the textures of the scene exist
         public void ResolveTextures(NamedTextures textures, FileLoc loc)
         {
-            if (axisNames != null)
+            for (int i = 0; axisFields != null && i < 3; ++i)
             {
-                axisTextures = new FloatTexture[3];
-                for (int i = 0; i < 3; ++i)
+                axisFields[i].Resolve(textures, "flakeaxisfield", loc);
+            }
+            if (roughnessField != null)
+            {
+                roughnessField.Resolve(textures, "flakeroughnessfield", loc);
+            }
+            for (int i = 0; matrixFields != null && i < 6; ++i)
+            {
+                matrixFields[i].Resolve(textures, "sggxfield", loc);
+            }
+        }
+
+        // A matrix of the space of the medium in render space: R S R^T with the rotation of the medium (its three axes in
+        // render space, made of length 1: a scale of the medium scales its coefficients, not the flakes)
+        public static SGGXMatrix ToRender(SGGXMatrix inMedium, Transform renderFromMedium)
+        {
+            Vector3f ex = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(1, 0, 0)));
+            Vector3f ey = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(0, 1, 0)));
+            Vector3f ez = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(0, 0, 1)));
+            Vector3f sx = inMedium.xx * ex + inMedium.xy * ey + inMedium.xz * ez;
+            Vector3f sy = inMedium.xy * ex + inMedium.yy * ey + inMedium.yz * ez;
+            Vector3f sz = inMedium.xz * ex + inMedium.yz * ey + inMedium.zz * ez;
+            // (S' = sum over i, j of S_ij e_i e_j^T: the columns sx, sy, sz against ex, ey, ez)
+            return new SGGXMatrix(sx.x * ex.x + sy.x * ey.x + sz.x * ez.x, sx.y * ex.y + sy.y * ey.y + sz.y * ez.y, sx.z * ex.z + sy.z * ey.z + sz.z * ez.z,
+                                  sx.x * ex.y + sy.x * ey.y + sz.x * ez.y, sx.x * ex.z + sy.x * ey.z + sz.x * ez.z, sx.y * ex.z + sy.y * ey.z + sz.y * ez.z);
+        }
+
+        // The fields of one quantity of count components, from whichever of its three parameters is given (or null): the
+        // names of float textures, the values of a grid (the components of a voxel together, x fastest as "density"), or the
+        // names of float grids of a NanoVDB file
+        private static SGGXField[] Fields(ParameterDictionary parameters, string textureParameter, string gridParameter, string nanoParameter, int count,
+                                          FileLoc loc, Allocator alloc)
+        {
+            System.Collections.Generic.List<string> textureNames = parameters.GetStringArray(textureParameter);
+            System.Collections.Generic.List<Float> values = parameters.GetFloatArray(gridParameter);
+            System.Collections.Generic.List<string> gridNames = parameters.GetStringArray(nanoParameter);
+            int given = (textureNames.Count != 0 ? 1 : 0) + (values.Count != 0 ? 1 : 0) + (gridNames.Count != 0 ? 1 : 0);
+            if (given == 0)
+            {
+                return null;
+            }
+            if (given > 1)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\", \"%s\" and \"%s\" are three ways to give the same field: one of them.", textureParameter, gridParameter, nanoParameter));
+            }
+            SGGXField[] fields = new SGGXField[count];
+            if (textureNames.Count != 0)
+            {
+                if (textureNames.Count != count)
                 {
-                    if (!textures.floatTextures.TryGetValue(axisNames[i], out axisTextures[i]))
-                    {
-                        pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (\"flakeaxisfield\" of a medium of microflakes)", axisNames[i]));
-                    }
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\" takes the names of %d float textures.", textureParameter, count));
+                }
+                for (int i = 0; i < count; ++i)
+                {
+                    fields[i] = new SGGXTextureField(textureNames[i]);
                 }
             }
-            if (roughnessName != null && !textures.floatTextures.TryGetValue(roughnessName, out roughnessTexture))
+            else if (values.Count != 0)
             {
-                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (\"flakeroughnessfield\" of a medium of microflakes)", roughnessName));
+                // (the grid of the flakes is that of the medium unless it has its own size and corners)
+                int nx = parameters.GetOneInt("flakenx", parameters.GetOneInt("nx", 1));
+                int ny = parameters.GetOneInt("flakeny", parameters.GetOneInt("ny", 1));
+                int nz = parameters.GetOneInt("flakenz", parameters.GetOneInt("nz", 1));
+                Point3f p0 = parameters.GetOnePoint3f("flakep0", parameters.GetOnePoint3f("p0", new Point3f(0, 0, 0)));
+                Point3f p1 = parameters.GetOnePoint3f("flakep1", parameters.GetOnePoint3f("p1", new Point3f(1, 1, 1)));
+                if (nx < 1 || ny < 1 || nz < 1 || values.Count != count * nx * ny * nz)
+                {
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\" takes %d values for each of the %d x %d x %d voxels (\"flakenx\", \"flakeny\", \"flakenz\", or the medium's \"nx\", \"ny\", \"nz\"): %d, not the %d given.",
+                                                          gridParameter, count, nx, ny, nz, count * nx * ny * nz, values.Count));
+                }
+                Bounds3f bounds = new Bounds3f(p0, p1);
+                for (int i = 0; i < count; ++i)
+                {
+                    Float[] component = new Float[nx * ny * nz];
+                    for (int voxel = 0; voxel < component.Length; ++voxel)
+                    {
+                        component[voxel] = values[count * voxel + i];
+                    }
+                    fields[i] = new SGGXGridField(new SampledGrid<Float>(component, nx, ny, nz, alloc), bounds);
+                }
             }
+            else
+            {
+                if (gridNames.Count != count)
+                {
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\" takes the names of %d float grids.", nanoParameter, count));
+                }
+                string filename = pbrt.ResolveFilename(parameters.GetOneString("flakegridfile", parameters.GetOneString("filename", "")));
+                if (filename.Length == 0)
+                {
+                    pbrt.ErrorExit(loc, pbrt.StringPrintf("\"%s\": the grids are those of the NanoVDB file \"flakegridfile\", or of the medium's \"filename\": neither is given.", nanoParameter));
+                }
+                for (int i = 0; i < count; ++i)
+                {
+                    fields[i] = SGGXNanoField.Read(filename, gridNames[i], loc, alloc);
+                }
+            }
+            return fields;
         }
 
         // The medium for the parameters of MakeNamedMedium, or the medium itself where they ask for no flakes
@@ -465,15 +602,16 @@ namespace pbrt
             {
                 pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: flakes unknown (specular, diffuse).", flakes));
             }
-            System.Collections.Generic.List<string> axisField = parameters.GetStringArray("flakeaxisfield");
-            string roughnessField = parameters.GetOneString("flakeroughnessfield", "");
-            if (axisField.Count != 0 && axisField.Count != 3)
+            SGGXField[] axisFields = Fields(parameters, "flakeaxisfield", "flakeaxisgrid", "flakeaxisgridnames", 3, loc, alloc);
+            SGGXField[] roughnessFields = Fields(parameters, "flakeroughnessfield", "flakeroughnessgrid", "flakeroughnessgridname", 1, loc, alloc);
+            SGGXField[] matrixFields = Fields(parameters, "sggxfield", "sggxgrid", "sggxgridnames", 6, loc, alloc);
+            if (kind == "matrix" && (axisFields != null || roughnessFields != null))
             {
-                pbrt.ErrorExit(loc, "\"flakeaxisfield\" takes the names of three float textures: the x, y and z of the axis.");
+                pbrt.ErrorExit(loc, "\"microflakes\" \"matrix\": its field is \"sggxfield\", \"sggxgrid\" or \"sggxgridnames\"; those of the axis and the roughness are for \"fibre\" and \"surface\".");
             }
-            if (kind == "matrix" && (axisField.Count != 0 || roughnessField != ""))
+            if (kind != "matrix" && matrixFields != null)
             {
-                pbrt.ErrorExit(loc, "\"microflakes\" \"matrix\" is the same everywhere: the fields are for \"fibre\" and \"surface\".");
+                pbrt.ErrorExit(loc, "\"sggxfield\", \"sggxgrid\" and \"sggxgridnames\" are for \"microflakes\" \"matrix\".");
             }
             Vector3f axisGiven = new Vector3f(0, 0, 1);
             Float roughnessGiven = 0.3f;
@@ -481,11 +619,19 @@ namespace pbrt
             if (kind == "matrix")
             {
                 System.Collections.Generic.List<Float> values = parameters.GetFloatArray("sggx");
-                if (values.Count != 6)
+                if (values.Count == 0 && matrixFields != null)
                 {
-                    pbrt.ErrorExit(loc, "\"microflakes\" \"matrix\": \"float sggx\" takes six values, Sxx Syy Szz Sxy Sxz Syz.");
+                    // (where the field has no matrix: flakes that face every direction alike)
+                    inMedium = new SGGXMatrix(1, 1, 1, 0, 0, 0);
                 }
-                inMedium = new SGGXMatrix(values[0], values[1], values[2], values[3], values[4], values[5]);
+                else
+                {
+                    if (values.Count != 6)
+                    {
+                        pbrt.ErrorExit(loc, "\"microflakes\" \"matrix\": \"float sggx\" takes six values, Sxx Syy Szz Sxy Sxz Syz.");
+                    }
+                    inMedium = new SGGXMatrix(values[0], values[1], values[2], values[3], values[4], values[5]);
+                }
             }
             else if (kind == "fibre" || kind == "surface")
             {
@@ -510,27 +656,47 @@ namespace pbrt
                 return medium;
             }
 
-            // To render space: R S R^T with the rotation of the medium (its three axes in render space, made of length 1: a
-            // scale of the medium scales its coefficients, not the flakes)
-            Vector3f ex = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(1, 0, 0)));
-            Vector3f ey = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(0, 1, 0)));
-            Vector3f ez = pbrt.Normalize(renderFromMedium.Apply(new Vector3f(0, 0, 1)));
-            Vector3f sx = inMedium.xx * ex + inMedium.xy * ey + inMedium.xz * ez;
-            Vector3f sy = inMedium.xy * ex + inMedium.yy * ey + inMedium.yz * ez;
-            Vector3f sz = inMedium.xz * ex + inMedium.yz * ey + inMedium.zz * ez;
-            // (S' = sum over i, j of S_ij e_i e_j^T: the columns sx, sy, sz against ex, ey, ez)
-            SGGXMatrix S = new SGGXMatrix(sx.x * ex.x + sy.x * ey.x + sz.x * ez.x, sx.y * ex.y + sy.y * ey.y + sz.y * ez.y, sx.z * ex.z + sy.z * ey.z + sz.z * ez.z,
-                                          sx.x * ex.y + sy.x * ey.y + sz.x * ez.y, sx.x * ex.z + sy.x * ey.z + sz.x * ez.z, sx.y * ex.z + sy.y * ey.z + sz.y * ez.z);
-            if (!(S.Determinant() > 0) || !(S.xx > 0) || !(S.xx * S.yy - S.xy * S.xy > 0))
+            SGGXMatrix S = ToRender(inMedium, renderFromMedium);
+            if (!S.IsPositiveDefinite())
             {
                 pbrt.ErrorExit(loc, "\"microflakes\": the SGGX matrix is not positive definite.");
             }
             Spectrum flakeK = parameters.GetOneSpectrum("flakek", null, SpectrumType.Unbounded, alloc);
             SGGXMedium created = new SGGXMedium(medium, S, flakeK, flakes == "diffuse");
-            if (axisField.Count == 3 || roughnessField != "")
+            if (axisFields != null || roughnessFields != null)
             {
-                created.SetFields(axisField.Count == 3 ? axisField.ToArray() : null, roughnessField != "" ? roughnessField : null, kind == "fibre",
+                created.SetFields(axisFields, roughnessFields != null ? roughnessFields[0] : null, kind == "fibre",
                                   pbrt.Normalize(renderFromMedium.Apply(axisGiven)), roughnessGiven, renderFromMedium);
+            }
+            if (matrixFields != null)
+            {
+                // The largest projected area of the field: given, or that of the voxels of a grid (between the voxels the
+                // matrix is a mean of theirs, and the largest projected area of a mean is not over those of its parts), or 1
+                Float largestOfField = 0;
+                if (matrixFields[0] is SGGXGridField)
+                {
+                    int voxels = ((SGGXGridField)matrixFields[0]).Count();
+                    for (int voxel = 0; voxel < voxels; ++voxel)
+                    {
+                        SGGXMatrix at = new SGGXMatrix(((SGGXGridField)matrixFields[0]).Value(voxel), ((SGGXGridField)matrixFields[1]).Value(voxel),
+                                                       ((SGGXGridField)matrixFields[2]).Value(voxel), ((SGGXGridField)matrixFields[3]).Value(voxel),
+                                                       ((SGGXGridField)matrixFields[4]).Value(voxel), ((SGGXGridField)matrixFields[5]).Value(voxel));
+                        if (at.IsPositiveDefinite())
+                        {
+                            largestOfField = std.max(largestOfField, at.LargestProjectedArea());
+                        }
+                    }
+                }
+                if (largestOfField == 0)
+                {
+                    largestOfField = 1;
+                }
+                largestOfField = parameters.GetOneFloat("sggxmax", largestOfField);
+                if (!(largestOfField > 0))
+                {
+                    pbrt.ErrorExit(loc, "\"sggxmax\", the largest projected area of the field of matrices, is over 0.");
+                }
+                created.SetMatrixFields(matrixFields, largestOfField, renderFromMedium);
             }
             return created;
         }
@@ -546,13 +712,121 @@ namespace pbrt
         private SGGXPhaseFunction phase;
         private Float largest;
         // The fields
-        private string[] axisNames;
-        private string roughnessName;
-        private FloatTexture[] axisTextures;
-        private FloatTexture roughnessTexture;
+        private SGGXField[] axisFields;
+        private SGGXField roughnessField;
+        private SGGXField[] matrixFields;
+        private Float matrixLargest;
         private bool fibres;
         private Vector3f axisInRender;
         private Float roughness;
-        private Transform renderFromMedium;
+        private Transform renderFromMedium, mediumFromRender;
+    }
+
+    // SGGXField Definition: one number at every point of a medium of microflakes (a component of the axis, the roughness, a
+    // coefficient of the matrix), asked with the point in render space and in the space of the medium
+    public abstract class SGGXField
+    {
+        public abstract Float Evaluate(Point3f pRender, Point3f pMedium);
+
+        // (the fields of textures find theirs here)
+        public virtual void Resolve(NamedTextures textures, string parameter, FileLoc loc)
+        {
+        }
+    }
+
+    // A float texture of the scene, by name: looked up with the point alone
+    public sealed class SGGXTextureField : SGGXField
+    {
+        public SGGXTextureField(string name)
+        {
+            this.name = name;
+        }
+
+        public override void Resolve(NamedTextures textures, string parameter, FileLoc loc)
+        {
+            if (!textures.floatTextures.TryGetValue(name, out texture))
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: float texture not defined (\"%s\" of a medium of microflakes)", name, parameter));
+            }
+        }
+
+        public override Float Evaluate(Point3f pRender, Point3f pMedium)
+        {
+            return texture.Evaluate(new TextureEvalContext(pRender, default, default, default, default, 0, 0, 0, 0, 0));
+        }
+
+        private string name;
+        private FloatTexture texture;
+    }
+
+    // The values of a grid between two corners of the space of the medium, interpolated as the density of a grid medium;
+    // zero outside
+    public sealed class SGGXGridField : SGGXField
+    {
+        public SGGXGridField(SampledGrid<Float> grid, Bounds3f bounds)
+        {
+            this.grid = grid;
+            this.bounds = bounds;
+        }
+
+        public override Float Evaluate(Point3f pRender, Point3f pMedium)
+        {
+            return grid.Lookup((Point3f)bounds.Offset(pMedium));
+        }
+
+        public int Count()
+        {
+            return grid.XSize() * grid.YSize() * grid.ZSize();
+        }
+
+        public Float Value(int voxel)
+        {
+            return grid.Lookup(new Point3i(voxel % grid.XSize(), voxel / grid.XSize() % grid.YSize(), voxel / (grid.XSize() * grid.YSize())));
+        }
+
+        private SampledGrid<Float> grid;
+        private Bounds3f bounds;
+    }
+
+    // A float grid of a NanoVDB file, whose world space is the space of the medium (as for the "nanovdb" medium)
+    public sealed unsafe class SGGXNanoField : SGGXField
+    {
+        public SGGXNanoField(nanovdb.GridHandle<NanoVDBBuffer> handle)
+        {
+            this.handle = handle;
+            grid = handle.grid<float>();
+        }
+
+        public static SGGXNanoField Read(string filename, string gridName, FileLoc loc, Allocator alloc)
+        {
+            nanovdb.GridHandle<NanoVDBBuffer> handle = new nanovdb.GridHandle<NanoVDBBuffer>();
+            try
+            {
+                handle = nanovdb.io.IO.readGrid<NanoVDBBuffer>(filename, gridName, 0, new NanoVDBBuffer(alloc));
+            }
+            catch (Exception e) when (!(e is FatalException))
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("nanovdb: %s: %s", filename, e.Message));
+            }
+            if (!handle)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: no grid \"%s\" (a field of a medium of microflakes).", filename, gridName));
+            }
+            if (handle.grid<float>().IsNull)
+            {
+                pbrt.ErrorExit(loc, pbrt.StringPrintf("%s: \"%s\" isn't a float grid.", filename, gridName));
+            }
+            return new SGGXNanoField(handle);
+        }
+
+        public override Float Evaluate(Point3f pRender, Point3f pMedium)
+        {
+            nanovdb.Vec3<float> index = grid.worldToIndexF(new nanovdb.Vec3<float>((float)pMedium.x, (float)pMedium.y, (float)pMedium.z));
+            return new nanovdb.SampleFromVoxels<nanovdb.NanoTree<float>, float>(grid.tree()).Apply(index);
+        }
+
+        // (the handle owns the memory of the grid)
+        private nanovdb.GridHandle<NanoVDBBuffer> handle;
+        private nanovdb.NanoGrid<float> grid;
     }
 }
