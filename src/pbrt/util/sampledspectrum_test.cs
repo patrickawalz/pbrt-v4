@@ -69,8 +69,9 @@ namespace pbrt
                     EXPECT_EQ(squared[i], a[i] * a[i]);
                     EXPECT_EQ(root[i], std.sqrt(std.abs(a[i])));
                     EXPECT_EQ(safeRoot[i], SafeSqrt(a[i]));
-                    EXPECT_EQ(power[i], std.pow(std.abs(a[i]), 1.7f));
-                    EXPECT_EQ(exponential[i], std.exp(a[i]));
+                    // (Pow() and Exp() are those of the register: the values of std.pow() and std.exp() to rounding)
+                    EXPECT_NEAR(std.pow(std.abs(a[i]), 1.7f), power[i], 1.5e-7f * std.pow(std.abs(a[i]), 1.7f));
+                    EXPECT_NEAR(std.exp(a[i]), exponential[i], 4e-7f * std.exp(a[i]));
                     EXPECT_EQ(fast[i], FastExp(a[i]));
                     EXPECT_EQ(mixed[i], (1 - t) * a[i] + t * b[i]);
                     EXPECT_EQ(divided[i], a[i] / t);

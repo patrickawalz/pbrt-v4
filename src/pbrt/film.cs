@@ -76,8 +76,9 @@ namespace pbrt
         public RGB ToSensorRGB(SampledSpectrum L, SampledWavelengths lambda)
         {
             L = pbrt.SafeDiv(L, lambda.PDF());
-            return imagingRatio * new RGB((r_bar.Sample(lambda) * L).Average(), (g_bar.Sample(lambda) * L).Average(),
-                                          (b_bar.Sample(lambda) * L).Average());
+            // (not in pbrt-v4) The three averages at once: the values of Average() for each
+            pbrt.Averages(r_bar.Sample(lambda) * L, g_bar.Sample(lambda) * L, b_bar.Sample(lambda) * L, out Float r, out Float g, out Float b);
+            return imagingRatio * new RGB(r, g, b);
         }
 
         // PixelSensor Method Definitions

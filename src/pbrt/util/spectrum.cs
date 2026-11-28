@@ -135,23 +135,73 @@ namespace pbrt
             return ret;
         }
 
+        // (not in pbrt-v4) The sine and the cosine of the four values at once (to rounding those of std.sin() and std.cos())
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void SinCos(SampledSpectrum s, out SampledSpectrum sine, out SampledSpectrum cosine)
+        {
+            (SpectrumVector Sin, SpectrumVector Cos) both = SpectrumVectors.SinCos(s.values);
+            sine = new SampledSpectrum(both.Sin);
+            cosine = new SampledSpectrum(both.Cos);
+        }
+
+        // (not in pbrt-v4) The Average() of three spectra at once: the values of the three side by side, added wavelength by
+        // wavelength in the order of Average(), so each is the value of Average() to the last bit
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Averages(SampledSpectrum a, SampledSpectrum b, SampledSpectrum c, out Float averageA, out Float averageB, out Float averageC)
+        {
+#if PBRT_FLOAT_AS_DOUBLE
+            averageA = a.Average();
+            averageB = b.Average();
+            averageC = c.Average();
+#else
+            // (rows a, b, c, 0 to columns: the first, second, third and fourth wavelength of the three)
+            Vector128<float> ab01 = System.Runtime.Intrinsics.X86.Sse.IsSupported ? System.Runtime.Intrinsics.X86.Sse.UnpackLow(a.values, b.values)
+                                                                                  : Vector128.Create(a.values.GetElement(0), b.values.GetElement(0), a.values.GetElement(1), b.values.GetElement(1));
+            Vector128<float> ab23 = System.Runtime.Intrinsics.X86.Sse.IsSupported ? System.Runtime.Intrinsics.X86.Sse.UnpackHigh(a.values, b.values)
+                                                                                  : Vector128.Create(a.values.GetElement(2), b.values.GetElement(2), a.values.GetElement(3), b.values.GetElement(3));
+            Vector128<float> c01 = System.Runtime.Intrinsics.X86.Sse.IsSupported ? System.Runtime.Intrinsics.X86.Sse.UnpackLow(c.values, Vector128<float>.Zero)
+                                                                                 : Vector128.Create(c.values.GetElement(0), 0, c.values.GetElement(1), 0);
+            Vector128<float> c23 = System.Runtime.Intrinsics.X86.Sse.IsSupported ? System.Runtime.Intrinsics.X86.Sse.UnpackHigh(c.values, Vector128<float>.Zero)
+                                                                                 : Vector128.Create(c.values.GetElement(2), 0, c.values.GetElement(3), 0);
+            Vector128<float> first = Vector128.Create(ab01.GetLower(), c01.GetLower());
+            Vector128<float> second = Vector128.Create(ab01.GetUpper(), c01.GetUpper());
+            Vector128<float> third = Vector128.Create(ab23.GetLower(), c23.GetLower());
+            Vector128<float> fourth = Vector128.Create(ab23.GetUpper(), c23.GetUpper());
+            Vector128<float> sum = (((first + second) + third) + fourth) / Vector128.Create((float)NSpectrumSamples);
+            averageA = sum.GetElement(0);
+            averageB = sum.GetElement(1);
+            averageC = sum.GetElement(2);
+#endif
+        }
+
         public static SampledSpectrum Pow(SampledSpectrum s, Float e)
         {
+            // (not in pbrt-v4) Four positive values at once, as the exponential of the logarithm in double precision (in single
+            // precision the rounding of the logarithm would show: here the values are those of std.pow() to the last bit or
+            // the one before); any other value goes the old way, for what std.pow() makes of zeros and negative numbers
+#if !PBRT_FLOAT_AS_DOUBLE
+            if (System.Runtime.Intrinsics.X86.Avx.IsSupported && SpectrumVectors.GreaterThanAll(s.values, SpectrumVector.Zero))
+            {
+                Vector256<double> wide = System.Runtime.Intrinsics.X86.Avx.ConvertToVector256Double(s.values);
+                return new SampledSpectrum(System.Runtime.Intrinsics.X86.Avx.ConvertToVector128Single(Vector256.Exp(Vector256.Log(wide) * Vector256.Create((double)e))));
+            }
+#endif
             SampledSpectrum ret = new SampledSpectrum();
             for (int i = 0; i < NSpectrumSamples; ++i)
                 ret[i] = std.pow(s[i], e);
             return ret;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static SampledSpectrum Exp(SampledSpectrum s)
         {
-            SampledSpectrum ret = new SampledSpectrum();
-            for (int i = 0; i < NSpectrumSamples; ++i)
-                ret[i] = std.exp(s[i]);
+            // (not in pbrt-v4) The four values at once: the exponential of the register, which is that of std.exp() to rounding
+            SampledSpectrum ret = new SampledSpectrum(SpectrumVectors.Exp(s.values));
             DCHECK(!ret.HasNaNs());
             return ret;
         }
 
+#if PBRT_FLOAT_AS_DOUBLE
         public static SampledSpectrum FastExp(SampledSpectrum s)
         {
             SampledSpectrum ret = new SampledSpectrum();
@@ -160,6 +210,38 @@ namespace pbrt
             DCHECK(!ret.HasNaNs());
             return ret;
         }
+#else
+        // (not in pbrt-v4) FastExp() of util/math.cs on the four values at once, operation for operation: each value is that of
+        // FastExp() to the last bit
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static SampledSpectrum FastExp(SampledSpectrum s)
+        {
+            // Compute $x'$ such that $\roman{e}^x = 2^{x'}$
+            Vector128<float> xp = s.values * Vector128.Create(1.442695041f);
+
+            // Find integer and fractional components of $x'$
+            Vector128<float> fxp = Vector128.Floor(xp), f = xp - fxp;
+            Vector128<int> i = Vector128.ConvertToInt32(fxp);
+
+            // Evaluate polynomial approximation of $2^f$
+            Vector128<float> twoToF = Vector128.FusedMultiplyAdd(
+                f, Vector128.FusedMultiplyAdd(f, Vector128.FusedMultiplyAdd(f, Vector128.Create(0.0781455737f), Vector128.Create(0.226173572f)),
+                                              Vector128.Create(0.695556856f)),
+                Vector128.Create(1.0f));
+
+            // Scale $2^f$ by $2^i$ and return final result
+            Vector128<uint> bits = twoToF.AsUInt32();
+            Vector128<int> exponent = Vector128.ShiftRightLogical(bits, 23).AsInt32() - Vector128.Create(127) + i;
+            Vector128<uint> scaled = (bits & Vector128.Create(0b10000000011111111111111111111111u)) |
+                                     Vector128.ShiftLeft(exponent + Vector128.Create(127), 23).AsUInt32();
+            Vector128<float> result = Vector128.ConditionalSelect(Vector128.GreaterThan(exponent, Vector128.Create(127)).AsSingle(),
+                                                                  Vector128.Create(Infinity), scaled.AsSingle());
+            result = Vector128.ConditionalSelect(Vector128.LessThan(exponent, Vector128.Create(-126)).AsSingle(), Vector128<float>.Zero, result);
+            SampledSpectrum ret = new SampledSpectrum(result);
+            DCHECK(!ret.HasNaNs());
+            return ret;
+        }
+#endif
 
         public static SampledSpectrum Bilerp(Float[] p, pstd.span<SampledSpectrum> v)
         {
@@ -386,6 +468,13 @@ namespace pbrt
         public SampledSpectrum(Float c)
         {
             values = SpectrumVectors.Create(c);
+        }
+
+        // (not in pbrt-v4) From the four values
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public SampledSpectrum(Float first, Float second, Float third, Float fourth)
+        {
+            values = SpectrumVectors.Create(first, second, third, fourth);
         }
 
         // (not in pbrt-v4) From the register itself

@@ -23,6 +23,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace pbrt
 {
@@ -316,12 +317,28 @@ namespace pbrt
             double cosineScatter = CosineOfScattering(wo, wi);
             double fraction;
             int cell = species[0].FindCell(Math.Acos(cosineScatter), out fraction);
-            SampledSpectrum result = new SampledSpectrum(0f);
-            for (int i = 0; i < NSpectrumSamples; ++i)
+            // (the four wavelengths at once, in double precision as Value(): the same products and sums)
+            Vector256<double> share = Vector256.Create((double)rayleighShare[0], rayleighShare[1], rayleighShare[2], rayleighShare[3]);
+            Vector256<double> aerosol = Vector256<double>.Zero;
+            if (Vector256.LessThanAny(share, Vector256<double>.One))
             {
-                result[i] = (Float)Value(i, cosineScatter, cell, fraction);
+                for (int s = 0; s < species.Length; ++s)
+                {
+                    SampledSpectrum weight = speciesWeights[s];
+                    double[][] table = species[s].P11;
+                    Vector256<double> looked = Vector256.Create(
+                        weight[0] > 0 ? MieSpecies.Lookup(table, nodes[0], nodeFractions[0], cell, fraction) : 0.0,
+                        weight[1] > 0 ? MieSpecies.Lookup(table, nodes[1], nodeFractions[1], cell, fraction) : 0.0,
+                        weight[2] > 0 ? MieSpecies.Lookup(table, nodes[2], nodeFractions[2], cell, fraction) : 0.0,
+                        weight[3] > 0 ? MieSpecies.Lookup(table, nodes[3], nodeFractions[3], cell, fraction) : 0.0);
+                    aerosol += Vector256.Create((double)weight[0], weight[1], weight[2], weight[3]) * looked;
+                }
             }
-            return result;
+            Vector256<double> e = Vector256.Create((double)depolarised[0], depolarised[1], depolarised[2], depolarised[3]);
+            Vector256<double> air = (Vector256<double>.One - e) * Vector256.Create(3.0) / Vector256.Create(16.0 * Math.PI) *
+                                    Vector256.Create(1.0 + cosineScatter * cosineScatter) + e / Vector256.Create(4.0 * Math.PI);
+            Vector256<double> value = (Vector256<double>.One - share) * aerosol + share * air;
+            return new SampledSpectrum((Float)value.GetElement(0), (Float)value.GetElement(1), (Float)value.GetElement(2), (Float)value.GetElement(3));
         }
 
         public override pstd.optional<PhaseFunctionSample> Sample_p(Vector3f wo, Point2f u)
@@ -1010,16 +1027,11 @@ namespace pbrt
             {
                 weights[s] = new SampledSpectrum(0f);
             }
-            for (int i = 0; i < NSpectrumSamples; ++i)
+            // (the four wavelengths at once; none of the coefficients is negative, so "over a positive one" is SafeDiv())
+            share = SafeDiv(sigmaRayleigh, mp.sigma_s);
+            for (int s = 0; s < Species; ++s)
             {
-                share[i] = mp.sigma_s[i] > 0 ? sigmaRayleigh[i] / mp.sigma_s[i] : 0;
-                if (aerosolScattering[i] > 0)
-                {
-                    for (int s = 0; s < Species; ++s)
-                    {
-                        weights[s][i] = speciesScattering[s][i] / aerosolScattering[i];
-                    }
-                }
+                weights[s] = SafeDiv(speciesScattering[s], aerosolScattering);
             }
             mp.phase = new AtmospherePhase(species, lambda, share, depolarisedFraction.Sample(lambda), weights);
             return mp;

@@ -349,14 +349,11 @@ namespace pbrt
             {
                 SampledSpectrum A = (Fs + Fp) * 0.5f * multipliedBy;
                 SampledSpectrum B = (Fs - Fp) * 0.5f * multipliedBy;
-                SampledSpectrum C = new SampledSpectrum(0.0f), S = new SampledSpectrum(0.0f);
-                for (int i = 0; i < NSpectrumSamples; ++i)
-                {
-                    Float D = Ds[i] - Dp[i];
-                    Float sqrtFsFp = std.sqrt(Fs[i] * Fp[i]);
-                    C[i] = std.cos(D) * sqrtFsFp * multipliedBy[i];
-                    S[i] = std.sin(D) * sqrtFsFp * multipliedBy[i];
-                }
+                // (the four wavelengths at once)
+                SinCos(Ds - Dp, out SampledSpectrum sine, out SampledSpectrum cosine);
+                SampledSpectrum sqrtFsFp = Sqrt(Fs * Fp);
+                SampledSpectrum C = cosine * sqrtFsFp * multipliedBy;
+                SampledSpectrum S = sine * sqrtFsFp * multipliedBy;
 
                 SampledSpectrum zero = new SampledSpectrum(0.0f);
                 return new Attenuation(new MuellerMatrix(
